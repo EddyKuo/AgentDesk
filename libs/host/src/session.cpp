@@ -186,6 +186,17 @@ std::shared_ptr<const terminal::ScreenSnapshot> Session::snapshot() const {
     return snapshot_;
 }
 
+std::string Session::foreground_program() const {
+    // process_ is set before create() returns and destroyed only with *this.
+    if (!process_ || info().process_state != ProcessState::kRunning)
+        return {};
+    try {
+        return process_->foreground_program();
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 SessionInfo Session::info() const {
     std::lock_guard lock(state_mutex_);
     return info_;

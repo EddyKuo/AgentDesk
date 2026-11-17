@@ -1,6 +1,6 @@
 ---
 contract_type: PRD
-version: 1.1.0
+version: 1.2.0
 status: approved
 author_agent: PM
 sprint: 0
@@ -10,11 +10,12 @@ skills_used:
   - shared/domain-coding-agents@1.0.0
 upstream_deps:
   - raw_requirement@2026-11-16
-  - docs/design/AgentDesk_Design.md@1.7
+  - docs/design/AgentDesk_Design.md@2.1
 downstream_consumers:
   - RD
   - QA
 change_summary: |
+  1.2.0（Minor）：使用者要求功能與 herdr 一樣好用、外觀不同（設計文件 v2.1、ADR-13）。新增第 6 節需求：space／分頁／分割、注意力與通知、命令面板與快捷鍵、終端機搜尋與選取、worktree、子 Agent 協作、遠端機器、版面與 mod。原有需求不變。
   1.1.0（Minor）：跟進設計文件 v1.7。2.4 補紀錄被丟棄後顯示 Unknown 並保留 last_agent_state、report-state 新增 --kind／--message；2.7 驗收加退出碼（QA-13）。
   1.0.0：初版。M 模式精簡 PRD：需求本文以 docs/design/AgentDesk_Design.md v1.6 為單一真相來源，
   本契約固定版本並補齊 agents/pm.md 要求的結構。Orchestrator 依 M 模式輕量審核通過。
@@ -22,7 +23,7 @@ change_summary: |
 
 # Product Requirements Document：AgentDesk
 
-> 本契約鎖定設計文件 **v1.7**。設計文件之後的變更若影響第 2、3、4 節，必須依 CLAUDE.md Section 6.3 將本契約升版，下游才能採用。
+> 本契約鎖定設計文件 **v2.1**（1.1.0 鎖定 v1.7）。設計文件之後的變更若影響第 2、3、4 節，必須依 CLAUDE.md Section 6.3 將本契約升版，下游才能採用。
 
 ## 1. 產品概述
 
@@ -119,3 +120,16 @@ change_summary: |
 
 ## 7. Aesthetic Refs
 不適用（本專案為 M 模式、standard 執行模式）。
+
+## 6. v1.2.0 新增需求（功能對齊 herdr，設計文件 5.5）
+
+| ID | 需求 | 驗收 |
+|---|---|---|
+| FR-20 | 工作依 space（工作地點）→ 分頁 → 分割面板組織；可往右或往下分割、放大、用鍵盤切換與交換、拖曳調整大小、改名；重開視窗後還原 | Given 兩個分頁與一個分割，When 關閉並重開 UI，Then 版面相同（`HostFixture.UiStateIsSharedAndPersisted`、`Workspace.*`） |
+| FR-21 | Agent 在沒被看時完成標為 done，看過才變 idle；需要使用者或完成時發出音效與通知，點通知跳到該 Agent | `Attention.*` |
+| FR-22 | 命令面板、快捷鍵說明，快捷鍵可用 `keys.json` 修改，不送進終端機程式 | `Keymap.*` |
+| FR-23 | 終端機可搜尋畫面與歷史、雙擊選字、三擊選行、放開即複製 | 截圖驗證 |
+| FR-24 | 可為 repo 建立 git worktree 並開成新 space | `HostFixture.WorktreeAddCreatesCheckout` |
+| FR-25 | Agent 可開子 Agent、給第一則任務、等待它、接收它的回報 | `HostFixture.SubAgentTaskReportAndWait` |
+| FR-26 | 可加入 ssh 可連線的機器，遠端的 space 與 Agent 顯示在同一個側欄 | `HostFixture.ProtocolOverBridgeCommand`；實際 ssh 待人工 |
+| FR-27 | 可切換版面（含看板與格狀），可用 Lua mod 加命令、面板與通知 | `ModsTest.*` |

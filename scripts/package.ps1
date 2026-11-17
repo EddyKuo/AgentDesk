@@ -40,6 +40,7 @@ $components = @(
     @{ Name = 'libvterm 0.3.3'; Url = 'https://www.leonerd.org.uk/code/libvterm/'; File = (Join-Path $root 'third_party\libvterm\LICENSE') },
     @{ Name = 'Dear ImGui 1.93.0 (docking)'; Url = 'https://github.com/ocornut/imgui'; File = (Join-Path $share 'imgui\copyright') },
     @{ Name = 'nlohmann/json 3.12.0'; Url = 'https://github.com/nlohmann/json'; File = (Join-Path $share 'nlohmann-json\copyright') },
+    @{ Name = 'Lua 5.5.1'; Url = 'https://www.lua.org/'; File = (Join-Path $share 'lua\copyright') },
     @{ Name = 'Microsoft.Windows.Console.ConPTY 1.24.260710001'; Url = 'https://github.com/microsoft/terminal'; File = (Join-Path $root 'third_party\conpty\LICENSE') }
 )
 foreach ($c in $components) {

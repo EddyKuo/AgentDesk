@@ -84,6 +84,8 @@ public:
 
     [[nodiscard]] std::shared_ptr<const terminal::ScreenSnapshot> snapshot() const;
     [[nodiscard]] SessionInfo info() const;
+    // Program running in the terminal now ("claude", "pwsh", ...); empty once exited.
+    [[nodiscard]] std::string foreground_program() const;
     // Lines from history (oldest first) with line_id >= from, at most `max_lines`.
     [[nodiscard]] std::vector<terminal::HistoryLine> history(std::uint64_t from, std::size_t max_lines) const;
     // The newest `max_lines` history lines (oldest first).

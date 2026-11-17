@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/platform/win/error.hpp"
 
 namespace agentdesk::host {
@@ -126,9 +127,21 @@ SessionManager::SessionManager(HostConfig config) : config_(std::move(config)) {
         std::lock_guard lock(mutex_);
         persist_locked();
     }
+    maintenance_ = std::thread([this] {
+        while (!stopping_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            try {
+                deliver_pending();
+            } catch (const std::exception&) {
+            }
+        }
+    });
 }
 
 SessionManager::~SessionManager() {
+    stopping_ = true;
+    if (maintenance_.joinable())
+        maintenance_.join();
     stop_all();
     std::map<std::string, ManagedPtr> doomed;
     {
@@ -175,6 +188,7 @@ void SessionManager::on_open(const ipc::ConnectionPtr&) {}
 
 void SessionManager::on_close(const ipc::ConnectionPtr& conn) {
     std::lock_guard lock(mutex_);
+    ui_watchers_.erase(conn->id());
     for (auto& [id, m] : sessions_) {
         m->subscribers.erase(conn->id());
         if (m->controller == conn->id())
@@ -237,7 +251,237 @@ Response SessionManager::dispatch(const ipc::ConnectionPtr& conn, const Request&
         return do_state_report(req);
     if (m == "host.shutdown")
         return do_shutdown(req);
+    if (m == "ui.state.get")
+        return do_ui_state_get(conn, req);
+    if (m == "ui.state.set")
+        return do_ui_state_set(conn, req);
+    if (m == "worktree.add")
+        return do_worktree_add(req);
+    if (m == "session.wait")
+        return do_wait(req);
+    if (m == "session.label")
+        return do_label(req);
+    if (m == "session.report")
+        return do_report(req);
     return bad(req, "unknown method: " + m);
+}
+
+Response SessionManager::do_ui_state_get(const ipc::ConnectionPtr& conn, const Request& req) {
+    std::lock_guard lock(mutex_);
+    if (!ui_state_loaded_) {
+        ui_state_loaded_ = true;
+        if (const auto j = read_json_with_backup(config_.data_dir / L"ui-state.json")) {
+            ui_state_ = j->value("doc", Json::object());
+            ui_state_rev_ = j->value("rev", static_cast<std::uint64_t>(0));
+        }
+    }
+    if (req.params.value("watch", false))
+        ui_watchers_[conn->id()] = conn;
+    return protocol::ok(req.id, {{"rev", ui_state_rev_}, {"doc", ui_state_}});
+}
+
+Response SessionManager::do_ui_state_set(const ipc::ConnectionPtr& conn, const Request& req) {
+    const auto it = req.params.find("doc");
+    if (it == req.params.end() || !it->is_object())
+        return bad(req, "doc must be an object");
+    if (it->dump().size() > 1024 * 1024)
+        return bad(req, "doc larger than 1 MiB");
+    std::lock_guard lock(mutex_);
+    ui_state_loaded_ = true;
+    ui_state_ = *it;
+    ++ui_state_rev_;
+    try {
+        write_json_atomic(config_.data_dir / L"ui-state.json",
+                          {{"schema_version", 1}, {"rev", ui_state_rev_}, {"doc", ui_state_}});
+    } catch (const std::exception&) {
+        // Like sessions.json: a write failure must not stop the host (kept in memory).
+    }
+    protocol::Event e;
+    e.event = "ui.state";
+    e.body = {{"rev", ui_state_rev_}, {"doc", ui_state_}, {"from", conn->id()}};
+    const auto payload = protocol::serialize(e);
+    for (auto w = ui_watchers_.begin(); w != ui_watchers_.end();) {
+        auto c = w->second.lock();
+        if (!c) {
+            w = ui_watchers_.erase(w);
+            continue;
+        }
+        if (c->id() != conn->id())
+            c->send(payload);
+        ++w;
+    }
+    return protocol::ok(req.id, {{"rev", ui_state_rev_}});
+}
+
+Response SessionManager::do_worktree_add(const Request& req) {
+    const std::string repo = req.params.value("repo", "");
+    const std::string branch = req.params.value("branch", "");
+    std::string path = req.params.value("path", "");
+    if (repo.empty() || branch.empty() || has_control_chars(branch) || branch.starts_with("-"))
+        return bad(req, "repo and branch are required; branch may not start with '-'");
+    const std::filesystem::path repo_path(win::to_wide(repo));
+    std::error_code ec;
+    if (!std::filesystem::is_directory(repo_path, ec))
+        return protocol::fail(req.id, ErrorCode::kBadRequest, "repo folder does not exist: " + repo);
+    if (path.empty()) {
+        wchar_t home[MAX_PATH]{};
+        const DWORD n = ::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
+        const auto base = std::filesystem::path(std::wstring(home, n)) / L".agentdesk" / L"worktrees";
+        const auto p = default_worktree_path(base, repo_path, branch).u8string();
+        path.assign(p.begin(), p.end());
+    }
+    const std::wstring wbranch = win::to_wide(branch);
+    const std::wstring wpath = win::to_wide(path);
+    // New branch first; if it already exists, check the existing branch out.
+    auto r = run_tool({L"git", L"-C", repo_path.native(), L"worktree", L"add", L"-b", wbranch, wpath},
+                      repo_path, std::chrono::seconds(60));
+    if (r.started && !r.timed_out && r.exit_code != 0 &&
+        r.output.find("already exists") != std::string::npos &&
+        r.output.find("branch") != std::string::npos) {
+        r = run_tool({L"git", L"-C", repo_path.native(), L"worktree", L"add", wpath, wbranch}, repo_path,
+                     std::chrono::seconds(60));
+    }
+    if (!r.started)
+        return protocol::fail(req.id, ErrorCode::kSpawnFailed, "git was not found on PATH");
+    if (r.timed_out)
+        return protocol::fail(req.id, ErrorCode::kInternal, "git worktree add timed out");
+    if (r.exit_code != 0)
+        return protocol::fail(req.id, ErrorCode::kBadRequest, "git worktree add failed: " + r.output);
+    return protocol::ok(req.id, {{"path", path}, {"branch", branch}, {"output", r.output}});
+}
+
+namespace {
+constexpr auto kTaskFallback = std::chrono::seconds(8);
+
+bool busy(AgentState s) {
+    return s == AgentState::kWorking || s == AgentState::kBlocked;
+}
+}  // namespace
+
+void SessionManager::deliver_pending() {
+    struct Delivery {
+        Session* session;
+        std::string text;
+    };
+    std::vector<Delivery> out;
+    {
+        std::lock_guard lock(mutex_);
+        const auto now = std::chrono::steady_clock::now();
+        for (auto& [id, m] : sessions_) {
+            if (!m->session)
+                continue;
+            const auto info = m->session->info();
+            if (info.process_state != ProcessState::kRunning)
+                continue;
+            const bool has_source = !info.agent.source.empty();
+            if (!m->pending_task.empty()) {
+                // Wait for the agent to say it is ready (Idle); without any status source, give
+                // it kTaskFallback to start.
+                if ((has_source && info.agent.state == AgentState::kIdle) ||
+                    (!has_source && now >= m->task_after) || now >= m->task_after + kTaskFallback * 2) {
+                    out.push_back({m->session.get(), std::exchange(m->pending_task, {})});
+                }
+            }
+            if (!m->pending_reports.empty() && !busy(info.agent.state) && m->pending_task.empty()) {
+                for (auto& r : m->pending_reports)
+                    out.push_back({m->session.get(), std::move(r)});
+                m->pending_reports.clear();
+            }
+        }
+        // Sessions are only destroyed outside mutex_ by prune_exited on request threads; the
+        // send calls below are queued writes and do not block.
+        for (const auto& d : out) {
+            d.session->send(PasteInput{d.text});
+            d.session->send(RawInput{"\r"});
+        }
+    }
+}
+
+Response SessionManager::do_wait(const Request& req) {
+    std::optional<Response> err;
+    const auto m = resolve(req, err);
+    if (!m)
+        return *err;
+    const std::string until = req.params.value("until", "idle");
+    if (until != "idle" && until != "blocked" && until != "exited" && until != "change")
+        return bad(req, "until must be idle, blocked, exited or change");
+    const auto timeout = std::chrono::milliseconds(
+        std::clamp<long long>(req.params.value("timeout_ms", 600000LL), 0, 3600000LL));
+    if (!m->session)
+        return protocol::ok(
+            req.id, {{"reached", until == "exited"}, {"process_state", "Lost"}, {"agent_state", "Unknown"}});
+    const auto first = m->session->info();
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    bool seen_working = first.agent.state == AgentState::kWorking;
+    for (;;) {
+        const auto info = m->session->info();
+        seen_working = seen_working || info.agent.state == AgentState::kWorking;
+        bool reached = false;
+        if (info.process_state == ProcessState::kExited || info.process_state == ProcessState::kFailed)
+            reached = true;  // nothing more will happen
+        else if (until == "idle")
+            // Finished: idle/done after it has worked (or right away if it never reports working
+            // but is already idle).
+            reached = (info.agent.state == AgentState::kIdle || info.agent.state == AgentState::kDone) &&
+                      (seen_working || first.agent.state != AgentState::kUnknown);
+        else if (until == "blocked")
+            reached = info.agent.state == AgentState::kBlocked;
+        else if (until == "change")
+            reached = info.agent.state != first.agent.state || info.process_state != first.process_state;
+        if (reached || std::chrono::steady_clock::now() >= deadline || stopping_) {
+            return protocol::ok(req.id, {{"reached", reached},
+                                         {"process_state", to_string(info.process_state)},
+                                         {"agent_state", to_string(info.agent.state)},
+                                         {"agent_message", info.agent.message}});
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+
+Response SessionManager::do_label(const Request& req) {
+    std::optional<Response> err;
+    const auto m = resolve(req, err);
+    if (!m)
+        return *err;
+    const auto it = req.params.find("labels");
+    if (it == req.params.end() || !it->is_object())
+        return bad(req, "labels must be an object");
+    std::lock_guard lock(mutex_);
+    for (const auto& [k, v] : it->items()) {
+        if (!v.is_string() || k.empty() || k.size() > 64 || has_control_chars(k) ||
+            has_control_chars(v.get<std::string>()))
+            return bad(req, "labels must be printable strings");
+        if (v.get<std::string>().empty())
+            m->record.labels.erase(k);
+        else
+            m->record.labels[k] = v.get<std::string>();
+    }
+    persist_locked();
+    return protocol::ok(req.id, {{"labels", m->record.labels}});
+}
+
+// A sub-agent reports to the session that started it (or `to`): the text arrives in that
+// agent's input, tagged with the sender, once it is not working or waiting for the user.
+Response SessionManager::do_report(const Request& req) {
+    std::optional<Response> err;
+    const auto from = resolve(req, err);
+    if (!from)
+        return *err;
+    const std::string text = req.params.value("text", "");
+    if (text.empty() || text.size() > 64 * 1024 || text.find('\0') != std::string::npos)
+        return bad(req, "text must be 1..64 KiB without NUL");
+    std::lock_guard lock(mutex_);
+    std::string to = req.params.value("to", "");
+    if (to.empty())
+        to = from->record.parent;
+    if (to.empty())
+        return protocol::fail(req.id, ErrorCode::kNotFound, "this session has no parent; pass \"to\"");
+    const auto it = sessions_.find(to);
+    if (it == sessions_.end() || !it->second->session)
+        return protocol::fail(req.id, ErrorCode::kNotFound, "target session not found or not running: " + to);
+    it->second->pending_reports.push_back("[from " + from->record.name + " " + from->record.id.substr(0, 8) +
+                                          "] " + text);
+    return protocol::ok(req.id, {{"queued", true}, {"to", to}});
 }
 
 void SessionManager::prune_exited() {
@@ -332,6 +576,23 @@ Response SessionManager::do_create(const Request& req) {
     rec.profile_id = profile_id;
     rec.created_at = iso8601_now();
     rec.process_state = "Starting";
+    rec.parent = p.value("parent", "");
+    if (!rec.parent.empty()) {
+        std::lock_guard lock(mutex_);
+        if (!sessions_.contains(rec.parent))
+            return protocol::fail(req.id, ErrorCode::kNotFound, "parent session not found: " + rec.parent);
+    }
+    if (const auto it = p.find("labels"); it != p.end() && it->is_object()) {
+        for (const auto& [k, v] : it->items()) {
+            if (!v.is_string() || k.empty() || k.size() > 64 || has_control_chars(k) ||
+                has_control_chars(v.get<std::string>()))
+                return bad(req, "labels must be printable strings");
+            rec.labels[k] = v.get<std::string>();
+        }
+    }
+    const std::string task = p.value("task", "");
+    if (task.size() > 64 * 1024)
+        return bad(req, "task larger than 64 KiB");
 
     SessionConfig sc;
     sc.api = config_.conpty;
@@ -370,6 +631,10 @@ Response SessionManager::do_create(const Request& req) {
     m->record.process_state = std::string(to_string(session->info().process_state));
     m->last_process_state = m->record.process_state;
     m->session = std::move(session);
+    if (!task.empty()) {
+        m->pending_task = task;
+        m->task_after = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    }
     Response r = protocol::ok(req.id, {{"session_id", id}, {"process_state", m->record.process_state}});
     std::lock_guard lock(mutex_);
     sessions_.emplace(id, m);
@@ -426,6 +691,7 @@ Json SessionManager::describe(const Managed& m) const {
         j["rows"] = snap->rows;
         j["history_truncated"] = info.history_truncated;
         j["backpressure_waits"] = info.backpressure_waits;
+        j["program"] = m.session->foreground_program();
     } else {
         j["agent_state"] = "Unknown";
         j["history_only"] = true;  // Lost, or Exited and released to bound resources

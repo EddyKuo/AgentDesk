@@ -107,9 +107,18 @@ private:
 };
 
 // Client side. A reader thread matches responses to requests by id; events go to on_event.
+// Opens the host pipe (same owner checks as PipeClient::connect) as a raw overlapped handle,
+// for agentctl bridge which relays bytes without parsing them. Invalid handle on failure.
+platform::win::UniqueHandle open_raw_pipe(const std::wstring& name, std::chrono::milliseconds timeout);
+
 class PipeClient {
 public:
     static std::unique_ptr<PipeClient> connect(const std::wstring& name, std::chrono::milliseconds timeout);
+    // Takes over a connected stream opened with FILE_FLAG_OVERLAPPED: reads from `read`, writes
+    // to `write` (a stream to another machine's host through ssh; the far end checks its own
+    // pipe). `write` may be empty when one duplex handle does both.
+    static std::unique_ptr<PipeClient> adopt(platform::win::UniqueHandle read,
+                                             platform::win::UniqueHandle write = {});
     ~PipeClient();
     PipeClient(const PipeClient&) = delete;
     PipeClient& operator=(const PipeClient&) = delete;
@@ -131,6 +140,7 @@ private:
     bool write_all(const std::string& bytes);
 
     platform::win::UniqueHandle pipe_;
+    platform::win::UniqueHandle write_pipe_;  // separate write stream (adopt), else pipe_
     platform::win::UniqueHandle stop_event_;
     std::thread reader_;
     std::mutex write_mutex_;

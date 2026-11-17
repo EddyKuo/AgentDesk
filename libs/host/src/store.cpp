@@ -138,7 +138,9 @@ nlohmann::json to_json(const SessionRecord& r) {
             {"profile_id", r.profile_id},
             {"created_at", r.created_at},
             {"process_state", r.process_state},
-            {"exit_code", r.exit_code ? nlohmann::json(*r.exit_code) : nlohmann::json(nullptr)}};
+            {"exit_code", r.exit_code ? nlohmann::json(*r.exit_code) : nlohmann::json(nullptr)},
+            {"parent", r.parent},
+            {"labels", r.labels}};
 }
 
 SessionRecord session_record_from_json(const nlohmann::json& j) {
@@ -151,6 +153,12 @@ SessionRecord session_record_from_json(const nlohmann::json& j) {
     r.process_state = j.value("process_state", "Lost");
     if (j.contains("exit_code") && j["exit_code"].is_number_unsigned())
         r.exit_code = j["exit_code"].get<std::uint32_t>();
+    r.parent = j.value("parent", "");
+    if (const auto it = j.find("labels"); it != j.end() && it->is_object()) {
+        for (const auto& [k, v] : it->items())
+            if (v.is_string())
+                r.labels[k] = v.get<std::string>();
+    }
     return r;
 }
 

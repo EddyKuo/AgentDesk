@@ -5,7 +5,10 @@ param(
     [Parameter(Mandatory)][string]$Out,
     [string]$BuildDir = '',
     [string]$Profile = 'chinese',
-    [int]$WaitSeconds = 6
+    [int]$WaitSeconds = 6,
+    [string]$Run = '',
+    [string]$Child = '',  # profile:name started as a sub-agent of the first session
+    [string]$Remote = ''  # machine name: a second host shown as that machine (pipe: target)
 )
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -42,6 +45,17 @@ $profiles += @{ id = 'symbols'; name = 'symbols'; executable = $ps; args = @('-N
 $json = @{ schema_version = 1; profiles = $profiles } | ConvertTo-Json -Depth 5
 [IO.File]::WriteAllText((Join-Path $data 'profiles.json'), $json, (New-Object Text.UTF8Encoding($false)))
 $env:AGENTDESK_DATA_DIR = $data
+if ($Remote) {
+    $data2 = $data + '-remote'
+    New-Item -ItemType Directory -Force $data2 | Out-Null
+    Copy-Item (Join-Path $data 'profiles.json') $data2
+    $pipe2 = '\\.\pipe\AgentDeskShotRemote-' + $PID
+    $env:AGENTDESK_DATA_DIR = $data2
+    & (Join-Path $dir 'agentctl.exe') --pipe $pipe2 run --profile chinese --name 'build-agent' --cwd $data2 | Out-Null
+    $env:AGENTDESK_DATA_DIR = $data
+    $ui = @{ schema_version = 1; machines = @(@{ name = $Remote; target = 'pipe:' + $pipe2; ctl = '' }) } | ConvertTo-Json -Depth 5
+    [IO.File]::WriteAllText((Join-Path $data 'ui.json'), $ui, (New-Object Text.UTF8Encoding($false)))
+}
 $pipe = '\\.\pipe\AgentDeskShot-' + $PID
 $ui = Join-Path $dir 'agent-ui.exe'
 $report = [IO.Path]::ChangeExtension($Out, '.json')
@@ -52,24 +66,39 @@ if ($env:SHOT_EXTRA) {  # extra sessions created before the UI starts: "profile:
         & (Join-Path $dir 'agentctl.exe') --pipe $pipe run --profile $pn[0] --name $pn[1] --cwd ([IO.Path]::GetTempPath()) | Out-Null
     }
 }
-$p = Start-Process $ui -ArgumentList @('--pipe', $pipe, '--start', $Profile, '--exit-after-ms', (($WaitSeconds + 1) * 1000), '--report', "`"$report`"") -PassThru -WorkingDirectory $here
-Start-Sleep -Seconds $WaitSeconds
-$p.Refresh()
-$h = $p.MainWindowHandle
-[Win]::SetForegroundWindow($h) | Out-Null
-Start-Sleep -Milliseconds 500
-$r = New-Object Win+RECT
-[Win]::GetWindowRect($h, [ref]$r) | Out-Null
-$w = $r.R - $r.L; $hgt = $r.B - $r.T
-$bmp = New-Object System.Drawing.Bitmap $w, $hgt
-$g = [System.Drawing.Graphics]::FromImage($bmp)
-$dc = $g.GetHdc()
-[Win]::PrintWindow($h, $dc, 2) | Out-Null   # PW_RENDERFULLCONTENT: works when covered, and for DX
-$g.ReleaseHdc($dc)
-$bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
-$g.Dispose(); $bmp.Dispose()
-$p.WaitForExit(15000) | Out-Null
-if ($env:SHOT_DEBUG) { $sid = (& (Join-Path $dir 'agentctl.exe') --pipe $pipe list --json | ConvertFrom-Json).sessions[0].id; $rb = [IO.Path]::ChangeExtension($Out, '.read.bin'); cmd /c "`"$(Join-Path $dir 'agentctl.exe')`" --pipe $pipe read $sid --lines 3 > `"$rb`""; Copy-Item (Join-Path $data 'host.log') ([IO.Path]::ChangeExtension($Out, '.host.log')) }
-& (Join-Path $dir 'agentctl.exe') --pipe $pipe shutdown --stop-sessions | Out-Null
-Start-Sleep -Seconds 1; Remove-Item -Recurse -Force $data -ErrorAction SilentlyContinue
+try {
+    $uiArgs = @('--pipe', $pipe, '--start', $Profile, '--exit-after-ms', (($WaitSeconds + 1) * 1000), '--report', "`"$report`"")
+    if ($Run) { $uiArgs += @('--run', "`"$Run`"") }
+    $p = Start-Process $ui -ArgumentList $uiArgs -PassThru -WorkingDirectory $here
+    if ($Child) {
+        Start-Sleep -Seconds 4
+        $first = (& (Join-Path $dir 'agentctl.exe') --pipe $pipe list --json | ConvertFrom-Json).sessions[0].id
+        $pn = $Child.Split(':')
+        & (Join-Path $dir 'agentctl.exe') --pipe $pipe run --profile $pn[0] --name $pn[1] --cwd ([IO.Path]::GetTempPath()) --parent $first | Out-Null
+        Start-Sleep -Seconds ([Math]::Max(1, $WaitSeconds - 4))
+    } else {
+        Start-Sleep -Seconds $WaitSeconds
+    }
+    $p.Refresh()
+    $h = $p.MainWindowHandle
+    [Win]::SetForegroundWindow($h) | Out-Null
+    Start-Sleep -Milliseconds 500
+    $r = New-Object Win+RECT
+    [Win]::GetWindowRect($h, [ref]$r) | Out-Null
+    $w = $r.R - $r.L; $hgt = $r.B - $r.T
+    $bmp = New-Object System.Drawing.Bitmap $w, $hgt
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $dc = $g.GetHdc()
+    [Win]::PrintWindow($h, $dc, 2) | Out-Null   # PW_RENDERFULLCONTENT: works when covered, and for DX
+    $g.ReleaseHdc($dc)
+    $bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
+    $g.Dispose(); $bmp.Dispose()
+    $p.WaitForExit(15000) | Out-Null
+    if ($env:SHOT_DEBUG) { $sid = (& (Join-Path $dir 'agentctl.exe') --pipe $pipe list --json | ConvertFrom-Json).sessions[0].id; $rb = [IO.Path]::ChangeExtension($Out, '.read.bin'); cmd /c "`"$(Join-Path $dir 'agentctl.exe')`" --pipe $pipe read $sid --lines 3 > `"$rb`""; Copy-Item (Join-Path $data 'host.log') ([IO.Path]::ChangeExtension($Out, '.host.log')) }
+} finally {
+    if ($p -and -not $p.HasExited) { $p.Kill() }
+    & (Join-Path $dir 'agentctl.exe') --pipe $pipe shutdown --stop-sessions | Out-Null
+    if ($Remote) { & (Join-Path $dir 'agentctl.exe') --pipe $pipe2 shutdown --stop-sessions | Out-Null; Remove-Item -Recurse -Force $data2 -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 1; Remove-Item -Recurse -Force $data -ErrorAction SilentlyContinue
+}
 "saved $Out ($w x $hgt)"

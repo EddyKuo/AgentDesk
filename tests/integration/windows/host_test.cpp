@@ -23,6 +23,8 @@
 #include <aclapi.h>
 #include <sddl.h>
 
+#include "agentdesk/host/git_tools.hpp"
+#include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
@@ -682,4 +684,174 @@ TEST_F(HostFixture, LocalizedOutputSurvivesResize) {
     EXPECT_EQ(before.find("\xEF\xBF\xBD"), std::string::npos) << "U+FFFD before resize";
     EXPECT_EQ(after.find("\xEF\xBF\xBD"), std::string::npos) << "U+FFFD after resize";
     c->close();
+}
+
+// The shared UI document: stored by the host, survives a host restart, and other watching
+// windows get the change (spaces, tabs and splits shared between screens).
+TEST_F(HostFixture, UiStateIsSharedAndPersisted) {
+    auto a = connect();
+    auto b = connect();
+    ASSERT_TRUE(a && b);
+    std::atomic<int> events{0};
+    Json last;
+    std::mutex m;
+    b->set_event_handler([&](agentdesk::protocol::Event e) {
+        if (e.event == "ui.state") {
+            std::lock_guard lock(m);
+            last = e.body;
+            ++events;
+        }
+    });
+    const auto g = b->call("ui.state.get", {{"watch", true}});
+    ASSERT_TRUE(g && g->result);
+    EXPECT_TRUE(g->result->at("doc").empty());
+    const Json doc = {{"version", 1}, {"spaces", Json::array({{{"id", "s1"}, {"name", "api"}}})}};
+    const auto set = a->call("ui.state.set", {{"doc", doc}});
+    ASSERT_TRUE(set && set->result);
+    ASSERT_TRUE(wait_until([&] { return events.load() == 1; }, 5s));
+    {
+        std::lock_guard lock(m);
+        EXPECT_EQ(last["doc"], doc);
+    }
+    EXPECT_TRUE(a->call("ui.state.set", {{"doc", "not an object"}})->error.has_value());
+    a->close();
+    b->close();
+    ::TerminateProcess(host_.get(), 99);
+    ::WaitForSingleObject(host_.get(), 5000);
+    start_host();
+    auto c = connect();
+    ASSERT_TRUE(c);
+    const auto again = c->call("ui.state.get", Json::object());
+    ASSERT_TRUE(again && again->result);
+    EXPECT_EQ(again->result->at("doc"), doc);
+    c->close();
+}
+
+// What runs in the terminal now: a shell that starts a program reports that program.
+TEST_F(HostFixture, ForegroundProgramFollowsChild) {
+    const auto id = create("cmd", "prog");
+    auto program = [&] {
+        const auto j = Json::parse(ctl({L"list", L"--json"}).out, nullptr, false);
+        return j.is_discarded() ? std::string() : j["sessions"][0].value("program", "");
+    };
+    ASSERT_TRUE(wait_until([&] { return program() == "cmd"; }, 10s)) << program();
+    ctl({L"send", w(id), L"--text", w("\"" + win::to_utf8(std::wstring(AGENTDESK_VT_PROBE)) + "\" echo"),
+         L"--enter"});
+    EXPECT_TRUE(wait_until([&] { return program() == "vt_probe"; }, 10s)) << program();
+}
+
+// worktree.add: a new branch checked out in its own folder; bad input is refused.
+TEST_F(HostFixture, WorktreeAddCreatesCheckout) {
+    const auto repo = data_dir_ / L"repo";
+    std::filesystem::create_directories(repo);
+    auto git = [&](std::vector<std::wstring> args) {
+        args.insert(args.begin(), {L"git", L"-C", repo.native()});
+        return agentdesk::host::run_tool(args, repo, 30s);
+    };
+    ASSERT_TRUE(git({L"init", L"-q"}).started) << "git not on PATH";
+    git({L"-c", L"user.email=t@example.invalid", L"-c", L"user.name=t", L"commit", L"-q", L"--allow-empty",
+         L"-m", L"init"});
+    auto c = connect();
+    ASSERT_TRUE(c);
+    const auto target = data_dir_ / L"wt" / L"feature-x";
+    const auto r = c->call("worktree.add",
+                           {{"repo", win::to_utf8(repo.native())},
+                            {"branch", "feature/x"},
+                            {"path", win::to_utf8(target.native())}},
+                           70s);
+    ASSERT_TRUE(r && r->result) << (r && r->error ? r->error_message : "no response");
+    EXPECT_TRUE(std::filesystem::exists(target / L".git"));
+    EXPECT_TRUE(c->call("worktree.add", {{"repo", win::to_utf8(repo.native())}, {"branch", "-x"}})
+                    ->error.has_value());
+    c->close();
+}
+
+// Agent collaboration (herdr-style helpers): a sub-agent records its parent, gets its first task
+// once it is ready, reports back into the parent's input, and the parent can wait for it.
+TEST_F(HostFixture, SubAgentTaskReportAndWait) {
+    const auto parent = create("cmd", "lead");
+    auto r =
+        ctl({L"run", L"--profile", L"cmd", L"--name", L"helper", L"--cwd", fs::temp_directory_path().native(),
+             L"--parent", w(parent), L"--task", L"TASK-alpha", L"--label", L"role=review"});
+    ASSERT_EQ(r.exit_code, 0u) << r.out;
+    std::string child = r.out;
+    while (!child.empty() && (child.back() == '\n' || child.back() == '\r'))
+        child.pop_back();
+    const auto list = Json::parse(ctl({L"list", L"--json"}).out);
+    bool found = false;
+    for (const auto& s : list["sessions"]) {
+        if (s["id"] == child) {
+            found = true;
+            EXPECT_EQ(s["parent"], parent);
+            EXPECT_EQ(s["labels"]["role"], "review");
+        }
+    }
+    ASSERT_TRUE(found);
+    // The helper says it is ready: the task arrives.
+    ctl({L"report-state", w(child), L"--source", L"test", L"--state", L"idle", L"--seq", L"1"});
+    EXPECT_TRUE(wait_until([&] { return read(child).find("TASK-alpha") != std::string::npos; }, 5s))
+        << read(child);
+    // Report back: tagged text in the parent's input.
+    r = ctl({L"report", L"RESULT-42", L"--from", w(child)});
+    ASSERT_EQ(r.exit_code, 0u) << r.out;
+    EXPECT_TRUE(wait_until(
+        [&] {
+            return read(parent).find("[from helper") != std::string::npos &&
+                   read(parent).find("RESULT-42") != std::string::npos;
+        },
+        5s))
+        << read(parent);
+    // Not delivered while the target works.
+    ctl({L"report-state", w(parent), L"--source", L"test", L"--state", L"working", L"--seq", L"1"});
+    ctl({L"report", L"LATER-7", L"--from", w(child)});
+    std::this_thread::sleep_for(600ms);
+    EXPECT_EQ(read(parent).find("LATER-7"), std::string::npos);
+    // wait --until idle returns once the parent finishes.
+    std::thread finisher([&] {
+        std::this_thread::sleep_for(700ms);
+        ctl({L"report-state", w(parent), L"--source", L"test", L"--state", L"idle", L"--seq", L"2"});
+    });
+    const auto waited = ctl({L"wait", w(parent), L"--until", L"idle", L"--timeout-ms", L"10000"});
+    finisher.join();
+    EXPECT_EQ(waited.exit_code, 0u) << waited.out;
+    EXPECT_TRUE(wait_until([&] { return read(parent).find("LATER-7") != std::string::npos; }, 5s));
+    // Timeout: exit code 7.
+    EXPECT_EQ(ctl({L"wait", w(parent), L"--until", L"blocked", L"--timeout-ms", L"300"}).exit_code, 7u);
+    // No parent: refused with a clear error.
+    EXPECT_EQ(ctl({L"report", L"x", L"--from", w(parent)}).exit_code, 4u);
+}
+
+// Remote machines: the protocol over a command's stdin/stdout (ssh in real use). Locally the
+// command is agentctl bridge itself, so the whole path is exercised without an ssh server.
+TEST_F(HostFixture, ProtocolOverBridgeCommand) {
+    const auto id = create("cmd", "remote-shell");
+    auto hc = agentdesk::ipc::connect_over_command({AGENTDESK_CTL_EXE, L"--pipe", pipe_, L"bridge"}, 10s);
+    ASSERT_TRUE(hc.client) << hc.error;
+    EXPECT_FALSE(hc.host_instance_id.empty());
+    const auto list = hc.client->call("session.list", Json::object());
+    ASSERT_TRUE(list && list->result);
+    ASSERT_EQ(list->result->at("sessions").size(), 1u);
+    // Events flow too: attach gets a snapshot.
+    std::atomic<int> snapshots{0};
+    hc.client->set_event_handler([&](agentdesk::protocol::Event e) {
+        if (e.event == "screen.snapshot")
+            ++snapshots;
+    });
+    ASSERT_TRUE(hc.client->call("session.attach", {{"session", id}}));
+    EXPECT_TRUE(wait_until([&] { return snapshots.load() > 0; }, 5s));
+    hc.client->close();
+}
+
+TEST(RemoteTransport, FailingCommandExplainsWhy) {
+    wchar_t sys[MAX_PATH]{};
+    ::GetSystemDirectoryW(sys, MAX_PATH);
+    const auto cmd = (fs::path(sys) / L"cmd.exe").native();
+    auto hc =
+        agentdesk::ipc::connect_over_command({cmd, L"/c", L"echo Permission denied (publickey) 1>&2"}, 3s);
+    EXPECT_FALSE(hc.client);
+    EXPECT_NE(hc.error.find("Permission denied"), std::string::npos) << hc.error;
+    const auto argv = agentdesk::ipc::ssh_bridge_argv("dev@build-box", "");
+    EXPECT_EQ(argv.front(), L"ssh");
+    EXPECT_EQ(argv[argv.size() - 3], L"dev@build-box");
+    EXPECT_EQ(argv.back(), L"bridge");
 }

@@ -1,5 +1,5 @@
-agentdesk_executable(agent-ui WIN32 main.cpp agent-ui.manifest)
-target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc d3d11 dxgi dwmapi imm32 shell32 nlohmann_json::nlohmann_json)
+agentdesk_executable(agent-ui WIN32 main.cpp app.cpp agent-ui.manifest)
+target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc d3d11 dxgi dwmapi dbghelp winmm imm32 shell32 nlohmann_json::nlohmann_json)
 # The UI starts agent-host.exe from its own directory (design doc 2.2).
 add_dependencies(agent-ui agent-host agentctl)
 add_custom_command(TARGET agent-ui POST_BUILD

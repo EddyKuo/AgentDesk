@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -14,6 +15,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "agentdesk/ipc/host_launcher.hpp"
@@ -46,6 +48,7 @@ struct Args {
     std::map<std::string, std::string> options;  // --name value
     std::vector<std::string> flags;              // --json, --enter ...
     std::vector<std::string> passthrough;        // after "--"
+    std::vector<std::string> labels;             // --label k=v (repeatable)
     [[nodiscard]] bool has(const std::string& f) const {
         return std::find(flags.begin(), flags.end(), f) != flags.end();
     }
@@ -56,8 +59,9 @@ struct Args {
 };
 
 const std::vector<std::string> kValueOptions = {
-    "--profile", "--name", "--cwd",     "--lines", "--file", "--text",       "--source",
-    "--state",   "--kind", "--message", "--seq",   "--pipe", "--timeout-ms", "--key"};
+    "--profile", "--name",   "--cwd",     "--lines", "--file", "--text",       "--source",
+    "--state",   "--kind",   "--message", "--seq",   "--pipe", "--timeout-ms", "--key",
+    "--task",    "--parent", "--until",   "--to",    "--from"};
 
 Args parse_args(int argc, wchar_t** argv) {
     Args a;
@@ -67,6 +71,12 @@ Args parse_args(int argc, wchar_t** argv) {
             for (++i; i < argc; ++i)
                 a.passthrough.push_back(win::to_utf8(argv[i]));
             break;
+        }
+        if (s == "--label") {
+            if (i + 1 >= argc)
+                throw std::invalid_argument("missing value for --label");
+            a.labels.push_back(win::to_utf8(argv[++i]));
+            continue;
         }
         if (s.rfind("--", 0) == 0) {
             if (std::find(kValueOptions.begin(), kValueOptions.end(), s) != kValueOptions.end()) {
@@ -139,6 +149,23 @@ std::optional<int> call(Ctx& ctx, const std::string& method, Json params, Json& 
     return std::nullopt;
 }
 
+std::string env(const wchar_t* name) {
+    wchar_t buf[512]{};
+    const DWORD n = ::GetEnvironmentVariableW(name, buf, 512);
+    return n > 0 && n < 512 ? win::to_utf8(std::wstring(buf, n)) : std::string();
+}
+
+Json labels_json(const std::vector<std::string>& list) {
+    Json j = Json::object();
+    for (const auto& kv : list) {
+        const auto eq = kv.find('=');
+        if (eq == std::string::npos || eq == 0)
+            throw std::invalid_argument("labels are key=value: " + kv);
+        j[kv.substr(0, eq)] = kv.substr(eq + 1);
+    }
+    return j;
+}
+
 std::string session_arg(const Ctx& ctx) {
     if (ctx.args.positional.empty())
         throw std::invalid_argument("session name or id is required");
@@ -155,6 +182,15 @@ int cmd_run(Ctx& ctx) {
         {"args", ctx.args.passthrough}};
     if (const auto n = ctx.args.opt("--name"))
         params["name"] = *n;
+    if (const auto t = ctx.args.opt("--task"))
+        params["task"] = *t;  // first message, sent once the agent is ready
+    // Run from inside a session: that session is the parent (a sub-agent), unless --no-parent.
+    if (const auto p = ctx.args.opt("--parent"))
+        params["parent"] = *p;
+    else if (const auto self = env(L"AGENTDESK_SESSION_ID"); !self.empty() && !ctx.args.has("--no-parent"))
+        params["parent"] = self;
+    if (!ctx.args.labels.empty())
+        params["labels"] = labels_json(ctx.args.labels);
     Json r;
     if (const auto e = call(ctx, "session.create", params, r))
         return *e;
@@ -322,12 +358,150 @@ int cmd_report_state(Ctx& ctx) {
     return kOk;
 }
 
+// Blocks until the agent finished (idle), asks for the user (blocked), exits, or changes.
+int cmd_wait(Ctx& ctx) {
+    const std::string session = session_arg(ctx);
+    const auto wait_ms = std::stoll(ctx.args.opt("--timeout-ms").value_or("600000"));
+    ctx.timeout = std::chrono::milliseconds(wait_ms + 10000);
+    Json r;
+    if (const auto e = call(ctx, "session.wait",
+                            {{"session", session},
+                             {"until", ctx.args.opt("--until").value_or("idle")},
+                             {"timeout_ms", wait_ms}},
+                            r))
+        return *e;
+    if (ctx.json)
+        out(r.dump() + "\n");
+    else
+        out(r.value("agent_state", "") + " (" + r.value("process_state", "") + ")\n");
+    return r.value("reached", false) ? kOk : kTimeout;
+}
+
+// From inside a sub-agent: report text to the session that started it (or --to).
+int cmd_report(Ctx& ctx) {
+    std::string from = ctx.args.opt("--from").value_or(env(L"AGENTDESK_SESSION_ID"));
+    if (from.empty())
+        throw std::invalid_argument("report runs inside an AgentDesk session (or pass --from)");
+    std::string text;
+    if (const auto f = ctx.args.opt("--file")) {
+        std::ifstream in(std::filesystem::path(win::to_wide(*f)), std::ios::binary);
+        std::stringstream ss;
+        ss << in.rdbuf();
+        text = ss.str();
+    } else if (const auto t = ctx.args.opt("--text")) {
+        text = *t;
+    } else {
+        for (const auto& p : ctx.args.positional)
+            text += (text.empty() ? "" : " ") + p;
+    }
+    if (text.empty())
+        throw std::invalid_argument("report needs text (argument, --text or --file)");
+    Json params{{"session", from}, {"text", text}};
+    if (const auto to = ctx.args.opt("--to"))
+        params["to"] = *to;
+    Json r;
+    if (const auto e = call(ctx, "session.report", params, r))
+        return *e;
+    out(ctx.json ? r.dump() + "\n" : "report queued for " + r.value("to", "") + "\n");
+    return kOk;
+}
+
+int cmd_label(Ctx& ctx) {
+    const std::string session = session_arg(ctx);
+    std::vector<std::string> kv(ctx.args.positional.begin() + 1, ctx.args.positional.end());
+    kv.insert(kv.end(), ctx.args.labels.begin(), ctx.args.labels.end());
+    Json r;
+    if (const auto e = call(ctx, "session.label", {{"session", session}, {"labels", labels_json(kv)}}, r))
+        return *e;
+    out(r.dump() + "\n");
+    return kOk;
+}
+
+const char* kSkill = R"(AgentDesk: running helper agents (for coding agents running inside AgentDesk)
+
+You run in an AgentDesk terminal (AGENTDESK_SESSION_ID is set). agentctl is in AGENTDESK_CTL.
+Sessions you start are your sub-agents: they show under you in the sidebar and keep running
+when the window closes.
+
+  Start a helper with a first task (it is sent once the helper is ready):
+    agentctl run --profile claude-native --name reviewer --cwd <dir> --task "review the diff in <dir> and report problems"
+  See what runs and what state it is in:
+    agentctl list --json
+  Wait until it finished, needs a person, or exited (exit code 7 on timeout):
+    agentctl wait reviewer --until idle --timeout-ms 600000
+  Read its screen and recent output:
+    agentctl read reviewer --lines 80
+  Send it a message (add --enter to submit):
+    agentctl send reviewer --text "also check the tests" --enter
+  From inside a helper, report back to the agent that started you. The text arrives in that
+  agent's input, tagged "[from <name> <id>]", once it is not busy:
+    agentctl report "found 3 problems: ..."
+  Tag sessions:
+    agentctl label reviewer role=review issue=123
+  Stop it:
+    agentctl stop reviewer --interrupt
+
+Profiles: agentctl run needs a profile id; ask the person or look at %LOCALAPPDATA%\AgentDesk\profiles.json.
+Never send prompts to agents the person did not ask you to start.
+)";
+
 int cmd_shutdown(Ctx& ctx) {
     Json r;
     if (const auto e = call(ctx, "host.shutdown", {{"stop_sessions", ctx.args.has("--stop-sessions")}}, r))
         return *e;
     out(ctx.json ? r.dump() + "\n" : "host shutting down\n");
     return kOk;
+}
+
+// stdin/stdout <-> the local host pipe, byte for byte. Runs on a remote machine under ssh:
+// "ssh <machine> agentctl bridge" lets another PC's AgentDesk use this machine's agent-host.
+// stdout carries only protocol bytes; diagnostics go to stderr.
+int run_bridge(const std::wstring& pipe, bool may_start) {
+    auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);
+    if (!host.client) {
+        diag("cannot reach agent-host on this machine");
+        return kNoHost;
+    }
+    host.client->close();
+    win::UniqueHandle p = ipc::open_raw_pipe(pipe, 10s);
+    if (!p) {
+        diag("cannot open the agent-host pipe");
+        return kNoHost;
+    }
+    HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE out_h = ::GetStdHandle(STD_OUTPUT_HANDLE);
+    std::atomic<bool> done{false};
+    auto io = [&](bool write, char* buf, DWORD len, DWORD& n) {
+        OVERLAPPED ov{};
+        win::UniqueHandle ev(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
+        ov.hEvent = ev.get();
+        const BOOL ok = write ? ::WriteFile(p.get(), buf, len, nullptr, &ov)
+                              : ::ReadFile(p.get(), buf, len, nullptr, &ov);
+        if (!ok && ::GetLastError() != ERROR_IO_PENDING)
+            return false;
+        return ::GetOverlappedResult(p.get(), &ov, &n, TRUE) != FALSE;
+    };
+    std::thread up([&] {
+        char buf[16384];
+        DWORD n = 0;
+        while (!done && ::ReadFile(in, buf, sizeof buf, &n, nullptr) && n > 0) {
+            DWORD w = 0;
+            if (!io(true, buf, n, w) || w != n)
+                break;
+        }
+        done = true;
+        ::CancelIoEx(p.get(), nullptr);
+    });
+    char buf[16384];
+    DWORD n = 0;
+    while (!done && io(false, buf, sizeof buf, n) && n > 0) {
+        DWORD w = 0;
+        if (!::WriteFile(out_h, buf, n, &w, nullptr) || w != n)
+            break;
+    }
+    done = true;
+    up.detach();  // may be blocked reading stdin; the process exit ends it
+    ::ExitProcess(kOk);
 }
 
 const char* kUsage =
@@ -339,6 +513,12 @@ const char* kUsage =
     "  stop <session> (--interrupt | --force)\n"
     "  report-state <session> --source S --state STATE --seq N [--kind K] [--message M]\n"
     "  shutdown [--stop-sessions]\n"
+    "  run ... [--task TEXT] [--parent ID | --no-parent] [--label k=v]...\n"
+    "  wait <session> [--until idle|blocked|exited|change] [--timeout-ms N]\n"
+    "  report <text...> [--to SESSION] [--from SESSION]\n"
+    "  label <session> k=v...\n"
+    "  --skill   how agents use agentctl to run helper agents\n"
+    "  bridge    relay stdin/stdout to this machine's agent-host (used through ssh)\n"
     "global: --json  --pipe NAME  --no-start  --timeout-ms N\n";
 
 }  // namespace
@@ -352,6 +532,10 @@ int wmain(int argc, wchar_t** argv) {
         diag(e.what());
         return kBadArgs;
     }
+    if (ctx.args.has("--skill") || ctx.args.command == "skill") {
+        out(kSkill);
+        return kOk;
+    }
     if (ctx.args.command.empty() || ctx.args.command == "help" || ctx.args.has("--help")) {
         std::cerr << kUsage;
         return ctx.args.command.empty() ? kBadArgs : kOk;
@@ -359,6 +543,13 @@ int wmain(int argc, wchar_t** argv) {
     ctx.json = ctx.args.has("--json");
     if (const auto t = ctx.args.opt("--timeout-ms"))
         ctx.timeout = std::chrono::milliseconds(std::stoll(*t));
+
+    if (ctx.args.command == "bridge") {
+        std::wstring pipe = ipc::default_pipe_name();
+        if (const auto p = ctx.args.opt("--pipe"))
+            pipe = win::to_wide(*p);
+        return run_bridge(pipe, !ctx.args.has("--no-start"));
+    }
 
     // report-state runs inside agent hooks: never start a host from there, and inherit the
     // pipe advertised to the session (design doc 3.6).
@@ -368,8 +559,8 @@ int wmain(int argc, wchar_t** argv) {
     } else if (wchar_t buf[512]{}; ::GetEnvironmentVariableW(L"AGENTDESK_PIPE", buf, 512) > 0) {
         pipe = buf;
     }
-    const bool may_start =
-        !ctx.args.has("--no-start") && ctx.args.command != "report-state" && ctx.args.command != "shutdown";
+    const bool may_start = !ctx.args.has("--no-start") && ctx.args.command != "report-state" &&
+                           ctx.args.command != "shutdown" && ctx.args.command != "report";
     auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);
     if (!host.client) {
         diag("cannot reach agent-host (pipe " + win::to_utf8(pipe) + ")");
@@ -396,6 +587,12 @@ int wmain(int argc, wchar_t** argv) {
             return cmd_report_state(ctx);
         if (c == "shutdown")
             return cmd_shutdown(ctx);
+        if (c == "wait")
+            return cmd_wait(ctx);
+        if (c == "report")
+            return cmd_report(ctx);
+        if (c == "label")
+            return cmd_label(ctx);
         diag("unknown command: " + c);
         std::cerr << kUsage;
         return kBadArgs;
