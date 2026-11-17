@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AgentDesk 是 Windows 11 x64 的原生 AI Agent 工作台：在可分割的終端機面板裡跑多個 coding agent CLI（首發 Claude Code 與 Codex CLI），關掉視窗後工作繼續跑，重開時接回原畫面。設計參考 herdr（https://github.com/herdrdev），但是獨立實作，不追求相容。
 
-MVP（M0～M4，Sprint 1～5）已完成：結論在 `docs/poc/M0-report.md`、`docs/poc/M4-report.md`，最終驗收矩陣在 `contracts/inbox/TestReport_sprint5.md`。剩下的是人工驗收項目（設計文件 5.4）。之後的工作依 `sprint/current/plan.md` 的任務順序進行，每完成一項就在 `sprint/current/status.md` 追加一列（只追加不改寫）。需求不清楚時列進設計文件 7.4，不要自己補。
+MVP（M0～M4，Sprint 1～5）已完成：結論在 `docs/poc/M0-report.md`、`docs/poc/M4-report.md`，最終驗收矩陣在 `contracts/inbox/TestReport_sprint5.md`。Sprint 6～9 依使用者要求補齊 herdr 的主要功能，外觀自訂（設計文件 5.5、ADR-13、ADR-14）：space／分頁／分割、注意力與通知、命令面板與 keys.json、子 Agent 協作、遠端機器（ssh＋`agentctl bridge`）、版面與 Lua mod。剩下的是人工驗收項目（設計文件 5.4、5.5）。之後的工作依 `sprint/current/plan.md` 的任務順序進行，每完成一項就在 `sprint/current/status.md` 追加一列（只追加不改寫）。需求不清楚時列進設計文件 7.4，不要自己補。
 
 ## 常用指令
 
@@ -43,8 +43,8 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 
 | 檔案 | 內容 |
 |---|---|
-| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.0）。改設計就改這份，並在檔頭版本紀錄加一列 |
-| `contracts/approved/PRD.md` | PRD 契約 v1.1.0（鎖定設計文件 v1.7；v1.8 未改需求）。需求變更要依憲法 6.3 升版 |
+| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.1）。改設計就改這份，並在檔頭版本紀錄加一列 |
+| `contracts/approved/PRD.md` | PRD 契約 v1.2.0（鎖定設計文件 v2.1）。需求變更要依憲法 6.3 升版 |
 | `contracts/inbox/TestReport_sprint*.md` | 每個 Sprint 的測試報告（QA，依 ADR_001 判定） |
 | `docs/poc/M0-report.md`、`docs/poc/evidence/` | M0 結論與實測 JSON |
 | `sprint/current/`、`sprint/archive/` | Sprint 計畫與狀態 |
@@ -62,8 +62,8 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 | `libs/terminal` | `VtEngine`（libvterm 封裝、快照、歷史、按鍵編碼）、OSC 7501 解析與紀錄 |
 | `libs/protocol` | IPC 分幀（4-byte LE＋UTF-8 JSON）、訊息封包、錯誤碼、畫面編碼 |
 | `libs/host` | `Session` actor（程序＋引擎＋狀態），M1 的 host 由它組成 |
-| `libs/ui` | `TerminalView`（ImGui 字元格、輸入、IME、選取）、`TerminalSource` 介面、唯一碰 `imgui_internal.h` 的 `imgui_adapter.cpp` |
-| `apps/desktop` | `agent-ui.exe`（Win32＋DX11＋docking）。M0 在程序內跑 Session；M2 起改經 IPC 連 host |
+| `libs/ui` | `TerminalView`（字元格、輸入、IME、選取、搜尋、捲動）、`Workspace`（space／分頁／分割樹、注意力）、`Keymap`、`ModHost`（Lua mod，ImGui 無關）、`git_info`、`HostClient`、唯一碰 `imgui_internal.h` 的 `imgui_adapter.cpp` |
+| `apps/desktop` | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼與崩潰記錄，`app.cpp` 是整個介面（主題、側欄、分頁、面板、版面、命令、對話框、mod 整合、遠端機器） |
 | `tools/` | 開發與量測工具（不出貨） |
 | `tests/unit`、`tests/integration/windows`、`tests/fixtures` | GoogleTest；fixture 是原始位元組檔，由 `tests/fixtures/make_fixtures.py` 產生 |
 | `third_party/libvterm`、`third_party/conpty` | 收錄的 libvterm 0.3.3；隨附 ConPTY 的授權與 NOTICE（二進位由腳本下載到 `bin/`，不進版控） |

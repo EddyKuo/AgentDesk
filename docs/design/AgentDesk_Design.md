@@ -1,7 +1,7 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.0  
-日期：2026-11-17｜狀態：MVP 已實作（M0～M4），待人工驗收項目見 5.4  
+產品需求與系統設計文件 v2.1  
+日期：2026-11-17｜狀態：MVP 已實作（M0～M4），並補齊 herdr 的主要功能（5.5）；待人工驗收項目見 5.4  
 技術基線：C++20、Windows 11 x64、Dear ImGui、Win32、DirectX 11、ConPTY
 
 > 產品名稱定為 AgentDesk，本身以 MIT License 釋出。本文件定義類似 Herdr 使用體驗的獨立實作，不宣稱與 Herdr 協定、程式碼或所有功能相容。內容為建議設計；尚未完成 Windows 實機驗證，不將候選套件或時程視為已驗證成果。
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.1 | 2026-11-17 | 使用者要求功能與 herdr 一樣好用、外觀不同：新增 ADR-13（對齊範圍，手機版不做）、ADR-14（Lua mod）；4.1 改為 space／分頁／分割樹；3.7.2 新增協定方法；3.8 新增 CLI 指令；新增 5.5 |
 | 2.0 | 2026-11-17 | MVP 完成：4.1 主畫面改為實作的版面（側欄 Spaces／Agents、分頁加分割面板、Details 卡片），新增 ADR-12；新增 5.4 MVP 完成狀態與限制；已結束 session 只保留最新 8 個的完整畫面（3.4 補充） |
 | 1.9 | 2026-11-17 | M1 實作補充（3.7.1）：attach 的控制權參數、事件格式、輸入種類、`profile.list`、`history.read` 的 `tail`、錯誤碼 `AMBIGUOUS`、request id 必須跨 client 唯一、`AGENTDESK_DATA_DIR`；3.8 補 `--key`、`shutdown`、`--pipe`、`--no-start`、`--timeout-ms` |
 
@@ -380,7 +381,19 @@ CLI 支援 name 查找但拒絕歧義，穩定自動化應使用 session UUID。
 
 退出碼：0 成功、2 參數錯誤、3 host 無法連線、4 session 不存在或歧義、5 操作遭拒、6 啟動失敗、7 逾時。--json 時 stdout 只含結果，診斷寫 stderr。
 
-多 Agent 任務協作延後至 P2：Task 記錄 task_id、owner_session_id、parent_task_id、status、result_ref。MVP 的 send/read 僅提供通道，不宣稱具備可靠任務完成或自動派工能力。
+v2.1 起支援子 Agent 協作（ADR-13）：在 session 內執行 `agentctl run` 時，新 session 的 parent 就是目前的 session；`--task` 是 Agent 就緒（回報 Idle，或沒有狀態來源時等 8 秒）後送出的第一則訊息；`agentctl report` 把文字送進父 Agent 的輸入，前面加上 `[from <名稱> <id>]`，父 Agent 正在工作或等待使用者時先排隊；`agentctl wait --until idle|blocked|exited|change` 等到條件成立（逾時退出碼 7）；`agentctl label` 標記 session；`agentctl --skill` 印出給 Agent 看的使用說明；`agentctl bridge` 把 stdin/stdout 轉接到本機 host，供 ssh 使用。這些仍是通道，不宣稱任務一定完成。
+
+### 3.7.2 v2.1 新增的協定方法
+
+| 方法 | 用途 |
+|---|---|
+| `ui.state.get {watch}`／`ui.state.set {doc}` | host 保存 UI 文件（space、分頁、分割、名稱），寫入 `ui-state.json`；`watch` 的 client 在別的視窗修改時收到 `ui.state` 事件，最新的寫入為準 |
+| `session.create` 新增 `parent`、`labels`、`task` | 子 Agent、標籤、第一則訊息 |
+| `session.wait {until, timeout_ms}` | 等到 idle／blocked／exited／change，最多 1 小時 |
+| `session.label {labels}` | 新增或移除標籤（值為空字串即移除） |
+| `session.report {text, to?}` | 送進父 Agent（或 `to`）的輸入，不忙時才送 |
+| `worktree.add {repo, branch, path?}` | 不經 shell 執行 `git worktree add`，預設位置 `%USERPROFILE%\.agentdesk\worktrees\<repo>\<branch>` |
+| `session.list` 新增 `program` | 終端機裡目前在跑的程式（Job 內最新、最深的子程序） |
 
 ### 3.9 設定與資料保存
 
@@ -412,7 +425,9 @@ Agent 登入由原 CLI 處理；不複製 token、不繞過確認、不在診斷
 
 ### 4.1 主畫面
 
-v2.0 起依實作（ADR-12）：
+v2.1 起（ADR-12、ADR-13）：一個 **space** 是一個工作地點（通常是一個 repo 或資料夾，可以在遠端機器上），底下有多個**分頁**，每個分頁是一棵往右或往下分割的面板樹。子 Agent 不自動開成面板，列在父 Agent 底下，可以預覽（peek）或改開成面板。版面（workspace／board／grid／focus 與自訂 JSON）決定顯示哪些區塊與主區域的內容。
+
+v2.0 的區塊：
 
 | 區域 | 內容 |
 |---|---|
@@ -486,6 +501,21 @@ M0～M4 已實作，驗收矩陣結果見 `contracts/inbox/TestReport_sprint5.md
 - 結束超過 8 個的工作，只保留清單紀錄，最後畫面與歷史會釋放。
 - 沒有螢幕閱讀器支援。
 
+### 5.5 herdr 功能對齊（Sprint 6～9，2026-11-17）
+
+| 功能 | AgentDesk 的做法 | 狀態 |
+|---|---|---|
+| space、分頁、往右／往下分割、放大、方向鍵切換與交換、拖曳調整、改名 | `libs/ui/workspace`，存在 host（ui.state） | ✅ |
+| 注意力：done＝沒在看時完成、看過才變 idle；分頁與 space 顯示最緊急的狀態 | `AttentionTracker` | ✅ |
+| 通知：音效、角落通知、工作列閃爍，點擊跳到該面板 | 設定可關 | ✅ |
+| 命令面板、快捷鍵說明、`keys.json` | 預設鍵位接近 herdr 以利轉換 | ✅ |
+| 終端機搜尋、完整捲動、雙擊選字、三擊選行、放開即複製、右鍵選單 | 歷史分頁讀取，最多 5000 行 | ✅ |
+| 新增 Agent 選單、程式偵測、啟動失敗提示、git 分支顯示、worktree | | ✅ |
+| 子 Agent：parent、task、report、wait、label、peek | 3.8、3.7.2 | ✅ |
+| 遠端機器：ssh＋`agentctl bridge` | 需要遠端安裝 AgentDesk 與金鑰登入；真正的 ssh 連線待人工驗證 | 🟡 |
+| 版面與 mod | ADR-14 | ✅ |
+| 手機 app | 不做 | — |
+
 ## 6. 測試計畫與驗收（QA）
 
 ### 6.1 測試分層
@@ -550,6 +580,8 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-08 | 隨附 ConPTY（M0 定案，2026-11-17） | 內建版本可能吞掉 DA 與 OSC 7501 查詢回覆，Claude Code 會因此判定不支援、不送狀態；代價是多兩個二進位檔、需追版本與 license |
 | ADR-09 | MVP 狀態只收結構化回報，不做畫面推斷 | 不會誤判 Done 或在權限畫面誤送輸入；代價是結構化來源沒涵蓋的轉換（主要是 Codex hook 的缺口，以及 OSC 7501 無法使用時的 Claude Code）只能顯示舊狀態加經過時間 |
 | ADR-10 | AgentDesk 以 MIT License 釋出 | 與 Dear ImGui、libvterm、Microsoft ConPTY 套件同為 MIT，可直接隨附（Ghostty 也是 MIT，但依 ADR-11 僅供參考）；herdr 為 Apache-2.0，只參考設計、不複製程式碼，避免帶入其 NOTICE 義務 |
+| ADR-13 | 功能對齊 herdr，外觀自訂 | 使用者要求「一樣好用，但不能讓人覺得一樣，配色可以不同，功能要一樣」。功能依 herdr-app 公開指南（defaults/AGENTS.md、keys.json）整理：space／分頁／分割、注意力與通知、命令面板、worktree、子 Agent 協作、遠端機器、版面與 mod。手機 app 不做（使用者決定）。配色、圖示、字體與命名都是我們自己的；herdr 為 Apache-2.0，只參考行為，不複製程式碼 |
+| ADR-14 | mod 用 Lua 5.5（vcpkg lua[cpp]，MIT） | 每個 mod 一個沙盒 Lua state：沒有 io、os.execute、require、程式載入，有指令數上限，連續出錯就停用。要啟動程式只能用 `agentdesk.exec`（不經 shell）。UI 以資料（widget 清單）回傳，mod 主機不碰 ImGui，可以單元測試。代價是新增一個依賴，mod 能力受限於我們提供的 API |
 | ADR-12 | 主畫面改用固定版面（側欄＋分頁＋分割面板），不用 ImGui DockSpace | 使用者要求介面接近 herdr（https://herdr.dev/gallery/ 觀察到的預設視窗：Spaces 與 Agents 側欄、分頁、卡片面板、細狀態列）。固定版面每次由 host 的 session 清單重建，不需要 imgui.ini。代價是不能任意拖曳停靠，分割只有左右、每分頁最多 3 個 |
 | ADR-11 | 只用已安裝的 VS 2022 C++ 工具鏈，不另外安裝工具 | 使用者要求；開發環境可重現、無額外依賴。代價是排除需要 Zig 的 libghostty-vt |
 
