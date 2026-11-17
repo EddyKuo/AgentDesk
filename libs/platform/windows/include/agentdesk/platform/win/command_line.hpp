@@ -17,4 +17,9 @@ std::wstring build_command_line(std::wstring_view executable, const std::vector<
 // used for because cmd.exe applies different parsing rules (CVE-2024-24576).
 bool is_batch_file(std::wstring_view path);
 
+// True when the path names a file CreateProcess can start: a regular file, or an app execution
+// alias (the reparse points under %LOCALAPPDATA%\Microsoft\WindowsApps that Store apps such as
+// PowerShell 7 install), which std::filesystem does not report as a regular file.
+bool is_launchable_file(const std::wstring& path);
+
 }  // namespace agentdesk::platform::win

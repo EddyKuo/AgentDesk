@@ -1,5 +1,7 @@
 #include "agentdesk/platform/win/command_line.hpp"
 
+#include <windows.h>
+
 #include <algorithm>
 #include <cwctype>
 
@@ -51,6 +53,11 @@ bool is_batch_file(std::wstring_view path) {
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
     return ext == L".cmd" || ext == L".bat";
+}
+
+bool is_launchable_file(const std::wstring& path) {
+    const DWORD a = ::GetFileAttributesW(path.c_str());
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
 }  // namespace agentdesk::platform::win

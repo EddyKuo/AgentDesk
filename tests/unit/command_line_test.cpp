@@ -54,3 +54,25 @@ TEST(IsBatchFile, DetectsCmdAndBatCaseInsensitive) {
     EXPECT_FALSE(is_batch_file(L"claude.exe"));
     EXPECT_FALSE(is_batch_file(L"noext"));
 }
+
+TEST(CommandLine, LaunchableFileAcceptsFilesAndAppAliasesOnly) {
+    wchar_t sys[MAX_PATH]{};
+    ASSERT_GT(::GetSystemDirectoryW(sys, MAX_PATH), 0u);
+    const std::wstring dir(sys);
+    EXPECT_TRUE(agentdesk::platform::win::is_launchable_file(dir + L"\\cmd.exe"));
+    EXPECT_FALSE(agentdesk::platform::win::is_launchable_file(dir));
+    EXPECT_FALSE(agentdesk::platform::win::is_launchable_file(dir + L"\\no-such-program.exe"));
+    // Store apps (PowerShell 7, winget) install app execution aliases: reparse points that
+    // std::filesystem does not call regular files but CreateProcess starts.
+    wchar_t local[MAX_PATH]{};
+    if (::GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH) == 0)
+        GTEST_SKIP() << "no LOCALAPPDATA";
+    for (const wchar_t* name : {L"pwsh.exe", L"winget.exe", L"wt.exe"}) {
+        const std::wstring alias = std::wstring(local) + L"\\Microsoft\\WindowsApps\\" + name;
+        if (::GetFileAttributesW(alias.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            EXPECT_TRUE(agentdesk::platform::win::is_launchable_file(alias));
+            return;
+        }
+    }
+    GTEST_SKIP() << "no app execution alias on this machine";
+}
