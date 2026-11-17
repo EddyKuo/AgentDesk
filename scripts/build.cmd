@@ -15,6 +15,8 @@ if not defined VSDIR (
 )
 call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 if not defined VCPKG_ROOT set "VCPKG_ROOT=C:\vcpkg"
+rem English compiler diagnostics regardless of the OS UI language.
+set VSLANG=1033
 
 pushd "%~dp0.."
 if /i "%STEP%"=="configure" goto configure

@@ -1,10 +1,10 @@
 // S1-1: proves the toolchain, vcpkg dependencies and vendored libvterm link together.
+#include <memory>
+#include <string>
+
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <vterm.h>
-
-#include <memory>
-#include <string>
 
 namespace {
 

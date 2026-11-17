@@ -1,0 +1,7 @@
+]2;fixture title[1;31mRED[0m plain [38;2;10;20;30mrgb[0m
+中文寬字 é emoji 😀 end
+[3;5Hpos[K
+line
+line2[2J[Hafter clear
+[?1049halt screen text[?1049l]7501;state=working:app=fixture:progress=40\tail 測試
+]7501;state=blocked:kind=permission:msg=bmVlZCBhcHByb3ZhbA==
