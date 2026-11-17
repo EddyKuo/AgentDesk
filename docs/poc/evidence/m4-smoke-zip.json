@@ -1,0 +1,17 @@
+{
+    "checked_at":  "2026-11-17T12:32:06.4521515Z",
+    "zip":  "AgentDesk-0.1.0-win-x64.zip",
+    "host_autostarted":  true,
+    "osc7501_state":  "Unknown",
+    "osc7501_last_state":  "Blocked",
+    "osc7501_source":  "osc7501",
+    "bundled_conpty":  true,
+    "host_from_zip":  true,
+    "ui_exit_code":  0,
+    "ui_connected":  true,
+    "ui_sessions":  2,
+    "ui_tabs":  2,
+    "sessions_survive_ui_exit":  1,
+    "notices_present":  true,
+    "pass":  true
+}

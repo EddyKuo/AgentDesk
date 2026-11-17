@@ -1,7 +1,7 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v1.9  
-日期：2026-11-16｜狀態：可供技術 POC 與估工的設計草案  
+產品需求與系統設計文件 v2.0  
+日期：2026-11-17｜狀態：MVP 已實作（M0～M4），待人工驗收項目見 5.4  
 技術基線：C++20、Windows 11 x64、Dear ImGui、Win32、DirectX 11、ConPTY
 
 > 產品名稱定為 AgentDesk，本身以 MIT License 釋出。本文件定義類似 Herdr 使用體驗的獨立實作，不宣稱與 Herdr 協定、程式碼或所有功能相容。內容為建議設計；尚未完成 Windows 實機驗證，不將候選套件或時程視為已驗證成果。
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.0 | 2026-11-17 | MVP 完成：4.1 主畫面改為實作的版面（側欄 Spaces／Agents、分頁加分割面板、Details 卡片），新增 ADR-12；新增 5.4 MVP 完成狀態與限制；已結束 session 只保留最新 8 個的完整畫面（3.4 補充） |
 | 1.9 | 2026-11-17 | M1 實作補充（3.7.1）：attach 的控制權參數、事件格式、輸入種類、`profile.list`、`history.read` 的 `tail`、錯誤碼 `AMBIGUOUS`、request id 必須跨 client 唯一、`AGENTDESK_DATA_DIR`；3.8 補 `--key`、`shutdown`、`--pipe`、`--no-start`、`--timeout-ms` |
 
 ## 0. 文件導讀與決策摘要
@@ -411,13 +412,18 @@ Agent 登入由原 CLI 處理；不複製 token、不繞過確認、不在診斷
 
 ### 4.1 主畫面
 
+v2.0 起依實作（ADR-12）：
+
 | 區域 | 內容 |
 |---|---|
-| 頂部工具列 | 新增工作、啟動 profile、連線狀態、設定 |
-| 左側工作清單 | 名稱、專案目錄、程序狀態、Agent 狀態、未讀提示 |
-| 中央 DockSpace | 可分頁／左右或上下分割的終端機 |
-| 右側詳情（可收合） | profile、cwd、退出碼、狀態來源與更新時間 |
-| 底部狀態列 | host 連線、輸入控制權、字元尺寸、截斷或過載提示 |
+| 左側欄上半：Spaces | 依工作目錄分組，字母標記與工作數；側欄頂端有新增工作 |
+| 左側欄下半：Agents | 依狀態分組（Blocked、Working、Idle、Done、Error、Unknown、Stopped），每列有 profile 色塊、名稱、目錄、已執行時間與狀態形狀 |
+| 上方分頁列 | 每個工作一個分頁，分頁內最多 3 個左右分割的面板；右側有新增工作與 Details 開關 |
+| 面板 | 圓角卡片，標題列顯示名稱、目錄、狀態、Split、關閉；聚焦時外框變色；斷線、Lost、唯讀以提示條顯示 |
+| 右側 Details（可收合） | Agent 狀態與來源、訊息、程序與退出碼、目錄、啟動時間、控制權、停止按鈕 |
+| 底部狀態列 | host 連線、工作數、目錄、字元尺寸、輸入控制權、截斷或過載提示、快捷鍵提示 |
+
+快捷鍵 Ctrl+Shift+T（新增）、Ctrl+Tab／Ctrl+Shift+Tab（切換分頁）、Ctrl+Shift+W（關閉面板）由 UI 保留，不送進終端機。
 
 狀態用文字與圖示搭配顏色，不能只靠顏色。Unknown 使用中性標示，Blocked 才提示需要處理。根程序已退出但子程序仍存在時，明確顯示「正在清理子程序」。
 
@@ -466,6 +472,19 @@ M0 後修正（2026-11-17）：Session actor、背壓與協定分幀已在 M0 �
 ### 5.3 Definition of Done
 
 功能對應需求 ID、有 Windows 實機證據、錯誤可見、資源可回收；第三方版本與 license 已記錄；沒有將未知 Agent 狀態誤標完成；已更新安裝說明、限制及相容性矩陣。
+
+### 5.4 MVP 完成狀態（2026-11-17）
+
+M0～M4 已實作，驗收矩陣結果見 `contracts/inbox/TestReport_sprint5.md`：QA-01～QA-22 中 20 項通過，QA-17、QA-21 部分通過，QA-15 待人工。交付物是 `scripts/package.ps1` 產生的 portable zip。
+
+待人工驗收：繁中注音與候選視窗、100%／150%／200% DPI、Claude Code 實際回報 working／blocked／done、Codex hook 實機、8 小時 soak、另一個 Windows 帳號連線被拒。
+
+已知限制（完整清單見 `docs/user-guide.md`）：
+- 重新開機、登出或 host 異常結束後無法續接（Lost）。
+- 歷史捲動為純文字、最新 200 行；字寬依 libvterm 0.3.3（模糊寬度 1 欄、ZWJ emoji 不合併）；emoji 為單色。
+- OSC 7501 的 RIS 清除規則未實作。
+- 結束超過 8 個的工作，只保留清單紀錄，最後畫面與歷史會釋放。
+- 沒有螢幕閱讀器支援。
 
 ## 6. 測試計畫與驗收（QA）
 
@@ -531,6 +550,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-08 | 隨附 ConPTY（M0 定案，2026-11-17） | 內建版本可能吞掉 DA 與 OSC 7501 查詢回覆，Claude Code 會因此判定不支援、不送狀態；代價是多兩個二進位檔、需追版本與 license |
 | ADR-09 | MVP 狀態只收結構化回報，不做畫面推斷 | 不會誤判 Done 或在權限畫面誤送輸入；代價是結構化來源沒涵蓋的轉換（主要是 Codex hook 的缺口，以及 OSC 7501 無法使用時的 Claude Code）只能顯示舊狀態加經過時間 |
 | ADR-10 | AgentDesk 以 MIT License 釋出 | 與 Dear ImGui、libvterm、Microsoft ConPTY 套件同為 MIT，可直接隨附（Ghostty 也是 MIT，但依 ADR-11 僅供參考）；herdr 為 Apache-2.0，只參考設計、不複製程式碼，避免帶入其 NOTICE 義務 |
+| ADR-12 | 主畫面改用固定版面（側欄＋分頁＋分割面板），不用 ImGui DockSpace | 使用者要求介面接近 herdr（https://herdr.dev/gallery/ 觀察到的預設視窗：Spaces 與 Agents 側欄、分頁、卡片面板、細狀態列）。固定版面每次由 host 的 session 清單重建，不需要 imgui.ini。代價是不能任意拖曳停靠，分割只有左右、每分頁最多 3 個 |
 | ADR-11 | 只用已安裝的 VS 2022 C++ 工具鏈，不另外安裝工具 | 使用者要求；開發環境可重現、無額外依賴。代價是排除需要 Zig 的 libghostty-vt |
 
 ### 7.2 主要風險

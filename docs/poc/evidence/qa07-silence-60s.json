@@ -1,0 +1,8 @@
+{
+    "checked_at":  "2026-11-17T12:33:42.1294876Z",
+    "silence_seconds":  60,
+    "no_source_state":  "Unknown",
+    "trusted_state":  "Working",
+    "trusted_source":  "report:qa07",
+    "pass":  true
+}

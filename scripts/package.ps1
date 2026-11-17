@@ -70,7 +70,9 @@ if (Test-Path $symZip) { Remove-Item -Force $symZip }
 [IO.Compression.ZipFile]::CreateFromDirectory($symStage, $symZip)
 Remove-Item -Recurse -Force $symStage
 
-$hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+$sha = [Security.Cryptography.SHA256]::Create()
+$fs = [IO.File]::OpenRead($zip)
+try { $hash = -join ($sha.ComputeHash($fs) | ForEach-Object { $_.ToString('x2') }) } finally { $fs.Dispose() }
 "$zip"
 "sha256 $hash"
 "size $([math]::Round((Get-Item $zip).Length / 1MB, 2)) MB"
