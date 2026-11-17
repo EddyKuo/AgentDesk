@@ -557,6 +557,7 @@ constexpr CommandInfo kCommands[] = {
     {"session.restart", "Restart: new session in the same folder"},
     {"sidebar.toggle", "Show / hide sidebar"},
     {"details.toggle", "Show / hide details"},
+    {"app.palette", "Command palette"},
     {"app.settings", "Settings"},
     {"app.help", "Keyboard shortcuts"},
     {"app.zoom_in", "Zoom in"},
@@ -2169,27 +2170,42 @@ void draw_help(App::State& s) {
     if (ImGui::BeginTable("##k", 2, ImGuiTableFlags_RowBg)) {
         ImGui::TableSetupColumn("a", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("b", ImGuiTableColumnFlags_WidthFixed, px(170));
-        std::set<std::string> seen;
-        for (const auto& [chord, cmd] : s.keymap.global_map()) {
-            const char* label = command_label(cmd);
-            std::string text = label != nullptr ? label : cmd;
-            if (cmd.rfind("tab.select:", 0) == 0) {
-                if (cmd != "tab.select:1")
-                    continue;
-                text = "Go to tab 1-9";
-            } else if (cmd.rfind("space.select:", 0) == 0) {
-                if (cmd != "space.select:1")
-                    continue;
-                text = "Go to space 1-9";
-            }
+        auto row = [&](const std::string& label, const std::string& keys) {
+            if (keys.empty())
+                return;
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(text.c_str());
+            ImGui::TextUnformatted(label.c_str());
             ImGui::TableNextColumn();
-            std::string k = ui::Keymap::format(chord);
-            if (cmd.rfind("tab.select:", 0) == 0 || cmd.rfind("space.select:", 0) == 0)
-                k.back() = 'N';
-            ImGui::TextDisabled("%s", k.c_str());
+            ImGui::TextDisabled("%s", keys.c_str());
+        };
+        // In the palette's order; numbered and directional families on one line each.
+        for (const auto& c : kCommands) {
+            const std::string id = c.id;
+            if (id.rfind("pane.go:", 0) == 0 || id.rfind("pane.swap:", 0) == 0)
+                continue;
+            row(c.label, s.keymap.chord_for(id));
+        }
+        auto family = [&](const char* label, const std::vector<std::string>& cmds) {
+            std::string keys;
+            for (const auto& cmd : cmds) {
+                const auto k = s.keymap.chord_for(cmd);
+                if (!k.empty())
+                    keys += (keys.empty() ? "" : "  ") + k;
+            }
+            row(label, keys);
+        };
+        family("Focus pane left / down / up / right", {"pane.go:left", "pane.go:down", "pane.go:up", "pane.go:right"});
+        family("Swap pane left / down / up / right",
+               {"pane.swap:left", "pane.swap:down", "pane.swap:up", "pane.swap:right"});
+        family("Resize pane", {"pane.resize:left", "pane.resize:right", "pane.resize:up", "pane.resize:down"});
+        {
+            const auto t1 = s.keymap.chord_for("tab.select:1");
+            const auto s1 = s.keymap.chord_for("space.select:1");
+            if (!t1.empty())
+                row("Go to tab 1-9", t1.substr(0, t1.size() - 1) + "1...9");
+            if (!s1.empty())
+                row("Go to space 1-9", s1.substr(0, s1.size() - 1) + "1...9");
         }
         for (const auto& [label, cmd] :
              std::vector<std::pair<const char*, const char*>>{{"Copy", "terminal.copy"},
