@@ -2,6 +2,7 @@
 
 #include <windows.h>
 // rpc.h needs windows.h first.
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <ctime>
@@ -71,8 +72,15 @@ std::optional<nlohmann::json> read_json_with_backup(const std::filesystem::path&
     if (auto j = try_read(file))
         return j;
     if (auto j = try_read(std::filesystem::path(file).concat(L".bak")))
-        return j;  // corrupt main file
-    throw std::runtime_error("corrupt settings file without usable backup: " + win::to_utf8(file.native()));
+        return j;  // corrupt main file: fall back to the previous version
+    // Neither is usable: keep the damaged file for the user and start from defaults. The host
+    // must never fail to start because a settings file is broken (design doc 6.1 fault cases).
+    std::string stamp = iso8601_now();
+    std::replace(stamp.begin(), stamp.end(), ':', '-');
+    const auto keep =
+        std::filesystem::path(file).concat(L".corrupt-" + std::wstring(stamp.begin(), stamp.end()));
+    std::filesystem::rename(file, keep, ec);
+    return std::nullopt;
 }
 
 nlohmann::json to_json(const Profile& p) {

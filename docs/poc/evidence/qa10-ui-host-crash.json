@@ -1,0 +1,11 @@
+﻿{
+    "checked_at":  "2026-11-17T11:24:12.3542553Z",
+    "ui_exit_code":  0,
+    "child_killed_with_host":  true,
+    "ui_reconnected":  true,
+    "new_host_instance":  true,
+    "session_marked_lost":  true,
+    "session_state":  "Lost",
+    "session_not_controller":  true,
+    "pass":  true
+}

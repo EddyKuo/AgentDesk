@@ -19,7 +19,8 @@ std::filesystem::path default_data_dir();  // %LOCALAPPDATA%\AgentDesk (created 
 
 // Atomic write: <file>.tmp -> ReplaceFile/MoveFileEx; previous content kept as <file>.bak.
 void write_json_atomic(const std::filesystem::path& file, const nlohmann::json& doc);
-// nullopt when missing; throws on corrupt content only if no valid backup exists either.
+// nullopt when missing. Corrupt content falls back to <file>.bak; when that is unusable too the
+// damaged file is renamed to <file>.corrupt-<UTC time> and nullopt is returned (start from defaults).
 std::optional<nlohmann::json> read_json_with_backup(const std::filesystem::path& file);
 
 struct Profile {
