@@ -121,6 +121,7 @@ Keymap Keymap::defaults() {
     const std::pair<const char*, const char*> global[] = {
         {"ctrl-shift-t", "tab.new"},
         {"ctrl-shift-n", "space.new"},
+        {"ctrl-shift-r", "agent.new"},
         {"ctrl-shift-w", "tab.close"},
         {"ctrl-shift-x", "pane.close"},
         {"ctrl-shift-o", "pane.split:right"},

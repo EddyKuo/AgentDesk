@@ -29,8 +29,11 @@ Agent 需要你，或在你沒看的時候完成時，AgentDesk 會播放提示�
 
 ## 新增工作
 
-按側欄或分頁列的「+」、Ctrl+Shift+T，或用命令面板。選單列出偵測到的 profile（Claude Code、Codex CLI、PowerShell 7、Windows PowerShell、Command Prompt），可直接按數字鍵選擇。新工作預設在目前面板的資料夾；資料夾不存在時會留在選單並顯示原因，不會自動改用別的資料夾。
+新 space、新分頁和分割都會先開一個 shell（預設依序找 PowerShell 7、Windows PowerShell、Command Prompt，可在設定的「Terminal」分頁更改），位置在目前面板的資料夾。用 `cd` 切到專案後再輸入 `claude` 或 `codex`；面板會跟著顯示裡面正在跑的程式。
 
+想直接啟動某個 profile（Claude Code、Codex CLI 等），按 Ctrl+Shift+R 或分頁列的「Run...」，選單可直接按數字鍵選擇。資料夾不存在時會留在選單並顯示原因，不會自動改用別的資料夾。
+
+- 新分頁：Ctrl+Shift+T，或側欄、分頁列的「+」
 - 新 space：Ctrl+Shift+N
 - 往右或往下分割：Ctrl+Shift+O、Ctrl+Shift+E，或面板標題列的分割按鈕
 - git worktree：Ctrl+Shift+G。輸入分支名稱後，AgentDesk 會在 `%USERPROFILE%\.agentdesk\worktrees\<repo>\<分支>` 建立 checkout（可在設定中更改），開成新的 space，並在裡面啟動你選的 Agent。這樣多個 Agent 可以同時改同一個 repo，又不會動到彼此的檔案。
@@ -41,7 +44,8 @@ Ctrl+Shift+/ 顯示完整清單，Ctrl+Shift+P 開啟命令面板（命令、Age
 
 | 快捷鍵 | 動作 |
 |---|---|
-| Ctrl+Shift+T／Ctrl+Shift+N | 新分頁／新 space |
+| Ctrl+Shift+T／Ctrl+Shift+N | 新分頁／新 space（開 shell） |
+| Ctrl+Shift+R | 選擇要啟動的程式 |
 | Ctrl+Shift+O／Ctrl+Shift+E | 往右／往下分割 |
 | Ctrl+Shift+Z | 放大或還原面板 |
 | Ctrl+Shift+X／Ctrl+Shift+W | 關閉面板／分頁（工作繼續執行） |

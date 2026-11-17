@@ -41,6 +41,7 @@ $symbols = '[Console]::OutputEncoding = [Text.Encoding]::UTF8; ' +
     "'symbols: ' + [char]0x26A0 + ' ' + [char]0x2387 + ' ' + [char]0x2713 + ' ' + [char]0x23F5 + [char]0x23F5 + ' ' + [char]0x25D0 + ' ' + [char]::ConvertFromUtf32(0x1F500) + ' ' + [char]::ConvertFromUtf32(0x1F9E0); " +
     "'box: ' + [char]0x250C + [string][char]0x2500 * 6 + [char]0x2510 + ' ' + [char]0x2588 + [char]0x2593 + [char]0x2592 + [char]0x2591"
 $profiles += @{ id = 'symbols'; name = 'symbols'; executable = $ps; args = @('-NoLogo', '-NoProfile', '-NoExit', '-Command', $symbols) }
+$profiles += @{ id = 'powershell'; name = 'Windows PowerShell'; executable = $ps; args = @('-NoLogo', '-NoProfile') }
 # Windows PowerShell 5.1 writes a BOM with -Encoding UTF8; write BOM-less UTF-8 explicitly.
 $json = @{ schema_version = 1; profiles = $profiles } | ConvertTo-Json -Depth 5
 [IO.File]::WriteAllText((Join-Path $data 'profiles.json'), $json, (New-Object Text.UTF8Encoding($false)))
