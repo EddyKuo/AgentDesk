@@ -528,6 +528,7 @@ void write_report(const App& app, const std::filesystem::path& path) {
                         {"agent_state", v.agent_state},
                         {"agent_source", v.agent_source},
                         {"is_controller", v.is_controller},
+                        {"lost", v.lost},
                         {"cols", snap->cols},
                         {"rows", snap->rows},
                         {"screen", screen}});

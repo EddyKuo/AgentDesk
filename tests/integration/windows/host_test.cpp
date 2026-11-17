@@ -1,10 +1,14 @@
 // agent-host.exe + agentctl.exe end to end (Sprint 2, S2-5).
 #include <windows.h>
-
+// psapi.h needs windows.h first.
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -12,6 +16,7 @@
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
+#include <psapi.h>
 
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
@@ -114,6 +119,14 @@ protected:
              {"name", "cmd"},
              {"executable", win::to_utf8(cmd.native())},
              {"args", Json::array()}},
+            {{"id", "size"},
+             {"name", "probe size"},
+             {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
+             {"args", {"size"}}},
+            {{"id", "crash"},
+             {"name", "probe crash"},
+             {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
+             {"args", {"crash"}}},
             {{"id", "broken"},
              {"name", "broken"},
              {"executable", "C:\\nowhere\\missing.exe"},
@@ -409,4 +422,161 @@ TEST_F(HostFixture, StopWorksWithoutUi) {
             return !j.is_discarded() && j["sessions"][0]["process_state"] == "Exited";
         },
         10s));
+}
+
+// ======================================================================== Sprint 4 (M3)
+
+// QA-04: 100 rapid resizes; host engine, published snapshot and the child's own view agree.
+TEST_F(HostFixture, RapidResizesEndConsistent) {
+    const auto id = create("size", "resizer");
+    auto c = connect();
+    ASSERT_TRUE(c);
+    ASSERT_TRUE(c->call("session.attach", {{"session", id}, {"want_control", true}}));
+    int rows = 0;
+    int cols = 0;
+    for (int i = 0; i < 100; ++i) {
+        rows = 10 + (i * 7) % 40;
+        cols = 40 + (i * 13) % 120;
+        ASSERT_TRUE(c->call("session.resize", {{"session", id}, {"rows", rows}, {"cols", cols}}));
+    }
+    const std::string expected = "SIZE " + std::to_string(cols) + " " + std::to_string(rows);
+    ASSERT_TRUE(wait_until([&] { return read(id).find(expected) != std::string::npos; }, 10s))
+        << "child does not see " << expected << ":\n"
+        << read(id);
+    const auto got = c->call("session.get", {{"session", id}});
+    ASSERT_TRUE(got && got->result);
+    EXPECT_EQ(got->result->value("cols", 0), cols);
+    EXPECT_EQ(got->result->value("rows", 0), rows);
+}
+
+// Fault case: a crashing child ends as Exited with its real exit code, not Done.
+TEST_F(HostFixture, CrashingChildReportsExitCode) {
+    const auto id = create("crash", "crasher");
+    ASSERT_TRUE(wait_until(
+        [&] {
+            const auto j = Json::parse(ctl({L"list", L"--json"}).out, nullptr, false);
+            return !j.is_discarded() && j["sessions"][0]["process_state"] == "Exited";
+        },
+        10s));
+    const auto j = Json::parse(ctl({L"list", L"--json"}).out);
+    EXPECT_EQ(j["sessions"][0]["exit_code"].get<std::uint32_t>(), 0xC0000005u);
+    EXPECT_NE(j["sessions"][0]["agent_state"], "Done");
+}
+
+// QA-18 (IPC): a client that never reads cannot slow the host or starve other clients, and the
+// host's memory stays bounded.
+TEST_F(HostFixture, SlowClientDoesNotStallHost) {
+    const auto id = create("flood", "flooder");  // 3 s at 1 MiB/s
+    HANDLE raw =
+        ::CreateFileW(pipe_.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    ASSERT_NE(raw, INVALID_HANDLE_VALUE);
+    win::UniqueHandle stuck(raw);
+    const std::string attach = protocol::encode_frame(
+        protocol::serialize(protocol::Request{"stuck-1", "session.attach", {{"session", id}}}));
+    DWORD written = 0;
+    ASSERT_TRUE(
+        ::WriteFile(stuck.get(), attach.data(), static_cast<DWORD>(attach.size()), &written, nullptr));
+    auto healthy = connect();
+    ASSERT_TRUE(healthy);
+    std::atomic<int> deltas{0};
+    healthy->set_event_handler([&](protocol::Event e) {
+        if (e.event == "screen.delta")
+            ++deltas;
+    });
+    ASSERT_TRUE(healthy->call("session.attach", {{"session", id}}));
+    const auto start = std::chrono::steady_clock::now();
+    ASSERT_TRUE(wait_until([&] { return read(id).find("FLOOD-DONE") != std::string::npos; }, 30s));
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    EXPECT_LT(elapsed, 10s) << "host consumption slowed down";
+    EXPECT_GT(deltas.load(), 10) << "healthy client starved";
+    PROCESS_MEMORY_COUNTERS_EX pmc{};
+    pmc.cb = sizeof(pmc);
+    ASSERT_TRUE(
+        ::GetProcessMemoryInfo(host_.get(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc), sizeof(pmc)));
+    EXPECT_LT(pmc.PrivateUsage, 500ull * 1024 * 1024) << "host private bytes " << pmc.PrivateUsage;
+    healthy->close();
+}
+
+// Corrupt settings without backups: the host still starts, keeps the damaged files and uses
+// defaults.
+TEST_F(HostFixture, CorruptSettingsDoNotPreventStartup) {
+    if (auto c = connect())
+        c->call("host.shutdown", {{"stop_sessions", true}});
+    ::WaitForSingleObject(host_.get(), 10000);
+    for (const wchar_t* f : {L"profiles.json", L"sessions.json"}) {
+        std::ofstream(data_dir_ / f, std::ios::trunc) << "{ this is not json";
+        fs::remove(fs::path(data_dir_ / f).concat(L".bak"));
+    }
+    start_host();
+    auto c = connect();
+    ASSERT_TRUE(c);
+    const auto profiles = c->call("profile.list", Json::object());
+    ASSERT_TRUE(profiles && profiles->result);
+    EXPECT_FALSE(profiles->result->at("profiles").empty()) << "defaults were not detected";
+    int kept = 0;
+    for (const auto& entry : fs::directory_iterator(data_dir_)) {
+        if (entry.path().filename().wstring().find(L".corrupt-") != std::wstring::npos)
+            ++kept;
+    }
+    EXPECT_EQ(kept, 2);
+}
+
+// Fault case: sessions.json cannot be written (e.g. disk or permission problem); sessions work.
+TEST_F(HostFixture, PersistFailureKeepsHostRunning) {
+    fs::create_directories(data_dir_ / L"sessions.json.tmp");  // makes the temp write fail
+    const auto id = create("echo", "nodisk");
+    EXPECT_FALSE(id.empty());
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(ctl({L"send", w(id), L"--text", L"still-alive", L"--enter"}).exit_code, 0u);
+    EXPECT_TRUE(wait_until(
+        [&] { return read(id).find("PROBE-ECHO:7374696c6c2d616c6976650d") != std::string::npos; }, 10s));
+}
+
+// Design doc 1.5 "UI 續接": 4 sessions of 120x40, attach until every snapshot is complete.
+TEST_F(HostFixture, ReattachFourSessionsUnderTwoSeconds) {
+    std::vector<std::string> ids;
+    for (int i = 0; i < 4; ++i)
+        ids.push_back(create("cmd", "re" + std::to_string(i)));
+    std::this_thread::sleep_for(800ms);
+    std::vector<double> ms;
+    for (int round = 0; round < 20; ++round) {
+        const auto t0 = std::chrono::steady_clock::now();
+        auto c = connect();
+        ASSERT_TRUE(c);
+        const auto t_connected = std::chrono::steady_clock::now();
+        c->call("hello", {{"version", 1}});
+        const auto t_hello = std::chrono::steady_clock::now();
+        std::mutex mu;
+        std::condition_variable cv;
+        std::map<std::string, int> complete;
+        c->set_event_handler([&](protocol::Event e) {
+            if (e.event != "screen.snapshot")
+                return;
+            std::lock_guard lock(mu);
+            if (e.body["chunk_index"].get<int>() + 1 == e.body["chunk_count"].get<int>())
+                ++complete[e.body["session_id"]];
+            cv.notify_all();
+        });
+        for (const auto& id : ids)
+            ASSERT_TRUE(c->call("session.attach", {{"session", id}, {"want_control", true}}));
+        std::unique_lock lock(mu);
+        ASSERT_TRUE(cv.wait_for(lock, 5s, [&] { return complete.size() == ids.size(); }));
+        ms.push_back(
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        if (round == 0) {
+            std::cout << "[reattach] connect="
+                      << std::chrono::duration<double, std::milli>(t_connected - t0).count() << "ms hello="
+                      << std::chrono::duration<double, std::milli>(t_hello - t_connected).count() << "ms"
+                      << std::endl;
+        }
+        lock.unlock();
+        c->close();
+    }
+    std::sort(ms.begin(), ms.end());
+    const double p95 = ms[static_cast<std::size_t>(0.95 * static_cast<double>(ms.size() - 1))];
+    RecordProperty("reattach_p50_ms", std::to_string(ms[ms.size() / 2]));
+    RecordProperty("reattach_p95_ms", std::to_string(p95));
+    std::cout << "[reattach] p50=" << ms[ms.size() / 2] << "ms p95=" << p95 << "ms max=" << ms.back()
+              << "ms\n";
+    EXPECT_LT(p95, 2000.0);
 }

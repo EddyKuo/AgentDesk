@@ -138,6 +138,21 @@ int wmain(int argc, wchar_t** argv) {
         return run_report();
     if (mode == L"echo")
         return run_echo();
+    if (mode == L"size") {  // QA-04: report the console size the child actually sees
+        for (;;) {
+            CONSOLE_SCREEN_BUFFER_INFO info{};
+            ::GetConsoleScreenBufferInfo(::GetStdHandle(STD_OUTPUT_HANDLE), &info);
+            const int cols = info.srWindow.Right - info.srWindow.Left + 1;
+            const int rows = info.srWindow.Bottom - info.srWindow.Top + 1;
+            write_out("\r\x1b[2KSIZE " + std::to_string(cols) + " " + std::to_string(rows));
+            ::Sleep(100);
+        }
+    }
+    if (mode == L"crash") {  // fault case: dies like an access violation after a short delay
+        write_out("CRASHING\r\n");
+        ::Sleep(300);
+        ::ExitProcess(0xC0000005u);
+    }
     if (mode == L"counter") {  // QA-05: "COUNT n" every 200 ms until killed
         for (long long n = 1;; ++n) {
             write_out("COUNT " + std::to_string(n) + "\r\n");

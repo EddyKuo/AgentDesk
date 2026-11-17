@@ -102,6 +102,8 @@ void update_view_from_json(SessionView& v, const Json& j) {
     v.history_truncated = j.value("history_truncated", v.history_truncated);
     v.backpressure_waits = j.value("backpressure_waits", v.backpressure_waits);
     v.lost = v.lost || v.process_state == "Lost";
+    if (v.lost)
+        v.is_controller = false;  // nothing to control in a Lost session
 }
 
 std::shared_ptr<const terminal::ScreenSnapshot> placeholder_screen() {
@@ -342,6 +344,7 @@ bool HostClient::try_connect(bool allow_start) {
                 std::lock_guard sl(s->mutex_);
                 s->view_.lost = true;
                 s->view_.process_state = "Lost";
+                s->view_.is_controller = false;
                 s->attached_ = false;
             }
         }
