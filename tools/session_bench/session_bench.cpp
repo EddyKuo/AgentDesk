@@ -6,6 +6,7 @@
 // usage: session_bench --probe <vt_probe.exe> [--flood-seconds 60] [--rate 1048576] [--cycles 100]
 #include <windows.h>
 // psapi/tlhelp32 need windows.h first.
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -180,6 +181,45 @@ nlohmann::json run_snapshot_cost() {
     return {{"grid", "120x40"}, {"avg_snapshot_us", us}, {"cells", cells / kRounds}};
 }
 
+// Design doc 1.5 "互動延遲": key sent -> echoed character visible in the published snapshot.
+// cmd.exe echoes typed characters itself (cooked input), so no model is involved.
+nlohmann::json run_echo_latency(const win::ConPtyApi& api, int rounds) {
+    host::SessionConfig c;
+    c.api = api;
+    wchar_t sys[MAX_PATH]{};
+    const UINT n = ::GetSystemDirectoryW(sys, MAX_PATH);
+    c.spec.executable = std::filesystem::path(std::wstring(sys, n)) / L"cmd.exe";
+    c.spec.args = {L"/d", L"/q"};
+    c.spec.cwd = std::filesystem::temp_directory_path();
+    c.spec.size = {250, 30};
+    c.engine.rows = 30;
+    c.engine.cols = 250;
+    auto s = host::Session::start(c);
+    std::this_thread::sleep_for(800ms);
+    auto count_x = [&] {
+        const auto snap = s->snapshot();
+        const std::string row = snap->row_text(snap->cursor.row);
+        return static_cast<int>(std::count(row.begin(), row.end(), 'x'));
+    };
+    const int base = count_x();
+    std::vector<double> ms;
+    for (int i = 1; i <= rounds; ++i) {
+        const auto t0 = Clock::now();
+        s->send(host::TextInput{U"x"});
+        while (count_x() < base + i) {
+            if (Clock::now() - t0 > 5s)
+                break;
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        }
+        ms.push_back(std::chrono::duration<double, std::milli>(Clock::now() - t0).count());
+    }
+    s->force_stop();
+    std::sort(ms.begin(), ms.end());
+    auto pct = [&](double p) { return ms[static_cast<std::size_t>(p * static_cast<double>(ms.size() - 1))]; };
+    return {{"rounds", rounds},    {"p50_ms", pct(0.50)}, {"p95_ms", pct(0.95)},
+            {"p99_ms", pct(0.99)}, {"max_ms", ms.back()}, {"target_p95_ms", 100}};
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -204,6 +244,11 @@ int wmain(int argc, wchar_t** argv) {
         const auto api = win::load_conpty(exe_dir());
         nlohmann::json report = {{"conpty", win::to_utf8(api.source)}, {"bundled_conpty", api.bundled}};
         report["snapshot"] = run_snapshot_cost();
+        report["echo_latency"] = run_echo_latency(api, 100);
+        if (flood_seconds <= 0) {
+            std::cout << report.dump(2) << std::endl;
+            return 0;
+        }
         report["flood"] = run_flood(api, probe, flood_seconds, rate);
         report["cycles"] = run_cycles(api, probe, cycles);
         report["memory_end"] = memory();

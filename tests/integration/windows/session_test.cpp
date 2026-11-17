@@ -128,6 +128,17 @@ TEST(Session, ResizeChangesSnapshotSizeAndGeneration) {
     s->force_stop();
 }
 
+// QA-07: with no structured source, silence never turns into Done (or anything else).
+TEST(Session, SilenceWithoutSourceStaysUnknown) {
+    auto s = Session::start(probe_config(L"echo"));
+    std::this_thread::sleep_for(1500ms);
+    const auto info = s->info();
+    EXPECT_EQ(info.process_state, ProcessState::kRunning);
+    EXPECT_EQ(info.agent.state, AgentState::kUnknown);
+    EXPECT_TRUE(info.agent.source.empty());
+    s->force_stop();
+}
+
 // OQ-06 backpressure: a tiny queue forces the reader to pause; every line still arrives in order.
 TEST(Session, BackpressureNeverDropsOutput) {
     auto config = probe_config(L"flood");
