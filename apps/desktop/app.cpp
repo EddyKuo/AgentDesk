@@ -246,6 +246,7 @@ struct Settings {
     bool sidebar = true;
     bool details = false;
     std::string worktree_dir;  // empty: %USERPROFILE%\.agentdesk\worktrees
+    std::string shell_profile;  // new spaces/tabs/splits; empty: pwsh, powershell, cmd
 };
 
 std::filesystem::path data_dir() {
@@ -286,6 +287,7 @@ Settings load_settings() {
     s.sidebar = j.value("sidebar", true);
     s.details = j.value("details", false);
     s.worktree_dir = j.value("worktree_dir", "");
+    s.shell_profile = j.value("shell_profile", "");
     if (const auto it = j.find("mods_enabled"); it != j.end() && it->is_array()) {
         s.mods_enabled.clear();
         for (const auto& m : *it)
@@ -319,6 +321,7 @@ void save_settings(const Settings& s) {
             {"sidebar", s.sidebar},
             {"details", s.details},
             {"worktree_dir", s.worktree_dir},
+            {"shell_profile", s.shell_profile},
             {"mods_enabled", std::vector<std::string>(s.mods_enabled.begin(), s.mods_enabled.end())},
             {"layout", s.layout},
             {"machines", [&] {
@@ -683,8 +686,9 @@ struct CommandInfo {
 };
 
 constexpr CommandInfo kCommands[] = {
-    {"tab.new", "New agent or terminal (tab)"},
-    {"space.new", "New space"},
+    {"tab.new", "New terminal (tab)"},
+    {"space.new", "New space (terminal)"},
+    {"agent.new", "Start a program... (Claude Code, Codex, ...)"},
     {"pane.split:right", "Split right"},
     {"pane.split:down", "Split down"},
     {"pane.zoom", "Zoom / unzoom pane"},
@@ -1429,6 +1433,20 @@ void update_attention(App::State& s) {
 // ------------------------------------------------------------------ commands
 namespace {
 
+// Profile used for new spaces/tabs/splits: the configured one if it exists, else the first
+// shell found (PowerShell 7, Windows PowerShell, Command Prompt), else empty.
+std::string pick_shell(const std::string& wanted, const std::vector<std::pair<std::string, std::string>>& profiles) {
+    const auto has = [&](const std::string& id) {
+        return std::any_of(profiles.begin(), profiles.end(), [&](const auto& p) { return p.first == id; });
+    };
+    if (!wanted.empty() && has(wanted))
+        return wanted;
+    for (const char* id : {"pwsh", "powershell", "cmd"})
+        if (has(id))
+            return id;
+    return {};
+}
+
 void open_launcher(App::State& s, LaunchTarget target) {
     s.show_launcher = true;
     s.launch_machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
@@ -1479,15 +1497,34 @@ void run_command(App::State& s, const std::string& cmd) {
         const std::string cwd = s.focused_cwd().empty() ? std::string(s.launch_cwd) : s.focused_cwd();
         if (!profile.empty())
             create_session(s, profile, cwd, "", p);
-    } else if (name == "tab.new") {
-        open_launcher(s, LaunchTarget::kTab);
-    } else if (name == "space.new") {
-        open_launcher(s, LaunchTarget::kSpace);
-    } else if (name == "pane.split") {
+    } else if (name == "tab.new" || name == "space.new" || name == "pane.split") {
+        // New spaces, tabs and splits open a shell in the focused folder: cd there, then run
+        // claude / codex yourself (the pane follows the program running in it).
+        Placement p;
+        p.target = name == "space.new"                 ? LaunchTarget::kSpace
+                   : name == "tab.new" || focused.empty() ? LaunchTarget::kTab
+                   : arg == "down"                      ? LaunchTarget::kSplitDown
+                                                        : LaunchTarget::kSplitRight;
+        p.split_of = focused;
+        p.space = s.ws.active_space;
+        p.machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
+        if (s.machine_of.count(focused) && p.target != LaunchTarget::kSpace)
+            p.machine = s.machine_of[focused];
+        ui::HostClient* h = s.host_for(p.machine);
+        const std::string shell = pick_shell(s.settings.shell_profile, h->profiles());
+        if (!h->connected() || shell.empty()) {
+            open_launcher(s, p.target);
+        } else {
+            std::string cwd = s.focused_cwd();
+            if (cwd.empty())
+                cwd = s.launch_cwd;
+            create_session(s, shell, cwd, "", p);
+        }
+    } else if (name == "agent.new") {
         if (focused.empty())
             open_launcher(s, LaunchTarget::kTab);
         else
-            open_launcher(s, arg == "down" ? LaunchTarget::kSplitDown : LaunchTarget::kSplitRight);
+            open_launcher(s, arg == "space" ? LaunchTarget::kSpace : LaunchTarget::kTab);
     } else if (name == "pane.close") {
         if (!focused.empty()) {
             s.hidden.insert(focused);
@@ -1792,7 +1829,7 @@ void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
         ImGui::EndDisabled();
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("New agent or terminal  %s", s.keymap.chord_for("tab.new").c_str());
+            ImGui::SetTooltip("New terminal  %s", s.keymap.chord_for("tab.new").c_str());
         ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + px(42)));
     }
 
@@ -1806,7 +1843,7 @@ void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
             run_command(s, "space.new");
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("New space  %s", s.keymap.chord_for("space.new").c_str());
+            ImGui::SetTooltip("New space (opens a terminal)  %s", s.keymap.chord_for("space.new").c_str());
         ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + px(22)));
     }
     const auto cwds = s.session_cwds();
@@ -2218,7 +2255,8 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
     icon_button("palette", "Commands", "app.palette", "Command palette");
     icon_button("splitd", "\xE2\x96\xA4", "pane.split:down", "Split down");
     icon_button("splitr", "\xE2\x96\xA5", "pane.split:right", "Split right");
-    icon_button("new", "+", "tab.new", "New agent or terminal");
+    icon_button("agent", "Run...", "agent.new", "Start a program (Claude Code, Codex, ...)");
+    icon_button("new", "+", "tab.new", "New terminal");
 }
 
 void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected) {
@@ -2373,24 +2411,30 @@ void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
         dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), g_pal->card, px(12));
         dl->AddRect(pos, ImVec2(pos.x + size.x, pos.y + size.y), g_pal->border, px(12));
         const float fs = ImGui::GetFontSize();
-        const char* title = connected ? "Start an agent" : "Connecting to agent-host...";
+        const char* title = connected ? "Open a terminal" : "Connecting to agent-host...";
         const ImVec2 tsz = s.fonts.ui_bold->CalcTextSizeA(fs * 1.4f, FLT_MAX, 0, title);
         const float cx = pos.x + size.x * 0.5f;
         const float cy = pos.y + size.y * 0.4f;
         dl->AddText(s.fonts.ui_bold, fs * 1.4f, ImVec2(cx - tsz.x * 0.5f, cy - tsz.y), g_pal->text, title);
-        const char* hint = "Claude Code, Codex or any shell. It keeps running after you close this window.";
+        const char* hint = "cd to your project, then run claude or codex. It keeps running after you close this window.";
         const ImVec2 hsz = ImGui::CalcTextSize(hint);
         dl->AddText(s.fonts.ui, fs, ImVec2(cx - hsz.x * 0.5f, cy + px(10)), g_pal->dim, hint);
         if (connected) {
-            const std::string label = "New agent   " + s.keymap.chord_for("tab.new");
+            const std::string label = "New terminal   " + s.keymap.chord_for("tab.new");
+            const std::string other = "Start a program...   " + s.keymap.chord_for("agent.new");
             const float bw = ImGui::CalcTextSize(label.c_str()).x + px(36);
-            ImGui::SetCursorScreenPos(ImVec2(cx - bw * 0.5f, cy + px(44)));
+            const float ow = ImGui::CalcTextSize(other.c_str()).x + px(36);
+            const float total = bw + px(10) + ow;
+            ImGui::SetCursorScreenPos(ImVec2(cx - total * 0.5f, cy + px(44)));
             ImGui::PushStyleColor(ImGuiCol_Button, v4(g_pal->focus));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, v4(alpha(g_pal->focus, 220)));
             ImGui::PushStyleColor(ImGuiCol_Text, v4(IM_COL32(255, 255, 255, 255)));
             if (ImGui::Button(label.c_str(), ImVec2(bw, px(36))))
                 run_command(s, "tab.new");
             ImGui::PopStyleColor(3);
+            ImGui::SameLine(0, px(10));
+            if (ImGui::Button(other.c_str(), ImVec2(ow, px(36))))
+                run_command(s, "agent.new");
         }
         return;
     }
@@ -3316,6 +3360,27 @@ void draw_settings(App::State& s) {
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Terminal")) {
+            {
+                const auto profiles = s.host->profiles();
+                const std::string current = pick_shell(s.settings.shell_profile, profiles);
+                std::string label = current.empty() ? std::string("(none found)") : current;
+                for (const auto& [id, pname] : profiles)
+                    if (id == current)
+                        label = pname;
+                ImGui::TextDisabled("Shell for new spaces, tabs and splits");
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::BeginCombo("##shell", label.c_str())) {
+                    for (const auto& [id, pname] : profiles) {
+                        if (ImGui::Selectable(pname.c_str(), id == current)) {
+                            s.settings.shell_profile = id;
+                            changed = true;
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+                ImGui::TextDisabled("Claude Code, Codex and other programs: %s, or type them in the shell.",
+                                    s.keymap.chord_for("agent.new").c_str());
+            }
             changed |=
                 ImGui::Checkbox("Copy selection when the mouse is released", &s.settings.copy_on_select);
             ImGui::TextDisabled("Wheel scroll speed");
