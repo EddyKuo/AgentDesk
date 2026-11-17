@@ -1,13 +1,22 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "agentdesk/host/input.hpp"
 #include "agentdesk/terminal/vt_engine.hpp"
 
 namespace agentdesk::ui {
 
-// What a TerminalView needs from a session. M0: in-process host::Session. M2+: IPC client.
+// One scrollback line as text (history.read returns text; design doc 3.7).
+struct HistoryLineText {
+    std::uint64_t line_id = 0;
+    std::string text;
+};
+
+// What a TerminalView needs from a session. Implemented by RemoteSession (IPC to agent-host).
 class TerminalSource {
 public:
     virtual ~TerminalSource() = default;
@@ -15,6 +24,12 @@ public:
     virtual void send(host::InputEvent input) = 0;
     virtual void resize(int rows, int cols) = 0;
     [[nodiscard]] virtual bool can_input() const = 0;  // false: read-only (not controller / exited)
+
+    // Scrollback: ask for the newest `lines` history lines; they arrive asynchronously.
+    virtual void request_history(std::size_t /*lines*/) {}
+    [[nodiscard]] virtual std::shared_ptr<const std::vector<HistoryLineText>> history() const {
+        return nullptr;
+    }
 };
 
 }  // namespace agentdesk::ui

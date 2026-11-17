@@ -138,6 +138,12 @@ int wmain(int argc, wchar_t** argv) {
         return run_report();
     if (mode == L"echo")
         return run_echo();
+    if (mode == L"counter") {  // QA-05: "COUNT n" every 200 ms until killed
+        for (long long n = 1;; ++n) {
+            write_out("COUNT " + std::to_string(n) + "\r\n");
+            ::Sleep(200);
+        }
+    }
     if (mode == L"flood") {
         const int seconds = argc > 2 ? _wtoi(argv[2]) : 5;
         const long long rate = argc > 3 ? _wtoi64(argv[3]) : 1024 * 1024;

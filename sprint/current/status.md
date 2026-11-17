@@ -1,10 +1,10 @@
 ---
-sprint: 3
+sprint: 4
 updated_at: 2026-11-17T00:00:00+08:00
 plan: sprint/current/plan.md
 ---
 
-# Sprint 3：狀態
+# Sprint 4：狀態
 
 > 由 Orchestrator 維護，只追加不改寫歷史列。
 
@@ -12,15 +12,15 @@ plan: sprint/current/plan.md
 
 | 時間 | 任務 ID | 舊狀態 | 新狀態 | 說明 |
 |------|--------|--------|--------|------|
-| 2026-11-17 | S3-1～S3-9 | — | ⬜ | 計畫建立 |
-| 2026-11-17 | S3-10 | — | ⏸ | 自 S2-9 轉入，等使用者 |
+| 2026-11-17 | S4-1～S4-8 | — | ⬜ | 計畫建立 |
+| 2026-11-17 | S4-9 | — | ⏸ | 自 S3-10 轉入，等使用者 |
 
 ## 契約狀態
 
 | 契約 | 版本 | 狀態 | 審核時間 | 下游通知 |
 |------|------|------|---------|---------|
 | PRD | 1.1.0 | approved | 2026-11-16 | RD、QA |
-| TestReport（Sprint 1、2） | 1.0.0 | draft（contracts/inbox） | — | Orchestrator |
+| TestReport（Sprint 1～3） | 1.0.0 | draft（contracts/inbox） | — | Orchestrator |
 
 ## 例外摘要
 
@@ -40,4 +40,4 @@ plan: sprint/current/plan.md
 - [ ] 所有任務為 ✅ 或已轉入下個 Sprint（附理由）
 - [ ] 無未解決的 P0/P1 例外
 - [ ] 升級偵測已執行（CLAUDE.md Section 7.1），結果：維持 / 建議升級至 __
-- [ ] plan.md、status.md 已移至 `sprint/archive/sprint-3/`
+- [ ] plan.md、status.md 已移至 `sprint/archive/sprint-4/`
