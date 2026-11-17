@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <psapi.h>
+#include <tlhelp32.h>
 
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
@@ -579,4 +580,42 @@ TEST_F(HostFixture, ReattachFourSessionsUnderTwoSeconds) {
     std::cout << "[reattach] p50=" << ms[ms.size() / 2] << "ms p95=" << p95 << "ms max=" << ms.back()
               << "ms\n";
     EXPECT_LT(p95, 2000.0);
+}
+
+// Stability (design doc 1.5): exited sessions beyond the retention limit release their threads,
+// engines and history; their metadata stays listed.
+TEST_F(HostFixture, ExitedSessionsAreReleasedBeyondRetention) {
+    auto thread_count = [&] {
+        DWORD n = 0;
+        HANDLE snap = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        THREADENTRY32 te{sizeof(te)};
+        for (BOOL ok = ::Thread32First(snap, &te); ok; ok = ::Thread32Next(snap, &te)) {
+            if (te.th32OwnerProcessID == ::GetProcessId(host_.get()))
+                ++n;
+        }
+        ::CloseHandle(snap);
+        return n;
+    };
+    const DWORD baseline = thread_count();
+    std::vector<std::string> ids;
+    for (int i = 0; i < 12; ++i)
+        ids.push_back(create("echo", "churn" + std::to_string(i)));
+    for (const auto& id : ids)
+        ctl({L"stop", w(id), L"--force"});
+    ASSERT_TRUE(wait_until(
+        [&] {
+            const auto j = Json::parse(ctl({L"list", L"--json"}).out, nullptr, false);
+            if (j.is_discarded())
+                return false;
+            return std::all_of(j["sessions"].begin(), j["sessions"].end(),
+                               [](const Json& s) { return s["process_state"] == "Exited"; });
+        },
+        20s));
+    const auto j = Json::parse(ctl({L"list", L"--json"}).out);  // list prunes
+    int released = 0;
+    for (const auto& s : j["sessions"])
+        released += s.value("history_only", false) ? 1 : 0;
+    EXPECT_EQ(j["sessions"].size(), 12u);
+    EXPECT_EQ(released, 4);
+    EXPECT_LE(thread_count(), baseline + 8 * 2 + 4) << "baseline " << baseline;
 }

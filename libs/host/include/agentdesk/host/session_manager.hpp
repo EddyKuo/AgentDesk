@@ -46,6 +46,8 @@ public:
 
     [[nodiscard]] std::size_t running_session_count() const;
     void stop_all();  // force stop every running session (host exit)
+    // Releases Session objects of all but the newest exited sessions (not on actor threads).
+    void prune_exited();
 
 private:
     struct Subscriber {

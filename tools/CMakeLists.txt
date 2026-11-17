@@ -10,3 +10,7 @@ agentdesk_bundle_conpty(pty_run)
 agentdesk_executable(session_bench session_bench/session_bench.cpp)
 target_link_libraries(session_bench PRIVATE agentdesk::host nlohmann_json::nlohmann_json psapi)
 agentdesk_bundle_conpty(session_bench)
+
+# Long-running stability check of agent-host (M4).
+agentdesk_executable(soak soak/soak.cpp)
+target_link_libraries(soak PRIVATE agentdesk::ipc nlohmann_json::nlohmann_json psapi)

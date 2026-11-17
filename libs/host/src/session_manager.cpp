@@ -17,6 +17,10 @@ namespace {
 constexpr std::size_t kMaxHistoryLines = 200;  // design doc 3.7 history.read
 constexpr std::size_t kMaxSnapshotChunkBytes = 900 * 1024;
 constexpr std::size_t kMaxRecords = 200;
+// Exited sessions keep their Session (threads, engine, history) so the final screen can still be
+// read; only the newest few do, otherwise create/stop churn grows threads and memory forever
+// (design doc 1.5 stability target). Older ones keep metadata only.
+constexpr std::size_t kMaxExitedLive = 8;
 
 Response bad(const Request& r, std::string msg) {
     return protocol::fail(r.id, ErrorCode::kBadRequest, std::move(msg));
@@ -236,6 +240,42 @@ Response SessionManager::dispatch(const ipc::ConnectionPtr& conn, const Request&
     return bad(req, "unknown method: " + m);
 }
 
+void SessionManager::prune_exited() {
+    std::vector<std::unique_ptr<Session>> doomed;
+    {
+        std::lock_guard lock(mutex_);
+        std::vector<ManagedPtr> exited;
+        for (const auto& [id, m] : sessions_) {
+            if (m->session && m->session->info().process_state == ProcessState::kExited)
+                exited.push_back(m);
+        }
+        if (exited.size() > kMaxExitedLive) {
+            std::sort(exited.begin(), exited.end(), [](const auto& a, const auto& b) {
+                return a->record.created_at < b->record.created_at;
+            });
+            for (std::size_t i = 0; i + kMaxExitedLive < exited.size(); ++i) {
+                exited[i]->subscribers.clear();
+                exited[i]->controller.reset();
+                doomed.push_back(std::move(exited[i]->session));  // metadata stays in the list
+            }
+        }
+        // Metadata-only records are bounded too (same limit as sessions.json).
+        std::vector<ManagedPtr> history_only;
+        for (const auto& [id, m] : sessions_) {
+            if (!m->session)
+                history_only.push_back(m);
+        }
+        if (history_only.size() > kMaxRecords) {
+            std::sort(history_only.begin(), history_only.end(), [](const auto& a, const auto& b) {
+                return a->record.created_at < b->record.created_at;
+            });
+            for (std::size_t i = 0; i + kMaxRecords < history_only.size(); ++i)
+                sessions_.erase(history_only[i]->record.id);
+        }
+    }
+    doomed.clear();  // joins actor/writer threads outside mutex_ (see header locking rule)
+}
+
 Response SessionManager::do_hello(const Request& req) {
     const int version = req.params.value("version", 1);
     if (version != protocol::kProtocolVersion) {
@@ -258,6 +298,7 @@ Response SessionManager::do_profile_list(const Request& req) {
 }
 
 Response SessionManager::do_create(const Request& req) {
+    prune_exited();
     const auto now = std::chrono::steady_clock::now();
     {
         std::lock_guard lock(mutex_);
@@ -387,11 +428,13 @@ Json SessionManager::describe(const Managed& m) const {
         j["backpressure_waits"] = info.backpressure_waits;
     } else {
         j["agent_state"] = "Unknown";
+        j["history_only"] = true;  // Lost, or Exited and released to bound resources
     }
     return j;
 }
 
 Response SessionManager::do_list(const Request& req) {
+    prune_exited();
     std::lock_guard lock(mutex_);
     Json list = Json::array();
     std::vector<ManagedPtr> ordered;
