@@ -665,3 +665,21 @@ TEST_F(HostFixture, HostLogNeverContainsInput) {
     EXPECT_FALSE(log.empty());
     EXPECT_EQ(log.find("TOP-SECRET"), std::string::npos);
 }
+
+// Non-ASCII output survives a resize: ConPTY repaints the screen after a resize, and the repaint
+// must still reach the engine as valid UTF-8 (cmd's banner is localized, e.g. Traditional Chinese).
+TEST_F(HostFixture, LocalizedOutputSurvivesResize) {
+    const auto id = create("cmd", "cjk");
+    auto c = connect();
+    ASSERT_TRUE(c);
+    ASSERT_TRUE(c->call("session.attach", {{"session", id}, {"want_control", true}}));
+    ASSERT_TRUE(wait_until([&] { return read(id).find("Microsoft") != std::string::npos; }, 10s));
+    const std::string before = read(id);
+    ASSERT_TRUE(c->call("session.resize", {{"session", id}, {"rows", 21}, {"cols", 67}}));
+    std::this_thread::sleep_for(1500ms);
+    const std::string after = read(id);
+    std::cout << "[before]\n" << before << "\n[after]\n" << after << std::endl;
+    EXPECT_EQ(before.find("\xEF\xBF\xBD"), std::string::npos) << "U+FFFD before resize";
+    EXPECT_EQ(after.find("\xEF\xBF\xBD"), std::string::npos) << "U+FFFD after resize";
+    c->close();
+}

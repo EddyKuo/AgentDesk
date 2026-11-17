@@ -83,6 +83,7 @@ Json mods_json(std::uint8_t m) {
 void update_view_from_json(SessionView& v, const Json& j) {
     v.name = j.value("name", v.name);
     v.cwd = j.value("cwd", v.cwd);
+    v.created_at = j.value("created_at", v.created_at);
     v.profile_id = j.value("profile_id", v.profile_id);
     v.process_state = j.value("process_state", v.process_state);
     if (j.contains("exit_code")) {

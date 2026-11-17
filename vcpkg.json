@@ -8,7 +8,7 @@
     "nlohmann-json",
     {
       "name": "imgui",
-      "features": [ "docking-experimental", "win32-binding", "dx11-binding" ]
+      "features": [ "docking-experimental", "win32-binding", "dx11-binding", "wchar32" ]
     }
   ],
   "overrides": [

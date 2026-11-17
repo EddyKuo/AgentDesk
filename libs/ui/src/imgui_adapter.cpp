@@ -50,4 +50,10 @@ bool key_pressed_owned(ImGuiKey key, const char* str_id) {
     return ImGui::IsKeyPressed(key, ImGuiInputFlags_Repeat, id);
 }
 
+void disable_nav_windowing() {
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    g.ConfigNavWindowingKeyNext = 0;
+    g.ConfigNavWindowingKeyPrev = 0;
+}
+
 }  // namespace agentdesk::ui::adapter
