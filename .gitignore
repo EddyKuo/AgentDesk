@@ -41,3 +41,7 @@ desktop.ini
 
 # Local build logs
 *.log
+
+# Packaging output
+/dist/
+soak.err

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <string>
@@ -18,6 +19,9 @@
 #include <nlohmann/json.hpp>
 #include <psapi.h>
 #include <tlhelp32.h>
+// aclapi/sddl need windows.h first.
+#include <aclapi.h>
+#include <sddl.h>
 
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
@@ -618,4 +622,46 @@ TEST_F(HostFixture, ExitedSessionsAreReleasedBeyondRetention) {
     EXPECT_EQ(j["sessions"].size(), 12u);
     EXPECT_EQ(released, 4);
     EXPECT_LE(thread_count(), baseline + 8 * 2 + 4) << "baseline " << baseline;
+}
+
+// QA-17: the pipe's DACL grants access to SYSTEM and the current user only.
+TEST_F(HostFixture, PipeDaclAllowsOnlySystemAndCurrentUser) {
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    // Read the DACL from a client handle on the real pipe instance.
+    HANDLE h =
+        ::CreateFileW(pipe_.c_str(), GENERIC_READ | READ_CONTROL, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    ASSERT_NE(h, INVALID_HANDLE_VALUE);
+    win::UniqueHandle pipe_handle(h);
+    ASSERT_EQ(::GetSecurityInfo(pipe_handle.get(), SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                                nullptr, &dacl, nullptr, &sd),
+              static_cast<DWORD>(ERROR_SUCCESS));
+    ASSERT_NE(dacl, nullptr);
+    std::vector<std::wstring> sids;
+    for (DWORD i = 0; i < dacl->AceCount; ++i) {
+        void* ace = nullptr;
+        ASSERT_TRUE(::GetAce(dacl, i, &ace));
+        auto* allowed = static_cast<ACCESS_ALLOWED_ACE*>(ace);
+        ASSERT_EQ(allowed->Header.AceType, ACCESS_ALLOWED_ACE_TYPE);
+        LPWSTR text = nullptr;
+        ASSERT_TRUE(::ConvertSidToStringSidW(reinterpret_cast<PSID>(&allowed->SidStart), &text));
+        sids.emplace_back(text);
+        ::LocalFree(text);
+    }
+    ::LocalFree(sd);
+    std::sort(sids.begin(), sids.end());
+    std::vector<std::wstring> expected = {L"S-1-5-18", ipc::current_user_sid()};
+    std::sort(expected.begin(), expected.end());
+    EXPECT_EQ(sids, expected);  // no Everyone (S-1-1-0), no anonymous, no other users
+}
+
+// Design doc 3.9: diagnostics never contain what the user typed.
+TEST_F(HostFixture, HostLogNeverContainsInput) {
+    const auto id = create("echo", "secret");
+    ctl({L"send", w(id), L"--text", L"TOP-SECRET-TOKEN-1234", L"--enter"});
+    std::this_thread::sleep_for(500ms);
+    std::ifstream in(data_dir_ / L"host.log", std::ios::binary);
+    const std::string log((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_FALSE(log.empty());
+    EXPECT_EQ(log.find("TOP-SECRET"), std::string::npos);
 }
