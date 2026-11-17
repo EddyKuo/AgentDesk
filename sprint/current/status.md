@@ -23,6 +23,11 @@ plan: sprint/current/plan.md
 | 2026-11-17 | S1-2 | ⬜ | ✅ | 凍結 CLI：Claude Code 2.1.326（`%USERPROFILE%\.local\bin\claude.exe`，原生 exe，≥2.1.295 支援 OSC 7501）；Codex CLI 0.155.1（`%LOCALAPPDATA%\Programs\OpenAI\Codex\bin\codex.exe`，原生 exe）。兩者皆不需 cmd 啟動器。登入由 CLI 自行處理，未檢查帳號內容 |
 | 2026-11-17 | S1-8 | ⬜ | 🔄 | 無 UI 端到端（tools/pty_run，只啟動與 Ctrl+C 退出，未送 prompt）：Claude Code 在隨附 ConPTY 下送出 7501 查詢、2.3 秒回報 idle、退出時 clear；內建 ConPTY 下無任何狀態。Codex 不送 7501 查詢，可正常啟動與退出。證據：docs/poc/evidence/s1-8-*.json。UI 內操作待 S1-6；Codex hook 實測需修改使用者 ~/.codex 設定，留待使用者同意 |
 | 2026-11-17 | — | — | — | 新增 libs/host Session actor（M1 沿用）：引擎只在 actor 執行緒、快照合併發布、中斷 5 秒寬限後提示強制終止、OSC 7501 與 report-state 兩種來源、seq 去重。測試 75/75 |
+| 2026-11-17 | S1-6 | ⬜ | ✅ | agent-ui.exe 原型（Win32＋DX11＋docking、TerminalView、事件驅動迴圈）。閒置 10 秒 CPU 31 ms、工作集 73 MB。Claude Code 在原型內正確繪製並經 osc7501 顯示 Idle（docs/poc/evidence/s1-8-claude-in-ui.json） |
+| 2026-11-17 | S1-8 | 🔄 | ✅ | UI 內端到端完成。Codex hook 實測移到 M1（需使用者同意修改 ~/.codex） |
+| 2026-11-17 | S1-9 | ⬜ | ✅ | Release 量測（docs/poc/evidence/s1-9-session-bench.json）：1 MiB/s×60 s 共 982,800 行全數依序到達、歷史 0 缺口、實測 0.99 MiB/s、峰值工作集 42 MB；100 次建立／停止 handle 88、執行緒 4 皆不成長；120×40 快照 277 µs。**凍結 OQ-06：背壓**（佇列超過 8 MiB 時 reader 暫停讀取，不丟位元組；4 KiB 上限測試確認觸發且無缺漏） |
+| 2026-11-17 | — | — | — | 里程碑 S1-M4（真實 Agent 可操作）達成：Claude Code 可在原型內顯示、縮放、以 Ctrl+C 停止，無死結 |
+| 2026-11-17 | — | — | — | 提前開始 M1：libs/protocol（分幀、訊息、錯誤碼、畫面編碼）＋6 個單元測試。測試 88/88 |
 
 ## 契約狀態
 

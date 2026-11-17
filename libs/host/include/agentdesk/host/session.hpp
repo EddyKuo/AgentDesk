@@ -28,8 +28,9 @@ struct SessionConfig {
     platform::win::ConPtyApi api;
     platform::win::PtySpawnSpec spec;
     terminal::VtEngineOptions engine;
-    std::chrono::milliseconds snapshot_interval{8};   // UI updates are coalesced, VT bytes never
-    std::chrono::milliseconds interrupt_grace{5000};  // design doc 3.2
+    std::chrono::milliseconds snapshot_interval{8};       // UI updates are coalesced, VT bytes never
+    std::chrono::milliseconds interrupt_grace{5000};      // design doc 3.2
+    std::size_t output_queue_limit = 8u * 1024u * 1024u;  // design doc 3.3: 8 MiB, then backpressure
 };
 
 struct AgentStatus {
@@ -51,6 +52,7 @@ struct SessionInfo {
     AgentStatus agent;
     std::uint64_t bytes_from_program = 0;
     bool history_truncated = false;
+    std::uint64_t backpressure_waits = 0;  // times the reader paused because the queue was full
     std::uint64_t first_history_line_id = 0;
 };
 
@@ -113,6 +115,9 @@ private:
 
     explicit Session(SessionConfig config, SessionListener listener);
     void post(Command cmd);
+    void post_output(std::string bytes);  // reader thread; may block (backpressure)
+    void release_backpressure();
+    void drain_queue();
     void actor_loop();
     void writer_loop();
     void handle(OutputChunk& c);
@@ -137,6 +142,11 @@ private:
     mutable std::mutex queue_mutex_;
     std::deque<Command> queue_;
     platform::win::UniqueHandle queue_event_;
+    std::condition_variable queue_space_cv_;
+    std::size_t queued_output_bytes_ = 0;   // guarded by queue_mutex_
+    std::uint64_t backpressure_waits_ = 0;  // guarded by queue_mutex_
+    bool overloaded_ = false;               // guarded by queue_mutex_
+    bool no_backpressure_ = false;          // guarded by queue_mutex_ (set while closing)
     std::atomic<bool> stopping_{false};
 
     // bytes -> writer thread

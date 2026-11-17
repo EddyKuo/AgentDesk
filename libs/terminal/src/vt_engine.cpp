@@ -384,8 +384,12 @@ Cell VtEngine::convert(const void* vterm_cell) const {
     out.default_bg = VTERM_COLOR_IS_DEFAULT_BG(&c.bg);
     vterm_screen_convert_color_to_rgb(screen_, &c.fg);
     vterm_screen_convert_color_to_rgb(screen_, &c.bg);
-    out.fg = Rgb{c.fg.rgb.red, c.fg.rgb.green, c.fg.rgb.blue};
-    out.bg = Rgb{c.bg.rgb.red, c.bg.rgb.green, c.bg.rgb.blue};
+    // Canonical form: default colours carry no RGB (the renderer uses the theme), so snapshots
+    // compare equal after a protocol round trip.
+    if (!out.default_fg)
+        out.fg = Rgb{c.fg.rgb.red, c.fg.rgb.green, c.fg.rgb.blue};
+    if (!out.default_bg)
+        out.bg = Rgb{c.bg.rgb.red, c.bg.rgb.green, c.bg.rgb.blue};
     return out;
 }
 

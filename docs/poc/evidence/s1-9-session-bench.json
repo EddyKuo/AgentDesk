@@ -1,0 +1,65 @@
+{
+  "bundled_conpty": true,
+  "conpty": "D:\\src\\AgentDesk\\build\\msvc-x64-release\\tools\\conpty\\conpty.dll",
+  "cycles": {
+    "avg_cycle_ms": 43.242416999999996,
+    "baseline_handles": 88,
+    "baseline_threads": 4,
+    "cycles": 100,
+    "samples": [
+      {
+        "cycle": 1,
+        "handles": 88,
+        "threads": 4
+      },
+      {
+        "cycle": 25,
+        "handles": 88,
+        "threads": 4
+      },
+      {
+        "cycle": 50,
+        "handles": 88,
+        "threads": 4
+      },
+      {
+        "cycle": 75,
+        "handles": 88,
+        "threads": 4
+      },
+      {
+        "cycle": 100,
+        "handles": 88,
+        "threads": 4
+      }
+    ]
+  },
+  "flood": {
+    "all_lines_arrived": true,
+    "backpressure_waits": 0,
+    "bytes_from_program": 62899258,
+    "effective_rate_mib_per_s": 0.9874772287190182,
+    "elapsed_s": 60.7461166,
+    "exit_code": 0,
+    "history_gaps": 0,
+    "history_lines_checked": true,
+    "history_truncated": true,
+    "last_numbered_line_on_screen": 982799,
+    "lines_reported_by_probe": 982800,
+    "memory_after": {
+      "peak_working_set_mb": 42.0234375,
+      "private_mb": 19.8125
+    },
+    "seconds": 60,
+    "target_rate_bytes_per_s": 1048576
+  },
+  "memory_end": {
+    "peak_working_set_mb": 42.0234375,
+    "private_mb": 1.953125
+  },
+  "snapshot": {
+    "avg_snapshot_us": 276.77,
+    "cells": 4800,
+    "grid": "120x40"
+  }
+}

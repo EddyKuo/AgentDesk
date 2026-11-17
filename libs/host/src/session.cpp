@@ -46,7 +46,7 @@ std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener li
     try {
         auto process = win::PtyProcess::spawn(self->config_.api, self->config_.spec,
                                               [raw = self.get()](std::span<const char> b) {
-                                                  raw->post(OutputChunk{std::string(b.data(), b.size())});
+                                                  raw->post_output(std::string(b.data(), b.size()));
                                               });
         std::lock_guard lock(self->write_mutex_);  // the writer reads process_ under this lock
         self->process_ = std::move(process);
@@ -76,6 +76,7 @@ std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener li
 
 Session::~Session() {
     stopping_ = true;
+    release_backpressure();
     ::SetEvent(queue_event_.get());
     if (actor_.joinable())
         actor_.join();
@@ -96,6 +97,59 @@ void Session::post(Command cmd) {
         queue_.push_back(std::move(cmd));
     }
     ::SetEvent(queue_event_.get());
+}
+
+void Session::post_output(std::string bytes) {
+    {
+        std::unique_lock lock(queue_mutex_);
+        const std::size_t limit = config_.output_queue_limit;
+        const auto has_room = [&] {
+            return no_backpressure_ || queued_output_bytes_ == 0 ||
+                   queued_output_bytes_ + bytes.size() <= limit;
+        };
+        if (!has_room()) {
+            // Backpressure (OQ-06): stop reading the PTY until the actor catches up. The child
+            // blocks on its own writes; no terminal byte is ever dropped (design doc 3.3).
+            ++backpressure_waits_;
+            overloaded_ = true;
+            queue_space_cv_.wait(lock, has_room);
+            overloaded_ = false;
+        }
+        queued_output_bytes_ += bytes.size();
+        queue_.push_back(OutputChunk{std::move(bytes)});
+    }
+    ::SetEvent(queue_event_.get());
+}
+
+void Session::release_backpressure() {
+    {
+        std::lock_guard lock(queue_mutex_);
+        no_backpressure_ = true;
+    }
+    queue_space_cv_.notify_all();
+}
+
+void Session::drain_queue() {
+    std::deque<Command> batch;
+    {
+        std::lock_guard lock(queue_mutex_);
+        batch.swap(queue_);
+    }
+    std::size_t output_bytes = 0;
+    for (auto& cmd : batch) {
+        if (const auto* chunk = std::get_if<OutputChunk>(&cmd))
+            output_bytes += chunk->bytes.size();
+        std::visit([this](auto& c) { handle(c); }, cmd);
+    }
+    if (output_bytes > 0) {
+        {
+            std::lock_guard lock(queue_mutex_);
+            queued_output_bytes_ -= output_bytes;
+            std::lock_guard state(state_mutex_);
+            info_.backpressure_waits = backpressure_waits_;
+        }
+        queue_space_cv_.notify_all();
+    }
 }
 
 void Session::send(InputEvent input) {
@@ -193,14 +247,7 @@ void Session::actor_loop() {
         const DWORD count = root_exited ? 1 : 2;
         const DWORD r = ::WaitForMultipleObjects(count, handles, FALSE, timeout);
 
-        std::deque<Command> batch;
-        {
-            std::lock_guard lock(queue_mutex_);
-            batch.swap(queue_);
-        }
-        for (auto& cmd : batch) {
-            std::visit([this](auto& c) { handle(c); }, cmd);
-        }
+        drain_queue();
 
         if (!root_exited && (r == WAIT_OBJECT_0 + 1 ||
                              ::WaitForSingleObject(process_->process_handle(), 0) == WAIT_OBJECT_0)) {
@@ -240,17 +287,12 @@ void Session::on_root_exit() {
     }
     const auto code = process_->wait_exit(std::chrono::milliseconds(0));
     // Close the pseudoconsole: the reader drains the final output (posted to our queue) and the
-    // job's remaining descendants are terminated.
+    // job's remaining descendants are terminated. The reader must not wait for queue space while
+    // we join it, so backpressure is lifted first.
+    release_backpressure();
     process_->close();
     {
-        std::deque<Command> batch;
-        {
-            std::lock_guard lock(queue_mutex_);
-            batch.swap(queue_);
-        }
-        for (auto& cmd : batch) {
-            std::visit([this](auto& c) { handle(c); }, cmd);
-        }
+        drain_queue();
     }
     engine_->on_process_exit();
     refresh_agent_from_engine();

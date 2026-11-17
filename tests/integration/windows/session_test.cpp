@@ -128,6 +128,39 @@ TEST(Session, ResizeChangesSnapshotSizeAndGeneration) {
     s->force_stop();
 }
 
+// OQ-06 backpressure: a tiny queue forces the reader to pause; every line still arrives in order.
+TEST(Session, BackpressureNeverDropsOutput) {
+    auto config = probe_config(L"flood");
+    config.spec.args = {L"flood", L"2", L"2097152"};  // 2 s at 2 MiB/s
+    config.output_queue_limit = 4 * 1024;
+    auto s = Session::start(config);
+    ASSERT_TRUE(s->wait_exit(60s).has_value());
+    const auto info = s->info();
+    EXPECT_GT(info.backpressure_waits, 0u)
+        << "queue limit never reached; test is not exercising backpressure";
+    EXPECT_TRUE(screen_contains(*s, "FLOOD-DONE"));
+    // Kept history lines must be consecutive: nothing dropped while the reader was paused.
+    long long prev = -1;
+    long long gaps = 0;
+    for (const auto& line : s->history(0, 20000)) {
+        std::string text;
+        for (const auto& cell : line.cells) {
+            if (cell.width != 0 && cell.chars[0] != 0)
+                agentdesk::terminal::append_utf8(text, cell.chars[0]);
+            else if (cell.width != 0)
+                text.push_back(' ');
+        }
+        if (text.size() > 11 && text[0] == 'L') {
+            const long long v = std::stoll(text.substr(1, 10));
+            if (prev >= 0 && v != prev + 1)
+                ++gaps;
+            prev = v;
+        }
+    }
+    EXPECT_GE(prev, 0);
+    EXPECT_EQ(gaps, 0);
+}
+
 TEST(Session, StartFailureIsReported) {
     auto config = probe_config(L"echo");
     config.spec.executable = L"C:\\nowhere\\missing.exe";

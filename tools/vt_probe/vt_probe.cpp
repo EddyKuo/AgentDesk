@@ -6,6 +6,7 @@
 // Used by S1-5 (inbox vs bundled ConPTY) and the end-to-end tests.
 #include <windows.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <string>
@@ -50,8 +51,10 @@ std::string read_until(std::chrono::steady_clock::time_point deadline, std::stri
     HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);
     std::string got;
     while (std::chrono::steady_clock::now() < deadline) {
-        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
-        if (::WaitForSingleObject(in, static_cast<DWORD>(std::max<long long>(left.count(), 0))) != WAIT_OBJECT_0) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if (::WaitForSingleObject(in, static_cast<DWORD>(std::max<long long>(left.count(), 0))) !=
+            WAIT_OBJECT_0) {
             break;
         }
         char buf[256];
@@ -97,14 +100,49 @@ int run_echo() {
     }
 }
 
+// Writes numbered 64-byte lines at `bytes_per_sec` for `seconds`, then "FLOOD-DONE <lines>".
+int run_flood(int seconds, long long bytes_per_sec) {
+    constexpr int kLine = 64;
+    const long long lines_per_tick = std::max<long long>(1, bytes_per_sec / kLine / 20);  // 50 ms ticks
+    const auto start = std::chrono::steady_clock::now();
+    long long n = 0;
+    std::string block;
+    char line[kLine + 1];
+    for (int tick = 0; tick < seconds * 20; ++tick) {
+        block.clear();
+        for (long long i = 0; i < lines_per_tick; ++i, ++n) {
+            std::snprintf(line, sizeof(line), "L%010lld %-49s\r\n", n,
+                          "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLM");
+            block.append(line, kLine);
+        }
+        write_out(block);
+        const auto next = start + std::chrono::milliseconds(50 * (tick + 1));
+        const auto now = std::chrono::steady_clock::now();
+        if (next > now)
+            ::Sleep(static_cast<DWORD>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count()));
+    }
+    write_out("FLOOD-DONE " + std::to_string(n) + "\r\n");
+    ::Sleep(300);
+    return 0;
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
     enable_vt_io();
     const std::wstring_view mode = argc > 1 ? argv[1] : L"query";
-    if (mode == L"query") return run_query();
-    if (mode == L"report") return run_report();
-    if (mode == L"echo") return run_echo();
+    if (mode == L"query")
+        return run_query();
+    if (mode == L"report")
+        return run_report();
+    if (mode == L"echo")
+        return run_echo();
+    if (mode == L"flood") {
+        const int seconds = argc > 2 ? _wtoi(argv[2]) : 5;
+        const long long rate = argc > 3 ? _wtoi64(argv[3]) : 1024 * 1024;
+        return run_flood(seconds, rate);
+    }
     write_out("usage: vt_probe query|report|echo\r\n");
     return 2;
 }
