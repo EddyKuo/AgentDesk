@@ -79,7 +79,8 @@ private:
     HPCON pcon_ = nullptr;
     DWORD pid_ = 0;
     std::thread reader_;
-    std::mutex close_mutex_;
+    std::mutex close_mutex_;  // lock order: close_mutex_ before write_mutex_
+    std::mutex write_mutex_;
     bool closed_ = false;
 };
 

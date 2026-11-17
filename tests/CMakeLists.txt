@@ -17,7 +17,13 @@ gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit"
 
 # Windows integration layer: real child processes in ConPTY + job objects.
 agentdesk_executable(win_integration_tests
-    integration/windows/conpty_test.cpp)
-target_link_libraries(win_integration_tests PRIVATE agentdesk::platform_win GTest::gtest_main)
+    integration/windows/conpty_test.cpp
+    integration/windows/conpty_compare_test.cpp)
+target_link_libraries(win_integration_tests PRIVATE
+    agentdesk::platform_win agentdesk::terminal GTest::gtest_main)
+add_dependencies(win_integration_tests vt_probe)
+target_compile_definitions(win_integration_tests PRIVATE
+    AGENTDESK_VT_PROBE=L"$<TARGET_FILE:vt_probe>"
+    AGENTDESK_BUNDLED_CONPTY_DIR=L"${PROJECT_SOURCE_DIR}/third_party/conpty/bin")
 gtest_discover_tests(win_integration_tests DISCOVERY_MODE PRE_TEST
     PROPERTIES LABELS "windows_integration" TIMEOUT 120)

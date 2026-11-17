@@ -182,11 +182,11 @@ void PtyProcess::reader_loop() noexcept {
 }
 
 void PtyProcess::write(std::string_view bytes) {
-    {
-        std::lock_guard lock(close_mutex_);
-        if (closed_) {
-            throw std::logic_error("PtyProcess::write after close");
-        }
+    // write_mutex_ keeps close() from releasing the handle while WriteFile uses it. A write
+    // blocked on a full pipe is released by close(): closing the pseudoconsole breaks the pipe.
+    std::lock_guard lock(write_mutex_);
+    if (!input_write_) {
+        throw std::logic_error("PtyProcess::write after close");
     }
     while (!bytes.empty()) {
         const DWORD chunk =
@@ -245,8 +245,12 @@ void PtyProcess::close() {
     if (reader_.joinable()) {
         reader_.join();
     }
-    // 3) Release pipes. 4) Kill whatever is left in the job; the job handle closes with *this.
-    input_write_.reset();
+    // 3) Release pipes (input only once no write is in flight). 4) Kill whatever is left in
+    //    the job; the job handle itself closes with *this.
+    {
+        std::lock_guard write_lock(write_mutex_);
+        input_write_.reset();
+    }
     output_read_.reset();
     try {
         job_.terminate(1);

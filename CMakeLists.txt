@@ -25,6 +25,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_subdirectory(third_party/libvterm)
 add_subdirectory(libs)
+add_subdirectory(tools)
 
 if(AGENTDESK_BUILD_APPS)
     add_subdirectory(apps)
