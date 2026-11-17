@@ -141,6 +141,7 @@ private:
     std::function<void()> on_disconnect_;
     std::atomic<bool> connected_{true};
     std::atomic<std::uint64_t> next_request_{1};
+    std::string id_prefix_;
 };
 
 }  // namespace agentdesk::ipc

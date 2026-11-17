@@ -373,6 +373,9 @@ std::unique_ptr<PipeClient> PipeClient::connect(const std::wstring& name, std::c
 }
 
 PipeClient::PipeClient(UniqueHandle pipe) : pipe_(std::move(pipe)), stop_event_(make_event(true)) {
+    LARGE_INTEGER t{};
+    ::QueryPerformanceCounter(&t);
+    id_prefix_ = "c-" + std::to_string(::GetCurrentProcessId()) + "-" + std::to_string(t.QuadPart) + "-";
     reader_ = std::thread([this] { reader_loop(); });
 }
 
@@ -384,6 +387,9 @@ void PipeClient::close() {
     ::SetEvent(stop_event_.get());
     if (reader_.joinable())
         reader_.join();
+    std::lock_guard lock(write_mutex_);
+    pipe_.reset();  // the server sees the disconnect and releases our control (design doc 3.7)
+    connected_ = false;
 }
 
 void PipeClient::set_event_handler(std::function<void(protocol::Event)> handler) {
@@ -398,6 +404,8 @@ void PipeClient::set_disconnect_handler(std::function<void()> handler) {
 
 bool PipeClient::write_all(const std::string& bytes) {
     std::lock_guard lock(write_mutex_);
+    if (!pipe_)
+        return false;
     UniqueHandle event = make_event(true);
     OVERLAPPED ov{};
     ov.hEvent = event.get();
@@ -415,7 +423,9 @@ std::optional<protocol::Response> PipeClient::call(const std::string& method, pr
     if (!connected_)
         return std::nullopt;
     protocol::Request req;
-    req.id = request_id.empty() ? "c-" + std::to_string(next_request_++) : std::move(request_id);
+    // Ids must be unique across clients: the host deduplicates session.create by request id for
+    // 10 minutes (design doc 3.7), so per-process counters alone would collide.
+    req.id = request_id.empty() ? id_prefix_ + std::to_string(next_request_++) : std::move(request_id);
     req.method = method;
     req.params = std::move(params);
     if (!write_all(protocol::encode_frame(protocol::serialize(req))))

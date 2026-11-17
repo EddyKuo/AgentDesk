@@ -1,0 +1,342 @@
+// agent-host.exe + agentctl.exe end to end (Sprint 2, S2-5).
+#include <windows.h>
+
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+
+#include "agentdesk/ipc/pipe.hpp"
+#include "agentdesk/platform/win/command_line.hpp"
+#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/win/job.hpp"
+#include "agentdesk/platform/win/unique_handle.hpp"
+#include "agentdesk/protocol/messages.hpp"
+
+using namespace std::chrono_literals;
+namespace fs = std::filesystem;
+namespace win = agentdesk::platform::win;
+namespace ipc = agentdesk::ipc;
+namespace protocol = agentdesk::protocol;
+using Json = nlohmann::json;
+
+namespace {
+
+struct ProcResult {
+    DWORD exit_code = 0;
+    std::string out;
+};
+
+// Runs a console program with captured stdout (stderr discarded) and returns its exit code.
+ProcResult run_capture(const fs::path& exe, const std::vector<std::wstring>& args, const fs::path& cwd = {}) {
+    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+    HANDLE rd = nullptr;
+    HANDLE wr = nullptr;
+    ::CreatePipe(&rd, &wr, &sa, 0);
+    ::SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+    win::UniqueHandle read_end(rd);
+    win::UniqueHandle write_end(wr);
+    HANDLE nul = ::CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
+    win::UniqueHandle nul_h(nul);
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = wr;
+    si.hStdError = nul;
+    si.hStdInput = nullptr;
+    std::wstring cmd = win::build_command_line(exe.native(), args);
+    PROCESS_INFORMATION pi{};
+    if (!::CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr,
+                          cwd.empty() ? nullptr : cwd.c_str(), &si, &pi)) {
+        return {9999, {}};
+    }
+    write_end.reset();
+    win::UniqueHandle process(pi.hProcess);
+    win::UniqueHandle thread(pi.hThread);
+    ProcResult r;
+    char buf[4096];
+    DWORD n = 0;
+    while (::ReadFile(read_end.get(), buf, sizeof(buf), &n, nullptr) && n > 0)
+        r.out.append(buf, n);
+    ::WaitForSingleObject(process.get(), 30000);
+    ::GetExitCodeProcess(process.get(), &r.exit_code);
+    return r;
+}
+
+std::wstring w(const std::string& s) {
+    return win::to_wide(s);
+}
+
+class HostFixture : public ::testing::Test {
+protected:
+    void SetUp() override {
+        static std::atomic<int> counter{0};
+        const auto tag = std::to_wstring(::GetCurrentProcessId()) + L"-" + std::to_wstring(++counter);
+        pipe_ = L"\\\\.\\pipe\\AgentDeskHostTest-" + tag;
+        data_dir_ = fs::temp_directory_path() / (L"agentdesk-hosttest-" + tag);
+        fs::remove_all(data_dir_);
+        fs::create_directories(data_dir_);
+        write_profiles();
+        start_host();
+    }
+    void TearDown() override {
+        if (auto c = connect())
+            c->call("host.shutdown", {{"stop_sessions", true}}, 5s);
+        if (host_)
+            ::WaitForSingleObject(host_.get(), 10000);
+        fs::remove_all(data_dir_);
+    }
+    void write_profiles() {
+        wchar_t sys[MAX_PATH]{};
+        const UINT n = ::GetSystemDirectoryW(sys, MAX_PATH);
+        const auto cmd = fs::path(std::wstring(sys, n)) / L"cmd.exe";
+        Json profiles = Json::array({
+            {{"id", "echo"},
+             {"name", "probe echo"},
+             {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
+             {"args", {"echo"}}},
+            {{"id", "flood"},
+             {"name", "probe flood"},
+             {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
+             {"args", {"flood", "3", "1048576"}}},
+            {{"id", "report"},
+             {"name", "probe report"},
+             {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
+             {"args", {"report"}}},
+            {{"id", "cmd"},
+             {"name", "cmd"},
+             {"executable", win::to_utf8(cmd.native())},
+             {"args", Json::array()}},
+            {{"id", "broken"},
+             {"name", "broken"},
+             {"executable", "C:\\nowhere\\missing.exe"},
+             {"args", Json::array()}},
+        });
+        std::ofstream(data_dir_ / L"profiles.json")
+            << Json{{"schema_version", 1}, {"profiles", profiles}}.dump(2);
+    }
+    void start_host() {
+        ::SetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", data_dir_.c_str());
+        std::wstring cmd = win::build_command_line(AGENTDESK_HOST_EXE, {L"--pipe", pipe_});
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        ASSERT_TRUE(::CreateProcessW(AGENTDESK_HOST_EXE, cmd.data(), nullptr, nullptr, FALSE,
+                                     DETACHED_PROCESS, nullptr, nullptr, &si, &pi));
+        host_.reset(pi.hProcess);
+        ::CloseHandle(pi.hThread);
+        // If this test process crashes, closing the job kills the host instead of leaking it.
+        host_job_.assign(pi.hProcess);
+        host_pid_ = pi.dwProcessId;
+        auto c = connect();
+        ASSERT_NE(c, nullptr) << "host did not come up";
+    }
+    std::unique_ptr<ipc::PipeClient> connect() { return ipc::PipeClient::connect(pipe_, 10s); }
+    ProcResult ctl(std::vector<std::wstring> args) {
+        args.insert(args.begin(), {L"--pipe", pipe_, L"--no-start"});
+        return run_capture(AGENTDESK_CTL_EXE, args, fs::temp_directory_path());
+    }
+    std::string create(const std::string& profile, const std::string& name) {
+        const auto r = ctl({L"run", L"--profile", w(profile), L"--name", w(name), L"--cwd",
+                            fs::temp_directory_path().native()});
+        EXPECT_EQ(r.exit_code, 0u) << r.out;
+        std::string id = r.out;
+        while (!id.empty() && (id.back() == '\n' || id.back() == '\r'))
+            id.pop_back();
+        return id;
+    }
+    std::string read(const std::string& session) { return ctl({L"read", w(session), L"--lines", L"50"}).out; }
+    template <typename Pred>
+    static bool wait_until(Pred p, std::chrono::milliseconds t) {
+        const auto d = std::chrono::steady_clock::now() + t;
+        while (std::chrono::steady_clock::now() < d) {
+            if (p())
+                return true;
+            std::this_thread::sleep_for(50ms);
+        }
+        return p();
+    }
+
+    std::wstring pipe_;
+    fs::path data_dir_;
+    win::UniqueHandle host_;
+    win::KillOnCloseJob host_job_;
+    DWORD host_pid_ = 0;
+};
+
+}  // namespace
+
+// S2-M2 / QA-03 (host side): input to one session never reaches the other.
+TEST_F(HostFixture, TwoSessionsAreIndependent) {
+    const auto a = create("echo", "alpha");
+    const auto b = create("echo", "beta");
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(ctl({L"send", L"alpha", L"--text", L"only-a", L"--enter"}).exit_code, 0u);
+    ASSERT_TRUE(
+        wait_until([&] { return read(a).find("PROBE-ECHO:6f6e6c792d610d") != std::string::npos; }, 10s));
+    // b's probe also echoes the host's terminal query replies; only a's text must be absent.
+    EXPECT_EQ(read(b).find("6f6e6c792d61"), std::string::npos);
+}
+
+// QA-13: --json output is pure JSON; send does not press Enter unless asked; exit codes 0,2..7.
+TEST_F(HostFixture, CliContractAndExitCodes) {
+    const auto id = create("echo", "contract");
+    std::this_thread::sleep_for(300ms);
+    const auto listed = ctl({L"list", L"--json"});
+    ASSERT_EQ(listed.exit_code, 0u);
+    const auto doc = Json::parse(listed.out, nullptr, false);
+    ASSERT_FALSE(doc.is_discarded()) << listed.out;
+    EXPECT_EQ(doc["sessions"].size(), 1u);
+
+    EXPECT_EQ(ctl({L"send", w(id), L"--text", L"no-enter"}).exit_code, 0u);
+    std::this_thread::sleep_for(800ms);
+    EXPECT_EQ(read(id).find("6e6f2d656e746572"), std::string::npos) << "Enter was sent without --enter";
+    EXPECT_EQ(ctl({L"send", w(id), L"--enter"}).exit_code, 0u);
+    EXPECT_TRUE(
+        wait_until([&] { return read(id).find("PROBE-ECHO:6e6f2d656e7465720d") != std::string::npos; }, 10s));
+
+    EXPECT_EQ(ctl({L"stop", w(id)}).exit_code, 2u);  // stop without --interrupt/--force: bad args
+    EXPECT_EQ(run_capture(AGENTDESK_CTL_EXE,
+                          {L"--pipe", L"\\\\.\\pipe\\AgentDeskNobodyHome", L"--no-start", L"list"})
+                  .exit_code,
+              3u);
+    EXPECT_EQ(ctl({L"read", L"nosuch"}).exit_code, 4u);
+    create("echo", "twin");
+    create("echo", "twin");
+    EXPECT_EQ(ctl({L"read", L"twin"}).exit_code, 4u);  // ambiguous name
+    EXPECT_EQ(ctl({L"shutdown"}).exit_code, 5u);       // active sessions
+    EXPECT_EQ(ctl({L"run", L"--profile", L"broken", L"--cwd", fs::temp_directory_path().native()}).exit_code,
+              6u);
+    EXPECT_EQ(ctl({L"list", L"--timeout-ms", L"0"}).exit_code, 7u);
+}
+
+// QA-19: report-state through the CLI; stale seq ignored; invalid input rejected.
+TEST_F(HostFixture, ReportStateViaCli) {
+    const auto id = create("echo", "reporter");
+    EXPECT_EQ(ctl({L"report-state", w(id), L"--source", L"codex-hook", L"--state", L"blocked", L"--kind",
+                   L"permission", L"--message", L"approve rm?", L"--seq", L"200"})
+                  .exit_code,
+              0u);
+    EXPECT_EQ(ctl({L"report-state", w(id), L"--source", L"codex-hook", L"--state", L"idle", L"--seq", L"150"})
+                  .exit_code,
+              0u);
+    std::this_thread::sleep_for(300ms);
+    const auto got = Json::parse(ctl({L"list", L"--json"}).out);
+    EXPECT_EQ(got["sessions"][0]["agent_state"], "Blocked");
+    EXPECT_EQ(got["sessions"][0]["agent_message"], "approve rm?");
+    EXPECT_EQ(
+        ctl({L"report-state", w(id), L"--source", L"x", L"--state", L"sleeping", L"--seq", L"1"}).exit_code,
+        2u);
+    EXPECT_EQ(
+        ctl({L"report-state", w(id), L"--source", L"agentdesk:fake", L"--state", L"idle", L"--seq", L"1"})
+            .exit_code,
+        2u);
+}
+
+// Environment advertised to sessions (design doc 3.6).
+TEST_F(HostFixture, SessionsGetAgentDeskEnvironment) {
+    const auto id = create("cmd", "envcheck");
+    std::this_thread::sleep_for(500ms);
+    ctl({L"send", w(id), L"--text", L"echo [%AGENTDESK_SESSION_ID%]", L"--enter"});
+    EXPECT_TRUE(wait_until([&] { return read(id).find("[" + id + "]") != std::string::npos; }, 10s))
+        << read(id);
+}
+
+// QA-14 (host side): one controller; others read-only until an explicit take-over.
+TEST_F(HostFixture, SingleInputController) {
+    const auto id = create("echo", "shared");
+    auto a = connect();
+    auto b = connect();
+    ASSERT_TRUE(a && b);
+    const auto ra = a->call("session.attach", {{"session", id}, {"want_control", true}});
+    ASSERT_TRUE(ra && ra->result);
+    EXPECT_TRUE(ra->result->value("is_controller", false));
+    const auto rb = b->call("session.attach", {{"session", id}, {"want_control", true}});
+    ASSERT_TRUE(rb && rb->result);
+    EXPECT_FALSE(rb->result->value("is_controller", true));
+    const auto denied = b->call("session.input", {{"session", id}, {"kind", "text"}, {"text", "x"}});
+    ASSERT_TRUE(denied);
+    EXPECT_EQ(denied->error, protocol::ErrorCode::kNotController);
+    EXPECT_EQ(b->call("session.resize", {{"session", id}, {"rows", 10}, {"cols", 40}})->error,
+              protocol::ErrorCode::kNotController);
+    b->call("session.attach", {{"session", id}, {"take_control", true}});
+    EXPECT_FALSE(
+        b->call("session.input", {{"session", id}, {"kind", "text"}, {"text", "x"}})->error.has_value());
+    EXPECT_EQ(a->call("session.input", {{"session", id}, {"kind", "text"}, {"text", "x"}})->error,
+              protocol::ErrorCode::kNotController);
+    b->close();  // holder disconnects: control released
+    EXPECT_TRUE(wait_until(
+        [&] { return !a->call("session.input", {{"session", id}, {"kind", "text"}, {"text", "y"}})->error; },
+        5s));
+}
+
+// QA-06: attach while output is flowing; deltas continue exactly from the snapshot seq.
+TEST_F(HostFixture, AttachSnapshotThenContiguousDeltas) {
+    const auto id = create("flood", "flowing");
+    std::this_thread::sleep_for(300ms);  // attach mid-stream
+    auto c = connect();
+    ASSERT_TRUE(c);
+    std::mutex mu;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> deltas;  // base_seq, seq
+    std::uint64_t snapshot_seq = 0;
+    c->set_event_handler([&](protocol::Event e) {
+        std::lock_guard lock(mu);
+        if (e.event == "screen.delta")
+            deltas.emplace_back(e.body["base_seq"].get<std::uint64_t>(), e.body["seq"].get<std::uint64_t>());
+        if (e.event == "screen.snapshot" && snapshot_seq == 0)
+            snapshot_seq = e.body["meta"]["seq"].get<std::uint64_t>();
+    });
+    const auto r = c->call("session.attach", {{"session", id}});
+    ASSERT_TRUE(r && r->result);
+    const auto attached_seq = r->result->at("snapshot_meta").at("seq").get<std::uint64_t>();
+    std::this_thread::sleep_for(1500ms);
+    c->close();  // stop the reader thread before the captured locals go out of scope
+    std::lock_guard lock(mu);
+    ASSERT_FALSE(deltas.empty());
+    EXPECT_EQ(snapshot_seq, attached_seq);
+    std::uint64_t expect = attached_seq;
+    for (const auto& [base, seq] : deltas) {
+        ASSERT_EQ(base, expect) << "gap between deltas";
+        expect = seq;
+    }
+}
+
+// QA-10: host crash -> new host marks the old session Lost and does not adopt it.
+TEST_F(HostFixture, HostCrashMarksSessionsLost) {
+    const auto id = create("echo", "orphan");
+    const auto before = Json::parse(ctl({L"list", L"--json"}).out);
+    const DWORD child_pid = before["sessions"][0]["pid"].get<DWORD>();
+    ::TerminateProcess(host_.get(), 99);  // simulated crash
+    ::WaitForSingleObject(host_.get(), 10000);
+    // KILL_ON_JOB_CLOSE: the child dies with the host's job handle.
+    win::UniqueHandle child(::OpenProcess(SYNCHRONIZE, FALSE, child_pid));
+    if (child)
+        EXPECT_EQ(::WaitForSingleObject(child.get(), 10000), WAIT_OBJECT_0);
+    start_host();
+    const auto after = Json::parse(ctl({L"list", L"--json"}).out);
+    ASSERT_EQ(after["sessions"].size(), 1u);
+    EXPECT_EQ(after["sessions"][0]["id"], id);
+    EXPECT_EQ(after["sessions"][0]["process_state"], "Lost");
+    EXPECT_NE(after["host_instance_id"], before["host_instance_id"]);
+    EXPECT_EQ(ctl({L"send", w(id), L"--text", L"x"}).exit_code, 4u);  // Lost sessions take no input
+}
+
+// UI-less operation (M1 exit criterion): read, write and stop without any attached UI.
+TEST_F(HostFixture, StopWorksWithoutUi) {
+    const auto id = create("echo", "headless");
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(ctl({L"stop", w(id), L"--force"}).exit_code, 0u);
+    EXPECT_TRUE(wait_until(
+        [&] {
+            const auto j = Json::parse(ctl({L"list", L"--json"}).out, nullptr, false);
+            return !j.is_discarded() && j["sessions"][0]["process_state"] == "Exited";
+        },
+        10s));
+}
