@@ -80,7 +80,7 @@ std::unique_ptr<PtyProcess> PtyProcess::spawn(const ConPtyApi& api, const PtySpa
         throw std::invalid_argument("PtyProcess::spawn: batch files need the shell launcher adapter");
     }
     std::error_code ec;
-    if (!std::filesystem::is_regular_file(spec.executable, ec)) {
+    if (!is_launchable_file(spec.executable.native())) {
         throw std::system_error(std::make_error_code(std::errc::no_such_file_or_directory),
                                 "executable not found");
     }

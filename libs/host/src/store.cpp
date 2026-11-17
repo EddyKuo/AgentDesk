@@ -124,8 +124,7 @@ std::optional<std::string> validate_profile(const Profile& p) {
     if (win::is_batch_file(p.executable.native())) {
         return "batch launchers (.cmd/.bat) need the shell launcher adapter, which is not available yet";
     }
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(p.executable, ec)) {
+    if (!win::is_launchable_file(p.executable.native())) {
         return "executable not found: " + win::to_utf8(p.executable.native());
     }
     return std::nullopt;

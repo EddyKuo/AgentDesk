@@ -1223,6 +1223,8 @@ void sync_sessions(App::State& s) {
         for (auto& e : s.async_errors) {
             s.launch_error = e;
             s.launch_busy = false;
+            // The launcher may be closed (new terminal, split, space): say it where it is seen.
+            s.toasts.push_back({"Could not start", e, "", g_pal->needs_you, Clock::now() + std::chrono::seconds(10)});
         }
         s.async_errors.clear();
     }
