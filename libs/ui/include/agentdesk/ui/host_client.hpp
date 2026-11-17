@@ -32,6 +32,8 @@ struct SessionView {
     std::string cwd;
     std::string created_at;  // ISO 8601 UTC, from the host
     std::string program;     // what runs in the terminal now ("claude", "pwsh"), from the host
+    std::string parent;      // session that started this one (sub-agent), or empty
+    std::map<std::string, std::string> labels;
     std::string profile_id;
     std::string process_state = "Unknown";
     std::optional<std::uint32_t> exit_code;

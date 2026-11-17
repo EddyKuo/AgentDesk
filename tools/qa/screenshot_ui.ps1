@@ -6,7 +6,8 @@ param(
     [string]$BuildDir = '',
     [string]$Profile = 'chinese',
     [int]$WaitSeconds = 6,
-    [string]$Run = ''
+    [string]$Run = '',
+    [string]$Child = ''   # profile:name started as a sub-agent of the first session
 )
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -56,7 +57,15 @@ if ($env:SHOT_EXTRA) {  # extra sessions created before the UI starts: "profile:
 $uiArgs = @('--pipe', $pipe, '--start', $Profile, '--exit-after-ms', (($WaitSeconds + 1) * 1000), '--report', "`"$report`"")
 if ($Run) { $uiArgs += @('--run', "`"$Run`"") }
 $p = Start-Process $ui -ArgumentList $uiArgs -PassThru -WorkingDirectory $here
-Start-Sleep -Seconds $WaitSeconds
+if ($Child) {
+    Start-Sleep -Seconds 4
+    $first = (& (Join-Path $dir 'agentctl.exe') --pipe $pipe list --json | ConvertFrom-Json).sessions[0].id
+    $pn = $Child.Split(':')
+    & (Join-Path $dir 'agentctl.exe') --pipe $pipe run --profile $pn[0] --name $pn[1] --cwd ([IO.Path]::GetTempPath()) --parent $first | Out-Null
+    Start-Sleep -Seconds ([Math]::Max(1, $WaitSeconds - 4))
+} else {
+    Start-Sleep -Seconds $WaitSeconds
+}
 $p.Refresh()
 $h = $p.MainWindowHandle
 [Win]::SetForegroundWindow($h) | Out-Null

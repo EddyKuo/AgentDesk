@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -9,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "agentdesk/host/session.hpp"
@@ -61,6 +63,12 @@ private:
         std::optional<std::uint64_t> controller;
         std::map<std::uint64_t, Subscriber> subscribers;
         std::string last_process_state;
+        // First message for an agent (session.create "task"): sent once it reports Idle, or
+        // after kTaskFallback when it reports nothing.
+        std::string pending_task;
+        std::chrono::steady_clock::time_point task_after{};
+        // Reports from sub-agents, delivered when this agent is not busy (session.report).
+        std::vector<std::string> pending_reports;
     };
     using ManagedPtr = std::shared_ptr<Managed>;
 
@@ -82,6 +90,11 @@ private:
     protocol::Response do_ui_state_get(const ipc::ConnectionPtr& conn, const protocol::Request& req);
     protocol::Response do_ui_state_set(const ipc::ConnectionPtr& conn, const protocol::Request& req);
     protocol::Response do_worktree_add(const protocol::Request& req);
+    protocol::Response do_wait(const protocol::Request& req);
+    protocol::Response do_label(const protocol::Request& req);
+    protocol::Response do_report(const protocol::Request& req);
+    // Delivers due tasks and reports (maintenance thread, every 200 ms).
+    void deliver_pending();
 
     // Resolves "session" (UUID or unique name). Sets `error` on failure. Takes mutex_.
     ManagedPtr resolve(const protocol::Request& req, std::optional<protocol::Response>& error);
@@ -110,6 +123,8 @@ private:
     std::uint64_t ui_state_rev_ = 0;
     bool ui_state_loaded_ = false;
     std::map<std::uint64_t, std::weak_ptr<ipc::Connection>> ui_watchers_;
+    std::atomic<bool> stopping_{false};
+    std::thread maintenance_;
 };
 
 }  // namespace agentdesk::host

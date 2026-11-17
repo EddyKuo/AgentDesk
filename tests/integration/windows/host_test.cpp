@@ -764,3 +764,58 @@ TEST_F(HostFixture, WorktreeAddCreatesCheckout) {
                     ->error.has_value());
     c->close();
 }
+
+// Agent collaboration (herdr-style helpers): a sub-agent records its parent, gets its first task
+// once it is ready, reports back into the parent's input, and the parent can wait for it.
+TEST_F(HostFixture, SubAgentTaskReportAndWait) {
+    const auto parent = create("cmd", "lead");
+    auto r =
+        ctl({L"run", L"--profile", L"cmd", L"--name", L"helper", L"--cwd", fs::temp_directory_path().native(),
+             L"--parent", w(parent), L"--task", L"TASK-alpha", L"--label", L"role=review"});
+    ASSERT_EQ(r.exit_code, 0u) << r.out;
+    std::string child = r.out;
+    while (!child.empty() && (child.back() == '\n' || child.back() == '\r'))
+        child.pop_back();
+    const auto list = Json::parse(ctl({L"list", L"--json"}).out);
+    bool found = false;
+    for (const auto& s : list["sessions"]) {
+        if (s["id"] == child) {
+            found = true;
+            EXPECT_EQ(s["parent"], parent);
+            EXPECT_EQ(s["labels"]["role"], "review");
+        }
+    }
+    ASSERT_TRUE(found);
+    // The helper says it is ready: the task arrives.
+    ctl({L"report-state", w(child), L"--source", L"test", L"--state", L"idle", L"--seq", L"1"});
+    EXPECT_TRUE(wait_until([&] { return read(child).find("TASK-alpha") != std::string::npos; }, 5s))
+        << read(child);
+    // Report back: tagged text in the parent's input.
+    r = ctl({L"report", L"RESULT-42", L"--from", w(child)});
+    ASSERT_EQ(r.exit_code, 0u) << r.out;
+    EXPECT_TRUE(wait_until(
+        [&] {
+            return read(parent).find("[from helper") != std::string::npos &&
+                   read(parent).find("RESULT-42") != std::string::npos;
+        },
+        5s))
+        << read(parent);
+    // Not delivered while the target works.
+    ctl({L"report-state", w(parent), L"--source", L"test", L"--state", L"working", L"--seq", L"1"});
+    ctl({L"report", L"LATER-7", L"--from", w(child)});
+    std::this_thread::sleep_for(600ms);
+    EXPECT_EQ(read(parent).find("LATER-7"), std::string::npos);
+    // wait --until idle returns once the parent finishes.
+    std::thread finisher([&] {
+        std::this_thread::sleep_for(700ms);
+        ctl({L"report-state", w(parent), L"--source", L"test", L"--state", L"idle", L"--seq", L"2"});
+    });
+    const auto waited = ctl({L"wait", w(parent), L"--until", L"idle", L"--timeout-ms", L"10000"});
+    finisher.join();
+    EXPECT_EQ(waited.exit_code, 0u) << waited.out;
+    EXPECT_TRUE(wait_until([&] { return read(parent).find("LATER-7") != std::string::npos; }, 5s));
+    // Timeout: exit code 7.
+    EXPECT_EQ(ctl({L"wait", w(parent), L"--until", L"blocked", L"--timeout-ms", L"300"}).exit_code, 7u);
+    // No parent: refused with a clear error.
+    EXPECT_EQ(ctl({L"report", L"x", L"--from", w(parent)}).exit_code, 4u);
+}

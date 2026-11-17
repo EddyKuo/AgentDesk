@@ -86,6 +86,14 @@ void update_view_from_json(SessionView& v, const Json& j) {
     v.created_at = j.value("created_at", v.created_at);
     if (const auto p = j.find("program"); p != j.end() && p->is_string())
         v.program = p->get<std::string>();
+    if (const auto p = j.find("parent"); p != j.end() && p->is_string())
+        v.parent = p->get<std::string>();
+    if (const auto l = j.find("labels"); l != j.end() && l->is_object()) {
+        v.labels.clear();
+        for (const auto& [k, val] : l->items())
+            if (val.is_string())
+                v.labels[k] = val.get<std::string>();
+    }
     v.profile_id = j.value("profile_id", v.profile_id);
     v.process_state = j.value("process_state", v.process_state);
     if (j.contains("exit_code")) {

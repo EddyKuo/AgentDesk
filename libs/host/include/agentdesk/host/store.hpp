@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -47,6 +48,8 @@ struct SessionRecord {
     std::string created_at;  // ISO 8601 UTC
     std::string process_state;
     std::optional<std::uint32_t> exit_code;
+    std::string parent;  // session that started this one (agentctl run inside a session)
+    std::map<std::string, std::string> labels;
 };
 
 nlohmann::json to_json(const SessionRecord& r);

@@ -630,6 +630,7 @@ struct App::State {
     std::map<std::string, Clock::time_point> awaiting_list;
     std::deque<Toast> toasts;
     std::vector<std::string> agent_order;
+    std::string peek;  // sub-agent shown in the floating peek window
 
     std::mutex placements_mutex;
     std::vector<Placement> placements;      // completed creates waiting for the UI thread
@@ -977,6 +978,8 @@ void sync_sessions(App::State& s) {
         const auto& v = s.views_by_id[id];
         if (v.process_state == "Exited" && !initial)
             continue;  // finished elsewhere; listed in the sidebar, not opened
+        if (!v.parent.empty() && s.views_by_id.count(v.parent))
+            continue;  // a sub-agent: listed under its parent, peeked or opened on demand
         const int before_space = s.ws.active_space;
         const int before_tab = s.ws.spaces.empty() ? 0 : s.ws.active()->active_tab;
         const int sp = s.space_for_cwd(v.cwd);
@@ -1192,6 +1195,21 @@ void run_command(App::State& s, const std::string& cmd) {
             s.focus(s.agent_order[static_cast<std::size_t>(i)]);
         }
     } else if (name == "agent.focus" || name == "session.focus") {
+        s.focus(arg);
+    } else if (name == "agent.peek") {
+        s.peek = arg;
+        s.views[arg].focus_next = true;
+    } else if (name == "agent.keep") {
+        // Give a sub-agent a pane: beside its parent when the parent is shown, else a new tab.
+        const auto it = s.views_by_id.find(arg);
+        if (it != s.views_by_id.end() && s.ws.find(arg).space < 0) {
+            s.hidden.erase(arg);
+            if (!it->second.parent.empty() && s.ws.find(it->second.parent).space >= 0)
+                s.ws.split(it->second.parent, arg, Dir::kRight);
+            else
+                s.ws.add_tab(arg, s.space_for_cwd(it->second.cwd));
+        }
+        s.peek.clear();
         s.focus(arg);
     } else if (name == "terminal.search") {
         if (!focused.empty())
@@ -1413,8 +1431,16 @@ void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
                                  {"Idle", Attention::kIdle, {}},
                                  {"Shells & other", Attention::kNone, {}}};
     std::vector<std::string> stopped;
+    std::map<std::string, std::vector<std::string>> children;
     for (const auto& sess : s.sessions) {
         const auto& v = s.views_by_id[sess->id()];
+        if (!v.parent.empty() && s.views_by_id.count(v.parent))
+            children[v.parent].push_back(sess->id());
+    }
+    for (const auto& sess : s.sessions) {
+        const auto& v = s.views_by_id[sess->id()];
+        if (!v.parent.empty() && s.views_by_id.count(v.parent))
+            continue;  // drawn under its parent
         if (v.lost || v.process_state != "Running") {
             stopped.push_back(sess->id());
             continue;
@@ -1428,11 +1454,16 @@ void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
     }
     s.agent_order.clear();
     for (const auto& g : groups)
-        for (const auto& id : g.ids)
+        for (const auto& id : g.ids) {
             s.agent_order.push_back(id);
+            for (const auto& c : children[id])
+                s.agent_order.push_back(c);
+        }
 
     int rows = 0;
     int headers = 0;
+    for (const auto& [p, list] : children)
+        rows += static_cast<int>(list.size());
     for (const auto& g : groups)
         if (!g.ids.empty()) {
             rows += static_cast<int>(g.ids.size());
@@ -1459,22 +1490,38 @@ void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
     ImGui::BeginChild("##agents", ImVec2(w, std::max(px(40), list_bottom - ImGui::GetCursorScreenPos().y)),
                       ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
     ImDrawList* ad = ImGui::GetWindowDrawList();
-    auto agent_row = [&](const std::string& id) {
+    auto agent_row = [&](const std::string& id, float indent) {
         const auto& v = s.views_by_id[id];
+        const bool is_child = indent > 0;
         ImGui::PushID(id.c_str());
-        const ImVec2 a = ImGui::GetCursorScreenPos();
+        const ImVec2 a0 = ImGui::GetCursorScreenPos();
         const float aw = ImGui::GetContentRegionAvail().x;
         const bool clicked = ImGui::InvisibleButton("##agent", ImVec2(aw, row_h));
         const bool hovered = ImGui::IsItemHovered();
-        const ImVec2 b(a.x + aw, a.y + row_h);
-        if (clicked)
-            s.focus(id);
+        const ImVec2 a(a0.x + indent, a0.y);
+        const ImVec2 b(a0.x + aw, a0.y + row_h);
+        if (is_child) {  // tree line from the parent
+            ad->AddLine(ImVec2(a0.x + px(20), a0.y - px(4)), ImVec2(a0.x + px(20), a0.y + row_h * 0.5f),
+                        g_pal->border, px(1.2f));
+            ad->AddLine(ImVec2(a0.x + px(20), a0.y + row_h * 0.5f), ImVec2(a.x + px(6), a0.y + row_h * 0.5f),
+                        g_pal->border, px(1.2f));
+        }
+        if (clicked) {
+            if (is_child && s.ws.find(id).space < 0)
+                run_command(s, "agent.peek:" + id);  // sub-agents without a pane: peek
+            else
+                s.focus(id);
+        }
         if (hovered)
             ImGui::SetTooltip("%s\n%s%s%s", s.pane_title(id).c_str(), display_path(v.cwd).c_str(),
                               v.agent_message.empty() ? "" : "\n", v.agent_message.c_str());
         if (ImGui::BeginPopupContextItem("##agentctx")) {
             if (ImGui::MenuItem("Show"))
                 s.focus(id);
+            if (ImGui::MenuItem("Peek"))
+                run_command(s, "agent.peek:" + id);
+            if (s.ws.find(id).space < 0 && ImGui::MenuItem("Open as pane"))
+                run_command(s, "agent.keep:" + id);
             if (ImGui::MenuItem("Send Ctrl+C", nullptr, false, v.process_state == "Running"))
                 if (auto it = s.by_id.find(id); it != s.by_id.end())
                     it->second->send(host::RawInput{std::string("\x03", 1)});
@@ -1511,8 +1558,11 @@ void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
         std::snprintf(head, sizeof head, "%s  %d", g.label, static_cast<int>(g.ids.size()));
         ad->AddText(bold, fs * 0.85f, ImVec2(p.x + px(14), p.y + px(2)), attention_color(g.att), head);
         ImGui::Dummy(ImVec2(0, px(22)));
-        for (const auto& id : g.ids)
-            agent_row(id);
+        for (const auto& id : g.ids) {
+            agent_row(id, 0);
+            for (const auto& c : children[id])
+                agent_row(c, px(22));
+        }
     }
     if (!stopped.empty()) {
         const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -1520,8 +1570,11 @@ void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
         std::snprintf(head, sizeof head, "Stopped  %d", static_cast<int>(stopped.size()));
         ad->AddText(bold, fs * 0.85f, ImVec2(p.x + px(14), p.y + px(2)), g_pal->faint, head);
         ImGui::Dummy(ImVec2(0, px(22)));
-        for (const auto& id : stopped)
-            agent_row(id);
+        for (const auto& id : stopped) {
+            agent_row(id, 0);
+            for (const auto& c : children[id])
+                agent_row(c, px(22));
+        }
     }
     if (s.sessions.empty())
         ImGui::TextDisabled("Nothing running");
@@ -1920,6 +1973,29 @@ void draw_details(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
     if (const auto age = elapsed_since(v.created_at); !age.empty())
         kv("Started", age + " ago", g_pal->dim);
     kv("Input", v.is_controller ? std::string("this window") : std::string("read-only"), g_pal->dim);
+    if (!v.parent.empty())
+        kv("Started by", s.views_by_id.count(v.parent) ? s.pane_title(v.parent) : v.parent.substr(0, 8),
+           g_pal->dim);
+    std::string labels;
+    for (const auto& [k, val] : v.labels)
+        labels += (labels.empty() ? "" : "  ") + k + "=" + val;
+    if (!labels.empty())
+        kv("Labels", labels, g_pal->dim);
+    std::vector<std::string> subs;
+    for (const auto& [cid, cv] : s.views_by_id)
+        if (cv.parent == id)
+            subs.push_back(cid);
+    if (!subs.empty()) {
+        ImGui::TextDisabled("Sub-agents");
+        for (const auto& c : subs) {
+            ImGui::PushID(c.c_str());
+            if (ImGui::SmallButton(s.pane_title(c).c_str()))
+                run_command(s, s.ws.find(c).space < 0 ? "agent.peek:" + c : "agent.focus:" + c);
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", s.views_by_id[c].agent_state.c_str());
+            ImGui::PopID();
+        }
+    }
     ImGui::Separator();
     const bool running = v.process_state == "Running";
     ImGui::BeginDisabled(!connected);
@@ -2052,6 +2128,62 @@ void draw_toasts(App::State& s) {
     }
 }
 
+// Floating view of a sub-agent over the panes, with "open as pane" and close.
+void draw_peek(App::State& s) {
+    if (s.peek.empty())
+        return;
+    const auto vit = s.views_by_id.find(s.peek);
+    const auto sit = s.by_id.find(s.peek);
+    if (vit == s.views_by_id.end() || sit == s.by_id.end()) {
+        s.peek.clear();
+        return;
+    }
+    const auto& v = vit->second;
+    const ui::Rect a = s.pane_area;
+    const float w = std::max(px(420), a.w * 0.72f);
+    const float h = std::max(px(300), a.h * 0.72f);
+    ImGui::SetNextWindowPos(ImVec2(a.x + (a.w - w) * 0.5f, a.y + (a.h - h) * 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(w, h));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(14), px(12)));
+    ImGui::Begin("##peek", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoScrollbar);
+    ImGui::PopStyleVar();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float fs = ImGui::GetFontSize();
+    program_badge(dl, s.fonts.ui_bold, fs, p, px(20), program_info(v.program, v.profile_id));
+    std::string head = s.pane_title(s.peek);
+    if (const auto pit = s.views_by_id.find(v.parent); pit != s.views_by_id.end())
+        head += "   \xE2\x80\xB9 sub-agent of " + s.pane_title(v.parent);
+    dl->AddText(s.fonts.ui_bold, fs, ImVec2(p.x + px(28), p.y + px(2)), g_pal->text, head.c_str());
+    ImGui::SetCursorScreenPos(
+        ImVec2(p.x + w - px(28) - ImGui::CalcTextSize("Open as pane").x - px(70), p.y - px(2)));
+    if (ImGui::Button("Open as pane"))
+        run_command(s, "agent.keep:" + s.peek);
+    ImGui::SameLine();
+    const bool close = ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape);
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + px(32)));
+    if (!s.peek.empty()) {
+        ImGui::BeginChild("##peekbody", ImVec2(0, 0), ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        auto& vs = s.views[s.peek];
+        vs.view.keymap = &s.keymap;
+        vs.view.theme.default_bg = g_pal->term_bg;
+        vs.view.theme.default_fg = g_pal->term_fg;
+        vs.view.theme.cursor = g_pal->cursor;
+        vs.view.theme.selection = g_pal->selection;
+        vs.view.draw("peek", *sit->second, s.fonts, vs.focus_next);
+        vs.focus_next = false;
+        for (const auto& cmd : vs.view.take_commands())
+            run_command(s, cmd);
+        ImGui::EndChild();
+    }
+    ImGui::End();
+    if (close)
+        s.peek.clear();
+}
+
 // ------------------------------------------------------------------ overlays
 void center_next(float w, float y_frac = 0.18f) {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -2092,8 +2224,11 @@ void draw_palette(App::State& s) {
         entries.push_back({std::string("Theme: ") + p.label, std::string("theme:") + p.id, ""});
     for (const auto& sess : s.sessions) {
         const auto& v = s.views_by_id[sess->id()];
-        entries.push_back({"Go to " + s.pane_title(sess->id()) + "  \xC2\xB7 " + folder_name(v.cwd),
-                           "agent.focus:" + sess->id(), v.agent_state});
+        const bool child_without_pane = !v.parent.empty() && s.ws.find(sess->id()).space < 0;
+        entries.push_back({(child_without_pane ? "Peek " : "Go to ") + s.pane_title(sess->id()) +
+                               "  \xC2\xB7 " + folder_name(v.cwd),
+                           (child_without_pane ? "agent.peek:" : "agent.focus:") + sess->id(),
+                           v.agent_state});
     }
     for (int i = 0; i < static_cast<int>(s.ws.spaces.size()); ++i)
         entries.push_back(
@@ -2195,10 +2330,12 @@ void draw_help(App::State& s) {
             }
             row(label, keys);
         };
-        family("Focus pane left / down / up / right", {"pane.go:left", "pane.go:down", "pane.go:up", "pane.go:right"});
+        family("Focus pane left / down / up / right",
+               {"pane.go:left", "pane.go:down", "pane.go:up", "pane.go:right"});
         family("Swap pane left / down / up / right",
                {"pane.swap:left", "pane.swap:down", "pane.swap:up", "pane.swap:right"});
-        family("Resize pane", {"pane.resize:left", "pane.resize:right", "pane.resize:up", "pane.resize:down"});
+        family("Resize pane",
+               {"pane.resize:left", "pane.resize:right", "pane.resize:up", "pane.resize:down"});
         {
             const auto t1 = s.keymap.chord_for("tab.select:1");
             const auto s1 = s.keymap.chord_for("space.select:1");
@@ -2712,6 +2849,7 @@ void App::frame() {
     draw_status_bar(s, ImVec2(origin.x, origin.y + full.y - status_h), full.x, status_h);
     ImGui::End();
 
+    draw_peek(s);
     draw_launcher(s);
     draw_rename(s);
     draw_worktree(s);
