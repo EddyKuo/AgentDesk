@@ -1,10 +1,10 @@
 ---
-sprint: 1
-updated_at: 2026-11-16T00:00:00+08:00
+sprint: 2
+updated_at: 2026-11-17T00:00:00+08:00
 plan: sprint/current/plan.md
 ---
 
-# Sprint 1：狀態
+# Sprint 2：狀態
 
 > 由 Orchestrator 維護，只追加不改寫歷史列。
 
@@ -12,15 +12,15 @@ plan: sprint/current/plan.md
 
 | 時間 | 任務 ID | 舊狀態 | 新狀態 | 說明 |
 |------|--------|--------|--------|------|
-| 2026-11-16 | S1-1～S1-12 | — | ⬜ | 計畫建立，等使用者下令開工 |
-| 2026-11-16 | — | — | — | 一致性審查後修正 plan：依賴、G4、里程碑改名 S1-M1～M6、OQ-05／OQ-07 提前到 S1-1 凍結 |
+| 2026-11-17 | S2-1～S2-8 | — | ⬜ | 計畫建立 |
+| 2026-11-17 | S2-9 | — | ⏸ | 自 S1-7 轉入，等使用者手動驗證 |
 
 ## 契約狀態
 
 | 契約 | 版本 | 狀態 | 審核時間 | 下游通知 |
 |------|------|------|---------|---------|
-| PRD | 1.0.0 | approved | 2026-11-16 | RD、QA |
-| PRD | 1.1.0 | approved（1.0.0 移至 deprecated） | 2026-11-16 | RD、QA：Minor，需 review 2.4、2.7 |
+| PRD | 1.1.0 | approved | 2026-11-16 | RD、QA |
+| TestReport（Sprint 1） | 1.0.0 | draft（contracts/inbox） | — | Orchestrator |
 
 ## 例外摘要
 
@@ -28,16 +28,17 @@ plan: sprint/current/plan.md
 
 ## Skill 衝突紀錄
 
-沿用 Sprint 0 紀錄（cppcheck、覆蓋率工具）。
+沿用 Sprint 0、1 紀錄。
 
 ## 估算調整
 
 | 時間 | 欄位 | 舊值 | 新值 | 理由 |
 |------|------|------|------|------|
+| 2026-11-17 | M1 人日 | 8–12 | 6–9 | M0 已完成 Session、背壓、協定分幀 |
 
 ## Sprint 結束檢查
 
 - [ ] 所有任務為 ✅ 或已轉入下個 Sprint（附理由）
 - [ ] 無未解決的 P0/P1 例外
 - [ ] 升級偵測已執行（CLAUDE.md Section 7.1），結果：維持 / 建議升級至 __
-- [ ] plan.md、status.md 已移至 `sprint/archive/sprint-1/`
+- [ ] plan.md、status.md 已移至 `sprint/archive/sprint-2/`

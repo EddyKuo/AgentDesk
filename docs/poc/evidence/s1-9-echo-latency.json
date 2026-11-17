@@ -1,0 +1,17 @@
+{
+  "bundled_conpty": true,
+  "conpty": "D:\\src\\AgentDesk\\build\\msvc-x64-release\\tools\\conpty\\conpty.dll",
+  "echo_latency": {
+    "max_ms": 16.6124,
+    "p50_ms": 15.5431,
+    "p95_ms": 16.1088,
+    "p99_ms": 16.552,
+    "rounds": 100,
+    "target_p95_ms": 100
+  },
+  "snapshot": {
+    "avg_snapshot_us": 249.19039999999998,
+    "cells": 4800,
+    "grid": "120x40"
+  }
+}

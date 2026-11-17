@@ -38,3 +38,6 @@ imgui.ini
 .idea/
 Thumbs.db
 desktop.ini
+
+# Local build logs
+*.log

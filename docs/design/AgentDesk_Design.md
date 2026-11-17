@@ -1,6 +1,6 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v1.7  
+產品需求與系統設計文件 v1.8  
 日期：2026-11-16｜狀態：可供技術 POC 與估工的設計草案  
 技術基線：C++20、Windows 11 x64、Dear ImGui、Win32、DirectX 11、ConPTY
 
@@ -19,6 +19,7 @@
 | 1.5 | 2026-11-16 | 建立 5 個對應 skill 後補入查證結果：vcpkg 沒有 libvterm port，改以 third_party 原始碼建置；Dear ImGui 1.93.0（docking）與 GoogleTest 1.18.0 在 vcpkg 可取得；OQ-05 傾向 GoogleTest |
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
+| 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
 
 ## 0. 文件導讀與決策摘要
 
@@ -162,12 +163,12 @@ VT Engine 需要回覆的終端機查詢由 host 處理，UI 不連線時仍可�
 | 語言 | C++20，RAII 封裝 HANDLE、HPCON、COM 資源 | 決定 |
 | 建置 | CMake + Ninja + MSVC，固定工具鏈版本及 CMakePresets；只用下方「開發環境基線」列出的已安裝工具 | 決定 |
 | GUI | Dear ImGui 1.93.0 docking（vcpkg `imgui` 的 `docking-experimental`、`win32-binding`、`dx11-binding` features，以 builtin-baseline＋overrides 固定）；Win32 + DX11 backends | 決定 |
-| 終端機核心 | 首選 Paul Evans 的 libvterm 0.3.3（C，以 CMake＋MSVC 建置；vcpkg 沒有此 port，原始碼放 third_party，`src/encoding/*.inc` 用 Git for Windows 附帶的 perl 產生一次後提交，建置時不呼叫 perl；呼叫端需加 `/utf-8`）。libghostty-vt（herdr-core 採用）需要 Zig 0.16 建置，違反 ADR-11，只有在取得現成建好的庫時才列為備案 | 候選，需 POC |
-| ConPTY 實作 | 隨附 Microsoft.Windows.Console.ConPTY NuGet 套件（`conpty.dll` + `OpenConsole.exe`），以 LoadLibraryW 動態載入；找不到時退回系統內建 | 候選，需 POC（見 3.2） |
-| JSON | nlohmann/json 或同級成熟套件 | 候選，凍結前選定 |
+| 終端機核心 | libvterm 0.3.3（官方 tarball 原始碼收錄於 third_party，tarball 已含產生的 `.inc`，建置不需 perl；呼叫端加 `/utf-8`）。libghostty-vt 因需要 Zig 不採用（ADR-11） | 決定（M0） |
+| ConPTY 實作 | 隨附 Microsoft.Windows.Console.ConPTY 1.24.260710001（`conpty.dll` + `OpenConsole.exe`），`scripts/fetch-conpty.ps1` 釘選版本並驗 SHA-256，以 LoadLibraryExW 從執行檔旁的 `conpty\` 載入；找不到時退回系統內建並在 UI 標示「狀態回報不可用」 | 決定（M0，ADR-08） |
+| JSON | nlohmann/json 3.12.0（vcpkg） | 決定（S1-1） |
 | IPC | 本機 Named Pipe，binary length prefix + UTF-8 JSON | 決定 |
 | 設定 | JSON 檔，原子替換與 schema_version | 決定 |
-| 測試 | CTest + 一種 C++ test framework + Windows integration runner | 框架待選 |
+| 測試 | CTest＋GoogleTest 1.18.0（vcpkg）；label `unit`、`windows_integration` | 決定（S1-1） |
 
 開發環境基線（2026-11-16 於開發機確認，ADR-11）：Visual Studio 2022 Build Tools 17.14（MSVC 14.44.35207、Windows SDK 10.0.26100.0、內附 clang-format／clang-tidy）、CMake 4.3.1、Ninja 1.13.2、vcpkg（`C:\vcpkg`）。不另外安裝其他編譯器或建置工具；第三方函式庫透過 vcpkg manifest 或放進 third_party 的原始碼取得。
 
@@ -196,7 +197,7 @@ ConPTY 來源：herdr-core 的實作註解指出，Windows 內建 ConPTY 會吞�
 - UI thread 獨占 ImGui 與 DX11 呼叫；IPC receiver 只把資料送入 UI queue。
 - 每個 TerminalState 僅由對應 session actor 寫入；renderer 只讀不可變快照。
 - ConPTY reader 不因慢速 UI 停止讀取。host 必須完整依序解析收到的輸出；只允許合併或省略 UI 更新，不可任意丟棄 VT bytes。
-- session 原始輸出處理佇列預算 8 MiB；持續超額時明確標記 overload，繼續消費路徑採磁碟暫存或背壓政策，POC 決定其中一種並量測。不得宣稱無限輸出可永遠無阻塞。
+- session 原始輸出處理佇列預算 8 MiB。超過時採**背壓**（OQ-06，M0 定案）：reader 暫停讀取 PTY，子程序的寫入隨之阻塞，不丟任何位元組；host 記錄 `backpressure_waits` 並在狀態列顯示過載。關閉 session 前先解除背壓，避免 join reader 時死結。M0 實測 1 MiB/s 持續 60 秒未觸發背壓。不得宣稱無限輸出可永遠無阻塞。
 - 每個 UI client 發送佇列預算 4 MiB。超額時丟棄未發出的畫面增量、設 needs_snapshot；恢復時傳最新完整快照。持續無法恢復的 client 斷線，不阻塞其他 client。
 - CLI 一般控制 RPC 預設 5 秒逾時。逾時不代表操作未執行，需依 request_id 查詢結果，避免重複建立。
 
@@ -213,6 +214,8 @@ ConPTY 來源：herdr-core 的實作註解指出，Windows 內建 ConPTY 會吞�
 字元不是一個 wchar_t 就能完整表示。需處理 UTF-8 跨讀取分段、combining marks、雙欄中文字與寬字元續格。渲染字寬政策與 engine 保持一致；彩色 emoji、複雜 ZWJ shaping 可列限制，但不得破壞後續欄位與游標位置。
 
 必備功能：SGR 顏色與樣式、游標定位、erase、捲動區域、alternate screen、游標可見性、application cursor keys、bracketed paste、必要 DSR/DA 查詢回覆。宣告的終端機能力只涵蓋已驗證項目。
+
+libvterm 0.3.3 已知限制（M0 實測）：UTF-8 序列被切在兩次寫入之間且後接控制字元時會產生 U+FFFD，VtEngine 暫存尾端不完整序列繞過（只延後、不丟）；Ambiguous 寬度一律 1 欄；ZWJ emoji 序列不合併；不支援 kitty keyboard protocol；不對外通知 RIS，因此 OSC 7501「RIS 清除全部紀錄」目前無法實作。
 
 歷史預設每工作 10,000 行並限制 16 MiB，先達上限者截斷最舊資料，UI 顯示保留範圍。alternate screen 與主畫面分開。MVP resize 保留引擎行為，暫不承諾完美歷史 reflow。
 
@@ -418,6 +421,8 @@ Agent 登入由原 CLI 處理；不複製 token、不繞過確認、不在診斷
 | M3 可靠性 | attach 快照、慢 client、設定、重連、故障處理 | 關閉 UI 後續跑與精確續接；故障有明確狀態 | 8–12 |
 | M4 驗收發布 | adapter、測試、效能、portable zip 與文件 | 完成第 6 章矩陣，限制清單與 notices 齊備 | 8–12 |
 
+M0 後修正（2026-11-17）：Session actor、背壓與協定分幀已在 M0 完成並有測試，M1 建議改為 6–9 人日，其餘不變，合計約 40–60 人日。詳見 `docs/poc/M0-report.md` 第 9 節。
+
 合計約 42–63 人日，約 9–13 週全職單人開發，另預留 20–30% 相容性緩衝。此估算假設具備 Windows C++ 經驗、重用成熟 VT 核心且只交付 MVP，不包含遠端、完整插件與自動協作平台；M0 後應重新估算。
 
 ### 5.2 技術 POC 的必要決策
@@ -499,7 +504,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-05 | VT 核心重用 | 降低解析器工作量；仍需 Windows 與字寬驗證 |
 | ADR-06 | 程序與 Agent 狀態分離 | 避免把存活、沉默或退出等同任務成功 |
 | ADR-07 | 首版不做跨重開機續跑 | 無法恢復原程序；metadata 僅供歷史顯示 |
-| ADR-08 | 隨附 ConPTY（待 M0 確認） | 內建版本可能吞掉 DA 與 OSC 7501 查詢回覆，Claude Code 會因此判定不支援、不送狀態；代價是多兩個二進位檔、需追版本與 license |
+| ADR-08 | 隨附 ConPTY（M0 定案，2026-11-17） | 內建版本可能吞掉 DA 與 OSC 7501 查詢回覆，Claude Code 會因此判定不支援、不送狀態；代價是多兩個二進位檔、需追版本與 license |
 | ADR-09 | MVP 狀態只收結構化回報，不做畫面推斷 | 不會誤判 Done 或在權限畫面誤送輸入；代價是結構化來源沒涵蓋的轉換（主要是 Codex hook 的缺口，以及 OSC 7501 無法使用時的 Claude Code）只能顯示舊狀態加經過時間 |
 | ADR-10 | AgentDesk 以 MIT License 釋出 | 與 Dear ImGui、libvterm、Microsoft ConPTY 套件同為 MIT，可直接隨附（Ghostty 也是 MIT，但依 ADR-11 僅供參考）；herdr 為 Apache-2.0，只參考設計、不複製程式碼，避免帶入其 NOTICE 義務 |
 | ADR-11 | 只用已安裝的 VS 2022 C++ 工具鏈，不另外安裝工具 | 使用者要求；開發環境可重現、無額外依賴。代價是排除需要 Zig 的 libghostty-vt |
@@ -543,11 +548,11 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 |---|---|---|
 | OQ-01 | 產品名稱：**已決定** AgentDesk（2026-11-16） | 使用者 |
 | OQ-02 | 首發 Agent CLI：**已決定** Claude Code 與 Codex CLI（2026-11-16）；精確版本與原生或 cmd 啟動器由 M0 凍結 | 使用者＋M0 |
-| OQ-03 | VT 引擎：傾向 libvterm（ADR-11），M0 確認 | M0 結果 |
-| OQ-04 | 是否隨附 ConPTY（ADR-08） | M0 結果 |
-| OQ-05 | C++ 測試框架與 JSON 套件：測試傾向 GoogleTest 1.18.0（vcpkg）＋CTest；JSON 待選 | Sprint 1 的 S1-1 凍結 |
-| OQ-06 | 輸出過載政策：磁碟暫存或背壓 | M0 結果 |
-| OQ-07 | 第三方套件取得方式：傾向 vcpkg manifest（開發機已有 `C:\vcpkg`）；vcpkg 沒有的 libvterm 放 third_party | Sprint 1 的 S1-1 凍結 |
+| OQ-03 | VT 引擎：**已決定** libvterm 0.3.3（M0） | M0 結果 |
+| OQ-04 | 是否隨附 ConPTY：**已決定** 隨附 1.24.260710001（ADR-08） | M0 結果 |
+| OQ-05 | C++ 測試框架與 JSON 套件：**已決定** GoogleTest 1.18.0、nlohmann-json 3.12.0 | Sprint 1 的 S1-1 凍結 |
+| OQ-06 | 輸出過載政策：**已決定** 背壓（M0） | M0 結果 |
+| OQ-07 | 第三方套件取得方式：**已決定** vcpkg manifest（baseline `afa249f`）；libvterm 原始碼收錄於 third_party | Sprint 1 的 S1-1 凍結 |
 | OQ-08 | 授權：**已決定** MIT License（2026-11-16，ADR-10） | 使用者 |
 
 ## 8. 官方參考資料
