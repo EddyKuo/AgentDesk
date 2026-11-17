@@ -131,6 +131,7 @@ Keymap Keymap::defaults() {
         {"ctrl-shift-b", "sidebar.toggle"},
         {"ctrl-shift-d", "details.toggle"},
         {"ctrl-shift-g", "worktree.new"},
+        {"ctrl-shift-l", "layout.switch"},
         {"ctrl-,", "app.settings"},
         {"ctrl-tab", "tab.next"},
         {"ctrl-shift-tab", "tab.prev"},

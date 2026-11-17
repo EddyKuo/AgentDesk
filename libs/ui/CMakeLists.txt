@@ -1,4 +1,5 @@
 find_package(imgui CONFIG REQUIRED)
+find_package(unofficial-lua CONFIG REQUIRED)
 
 agentdesk_library(agentdesk_ui
     src/input_mapping.cpp
@@ -8,9 +9,11 @@ agentdesk_library(agentdesk_ui
     src/workspace.cpp
     src/keymap.cpp
     src/git_info.cpp
+    src/mods.cpp
     src/remote_screen.cpp
     src/host_client.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # host/input.hpp is part of the public interface (TerminalSource::send).
+target_link_libraries(agentdesk_ui PRIVATE unofficial::lua::lua-cpp)
 target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agentdesk::host agentdesk::ipc agentdesk::protocol)

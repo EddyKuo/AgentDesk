@@ -27,9 +27,11 @@
 #include <shellapi.h>
 
 #include "agentdesk/ipc/host_launcher.hpp"
+#include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/ui/git_info.hpp"
 #include "agentdesk/ui/keymap.hpp"
+#include "agentdesk/ui/mods.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
 #include "agentdesk/ui/workspace.hpp"
 
@@ -230,6 +232,8 @@ struct MachineConfig {
 
 struct Settings {
     std::vector<MachineConfig> machines;
+    std::set<std::string> mods_enabled = {"tab-timer"};
+    std::string layout = "workspace";
     bool close_notice_shown = false;
     std::string last_cwd;
     std::string theme = "midnight";
@@ -282,6 +286,13 @@ Settings load_settings() {
     s.sidebar = j.value("sidebar", true);
     s.details = j.value("details", false);
     s.worktree_dir = j.value("worktree_dir", "");
+    if (const auto it = j.find("mods_enabled"); it != j.end() && it->is_array()) {
+        s.mods_enabled.clear();
+        for (const auto& m : *it)
+            if (m.is_string())
+                s.mods_enabled.insert(m.get<std::string>());
+    }
+    s.layout = j.value("layout", s.layout);
     for (const auto& m : j.value("machines", Json::array())) {
         if (m.is_object() && !m.value("name", "").empty() && !m.value("target", "").empty())
             s.machines.push_back({m.value("name", ""), m.value("target", ""), m.value("ctl", "")});
@@ -308,6 +319,8 @@ void save_settings(const Settings& s) {
             {"sidebar", s.sidebar},
             {"details", s.details},
             {"worktree_dir", s.worktree_dir},
+            {"mods_enabled", std::vector<std::string>(s.mods_enabled.begin(), s.mods_enabled.end())},
+            {"layout", s.layout},
             {"machines", [&] {
                  Json list = Json::array();
                  for (const auto& m : s.machines)
@@ -316,6 +329,135 @@ void save_settings(const Settings& s) {
              }()}}.dump(2);
     }
     ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+}
+
+// ------------------------------------------------------------------ layouts
+// A layout is one whole window: which chrome is shown and what fills the main area. Built-ins
+// below; <data>\layouts\<name>.json adds or overrides by name:
+//   {"name": "...", "main": "panes|board|grid", "sidebar": true, "details": false,
+//    "tab_bar": true, "status_bar": true, "theme": "ember"}
+struct LayoutSpec {
+    std::string name;
+    std::string main = "panes";
+    bool sidebar = true;
+    std::optional<bool> details;  // unset: the person's toggle
+    bool tab_bar = true;
+    bool status_bar = true;
+    std::string theme;  // optional
+};
+
+std::vector<LayoutSpec> load_layouts() {
+    std::vector<LayoutSpec> list = {
+        {"workspace", "panes", true, std::nullopt, true, true, ""},
+        {"board", "board", true, false, false, true, ""},
+        {"grid", "grid", false, false, true, true, ""},
+        {"focus", "panes", false, false, false, false, ""},
+    };
+    std::error_code ec;
+    for (const auto& e : std::filesystem::directory_iterator(data_dir() / L"layouts", ec)) {
+        if (e.path().extension() != L".json")
+            continue;
+        std::ifstream in(e.path(), std::ios::binary);
+        std::stringstream ss;
+        ss << in.rdbuf();
+        const auto j = Json::parse(ss.str(), nullptr, false);
+        if (!j.is_object())
+            continue;
+        LayoutSpec l;
+        const auto stem = e.path().stem().u8string();
+        l.name = j.value("name", std::string(stem.begin(), stem.end()));
+        l.main = j.value("main", "panes");
+        if (l.main != "panes" && l.main != "board" && l.main != "grid")
+            l.main = "panes";
+        l.sidebar = j.value("sidebar", true);
+        if (j.contains("details") && j["details"].is_boolean())
+            l.details = j["details"].get<bool>();
+        l.tab_bar = j.value("tab_bar", true);
+        l.status_bar = j.value("status_bar", true);
+        l.theme = j.value("theme", "");
+        std::erase_if(list, [&](const LayoutSpec& x) { return x.name == l.name; });
+        list.push_back(l);
+    }
+    return list;
+}
+
+// ------------------------------------------------------------------ example mods (first run)
+// Written to <data>\mods when that folder does not exist yet; ours, small, and meant to be read.
+constexpr const char* kTabTimerMod = R"(-- Shows how long each tab's agent has been working
+local started = {}
+
+agentdesk.on("agent_state", function(ev)
+  if ev.state == "Working" then
+    started[ev.session] = started[ev.session] or os.time()
+  else
+    started[ev.session] = nil
+  end
+end)
+
+local function since(t)
+  local s = os.time() - t
+  if s < 60 then return s .. "s" end
+  return math.floor(s / 60) .. "m"
+end
+
+agentdesk.decorate("tab", function(tab)
+  local oldest
+  for _, id in ipairs(tab.sessions) do
+    local t = started[id]
+    if t and (not oldest or t < oldest) then oldest = t end
+  end
+  if oldest then return since(oldest) end
+  return ""
+end)
+)";
+
+constexpr const char* kNtfyMod = R"(-- Phone notification through ntfy.sh when an agent needs you
+-- Set your topic in settings.json next to this file, then enable the mod in Settings > Mods.
+local topic = agentdesk.setting("topic", "")
+
+agentdesk.on("agent_state", function(ev)
+  if topic == "" then return end
+  if ev.state == "Blocked" or (ev.previous == "Working" and ev.state == "Idle") then
+    local what = ev.state == "Blocked" and "needs you" or "finished"
+    agentdesk.exec({"curl", "-s", "-d", ev.title .. " " .. what, "https://ntfy.sh/" .. topic})
+  end
+end)
+
+agentdesk.command("test", "Send a test notification", function()
+  if topic == "" then
+    agentdesk.notify("ntfy: no topic", "Put {"topic": "..."} in mods\ntfy-notify\settings.json")
+  else
+    agentdesk.exec({"curl", "-s", "-d", "AgentDesk test", "https://ntfy.sh/" .. topic})
+  end
+end)
+)";
+
+constexpr const char* kAgentCountMod = R"(-- Sidebar panel: how many agents are working, waiting or done
+agentdesk.panel{ id = "summary", title = "Agents now", where = "sidebar", draw = function(ui)
+  local n = { Working = 0, Blocked = 0, Idle = 0, Done = 0 }
+  for _, s in ipairs(agentdesk.sessions()) do
+    if n[s.state] then n[s.state] = n[s.state] + 1 end
+  end
+  ui:row("Need you", tostring(n.Blocked), n.Blocked > 0 and "bad" or "dim")
+  ui:row("Working", tostring(n.Working), n.Working > 0 and "warn" or "dim")
+  ui:row("Idle / done", tostring(n.Idle + n.Done), "dim")
+end }
+)";
+
+void write_example_mods() {
+    const auto dir = data_dir() / L"mods";
+    std::error_code ec;
+    if (std::filesystem::exists(dir, ec))
+        return;
+    auto put = [&](const wchar_t* name, const char* lua, const char* settings) {
+        std::filesystem::create_directories(dir / name, ec);
+        std::ofstream(dir / name / L"main.lua", std::ios::binary) << lua;
+        if (settings != nullptr)
+            std::ofstream(dir / name / L"settings.json", std::ios::binary) << settings;
+    };
+    put(L"tab-timer", kTabTimerMod, nullptr);
+    put(L"ntfy-notify", kNtfyMod, "{\n  \"topic\": \"\"\n}\n");
+    put(L"agent-summary", kAgentCountMod, nullptr);
 }
 
 // ------------------------------------------------------------------ programs
@@ -583,6 +725,9 @@ constexpr CommandInfo kCommands[] = {
     {"app.zoom_out", "Zoom out"},
     {"app.zoom_reset", "Reset zoom"},
     {"app.keys", "Edit keys.json"},
+    {"layout.switch", "Next layout"},
+    {"mods.reload", "Reload mods and layouts"},
+    {"mods.folder", "Open the mods folder"},
     {"app.exit_all", "Exit and stop all sessions"},
 };
 
@@ -659,6 +804,17 @@ struct App::State {
     std::deque<Toast> toasts;
     std::vector<std::string> agent_order;
     std::string peek;  // sub-agent shown in the floating peek window
+    std::unique_ptr<ui::ModHost> mods;
+    std::vector<std::string> pending_mod_commands;
+    std::vector<LayoutSpec> layouts;
+    std::map<std::string, std::string> last_agent_state;  // for mod events
+    Clock::time_point next_tick{};
+    [[nodiscard]] const LayoutSpec& layout() const {
+        for (const auto& l : layouts)
+            if (l.name == settings.layout)
+                return l;
+        return layouts.front();
+    }
 
     std::mutex placements_mutex;
     std::vector<Placement> placements;      // completed creates waiting for the UI thread
@@ -839,6 +995,10 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     }
     std::snprintf(s_->launch_cwd, sizeof s_->launch_cwd, "%s", cwd.c_str());
     start_remotes(*s_);
+    write_example_mods();
+    s_->layouts = load_layouts();
+    s_->mods = std::make_unique<ui::ModHost>(data_dir() / L"mods");
+    s_->mods->load(s_->settings.mods_enabled);
 }
 
 namespace {
@@ -1133,6 +1293,79 @@ void persist(App::State& s) {
 }
 
 // Agents that need the user / finished unseen: sound, toast, taskbar flash.
+// Events for mods, then whatever they asked for.
+void run_mods(App::State& s) {
+    std::vector<ui::ModSession> list;
+    const auto focused = s.ws.focused_session();
+    for (const auto& [id, v] : s.views_by_id) {
+        ui::ModSession m;
+        m.id = id;
+        m.title = s.pane_title(id);
+        m.program = v.program;
+        m.cwd = v.cwd;
+        m.agent_state = v.agent_state;
+        m.process_state = v.lost ? std::string("Lost") : v.process_state;
+        m.machine = s.machine_of.count(id) ? s.machine_of[id] : std::string();
+        m.parent = v.parent;
+        m.created_at = v.created_at;
+        m.labels = v.labels;
+        m.focused = id == focused;
+        list.push_back(std::move(m));
+    }
+    s.mods->set_sessions(list);
+    for (const auto& m : list) {
+        auto it = s.last_agent_state.find(m.id);
+        if (it == s.last_agent_state.end()) {
+            s.mods->emit("session_added", {{"session", m.id}, {"title", m.title}});
+            s.last_agent_state[m.id] = m.agent_state;
+            if (m.agent_state != "Unknown")
+                s.mods->emit("agent_state", {{"session", m.id},
+                                             {"state", m.agent_state},
+                                             {"previous", "Unknown"},
+                                             {"title", m.title}});
+        } else if (it->second != m.agent_state) {
+            s.mods->emit(
+                "agent_state",
+                {{"session", m.id}, {"state", m.agent_state}, {"previous", it->second}, {"title", m.title}});
+            it->second = m.agent_state;
+        }
+        if (m.process_state == "Exited" && s.prev_process_state[m.id] != "Exited")
+            s.mods->emit("session_exited", {{"session", m.id}, {"title", m.title}});
+    }
+    if (Clock::now() >= s.next_tick) {
+        s.next_tick = Clock::now() + std::chrono::seconds(1);
+        s.mods->emit("tick", Json::object());
+    }
+    auto out = s.mods->take_output();
+    for (const auto& n : out.notes)
+        s.toast(n.title, n.body, "", g_pal->info);
+    for (const auto& snd : out.sends) {
+        if (const auto it = s.by_id.find(snd.session); it != s.by_id.end()) {
+            it->second->send(host::PasteInput{snd.text});
+            if (snd.enter)
+                it->second->send(host::RawInput{"\r"});
+        }
+    }
+    for (const auto& argv : out.execs) {
+        // Started directly, never through a shell; no window; not waited for.
+        wchar_t exe[MAX_PATH]{};
+        if (::SearchPathW(nullptr, argv[0].c_str(), L".exe", MAX_PATH, exe, nullptr) == 0)
+            continue;
+        std::wstring cmd =
+            win::build_command_line(exe, std::vector<std::wstring>(argv.begin() + 1, argv.end()));
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        if (::CreateProcessW(exe, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+                             &si, &pi)) {
+            ::CloseHandle(pi.hThread);
+            ::CloseHandle(pi.hProcess);
+        }
+    }
+    for (const auto& c : out.commands)
+        s.pending_mod_commands.push_back(c);
+}
+
 void update_attention(App::State& s) {
     const ui::Tab* tab = s.ws.active_tab();
     std::set<std::string> visible;
@@ -1395,6 +1628,36 @@ void run_command(App::State& s, const std::string& cmd) {
         s.settings.theme = g_pal->id;
         save_settings(s.settings);
         apply_style(s.dpi, s.settings.zoom);
+    } else if (name == "layout.switch" || name == "layout") {
+        std::string next = arg;
+        if (next.empty()) {  // cycle
+            for (std::size_t i = 0; i < s.layouts.size(); ++i)
+                if (s.layouts[i].name == s.settings.layout)
+                    next = s.layouts[(i + 1) % s.layouts.size()].name;
+        }
+        if (next.empty() && !s.layouts.empty())
+            next = s.layouts.front().name;
+        s.settings.layout = next;
+        if (const auto& l = s.layout(); !l.theme.empty()) {
+            g_pal = palette_by_id(l.theme);
+            apply_style(s.dpi, s.settings.zoom);
+        }
+        save_settings(s.settings);
+        s.toast("Layout: " + next, "", "", g_pal->info, 2);
+        s.focus_view(s.ws.focused_session());
+    } else if (name == "mods.reload") {
+        s.layouts = load_layouts();
+        s.mods->load(s.settings.mods_enabled);
+        s.toast("Mods reloaded", "", "", g_pal->info, 2);
+    } else if (name == "mods.folder") {
+        const auto dir = data_dir() / L"mods";
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    } else if (name == "mod") {
+        const auto c2 = arg.find(':');
+        if (c2 != std::string::npos)
+            s.mods->run_command(arg.substr(0, c2), arg.substr(c2 + 1));
     }
 }
 
@@ -1402,6 +1665,78 @@ void run_command(App::State& s, const std::string& cmd) {
 
 // ------------------------------------------------------------------ drawing
 namespace {
+
+ImU32 mod_color(const std::string& c) {
+    if (c == "dim")
+        return g_pal->dim;
+    if (c == "accent")
+        return g_pal->focus;
+    if (c == "good")
+        return g_pal->done;
+    if (c == "warn")
+        return g_pal->working;
+    if (c == "bad")
+        return g_pal->needs_you;
+    return g_pal->text;
+}
+
+void draw_mod_panels(App::State& s, const std::string& where) {
+    for (const auto& panel : s.mods->panels(where)) {
+        ImGui::PushID((panel.mod + "/" + panel.id).c_str());
+        if (!panel.title.empty())
+            ImGui::TextDisabled("%s", panel.title.c_str());
+        for (std::size_t i = 0; i < panel.widgets.size(); ++i) {
+            const auto& w = panel.widgets[i];
+            ImGui::PushID(static_cast<int>(i));
+            switch (w.kind) {
+                case ui::ModWidget::Kind::kText:
+                    ImGui::PushStyleColor(ImGuiCol_Text, v4(mod_color(w.color)));
+                    ImGui::TextWrapped("%s", w.text.c_str());
+                    ImGui::PopStyleColor();
+                    break;
+                case ui::ModWidget::Kind::kButton:
+                    if (ImGui::SmallButton(w.text.c_str()))
+                        s.mods->click(panel.mod, panel.id, w.id);
+                    break;
+                case ui::ModWidget::Kind::kSeparator:
+                    ImGui::Separator();
+                    break;
+                case ui::ModWidget::Kind::kProgress:
+                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, v4(g_pal->focus));
+                    ImGui::ProgressBar(w.value, ImVec2(-1, px(6)), "");
+                    ImGui::PopStyleColor();
+                    if (!w.text.empty())
+                        ImGui::TextDisabled("%s", w.text.c_str());
+                    break;
+                case ui::ModWidget::Kind::kRow: {
+                    ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
+                    ImGui::TextUnformatted(w.text.c_str());
+                    ImGui::PopStyleColor();
+                    const float rw = ImGui::CalcTextSize(w.text2.c_str()).x;
+                    ImGui::SameLine(ImGui::GetContentRegionMax().x - rw - px(4));
+                    ImGui::PushStyleColor(ImGuiCol_Text, v4(mod_color(w.color)));
+                    ImGui::TextUnformatted(w.text2.c_str());
+                    ImGui::PopStyleColor();
+                    break;
+                }
+                case ui::ModWidget::Kind::kBadge: {
+                    const ImVec2 p = ImGui::GetCursorScreenPos();
+                    const ImVec2 t = ImGui::CalcTextSize(w.text.c_str());
+                    ImGui::GetWindowDrawList()->AddRectFilled(p,
+                                                              ImVec2(p.x + t.x + px(12), p.y + t.y + px(4)),
+                                                              alpha(mod_color(w.color), 60), px(8));
+                    ImGui::GetWindowDrawList()->AddText(ImVec2(p.x + px(6), p.y + px(2)), mod_color(w.color),
+                                                        w.text.c_str());
+                    ImGui::Dummy(ImVec2(t.x + px(12), t.y + px(4)));
+                    break;
+                }
+            }
+            ImGui::PopID();
+        }
+        ImGui::PopID();
+        ImGui::Dummy(ImVec2(0, px(4)));
+    }
+}
 
 void row_bg(ImDrawList* dl, ImVec2 a, ImVec2 b, bool selected, bool hovered) {
     if (selected) {
@@ -1576,6 +1911,10 @@ void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
         ImGui::PopID();
     }
 
+    // Mod panels for the sidebar, below the spaces.
+    ImGui::Dummy(ImVec2(0, px(6)));
+    draw_mod_panels(s, "sidebar");
+
     // Agents: grouped by attention, most urgent first; pinned to the bottom part.
     struct Group {
         const char* label;
@@ -1702,8 +2041,16 @@ void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
         const float nw = text_clipped(ad, bold, fs, ImVec2(tx, cy - fs * 0.5f),
                                       v.lost || v.process_state != "Running" ? g_pal->dim : g_pal->text,
                                       s.pane_title(id), max_w);
-        text_clipped(ad, uif, fs * 0.9f, ImVec2(tx + nw + px(6), cy - fs * 0.45f), g_pal->faint,
-                     folder_name(v.cwd), max_w - nw - px(6));
+        std::string sub = folder_name(v.cwd);
+        if (const auto deco = s.mods->decorate("agent", {{"id", id},
+                                                         {"title", s.pane_title(id)},
+                                                         {"state", v.agent_state},
+                                                         {"program", v.program},
+                                                         {"cwd", v.cwd}});
+            !deco.empty())
+            sub = deco + "  " + sub;
+        text_clipped(ad, uif, fs * 0.9f, ImVec2(tx + nw + px(6), cy - fs * 0.45f), g_pal->faint, sub,
+                     max_w - nw - px(6));
         ImGui::PopID();
     };
     for (const auto& g : groups) {
@@ -1783,6 +2130,9 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
                 label += "  " + s.pane_title(tab.focused.empty() ? ids.front() : tab.focused);
             if (ids.size() > 1)
                 label += "  +" + std::to_string(ids.size() - 1);
+            if (const auto deco = s.mods->decorate("tab", {{"title", label}, {"sessions", ids}});
+                !deco.empty())
+                label += "  \xC2\xB7 " + deco;
             ImFont* f = active ? s.fonts.ui_bold : s.fonts.ui;
             const float lw = std::min(f->CalcTextSizeA(fs, FLT_MAX, 0, label.c_str()).x, px(220));
             const float w = lw + px(56);
@@ -2074,6 +2424,135 @@ void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
     }
 }
 
+// Board layout: agents as cards in columns by what they need from you.
+void draw_board(App::State& s, ImVec2 pos, ImVec2 size) {
+    struct Column {
+        const char* title;
+        Attention att;
+        std::vector<std::string> ids;
+    };
+    std::vector<Column> cols = {{"Needs you", Attention::kBlocked, {}},
+                                {"Done", Attention::kDone, {}},
+                                {"Working", Attention::kWorking, {}},
+                                {"Idle & shells", Attention::kIdle, {}}};
+    for (const auto& sess : s.sessions) {
+        const auto& v = s.views_by_id[sess->id()];
+        if (v.lost || v.process_state != "Running")
+            continue;
+        const Attention a = s.attention_of(sess->id());
+        auto& col = a == Attention::kBlocked   ? cols[0]
+                    : a == Attention::kDone    ? cols[1]
+                    : a == Attention::kWorking ? cols[2]
+                                               : cols[3];
+        col.ids.push_back(sess->id());
+    }
+    const float gap = px(10);
+    const float cw = (size.x - gap * 3) / 4;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float fs = ImGui::GetFontSize();
+    for (int c = 0; c < 4; ++c) {
+        auto& col = cols[static_cast<std::size_t>(c)];
+        const ImVec2 cp(pos.x + static_cast<float>(c) * (cw + gap), pos.y);
+        dl->AddRectFilled(cp, ImVec2(cp.x + cw, cp.y + size.y), alpha(g_pal->card, 200), px(12));
+        attention_mark(dl, ImVec2(cp.x + px(16), cp.y + px(20)), px(5), col.att);
+        char head[64];
+        std::snprintf(head, sizeof head, "%s  %d", col.title, static_cast<int>(col.ids.size()));
+        dl->AddText(s.fonts.ui_bold, fs, ImVec2(cp.x + px(30), cp.y + px(20) - fs * 0.5f),
+                    attention_color(col.att), head);
+        ImGui::SetCursorScreenPos(ImVec2(cp.x + px(8), cp.y + px(40)));
+        ImGui::PushID(c);
+        ImGui::BeginChild("##col", ImVec2(cw - px(16), size.y - px(48)), ImGuiChildFlags_None);
+        for (const auto& id : col.ids) {
+            const auto& v = s.views_by_id[id];
+            ImGui::PushID(id.c_str());
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            const float w = ImGui::GetContentRegionAvail().x;
+            const float h = px(92);
+            const bool clicked = ImGui::InvisibleButton("##card", ImVec2(w, h));
+            const bool hovered = ImGui::IsItemHovered();
+            ImDrawList* d = ImGui::GetWindowDrawList();
+            d->AddRectFilled(a, ImVec2(a.x + w, a.y + h), hovered ? g_pal->hover : g_pal->bg, px(10));
+            d->AddRect(a, ImVec2(a.x + w, a.y + h),
+                       col.att == Attention::kBlocked ? g_pal->needs_you : g_pal->border, px(10));
+            program_badge(d, s.fonts.ui_bold, fs, ImVec2(a.x + px(10), a.y + px(10)), px(20),
+                          program_info(v.program, v.profile_id));
+            text_clipped(d, s.fonts.ui_bold, fs, ImVec2(a.x + px(38), a.y + px(12)), g_pal->text,
+                         s.pane_title(id), w - px(90));
+            const std::string age = elapsed_since(v.created_at);
+            d->AddText(s.fonts.ui, fs * 0.9f,
+                       ImVec2(a.x + w - px(10) - ImGui::CalcTextSize(age.c_str()).x, a.y + px(13)),
+                       g_pal->faint, age.c_str());
+            text_clipped(d, s.fonts.ui, fs * 0.9f, ImVec2(a.x + px(38), a.y + px(34)), g_pal->dim,
+                         display_path(v.cwd), w - px(48));
+            // Last words on its screen: what it is doing or asking.
+            std::string last = v.agent_message;
+            if (last.empty()) {
+                if (const auto it = s.by_id.find(id); it != s.by_id.end()) {
+                    const auto snap = it->second->snapshot();
+                    for (int r = snap->rows - 1; r >= 0 && last.empty(); --r) {
+                        auto t = snap->row_text(r);
+                        while (!t.empty() && t.front() == ' ')
+                            t.erase(t.begin());
+                        last = t;
+                    }
+                }
+            }
+            text_clipped(d, s.fonts.mono, fs * 0.9f, ImVec2(a.x + px(12), a.y + px(60)), g_pal->text, last,
+                         w - px(24));
+            if (clicked)
+                run_command(s, "agent.peek:" + id);
+            if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                s.peek.clear();
+                run_command(s, "layout:workspace");
+                s.focus(id);
+            }
+            if (hovered)
+                ImGui::SetTooltip("Click: peek   Double-click: open in the workspace layout");
+            ImGui::Dummy(ImVec2(0, px(6)));
+            ImGui::PopID();
+        }
+        if (col.ids.empty())
+            ImGui::TextDisabled("Nothing here");
+        ImGui::EndChild();
+        ImGui::PopID();
+    }
+}
+
+// Grid layout: every running session of the active space (all of them when the space has
+// none) as equal tiles, each a live terminal.
+void draw_grid(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
+    s.pane_area = {pos.x, pos.y, size.x, size.y};
+    std::vector<std::string> ids;
+    if (auto* sp = s.ws.active())
+        for (const auto& t : sp->tabs)
+            for (const auto& id : s.ws.sessions_in(t))
+                ids.push_back(id);
+    if (ids.empty())
+        for (const auto& sess : s.sessions)
+            if (s.views_by_id[sess->id()].process_state == "Running")
+                ids.push_back(sess->id());
+    if (ids.empty()) {
+        draw_panes(s, pos, size, connected);  // empty state
+        return;
+    }
+    const int n = static_cast<int>(ids.size());
+    const int cols = static_cast<int>(
+        std::ceil(std::sqrt(static_cast<double>(n) * size.x / std::max(1.0f, size.y) / 1.6)));
+    const int c = std::clamp(cols, 1, n);
+    const int rows = (n + c - 1) / c;
+    const float gap = px(8);
+    const float tw = (size.x - gap * static_cast<float>(c - 1)) / static_cast<float>(c);
+    const float th = (size.y - gap * static_cast<float>(rows - 1)) / static_cast<float>(rows);
+    for (int i = 0; i < n; ++i) {
+        const int r = i / c;
+        const int k = i % c;
+        draw_pane(s, ids[static_cast<std::size_t>(i)],
+                  {std::round(pos.x + static_cast<float>(k) * (tw + gap)),
+                   std::round(pos.y + static_cast<float>(r) * (th + gap)), std::floor(tw), std::floor(th)},
+                  connected);
+    }
+}
+
 void draw_details(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), g_pal->card, px(12));
@@ -2155,6 +2634,7 @@ void draw_details(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
             ImGui::PopID();
         }
     }
+    draw_mod_panels(s, "details");
     ImGui::Separator();
     const bool running = v.process_state == "Running";
     ImGui::BeginDisabled(!connected);
@@ -2387,6 +2867,11 @@ void draw_palette(App::State& s) {
         entries.push_back({c.label, c.id, s.keymap.chord_for(c.id)});
     for (const auto& p : kPalettes)
         entries.push_back({std::string("Theme: ") + p.label, std::string("theme:") + p.id, ""});
+    for (const auto& l : s.layouts)
+        entries.push_back(
+            {"Layout: " + l.name, "layout:" + l.name, l.name == s.settings.layout ? "current" : ""});
+    for (const auto& c : s.mods->commands())
+        entries.push_back({c.mod + ": " + c.label, "mod:" + c.mod + ":" + c.id, ""});
     for (const auto& sess : s.sessions) {
         const auto& v = s.views_by_id[sess->id()];
         const bool child_without_pane = !v.parent.empty() && s.ws.find(sess->id()).space < 0;
@@ -2857,6 +3342,49 @@ void draw_settings(App::State& s) {
             }
             ImGui::EndTabItem();
         }
+        if (ImGui::BeginTabItem("Mods")) {
+            ImGui::TextWrapped(
+                "Mods are small Lua programs in the mods folder (one folder per mod, main.lua). "
+                "They can react to agents, add commands, panels and tab text. They run in a "
+                "sandbox without file access; agentdesk.exec can start programs.");
+            for (const auto& m : s.mods->mods()) {
+                ImGui::PushID(m.name.c_str());
+                bool on = s.settings.mods_enabled.contains(m.name);
+                if (ImGui::Checkbox(m.name.c_str(), &on)) {
+                    if (on)
+                        s.settings.mods_enabled.insert(m.name);
+                    else
+                        s.settings.mods_enabled.erase(m.name);
+                    changed = true;
+                    s.mods->load(s.settings.mods_enabled);
+                }
+                if (!m.description.empty()) {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s", m.description.c_str());
+                }
+                if (!m.error.empty())
+                    ImGui::TextColored(v4(g_pal->needs_you), "  %s", m.error.c_str());
+                ImGui::PopID();
+            }
+            if (s.mods->mods().empty())
+                ImGui::TextDisabled("No mods yet.");
+            if (ImGui::Button("Reload"))
+                run_command(s, "mods.reload");
+            ImGui::SameLine();
+            if (ImGui::Button("Open mods folder"))
+                run_command(s, "mods.folder");
+            ImGui::Separator();
+            ImGui::TextDisabled("Layout");
+            for (const auto& l : s.layouts) {
+                if (ImGui::RadioButton(l.name.c_str(), l.name == s.settings.layout))
+                    run_command(s, "layout:" + l.name);
+                ImGui::SameLine();
+            }
+            ImGui::NewLine();
+            ImGui::TextDisabled(
+                "Add your own in the layouts folder next to mods (one JSON file per layout).");
+            ImGui::EndTabItem();
+        }
         if (ImGui::BeginTabItem("Machines")) {
             ImGui::TextWrapped(
                 "Other computers reachable over SSH. AgentDesk runs \"ssh <target> agentctl bridge\" "
@@ -3043,6 +3571,9 @@ void App::frame() {
         create_session(s, s.config.start_profile, s.launch_cwd, "", p);
     }
     update_attention(s);
+    run_mods(s);
+    for (const auto& c : std::exchange(s.pending_mod_commands, {}))
+        run_command(s, c);
     if (s.started_dev || s.config.start_profile.empty()) {
         if (s.next_dev_command < s.config.run_commands.size() && s.doc_loaded && !s.launch_busy &&
             Clock::now() >= s.next_dev_at && !s.sessions.empty()) {
@@ -3076,24 +3607,34 @@ void App::frame() {
     ImGui::PopStyleVar(3);
     const ImVec2 origin = vp->WorkPos;
     const ImVec2 full = vp->WorkSize;
-    const float sidebar_w = s.settings.sidebar ? px(256) : 0.0f;
-    const float status_h = px(28);
-    const float tabbar_h = px(48);
+    const LayoutSpec& layout = s.layout();
+    const bool show_sidebar = layout.sidebar && s.settings.sidebar;
+    const bool show_details = layout.details.value_or(s.settings.details);
+    const float sidebar_w = show_sidebar ? px(256) : 0.0f;
+    const float status_h = layout.status_bar ? px(28) : 0.0f;
+    const float tabbar_h = layout.tab_bar ? px(48) : 0.0f;
     const float gap = px(10);
-    if (s.settings.sidebar)
+    if (show_sidebar)
         draw_sidebar(s, origin, ImVec2(sidebar_w, full.y - status_h));
     const ImVec2 main_pos(origin.x + sidebar_w, origin.y);
     const float main_w = full.x - sidebar_w;
-    draw_tab_bar(s, main_pos, main_w, tabbar_h);
-    const float details_w = s.settings.details ? std::min(px(320), main_w * 0.3f) : 0.0f;
+    if (layout.tab_bar)
+        draw_tab_bar(s, main_pos, main_w, tabbar_h);
+    const float details_w = show_details ? std::min(px(320), main_w * 0.3f) : 0.0f;
     const ImVec2 content_pos(main_pos.x + gap, main_pos.y + tabbar_h + gap);
     const ImVec2 content_size(main_w - gap * 2 - (details_w > 0 ? details_w + gap : 0.0f),
                               full.y - status_h - tabbar_h - gap * 2);
-    draw_panes(s, content_pos, content_size, connected);
+    if (layout.main == "board")
+        draw_board(s, content_pos, content_size);
+    else if (layout.main == "grid")
+        draw_grid(s, content_pos, content_size, connected);
+    else
+        draw_panes(s, content_pos, content_size, connected);
     if (details_w > 0)
         draw_details(s, ImVec2(content_pos.x + content_size.x + gap, content_pos.y),
                      ImVec2(details_w, content_size.y), connected);
-    draw_status_bar(s, ImVec2(origin.x, origin.y + full.y - status_h), full.x, status_h);
+    if (layout.status_bar)
+        draw_status_bar(s, ImVec2(origin.x, origin.y + full.y - status_h), full.x, status_h);
     ImGui::End();
 
     draw_peek(s);
