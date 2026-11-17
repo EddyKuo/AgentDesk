@@ -18,6 +18,7 @@
 #include <thread>
 #include <vector>
 
+#include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/ui/remote_screen.hpp"
 #include "agentdesk/ui/terminal_source.hpp"
@@ -86,6 +87,9 @@ struct HostClientOptions {
     std::filesystem::path host_exe;
     std::wstring pipe_name;
     std::function<void()> wake;  // called from background threads when something changed
+    // Another machine: connects through a stream command (ssh ... agentctl bridge) instead of
+    // the local pipe; never starts a local host.
+    std::function<ipc::HostConnection()> connector;
 };
 
 class HostClient {
@@ -139,6 +143,7 @@ private:
     std::string instance_id_;
     std::string last_error_;
     std::unique_ptr<ipc::PipeClient> client_;  // worker thread owns connect/close
+    std::shared_ptr<void> transport_;          // ssh process of a remote machine
     std::atomic<bool> connected_{false};
     std::atomic<bool> start_requested_{true};
     std::atomic<bool> host_dies_with_launcher_{false};

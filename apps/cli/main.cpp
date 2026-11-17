@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -14,6 +15,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "agentdesk/ipc/host_launcher.hpp"
@@ -451,6 +453,57 @@ int cmd_shutdown(Ctx& ctx) {
     return kOk;
 }
 
+// stdin/stdout <-> the local host pipe, byte for byte. Runs on a remote machine under ssh:
+// "ssh <machine> agentctl bridge" lets another PC's AgentDesk use this machine's agent-host.
+// stdout carries only protocol bytes; diagnostics go to stderr.
+int run_bridge(const std::wstring& pipe, bool may_start) {
+    auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);
+    if (!host.client) {
+        diag("cannot reach agent-host on this machine");
+        return kNoHost;
+    }
+    host.client->close();
+    win::UniqueHandle p = ipc::open_raw_pipe(pipe, 10s);
+    if (!p) {
+        diag("cannot open the agent-host pipe");
+        return kNoHost;
+    }
+    HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE out_h = ::GetStdHandle(STD_OUTPUT_HANDLE);
+    std::atomic<bool> done{false};
+    auto io = [&](bool write, char* buf, DWORD len, DWORD& n) {
+        OVERLAPPED ov{};
+        win::UniqueHandle ev(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
+        ov.hEvent = ev.get();
+        const BOOL ok = write ? ::WriteFile(p.get(), buf, len, nullptr, &ov)
+                              : ::ReadFile(p.get(), buf, len, nullptr, &ov);
+        if (!ok && ::GetLastError() != ERROR_IO_PENDING)
+            return false;
+        return ::GetOverlappedResult(p.get(), &ov, &n, TRUE) != FALSE;
+    };
+    std::thread up([&] {
+        char buf[16384];
+        DWORD n = 0;
+        while (!done && ::ReadFile(in, buf, sizeof buf, &n, nullptr) && n > 0) {
+            DWORD w = 0;
+            if (!io(true, buf, n, w) || w != n)
+                break;
+        }
+        done = true;
+        ::CancelIoEx(p.get(), nullptr);
+    });
+    char buf[16384];
+    DWORD n = 0;
+    while (!done && io(false, buf, sizeof buf, n) && n > 0) {
+        DWORD w = 0;
+        if (!::WriteFile(out_h, buf, n, &w, nullptr) || w != n)
+            break;
+    }
+    done = true;
+    up.detach();  // may be blocked reading stdin; the process exit ends it
+    ::ExitProcess(kOk);
+}
+
 const char* kUsage =
     "usage: agentctl <command> [options]\n"
     "  run --profile ID [--name N] [--cwd DIR] [-- extra args]\n"
@@ -465,6 +518,7 @@ const char* kUsage =
     "  report <text...> [--to SESSION] [--from SESSION]\n"
     "  label <session> k=v...\n"
     "  --skill   how agents use agentctl to run helper agents\n"
+    "  bridge    relay stdin/stdout to this machine's agent-host (used through ssh)\n"
     "global: --json  --pipe NAME  --no-start  --timeout-ms N\n";
 
 }  // namespace
@@ -489,6 +543,13 @@ int wmain(int argc, wchar_t** argv) {
     ctx.json = ctx.args.has("--json");
     if (const auto t = ctx.args.opt("--timeout-ms"))
         ctx.timeout = std::chrono::milliseconds(std::stoll(*t));
+
+    if (ctx.args.command == "bridge") {
+        std::wstring pipe = ipc::default_pipe_name();
+        if (const auto p = ctx.args.opt("--pipe"))
+            pipe = win::to_wide(*p);
+        return run_bridge(pipe, !ctx.args.has("--no-start"));
+    }
 
     // report-state runs inside agent hooks: never start a host from there, and inherit the
     // pipe advertised to the session (design doc 3.6).

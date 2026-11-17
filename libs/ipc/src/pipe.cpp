@@ -343,6 +343,41 @@ void PipeServer::accept_loop() {
 
 // ------------------------------------------------------------------ PipeClient
 
+std::unique_ptr<PipeClient> PipeClient::adopt(UniqueHandle read, UniqueHandle write) {
+    if (!read)
+        return nullptr;
+    auto c = std::unique_ptr<PipeClient>(new PipeClient(std::move(read)));
+    std::lock_guard lock(c->write_mutex_);
+    c->write_pipe_ = std::move(write);
+    return c;
+}
+
+UniqueHandle open_raw_pipe(const std::wstring& name, std::chrono::milliseconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    for (;;) {
+        HANDLE h =
+            ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                          FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
+        if (h != INVALID_HANDLE_VALUE) {
+            UniqueHandle pipe(h);
+            ULONG server_pid = 0;
+            if (!::GetNamedPipeServerProcessId(pipe.get(), &server_pid) ||
+                !pid_belongs_to_current_user(server_pid))
+                return {};
+            return pipe;
+        }
+        const DWORD err = ::GetLastError();
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline)
+            return {};
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+        if (err == ERROR_PIPE_BUSY)
+            ::WaitNamedPipeW(name.c_str(), static_cast<DWORD>(std::min<long long>(left, 1000)));
+        else
+            ::Sleep(static_cast<DWORD>(std::min<long long>(left, 50)));
+    }
+}
+
 std::unique_ptr<PipeClient> PipeClient::connect(const std::wstring& name, std::chrono::milliseconds timeout) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
@@ -389,6 +424,7 @@ void PipeClient::close() {
         reader_.join();
     std::lock_guard lock(write_mutex_);
     pipe_.reset();  // the server sees the disconnect and releases our control (design doc 3.7)
+    write_pipe_.reset();
     connected_ = false;
 }
 
@@ -409,12 +445,13 @@ bool PipeClient::write_all(const std::string& bytes) {
     UniqueHandle event = make_event(true);
     OVERLAPPED ov{};
     ov.hEvent = event.get();
-    if (!::WriteFile(pipe_.get(), bytes.data(), static_cast<DWORD>(bytes.size()), nullptr, &ov) &&
+    HANDLE target = write_pipe_ ? write_pipe_.get() : pipe_.get();
+    if (!::WriteFile(target, bytes.data(), static_cast<DWORD>(bytes.size()), nullptr, &ov) &&
         ::GetLastError() != ERROR_IO_PENDING) {
         return false;
     }
     DWORD n = 0;
-    return ::GetOverlappedResult(pipe_.get(), &ov, &n, TRUE) && n == bytes.size();
+    return ::GetOverlappedResult(target, &ov, &n, TRUE) && n == bytes.size();
 }
 
 std::optional<protocol::Response> PipeClient::call(const std::string& method, protocol::Json params,

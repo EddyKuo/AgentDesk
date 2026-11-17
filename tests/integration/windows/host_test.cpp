@@ -24,6 +24,7 @@
 #include <sddl.h>
 
 #include "agentdesk/host/git_tools.hpp"
+#include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
@@ -818,4 +819,39 @@ TEST_F(HostFixture, SubAgentTaskReportAndWait) {
     EXPECT_EQ(ctl({L"wait", w(parent), L"--until", L"blocked", L"--timeout-ms", L"300"}).exit_code, 7u);
     // No parent: refused with a clear error.
     EXPECT_EQ(ctl({L"report", L"x", L"--from", w(parent)}).exit_code, 4u);
+}
+
+// Remote machines: the protocol over a command's stdin/stdout (ssh in real use). Locally the
+// command is agentctl bridge itself, so the whole path is exercised without an ssh server.
+TEST_F(HostFixture, ProtocolOverBridgeCommand) {
+    const auto id = create("cmd", "remote-shell");
+    auto hc = agentdesk::ipc::connect_over_command({AGENTDESK_CTL_EXE, L"--pipe", pipe_, L"bridge"}, 10s);
+    ASSERT_TRUE(hc.client) << hc.error;
+    EXPECT_FALSE(hc.host_instance_id.empty());
+    const auto list = hc.client->call("session.list", Json::object());
+    ASSERT_TRUE(list && list->result);
+    ASSERT_EQ(list->result->at("sessions").size(), 1u);
+    // Events flow too: attach gets a snapshot.
+    std::atomic<int> snapshots{0};
+    hc.client->set_event_handler([&](agentdesk::protocol::Event e) {
+        if (e.event == "screen.snapshot")
+            ++snapshots;
+    });
+    ASSERT_TRUE(hc.client->call("session.attach", {{"session", id}}));
+    EXPECT_TRUE(wait_until([&] { return snapshots.load() > 0; }, 5s));
+    hc.client->close();
+}
+
+TEST(RemoteTransport, FailingCommandExplainsWhy) {
+    wchar_t sys[MAX_PATH]{};
+    ::GetSystemDirectoryW(sys, MAX_PATH);
+    const auto cmd = (fs::path(sys) / L"cmd.exe").native();
+    auto hc =
+        agentdesk::ipc::connect_over_command({cmd, L"/c", L"echo Permission denied (publickey) 1>&2"}, 3s);
+    EXPECT_FALSE(hc.client);
+    EXPECT_NE(hc.error.find("Permission denied"), std::string::npos) << hc.error;
+    const auto argv = agentdesk::ipc::ssh_bridge_argv("dev@build-box", "");
+    EXPECT_EQ(argv.front(), L"ssh");
+    EXPECT_EQ(argv[argv.size() - 3], L"dev@build-box");
+    EXPECT_EQ(argv.back(), L"bridge");
 }

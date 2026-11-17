@@ -385,12 +385,15 @@ void HostClient::shutdown_host(bool stop_sessions, std::function<void(std::strin
 }
 
 bool HostClient::try_connect(bool allow_start) {
-    auto hc = ipc::connect_or_start_host(options_.host_exe, options_.pipe_name, 10s, allow_start);
+    auto hc = options_.connector
+                  ? options_.connector()
+                  : ipc::connect_or_start_host(options_.host_exe, options_.pipe_name, 10s, allow_start);
     if (!hc.client) {
         std::lock_guard lock(mutex_);
-        last_error_ = "agent-host is not reachable";
+        last_error_ = hc.error.empty() ? std::string("agent-host is not reachable") : hc.error;
         return false;
     }
+    transport_ = hc.transport;
     if (hc.host_dies_with_launcher)
         host_dies_with_launcher_ = true;
     hc.client->set_event_handler([this](protocol::Event e) { on_event(std::move(e)); });
@@ -520,7 +523,8 @@ void HostClient::worker_loop() {
             if (!try_connect(allow_start)) {
                 notify();
                 std::unique_lock lock(mutex_);
-                cv_.wait_for(lock, kReconnectDelay, [&] { return stop_.load() || start_requested_.load(); });
+                cv_.wait_for(lock, options_.connector ? std::chrono::seconds(10) : kReconnectDelay,
+                             [&] { return stop_.load() || start_requested_.load(); });
                 continue;
             }
         }

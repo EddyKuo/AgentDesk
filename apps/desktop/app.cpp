@@ -26,6 +26,7 @@
 #include <mmsystem.h>
 #include <shellapi.h>
 
+#include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/ui/git_info.hpp"
 #include "agentdesk/ui/keymap.hpp"
@@ -37,6 +38,7 @@ namespace agentdesk::desktop {
 namespace {
 
 namespace win = agentdesk::platform::win;
+namespace ipc = agentdesk::ipc;
 using Json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
 using ui::Attention;
@@ -220,7 +222,14 @@ void apply_style(float dpi, float zoom) {
 }
 
 // ------------------------------------------------------------------ settings (ui.json)
+struct MachineConfig {
+    std::string name;    // shown in the sidebar
+    std::string target;  // ssh target: user@host or an ssh config alias
+    std::string ctl;     // agentctl on that machine (empty: on PATH)
+};
+
 struct Settings {
+    std::vector<MachineConfig> machines;
     bool close_notice_shown = false;
     std::string last_cwd;
     std::string theme = "midnight";
@@ -273,6 +282,10 @@ Settings load_settings() {
     s.sidebar = j.value("sidebar", true);
     s.details = j.value("details", false);
     s.worktree_dir = j.value("worktree_dir", "");
+    for (const auto& m : j.value("machines", Json::array())) {
+        if (m.is_object() && !m.value("name", "").empty() && !m.value("target", "").empty())
+            s.machines.push_back({m.value("name", ""), m.value("target", ""), m.value("ctl", "")});
+    }
     return s;
 }
 
@@ -281,20 +294,26 @@ void save_settings(const Settings& s) {
     const auto tmp = std::filesystem::path(path).concat(L".tmp");
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        out << Json{{"schema_version", 1},
-                    {"close_notice_shown", s.close_notice_shown},
-                    {"last_cwd", s.last_cwd},
-                    {"theme", s.theme},
-                    {"zoom", s.zoom},
-                    {"font_size", s.font_size},
-                    {"sounds", s.sounds},
-                    {"toasts", s.toasts},
-                    {"copy_on_select", s.copy_on_select},
-                    {"scroll_speed", s.scroll_speed},
-                    {"sidebar", s.sidebar},
-                    {"details", s.details},
-                    {"worktree_dir", s.worktree_dir}}
-                   .dump(2);
+        out << Json{
+            {"schema_version", 1},
+            {"close_notice_shown", s.close_notice_shown},
+            {"last_cwd", s.last_cwd},
+            {"theme", s.theme},
+            {"zoom", s.zoom},
+            {"font_size", s.font_size},
+            {"sounds", s.sounds},
+            {"toasts", s.toasts},
+            {"copy_on_select", s.copy_on_select},
+            {"scroll_speed", s.scroll_speed},
+            {"sidebar", s.sidebar},
+            {"details", s.details},
+            {"worktree_dir", s.worktree_dir},
+            {"machines", [&] {
+                 Json list = Json::array();
+                 for (const auto& m : s.machines)
+                     list.push_back({{"name", m.name}, {"target", m.target}, {"ctl", m.ctl}});
+                 return list;
+             }()}}.dump(2);
     }
     ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
 }
@@ -593,6 +612,7 @@ struct Toast {
 enum class LaunchTarget { kTab, kSpace, kSplitRight, kSplitDown };
 
 struct Placement {
+    std::string machine;  // "" = this PC
     std::string session;
     LaunchTarget target = LaunchTarget::kTab;
     int space = -1;
@@ -601,9 +621,17 @@ struct Placement {
     std::string space_name;
 };
 
+struct Remote {
+    MachineConfig cfg;
+    std::unique_ptr<ui::HostClient> host;
+};
+
 struct App::State {
     AppConfig config;
-    std::unique_ptr<ui::HostClient> host;
+    std::unique_ptr<ui::HostClient> host;           // this PC
+    std::vector<Remote> remotes;                    // other machines over ssh
+    std::map<std::string, std::string> machine_of;  // session id -> machine name ("" here)
+    std::string launch_machine;
     Settings settings;
     ui::Keymap keymap;
     std::vector<std::string> keymap_errors;
@@ -724,16 +752,47 @@ struct App::State {
             return;
         if (ws.find(id).space < 0) {
             hidden.erase(id);
-            ws.add_tab(id, space_for_cwd(views_by_id.count(id) ? views_by_id[id].cwd : std::string()));
+            const std::string m = machine_of.count(id) ? machine_of[id] : std::string();
+            const int sp = space_for_cwd(views_by_id.count(id) ? views_by_id[id].cwd : std::string(), m);
+            if (sp >= 0) {
+                ws.add_tab(id, sp);
+            } else {
+                ws.add_space(id);
+                ws.spaces.back().machine = m;
+            }
         }
         ws.focus(id);
         views[id].focus_next = true;
         attention.seen(id);
     }
-    int space_for_cwd(const std::string& cwd) {
-        if (cwd.empty())
-            return ws.spaces.empty() ? -1 : ws.active_space;
+    ui::HostClient* host_for(const std::string& machine) {
+        for (auto& r : remotes)
+            if (r.cfg.name == machine)
+                return r.host.get();
+        return host.get();
+    }
+    [[nodiscard]] bool machine_connected(const std::string& machine) const {
+        if (machine.empty())
+            return host->connected();
+        for (const auto& r : remotes)
+            if (r.cfg.name == machine)
+                return r.host->connected();
+        return false;
+    }
+    [[nodiscard]] std::string machine_label(const std::string& machine) const {
+        return machine.empty() ? std::string("This PC") : machine;
+    }
+    int space_for_cwd(const std::string& cwd, const std::string& machine = {}) {
+        if (cwd.empty()) {
+            if (ws.spaces.empty())
+                return -1;
+            const auto& a = ws.spaces[static_cast<std::size_t>(
+                std::clamp(ws.active_space, 0, static_cast<int>(ws.spaces.size()) - 1))];
+            return a.machine == machine ? ws.active_space : -1;
+        }
         for (int s = 0; s < static_cast<int>(ws.spaces.size()); ++s) {
+            if (ws.spaces[static_cast<std::size_t>(s)].machine != machine)
+                continue;
             for (const auto& t : ws.spaces[static_cast<std::size_t>(s)].tabs) {
                 for (const auto& id : ws.sessions_in(t)) {
                     const auto it = views_by_id.find(id);
@@ -751,6 +810,10 @@ struct App::State {
 };
 
 // ------------------------------------------------------------------ construction
+namespace {
+void start_remotes(App::State& s);
+}  // namespace
+
 App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_unique<State>()) {
     s_->config = std::move(config);
     s_->host = std::move(host);
@@ -775,7 +838,39 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
         cwd.assign(u8.begin(), u8.end());
     }
     std::snprintf(s_->launch_cwd, sizeof s_->launch_cwd, "%s", cwd.c_str());
+    start_remotes(*s_);
 }
+
+namespace {
+void start_remotes(App::State& s) {
+    std::vector<Remote> keep;
+    for (const auto& cfg : s.settings.machines) {
+        auto it = std::find_if(s.remotes.begin(), s.remotes.end(), [&](const Remote& r) {
+            return r.cfg.name == cfg.name && r.cfg.target == cfg.target && r.cfg.ctl == cfg.ctl;
+        });
+        if (it != s.remotes.end()) {
+            keep.push_back(std::move(*it));
+            continue;
+        }
+        ui::HostClientOptions o;
+        o.wake = s.config.wake;
+        o.connector = [cfg] {
+            // "pipe:<name>": another agent-host on this PC through a local bridge (tests, a second
+            // host under another data folder); anything else is an ssh target.
+            if (cfg.target.rfind("pipe:", 0) == 0) {
+                return ipc::connect_over_command(
+                    {ipc::sibling_executable(L"agentctl.exe").native(), L"--pipe",
+                     win::to_wide(cfg.target.substr(5)), L"--no-start", L"bridge"},
+                    std::chrono::seconds(10));
+            }
+            return ipc::connect_over_command(ipc::ssh_bridge_argv(cfg.target, cfg.ctl),
+                                             std::chrono::seconds(20));
+        };
+        keep.push_back({cfg, std::make_unique<ui::HostClient>(o)});
+    }
+    s.remotes = std::move(keep);  // removed machines disconnect here
+}
+}  // namespace
 
 App::~App() = default;
 
@@ -892,18 +987,19 @@ void create_session(App::State& s, const std::string& profile, const std::string
     if (!name.empty())
         params["name"] = name;
     s.launch_busy = true;
-    s.host->call(
-        "session.create", params,
-        [st = &s, placement](Json result, std::string error) mutable {
-            std::lock_guard lock(st->placements_mutex);
-            if (!error.empty()) {
-                st->async_errors.push_back(error);
-                return;
-            }
-            placement.session = result.value("session_id", "");
-            st->placements.push_back(placement);
-        },
-        std::chrono::seconds(15));
+    s.host_for(placement.machine)
+        ->call(
+            "session.create", params,
+            [st = &s, placement](Json result, std::string error) mutable {
+                std::lock_guard lock(st->placements_mutex);
+                if (!error.empty()) {
+                    st->async_errors.push_back(error);
+                    return;
+                }
+                placement.session = result.value("session_id", "");
+                st->placements.push_back(placement);
+            },
+            std::chrono::seconds(15));
 }
 
 void place(App::State& s, const Placement& p) {
@@ -924,16 +1020,26 @@ void place(App::State& s, const Placement& p) {
                 return;
             }
             [[fallthrough]];
-        case LaunchTarget::kTab:
-            if (!s.ws.spaces.empty()) {
-                s.ws.add_tab(p.session,
-                             p.space >= 0 && p.space < static_cast<int>(s.ws.spaces.size()) ? p.space : -1);
+        case LaunchTarget::kTab: {
+            int sp = p.space >= 0 && p.space < static_cast<int>(s.ws.spaces.size()) &&
+                             s.ws.spaces[static_cast<std::size_t>(p.space)].machine == p.machine
+                         ? p.space
+                         : -1;
+            if (sp < 0) {
+                for (int i = 0; i < static_cast<int>(s.ws.spaces.size()) && sp < 0; ++i)
+                    if (s.ws.spaces[static_cast<std::size_t>(i)].machine == p.machine)
+                        sp = i;
+            }
+            if (sp >= 0) {
+                s.ws.add_tab(p.session, sp);
                 s.focus(p.session);
                 return;
             }
             [[fallthrough]];
+        }
         case LaunchTarget::kSpace:
             s.ws.add_space(p.session, p.space_name);
+            s.ws.spaces.back().machine = p.machine;
             s.focus(p.session);
             return;
     }
@@ -961,6 +1067,12 @@ void sync_sessions(App::State& s) {
         present.insert(sess->id());
         s.awaiting_list.erase(sess->id());
     }
+    // A machine that is not connected right now keeps its panes (its sessions still run there).
+    for (const auto& sp : s.ws.spaces)
+        if (!s.machine_connected(sp.machine))
+            for (const auto& t : sp.tabs)
+                for (const auto& id : s.ws.sessions_in(t))
+                    present.insert(id);
     for (auto it = s.awaiting_list.begin(); it != s.awaiting_list.end();) {
         if (Clock::now() - it->second > std::chrono::seconds(15)) {
             it = s.awaiting_list.erase(it);
@@ -982,11 +1094,14 @@ void sync_sessions(App::State& s) {
             continue;  // a sub-agent: listed under its parent, peeked or opened on demand
         const int before_space = s.ws.active_space;
         const int before_tab = s.ws.spaces.empty() ? 0 : s.ws.active()->active_tab;
-        const int sp = s.space_for_cwd(v.cwd);
-        if (sp >= 0)
+        const std::string m = s.machine_of.count(id) ? s.machine_of[id] : std::string();
+        const int sp = s.space_for_cwd(v.cwd, m);
+        if (sp >= 0) {
             s.ws.add_tab(id, sp);
-        else
+        } else {
             s.ws.add_space(id);
+            s.ws.spaces.back().machine = m;
+        }
         if (!initial && before_space < static_cast<int>(s.ws.spaces.size())) {
             s.ws.active_space = before_space;  // keep what the user looks at
             if (auto* a = s.ws.active())
@@ -1083,6 +1198,12 @@ namespace {
 
 void open_launcher(App::State& s, LaunchTarget target) {
     s.show_launcher = true;
+    s.launch_machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
+    if (target == LaunchTarget::kSplitRight || target == LaunchTarget::kSplitDown) {
+        const auto f = s.ws.focused_session();
+        if (s.machine_of.count(f))
+            s.launch_machine = s.machine_of[f];
+    }
     s.launch_target = target;
     s.launch_split_of = s.ws.focused_session();
     s.launch_error.clear();
@@ -1121,6 +1242,7 @@ void run_command(App::State& s, const std::string& cmd) {
                                        : LaunchTarget::kTab;
         p.split_of = focused;
         p.space = s.ws.active_space;
+        p.machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
         const std::string cwd = s.focused_cwd().empty() ? std::string(s.launch_cwd) : s.focused_cwd();
         if (!profile.empty())
             create_session(s, profile, cwd, "", p);
@@ -1233,6 +1355,7 @@ void run_command(App::State& s, const std::string& cmd) {
         if (it != s.views_by_id.end()) {
             Placement p;
             p.replace = focused;
+            p.machine = s.machine_of.count(focused) ? s.machine_of[focused] : std::string();
             create_session(s, it->second.profile_id, it->second.cwd, it->second.name, p);
         }
     } else if (name == "sidebar.toggle") {
@@ -1354,7 +1477,41 @@ void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
     const auto cwds = s.session_cwds();
     if (s.ws.spaces.empty())
         ImGui::TextDisabled("No spaces yet");
-    for (int i = 0; i < static_cast<int>(s.ws.spaces.size()); ++i) {
+    std::vector<std::string> machines_shown = {""};
+    for (const auto& r : s.remotes)
+        machines_shown.push_back(r.cfg.name);
+    for (const auto& sp : s.ws.spaces)
+        if (std::find(machines_shown.begin(), machines_shown.end(), sp.machine) == machines_shown.end())
+            machines_shown.push_back(sp.machine);
+    std::vector<int> order;
+    for (const auto& m : machines_shown) {
+        if (!s.remotes.empty()) {
+            order.push_back(-1 - static_cast<int>(&m - machines_shown.data()));  // machine header
+        }
+        for (int i = 0; i < static_cast<int>(s.ws.spaces.size()); ++i)
+            if (s.ws.spaces[static_cast<std::size_t>(i)].machine == m)
+                order.push_back(i);
+    }
+    for (const int i : order) {
+        if (i < 0) {
+            const std::string& m = machines_shown[static_cast<std::size_t>(-1 - i)];
+            const ImVec2 hp = ImGui::GetCursorScreenPos();
+            const bool on = s.machine_connected(m);
+            d->AddCircleFilled(ImVec2(hp.x + px(5), hp.y + px(10)), px(3.5f),
+                               on ? g_pal->done : g_pal->faint);
+            d->AddText(bold, fs * 0.85f, ImVec2(hp.x + px(14), hp.y + px(3)), on ? g_pal->dim : g_pal->faint,
+                       s.machine_label(m).c_str());
+            ImGui::Dummy(ImVec2(w, px(22)));
+            if (ImGui::IsItemHovered()) {
+                std::string why;
+                for (const auto& r : s.remotes)
+                    if (r.cfg.name == m && !r.host->connected())
+                        why = r.host->last_error();
+                if (!why.empty())
+                    ImGui::SetTooltip("%s: not connected\n%s", m.c_str(), why.c_str());
+            }
+            continue;
+        }
         const auto& sp = s.ws.spaces[static_cast<std::size_t>(i)];
         ImGui::PushID(sp.id.c_str());
         const ImVec2 a = ImGui::GetCursorScreenPos();
@@ -1967,6 +2124,8 @@ void draw_details(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
     }
     if (v.remaining_processes > 0)
         kv("Cleaning", std::to_string(v.remaining_processes) + " child processes", g_pal->working);
+    if (s.machine_of.count(id) && !s.machine_of[id].empty())
+        kv("Machine", s.machine_of[id], g_pal->info);
     kv("Folder", display_path(v.cwd), g_pal->dim);
     if (const auto b = ui::git_branch(v.cwd); !b.empty())
         kv("Branch", b, g_pal->dim);
@@ -2048,6 +2207,12 @@ void draw_status_bar(App::State& s, ImVec2 pos, float width, float height) {
     }
     if (s.host->host_dies_with_launcher())
         item("host ends when the launching terminal closes", g_pal->working);
+    for (const auto& r : s.remotes) {
+        dl->AddCircleFilled(ImVec2(x + px(4), pos.y + height * 0.5f), px(3.5f),
+                            r.host->connected() ? g_pal->done : g_pal->faint);
+        x += px(14);
+        item(r.cfg.name, r.host->connected() ? g_pal->dim : g_pal->faint);
+    }
     int working = 0;
     int needs = 0;
     for (const auto& [id, v] : s.views_by_id) {
@@ -2390,7 +2555,22 @@ void draw_launcher(App::State& s) {
     ImGui::SetNextItemWidth(-1);
     ImGui::InputText("##name", s.launch_name, sizeof s.launch_name);
     ImGui::Dummy(ImVec2(0, px(2)));
-    const auto profiles = s.host->profiles();
+    if (!s.remotes.empty()) {
+        ImGui::TextDisabled("Machine");
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::BeginCombo("##machine", s.machine_label(s.launch_machine).c_str())) {
+            if (ImGui::Selectable("This PC", s.launch_machine.empty()))
+                s.launch_machine.clear();
+            for (const auto& r : s.remotes) {
+                const std::string label = r.cfg.name + (r.host->connected() ? "" : "  (not connected)");
+                if (ImGui::Selectable(label.c_str(), s.launch_machine == r.cfg.name))
+                    s.launch_machine = r.cfg.name;
+            }
+            ImGui::EndCombo();
+        }
+    }
+    ui::HostClient* lhost = s.host_for(s.launch_machine);
+    const auto profiles = lhost->profiles();
     s.launcher_sel = std::clamp(s.launcher_sel, 0, std::max(0, static_cast<int>(profiles.size()) - 1));
     if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
         ++s.launcher_sel;
@@ -2439,8 +2619,9 @@ void draw_launcher(App::State& s) {
     ImGui::SameLine();
     if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
         ImGui::CloseCurrentPopup();
-    if (start >= 0 && s.host->connected() && !s.launch_busy) {
+    if (start >= 0 && lhost->connected() && !s.launch_busy) {
         Placement p;
+        p.machine = s.launch_machine;
         p.target = s.launch_target;
         p.split_of = s.launch_split_of;
         p.space = s.ws.active_space;
@@ -2523,8 +2704,12 @@ void draw_worktree(App::State& s) {
     if (ImGui::IsWindowAppearing())
         ImGui::SetKeyboardFocusHere();
     ImGui::InputTextWithHint("##branch", "fix/login-timeout", s.wt_branch, sizeof s.wt_branch);
-    const auto profiles = s.host->profiles();
+    const std::string wt_machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
+    ui::HostClient* wthost = s.host_for(wt_machine);
+    const auto profiles = wthost->profiles();
     s.wt_profile = std::clamp(s.wt_profile, 0, std::max(0, static_cast<int>(profiles.size()) - 1));
+    if (!wt_machine.empty())
+        ImGui::TextDisabled("On %s", wt_machine.c_str());
     ImGui::TextDisabled("Start in it");
     ImGui::SetNextItemWidth(-1);
     if (ImGui::BeginCombo("##prof", profiles.empty()
@@ -2545,7 +2730,7 @@ void draw_worktree(App::State& s) {
     }
     if (s.wt_busy)
         ImGui::TextDisabled("Creating...");
-    ImGui::BeginDisabled(s.wt_busy || s.wt_branch[0] == '\0' || profiles.empty() || !s.host->connected());
+    ImGui::BeginDisabled(s.wt_busy || s.wt_branch[0] == '\0' || profiles.empty() || !wthost->connected());
     primary_button_style(true);
     const bool create = ImGui::Button("Create");
     primary_button_style(false);
@@ -2566,9 +2751,9 @@ void draw_worktree(App::State& s) {
         }
         const std::string profile = profiles[static_cast<std::size_t>(s.wt_profile)].first;
         const std::string branch = s.wt_branch;
-        s.host->call(
+        wthost->call(
             "worktree.add", params,
-            [st = &s, profile, branch](Json result, std::string error) {
+            [st = &s, profile, branch, wthost, wt_machine](Json result, std::string error) {
                 if (!error.empty()) {
                     std::lock_guard lock(st->placements_mutex);
                     st->wt_error = error;
@@ -2577,9 +2762,9 @@ void draw_worktree(App::State& s) {
                 }
                 const std::string path = result.value("path", "");
                 Json p{{"profile_id", profile}, {"cwd", path}};
-                st->host->call(
+                wthost->call(
                     "session.create", p,
-                    [st, branch](Json r, std::string e) {
+                    [st, branch, wt_machine](Json r, std::string e) {
                         std::lock_guard lock(st->placements_mutex);
                         st->wt_busy = false;
                         if (!e.empty()) {
@@ -2590,6 +2775,7 @@ void draw_worktree(App::State& s) {
                         pl.session = r.value("session_id", "");
                         pl.target = LaunchTarget::kSpace;
                         pl.space_name = branch;
+                        pl.machine = wt_machine;
                         st->placements.push_back(pl);
                         st->wt_error = "done";
                     },
@@ -2669,6 +2855,58 @@ void draw_settings(App::State& s) {
                 ::PlaySoundW(L"SystemAsterisk", nullptr, SND_ALIAS | SND_ASYNC | SND_NODEFAULT);
                 s.toast("An agent finished", "Example notification", "", g_pal->done);
             }
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Machines")) {
+            ImGui::TextWrapped(
+                "Other computers reachable over SSH. AgentDesk runs \"ssh <target> agentctl bridge\" "
+                "and shows that machine's spaces and agents here; they keep running there when this "
+                "PC sleeps. The other computer needs AgentDesk installed and key-based ssh login.");
+            int remove = -1;
+            for (int i = 0; i < static_cast<int>(s.settings.machines.size()); ++i) {
+                const auto& m = s.settings.machines[static_cast<std::size_t>(i)];
+                ImGui::PushID(i);
+                const bool on = s.machine_connected(m.name);
+                ImGui::TextColored(v4(on ? g_pal->done : g_pal->faint), "%s", on ? "connected" : "offline");
+                ImGui::SameLine(px(100));
+                ImGui::Text("%s  (%s)", m.name.c_str(), m.target.c_str());
+                ImGui::SameLine(ImGui::GetContentRegionMax().x - px(70));
+                if (ImGui::SmallButton("Remove"))
+                    remove = i;
+                if (!on) {
+                    for (const auto& r : s.remotes)
+                        if (r.cfg.name == m.name && !r.host->last_error().empty())
+                            ImGui::TextColored(v4(g_pal->needs_you), "  %s", r.host->last_error().c_str());
+                    ImGui::TextDisabled(
+                        "  If it asks for a password or a host key, run  ssh %s  once in your own terminal.",
+                        m.target.c_str());
+                }
+                ImGui::PopID();
+            }
+            if (remove >= 0) {
+                s.settings.machines.erase(s.settings.machines.begin() + remove);
+                changed = true;
+                start_remotes(s);
+            }
+            ImGui::Separator();
+            static char name[64], target[128], ctl[256];
+            ImGui::TextDisabled("Add a machine");
+            ImGui::SetNextItemWidth(px(150));
+            ImGui::InputTextWithHint("##mname", "name", name, sizeof name);
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(px(200));
+            ImGui::InputTextWithHint("##mtarget", "user@host or ssh alias", target, sizeof target);
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputTextWithHint("##mctl", "agentctl path there (optional; default: agentctl on PATH)",
+                                     ctl, sizeof ctl);
+            ImGui::BeginDisabled(name[0] == '\0' || target[0] == '\0');
+            if (ImGui::Button("Add machine")) {
+                s.settings.machines.push_back({name, target, ctl});
+                name[0] = target[0] = ctl[0] = '\0';
+                changed = true;
+                start_remotes(s);
+            }
+            ImGui::EndDisabled();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Worktrees")) {
@@ -2781,6 +3019,15 @@ void App::frame() {
         s.doc_loaded = true;
     }
     s.sessions = s.host->sessions();
+    s.machine_of.clear();
+    for (const auto& sess : s.sessions)
+        s.machine_of[sess->id()] = "";
+    for (auto& r : s.remotes) {
+        for (const auto& sess : r.host->sessions()) {
+            s.sessions.push_back(sess);
+            s.machine_of[sess->id()] = r.cfg.name;
+        }
+    }
     s.views_by_id.clear();
     s.by_id.clear();
     for (const auto& sess : s.sessions) {

@@ -9,12 +9,14 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include <dbghelp.h>
 #include <dwmapi.h>
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -142,6 +144,57 @@ LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     return ::DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
+// A crash leaves ui-crash.txt (data folder) with the exception and the call stack, using the
+// .pdb next to the executable. Sessions keep running in the host either way.
+LONG WINAPI write_crash_report(EXCEPTION_POINTERS* ep) {
+    wchar_t buf[MAX_PATH]{};
+    DWORD n = ::GetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", buf, MAX_PATH);
+    std::filesystem::path dir;
+    if (n > 0 && n < MAX_PATH) {
+        dir = std::wstring(buf, n);
+    } else {
+        n = ::GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+        dir = std::filesystem::path(std::wstring(buf, n)) / L"AgentDesk";
+    }
+    std::ofstream out(dir / L"ui-crash.txt", std::ios::binary | std::ios::trunc);
+    char head[96];
+    std::snprintf(head, sizeof head, "exception 0x%08lX at %p\n", ep->ExceptionRecord->ExceptionCode,
+                  ep->ExceptionRecord->ExceptionAddress);
+    out << head;
+    HANDLE process = ::GetCurrentProcess();
+    ::SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+    ::SymInitialize(process, nullptr, TRUE);
+    CONTEXT ctx = *ep->ContextRecord;
+    STACKFRAME64 frame{};
+    frame.AddrPC.Offset = ctx.Rip;
+    frame.AddrPC.Mode = AddrModeFlat;
+    frame.AddrFrame.Offset = ctx.Rbp;
+    frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Offset = ctx.Rsp;
+    frame.AddrStack.Mode = AddrModeFlat;
+    for (int i = 0;
+         i < 48 && ::StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, ::GetCurrentThread(), &frame, &ctx,
+                                 nullptr, ::SymFunctionTableAccess64, ::SymGetModuleBase64, nullptr);
+         ++i) {
+        alignas(SYMBOL_INFO) char sym_buf[sizeof(SYMBOL_INFO) + 256]{};
+        auto* sym = reinterpret_cast<SYMBOL_INFO*>(sym_buf);
+        sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+        sym->MaxNameLen = 255;
+        DWORD64 disp = 0;
+        IMAGEHLP_LINE64 line{};
+        line.SizeOfStruct = sizeof(line);
+        DWORD line_disp = 0;
+        const bool has_sym = ::SymFromAddr(process, frame.AddrPC.Offset, &disp, sym) != FALSE;
+        const bool has_line =
+            ::SymGetLineFromAddr64(process, frame.AddrPC.Offset, &line_disp, &line) != FALSE;
+        out << "  " << (has_sym ? sym->Name : "?");
+        if (has_line)
+            out << "  " << line.FileName << ":" << line.LineNumber;
+        out << "\n";
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 // Developer options (automated checks): --start <profile id> [--exit-after-ms N] [--report file]
 // [--pipe NAME]
 struct DevOptions {
@@ -186,6 +239,7 @@ DevOptions parse_dev_options() {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+    ::SetUnhandledExceptionFilter(write_crash_report);
     const DevOptions dev = parse_dev_options();
     g_wake = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, wnd_proc,       0,      0, instance, nullptr, nullptr,
