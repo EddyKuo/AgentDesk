@@ -75,6 +75,7 @@ private:
     bool resync_requested_ = false;
     std::shared_ptr<const std::vector<HistoryLineText>> history_;
     std::size_t history_requested_ = 0;
+    std::chrono::steady_clock::time_point history_fetched_at_{};
 };
 
 struct HostClientOptions {

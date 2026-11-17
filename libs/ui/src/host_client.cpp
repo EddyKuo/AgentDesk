@@ -176,9 +176,13 @@ void RemoteSession::request_history(std::size_t lines) {
     lines = std::min<std::size_t>(lines, 200);  // history.read returns at most 200 lines
     {
         std::lock_guard lock(mutex_);
-        if (lines <= history_requested_)
+        // Refetch when more lines are needed or the cached copy is over a second old (new output
+        // keeps pushing lines into history while the user is scrolled up).
+        const auto now = std::chrono::steady_clock::now();
+        if (lines <= history_requested_ && now - history_fetched_at_ < 1s)
             return;
         history_requested_ = lines;
+        history_fetched_at_ = now;
     }
     owner_.enqueue([self = this, lines](ipc::PipeClient& c) {
         const auto r = c.call("history.read", {{"session", self->id_}, {"tail", true}, {"max_lines", lines}});
