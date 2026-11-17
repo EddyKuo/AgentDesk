@@ -1,6 +1,6 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v1.8  
+產品需求與系統設計文件 v1.9  
 日期：2026-11-16｜狀態：可供技術 POC 與估工的設計草案  
 技術基線：C++20、Windows 11 x64、Dear ImGui、Win32、DirectX 11、ConPTY
 
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 1.9 | 2026-11-17 | M1 實作補充（3.7.1）：attach 的控制權參數、事件格式、輸入種類、`profile.list`、`history.read` 的 `tail`、錯誤碼 `AMBIGUOUS`、request id 必須跨 client 唯一、`AGENTDESK_DATA_DIR`；3.8 補 `--key`、`shutdown`、`--pipe`、`--no-start`、`--timeout-ms` |
 
 ## 0. 文件導讀與決策摘要
 
@@ -331,9 +332,28 @@ frame = 4-byte little-endian payload_length + UTF-8 JSON。每 frame 上限 4 Mi
 | state.report | 已配置 adapter 的事件，驗證來源與 session 綁定；欄位 session_id、source、seq、state、kind、message（對應 3.6） |
 | host.shutdown | 若存在工作且未明確 stop_sessions，回傳 ACTIVE_SESSIONS |
 
-錯誤結構為 error.code、error.message、error.retryable；代碼包含 BAD_REQUEST、NOT_FOUND、PROFILE_INVALID、SPAWN_FAILED、NOT_CONTROLLER、VERSION_MISMATCH、OVERLOADED、ACTIVE_SESSIONS。
+錯誤結構為 error.code、error.message、error.retryable；代碼包含 BAD_REQUEST、NOT_FOUND、PROFILE_INVALID、SPAWN_FAILED、NOT_CONTROLLER、VERSION_MISMATCH、OVERLOADED、ACTIVE_SESSIONS、AMBIGUOUS（名稱對到多個 session）、INTERNAL。
 
 首次 attach：host 在 session actor 內建立 seq=S 的快照並註冊後續事件，再發快照，之後才發 seq>S 的增量；避免快照與訂閱之間漏事件。收到不同 generation 或 base_seq 不連續時，UI 捨棄增量並要求新快照。大型快照按 row range 分段，含 snapshot_id、chunk_index、chunk_count；完整收到才切換，單段仍受 frame 上限限制。
+
+#### 3.7.1 v1 實作補充（M1，2026-11-17）
+
+以下為 M1 實作時確定的細節，與上表一致，只是補足欄位。程式在 `libs/protocol`、`libs/ipc`、`libs/host/src/session_manager.cpp`。
+
+- **session 參照**：所有 `session.*`、`screen.snapshot`、`history.read`、`state.report` 以 `session` 參數接受 UUID 或名稱；名稱對到多個時回 `AMBIGUOUS`。
+- **request id**：host 以 request id 對 `session.create` 去重 10 分鐘，所以 id 必須跨 client 唯一。客戶端預設以 `c-<pid>-<高精度計時器>-<序號>` 產生。
+- **attach**：參數 `want_control`（無人控制時取得）、`take_control`（明確移交）；回應含 `is_controller`、`snapshot_id`、`snapshot_meta` 與 session 描述。快照與訂閱在同一把鎖內完成，之後的增量從該快照的 seq 接續。
+- **事件**：
+  - `screen.snapshot`：`session_id`、`snapshot_id`、`chunk_index`、`chunk_count`、`meta`（generation、seq、rows、cols、cursor、alt_screen、title）、`rows`。每段約 900 KiB 以內。
+  - `screen.delta`：`session_id`、`generation`、`base_seq`、`seq`、`meta`、`rows`（只含變動的列）。送出佇列超過 4 MiB 時丟棄並標記 `needs_snapshot`，之後以最新快照重新同步。
+  - `session.state`：程序狀態、退出碼、Agent 狀態與來源、kind、message、`last_agent_state`、`still_running_after_interrupt`、`remaining_processes`。必送，不丟棄。
+- **格子編碼**：`[text, width, fg, bg, attrs]`，顏色為 0xRRGGBB 整數，`-1` 代表主題預設色。
+- **session.input**：`kind` 為 `text`（`text`、`mods`）、`key`（`key` 名稱 enter／tab／backspace／escape／up／down／left／right／insert／delete／home／end／pageup／pagedown／f1～f12、`mods`）、`paste`（`text`，拒絕 NUL 與超過 1 MiB）、`raw`（已編碼位元組）。有控制者時只接受控制者；無人控制時任何 client 都可輸入（`agentctl send` 依賴此規則）。
+- **profile.list**：回傳 host 的 profiles。`profiles.json` 不存在時，host 依 PATH 偵測 Claude Code、Codex、PowerShell 7、Windows PowerShell、cmd 建立預設檔。
+- **history.read**：`tail: true` 回傳最新 `max_lines` 行（上限 200），否則自 `from_line_id` 起。
+- **host 資料目錄**：預設 `%LOCALAPPDATA%\AgentDesk`；`--data-dir` 或環境變數 `AGENTDESK_DATA_DIR` 可覆寫（測試與可攜用途）。
+- **安全**：pipe DACL 只含 SYSTEM 與目前使用者，`PIPE_REJECT_REMOTE_CLIENTS`，首實例旗標防搶名；host 比對 client token 的 SID，client 也比對 server 的 SID，不符即拒絕。客戶端以 `SECURITY_IDENTIFICATION` 開啟 pipe。
+
 
 MVP 一個 session 同時只允許一個輸入控制者，其餘唯讀。控制權轉移需明確操作；持有者斷線即釋放。無 UI 時沿用最後尺寸。縮小的唯讀面板採裁切／捲動，不可競爭改變 ConPTY 尺寸。
 
@@ -349,7 +369,11 @@ agentctl send review --file C:\work\prompt.txt
 agentctl stop review --interrupt
 agentctl stop review --force
 agentctl report-state <session-uuid> --source my-hook --state blocked --kind permission --message "需要核准指令" --seq 1731744000123
+agentctl send review --key up
+agentctl shutdown --stop-sessions
 ```
+
+全域選項：`--json`、`--pipe NAME`（預設依使用者與登入 session 命名；hook 內自動沿用 `AGENTDESK_PIPE`）、`--no-start`（不自動啟動 host）、`--timeout-ms N`（預設 5000）。`report-state` 與 `shutdown` 永不自動啟動 host。有其他 client 持有控制權時，`send` 回 `NOT_CONTROLLER`（退出碼 5）。
 
 CLI 支援 name 查找但拒絕歧義，穩定自動化應使用 session UUID。send 預設只輸入文字，不自動 Enter；需要 --enter 明示。它可能在 Agent 正等待確認時觸發操作，因此自動任務系統應使用結構化 adapter，不把任意畫面文字當可靠 API。
 

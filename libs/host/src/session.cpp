@@ -194,7 +194,7 @@ SessionInfo Session::info() const {
 std::vector<terminal::HistoryLine> Session::history(std::uint64_t from, std::size_t max_lines) const {
     auto promise = std::make_shared<std::promise<std::vector<terminal::HistoryLine>>>();
     auto future = promise->get_future();
-    const_cast<Session*>(this)->post(HistoryCmd{from, max_lines, promise});
+    const_cast<Session*>(this)->post(HistoryCmd{from, max_lines, promise, false});
     return future.get();
 }
 
@@ -379,9 +379,23 @@ void Session::handle(ReportCmd& c) {
     publish_info();
 }
 
+std::vector<terminal::HistoryLine> Session::history_tail(std::size_t max_lines) const {
+    auto promise = std::make_shared<std::promise<std::vector<terminal::HistoryLine>>>();
+    auto future = promise->get_future();
+    const_cast<Session*>(this)->post(HistoryCmd{0, max_lines, promise, true});
+    return future.get();
+}
+
 void Session::handle(HistoryCmd& c) {
     std::vector<terminal::HistoryLine> out;
-    for (const auto& line : engine_->history()) {
+    const auto& hist = engine_->history();
+    if (c.tail) {
+        const std::size_t n = std::min(c.max_lines, hist.size());
+        out.assign(hist.end() - static_cast<std::ptrdiff_t>(n), hist.end());
+        c.result->set_value(std::move(out));
+        return;
+    }
+    for (const auto& line : hist) {
         if (line.line_id < c.from)
             continue;
         if (out.size() >= c.max_lines)

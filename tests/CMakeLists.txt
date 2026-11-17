@@ -21,12 +21,16 @@ gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit"
 agentdesk_executable(win_integration_tests
     integration/windows/conpty_test.cpp
     integration/windows/conpty_compare_test.cpp
-    integration/windows/session_test.cpp)
+    integration/windows/session_test.cpp
+    integration/windows/pipe_test.cpp
+    integration/windows/host_test.cpp)
 target_link_libraries(win_integration_tests PRIVATE
-    agentdesk::host agentdesk::platform_win agentdesk::terminal GTest::gtest_main)
-add_dependencies(win_integration_tests vt_probe)
+    agentdesk::host agentdesk::ipc agentdesk::platform_win agentdesk::terminal nlohmann_json::nlohmann_json GTest::gtest_main)
+add_dependencies(win_integration_tests vt_probe agent-host agentctl)
 target_compile_definitions(win_integration_tests PRIVATE
     AGENTDESK_VT_PROBE=L"$<TARGET_FILE:vt_probe>"
+    AGENTDESK_HOST_EXE=L"$<TARGET_FILE:agent-host>"
+    AGENTDESK_CTL_EXE=L"$<TARGET_FILE:agentctl>"
     AGENTDESK_BUNDLED_CONPTY_DIR=L"${PROJECT_SOURCE_DIR}/third_party/conpty/bin")
 gtest_discover_tests(win_integration_tests DISCOVERY_MODE PRE_TEST
     PROPERTIES LABELS "windows_integration" TIMEOUT 120)

@@ -86,6 +86,8 @@ public:
     [[nodiscard]] SessionInfo info() const;
     // Lines from history (oldest first) with line_id >= from, at most `max_lines`.
     [[nodiscard]] std::vector<terminal::HistoryLine> history(std::uint64_t from, std::size_t max_lines) const;
+    // The newest `max_lines` history lines (oldest first).
+    [[nodiscard]] std::vector<terminal::HistoryLine> history_tail(std::size_t max_lines) const;
 
     // Blocks until the root process exited (or timeout). Returns the exit code.
     std::optional<std::uint32_t> wait_exit(std::chrono::milliseconds timeout) const;
@@ -110,6 +112,7 @@ private:
         std::uint64_t from;
         std::size_t max_lines;
         std::shared_ptr<std::promise<std::vector<terminal::HistoryLine>>> result;
+        bool tail = false;
     };
     using Command = std::variant<OutputChunk, InputEvent, ResizeCmd, InterruptCmd, ReportCmd, HistoryCmd>;
 

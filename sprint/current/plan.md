@@ -1,5 +1,5 @@
 ---
-sprint: 2
+sprint: 3
 start_date: 2026-11-17
 complexity: M
 execution_mode: standard
@@ -9,47 +9,38 @@ sprint_phase: S_feature
 status: active
 ---
 
-# Sprint 2：M1 Host 基礎
+# Sprint 3：M2 桌面整合
 
-> 對應設計文件 5.1 的 M1（修正估工 6–9 人日，M0 報告第 9 節）。Session actor、背壓、協定分幀已在 M0 完成。
+> 對應設計文件 5.1 的 M2（10–15 人日）。UI 由 M0 的「程序內 Session」改為 agent-host 的 client。
 
 ## 目標
 
-- `agent-host.exe` 背景程序：單一實例、Named Pipe IPC v1、管理多個 session，UI 不在也能讀寫與停止。
-- `agentctl.exe`：run／list／read／send／stop／report-state，穩定 JSON 輸出與退出碼（設計文件 3.8）。
-- 退出條件（設計文件 5.1）：2 個工作互不干擾；UI 不在也可讀寫與停止。
+- agent-ui.exe 透過 Named Pipe 連 host：關閉視窗只 detach，重開接回原畫面（US-03）。
+- 兩個 Agent 可在 UI 同時操作；docking、歷史捲動、選取、控制權（US-02、US-06）。
+- 退出條件（設計文件 5.1）：兩個 Agent 可操作，150% DPI 可用。
 
 ## 任務清單
 
 | ID | Agent | 依賴 | 產出 | Skills | 狀態 |
 |-----|-------|------|------|--------|------|
-| S2-1 | RD | — | `libs/ipc`：Named Pipe 伺服器與客戶端（自訂 DACL、拒絕遠端、首實例旗標、client SID 驗證、分幀、每 client 4 MiB 送出預算） | rd/platform-windows-conpty | ⬜ |
-| S2-2 | RD | S2-1 | `libs/host` SessionManager：session.create／list／get／attach／detach／input／resize／stop、screen.snapshot、history.read、state.report、host.shutdown；request_id 去重 10 分鐘；單一輸入控制者；attach 快照＋增量（seq 不漏） | rd/platform-windows-conpty、rd/engine-terminal-vt | ⬜ |
-| S2-3 | RD | S2-2 | `apps/host` agent-host.exe：每使用者每登入 session 單一實例、`DETACHED_PROCESS`＋breakaway 啟動、環境變數 `AGENTDESK_SESSION_ID`／`AGENTDESK_CTL`／`AGENTDESK_PIPE`、profiles.json／sessions.json（原子寫入、Lost 標記） | rd/platform-windows-conpty | ⬜ |
-| S2-4 | RD | S2-1 | `apps/cli` agentctl.exe：run／list／read／send（預設不送 Enter）／stop（interrupt／force）／report-state；name 歧義拒絕；`--json` 只輸出結果；退出碼 0、2～7；必要時自動啟動 host | rd/lang-cpp | ⬜ |
-| S2-5 | QA | S2-2～S2-4 | 整合測試：兩 session 互不干擾（QA-03 host 端）、UI 不在仍可讀寫停止、退出碼（QA-13）、report-state（QA-19）、pipe 拒絕其他使用者與超長 frame（QA-17）、host 重啟標記 Lost（QA-10）、第二 client 唯讀（QA-14 host 端） | qa/framework-gtest、qa/strategy-security | ⬜ |
-| S2-6 | RD | S2-4 | Codex hook 範例腳本（不自動安裝）：PowerShell hook 呼叫 `agentctl report-state` | shared/domain-coding-agents | ⬜ |
-| S2-7 | QA | S2-5 | `contracts/inbox/TestReport_sprint2.md` | qa/framework-gtest | ⬜ |
-| S2-8 | Orchestrator | S2-7 | 設計文件升版（若協定細節有變）、status 收尾 | — | ⬜ |
-| S2-9 | 使用者 | — | 自 S1-7 轉入：繁中 IME 與 DPI 手動驗證（M0 報告第 10 節步驟） | rd/frontend-imgui | ⏸ |
-
-狀態：⬜ 未開始｜🔄 進行中｜⏸ BLOCKED｜✅ 完成
-
-## 並行執行組
-
-| 組別 | 任務 | 前提 |
-|------|------|------|
-| G1 | S2-1 | — |
-| G2 | S2-2 ∥ S2-4（client 端） | S2-1 |
-| G3 | S2-3 → S2-5 → S2-7 | S2-2、S2-4 |
+| S3-1 | RD | — | `libs/ui` RemoteSource：attach、分段快照組裝、增量套用（generation／base_seq 不連續就重要快照）、輸入與 resize 經背景送出執行緒（UI 執行緒不阻塞） | rd/frontend-imgui、rd/engine-terminal-vt | ⬜ |
+| S3-2 | RD | S3-1 | UI 改連 host：session 清單（`session.list`＋`session.state`）、以 profile 建立、停止／強制停止、host 斷線覆蓋 Disconnected、instance id 改變時標記 Lost、自動重連 | rd/frontend-imgui | ⬜ |
+| S3-3 | RD | S3-1 | TerminalView 歷史捲動（滑鼠滾輪以 `history.read` 分頁）與以 line_id 為準的選取 | rd/frontend-imgui | ⬜ |
+| S3-4 | RD | S3-2 | 控制權：唯讀標示、「取得控制」按鈕、唯讀面板不改尺寸 | rd/frontend-imgui | ⬜ |
+| S3-5 | RD | S3-2 | 關閉語意：視窗 X＝detach（首次說明一次）、面板 X 不停止 session、「退出並停止所有工作」列出執行中工作後才 shutdown | rd/frontend-imgui | ⬜ |
+| S3-6 | RD | S3-2 | UI 自動啟動 host；breakaway 被拒且父 Job 會連帶結束時提示（QA-20） | rd/platform-windows-conpty | ⬜ |
+| S3-7 | RD | S3-2 | 狀態列：host 連線、控制權、字元尺寸、截斷與背壓提示 | rd/frontend-imgui | ⬜ |
+| S3-8 | QA | S3-1～S3-7 | 測試：RemoteSource 增量／缺號重新同步單元測試、UI 經 host 啟動冒煙、QA-05（關 UI 後再開，PID 與 session 不變、計數連續） | qa/framework-gtest | ⬜ |
+| S3-9 | QA | S3-8 | `contracts/inbox/TestReport_sprint3.md` | qa/framework-gtest | ⬜ |
+| S3-10 | 使用者 | — | 自 S2-9 轉入：繁中 IME、DPI 手動驗證 | rd/frontend-imgui | ⏸ |
 
 ## 里程碑
 
 | ID | 項目 | 退出條件 | 狀態 |
 |----|------|---------|------|
-| S2-M1 | host 可用 | `agentctl run` 自動啟動 host 並建立 session；關掉 agentctl 後工作持續 | ⬜ |
-| S2-M2 | 兩工作互不干擾 | 兩個 session 同時輸出，對其中一個輸入不影響另一個 | ⬜ |
-| S2-M3 | CLI 契約 | 退出碼與 `--json` 行為符合設計文件 3.8 | ⬜ |
+| S3-M1 | UI 是 host client | UI 關閉後 session 持續；重開後接回原畫面 | ⬜ |
+| S3-M2 | 兩 Agent 可操作 | 兩個 session 同時在 UI 中可輸入、各自尺寸 | ⬜ |
+| S3-M3 | 150% DPI 可用 | 需使用者手動確認（S3-10） | ⏸ |
 
 ## 開放例外
 

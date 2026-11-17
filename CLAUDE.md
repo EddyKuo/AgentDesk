@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AgentDesk 是 Windows 11 x64 的原生 AI Agent 工作台：在可分割的終端機面板裡跑多個 coding agent CLI（首發 Claude Code 與 Codex CLI），關掉視窗後工作繼續跑，重開時接回原畫面。設計參考 herdr（https://github.com/herdrdev），但是獨立實作，不追求相容。
 
-M0 技術 POC（Sprint 1）已完成，結論在 `docs/poc/M0-report.md`。目前在 M1（host 背景程序、IPC、agentctl）。工作依 `sprint/current/plan.md` 的任務順序進行，每完成一項就在 `sprint/current/status.md` 追加一列（只追加不改寫）。需求不清楚時列進設計文件 7.4，不要自己補。
+M0 技術 POC（Sprint 1）已完成，結論在 `docs/poc/M0-report.md`。M1（host、IPC、agentctl）已完成；目前在 M2（UI 改為 host 的 client）。工作依 `sprint/current/plan.md` 的任務順序進行，每完成一項就在 `sprint/current/status.md` 追加一列（只追加不改寫）。需求不清楚時列進設計文件 7.4，不要自己補。
 
 ## 常用指令
 
@@ -39,7 +39,7 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 
 | 檔案 | 內容 |
 |---|---|
-| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v1.8）。改設計就改這份，並在檔頭版本紀錄加一列 |
+| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v1.9）。改設計就改這份，並在檔頭版本紀錄加一列 |
 | `contracts/approved/PRD.md` | PRD 契約 v1.1.0（鎖定設計文件 v1.7；v1.8 未改需求）。需求變更要依憲法 6.3 升版 |
 | `contracts/inbox/TestReport_sprint*.md` | 每個 Sprint 的測試報告（QA，依 ADR_001 判定） |
 | `docs/poc/M0-report.md`、`docs/poc/evidence/` | M0 結論與實測 JSON |
