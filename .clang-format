@@ -1,0 +1,27 @@
+# Formatting for AgentDesk (clang-format bundled with VS 2022 Build Tools).
+# Naming rules live in .clang-tidy; see skill rd/lang-cpp.
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++20
+IndentWidth: 4
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+ColumnLimit: 110
+PointerAlignment: Left
+ReferenceAlignment: Left
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BreakBeforeBraces: Attach
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Windows headers must keep their relative order; keep them in their own block.
+  - Regex: '^<(windows|winsock2|consoleapi|processthreadsapi|sddl|aclapi|dxgi|d3d11)[^>]*\.h>'
+    Priority: 1
+  - Regex: '^<[a-z_]+>'
+    Priority: 2
+  - Regex: '^<.*>'
+    Priority: 3
+  - Regex: '.*'
+    Priority: 4
+SortIncludes: CaseSensitive

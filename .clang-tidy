@@ -1,0 +1,44 @@
+# Static analysis for AgentDesk (clang-tidy bundled with VS 2022 Build Tools).
+# Naming follows skill rd/lang-cpp; thresholds follow .decisions/ADR_001.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-union-access,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-vararg,
+  misc-*,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  performance-*,
+  readability-*,
+  -readability-magic-numbers,
+  -readability-identifier-length
+WarningsAsErrors: '*'
+HeaderFilterRegex: '^(apps|libs|tests)/'
+CheckOptions:
+  - { key: readability-identifier-naming.NamespaceCase,          value: lower_case }
+  - { key: readability-identifier-naming.ClassCase,              value: CamelCase }
+  - { key: readability-identifier-naming.StructCase,             value: CamelCase }
+  - { key: readability-identifier-naming.EnumCase,               value: CamelCase }
+  - { key: readability-identifier-naming.TypeAliasCase,          value: CamelCase }
+  - { key: readability-identifier-naming.FunctionCase,           value: lower_case }
+  - { key: readability-identifier-naming.MethodCase,             value: lower_case }
+  - { key: readability-identifier-naming.VariableCase,           value: lower_case }
+  - { key: readability-identifier-naming.ParameterCase,          value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberCase,      value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberSuffix,    value: '_' }
+  - { key: readability-identifier-naming.ProtectedMemberCase,    value: lower_case }
+  - { key: readability-identifier-naming.ProtectedMemberSuffix,  value: '_' }
+  - { key: readability-identifier-naming.ConstexprVariableCase,  value: CamelCase }
+  - { key: readability-identifier-naming.ConstexprVariablePrefix, value: k }
+  - { key: readability-identifier-naming.EnumConstantCase,       value: CamelCase }
+  - { key: readability-identifier-naming.EnumConstantPrefix,     value: k }
+# reinterpret_cast / pointer arithmetic are disabled above only because Win32 and libvterm
+# boundaries need them; ADR_001 requires each use to stay inside libs/platform or the
+# libvterm wrapper with a comment explaining why.

@@ -1,0 +1,40 @@
+# CMake / Ninja build trees
+/build/
+/out/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+Testing/
+
+# vcpkg manifest-mode install tree
+/vcpkg_installed/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.VC.db
+*.ipch
+
+# Binaries and debug artifacts
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
+*.dmp
+
+# Runtime state written by the app during local runs
+imgui.ini
+
+# Bundled ConPTY is fetched by script, never committed
+/third_party/conpty/bin/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
