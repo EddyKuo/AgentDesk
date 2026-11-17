@@ -21,9 +21,10 @@ gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit"
 agentdesk_executable(win_integration_tests
     integration/windows/conpty_test.cpp
     integration/windows/conpty_compare_test.cpp
-    integration/windows/session_test.cpp)
+    integration/windows/session_test.cpp
+    integration/windows/pipe_test.cpp)
 target_link_libraries(win_integration_tests PRIVATE
-    agentdesk::host agentdesk::platform_win agentdesk::terminal GTest::gtest_main)
+    agentdesk::host agentdesk::ipc agentdesk::platform_win agentdesk::terminal GTest::gtest_main)
 add_dependencies(win_integration_tests vt_probe)
 target_compile_definitions(win_integration_tests PRIVATE
     AGENTDESK_VT_PROBE=L"$<TARGET_FILE:vt_probe>"
