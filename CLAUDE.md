@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AgentDesk 是 Windows 11 x64 的原生 AI Agent 工作台：在可分割的終端機面板裡跑多個 coding agent CLI（首發 Claude Code 與 Codex CLI），關掉視窗後工作繼續跑，重開時接回原畫面。設計參考 herdr（https://github.com/herdrdev），但是獨立實作，不追求相容。
 
-M0 技術 POC（Sprint 1）已完成，結論在 `docs/poc/M0-report.md`。M1（host、IPC、agentctl）已完成；目前在 M2（UI 改為 host 的 client）。工作依 `sprint/current/plan.md` 的任務順序進行，每完成一項就在 `sprint/current/status.md` 追加一列（只追加不改寫）。需求不清楚時列進設計文件 7.4，不要自己補。
+MVP（M0～M4，Sprint 1～5）已完成：結論在 `docs/poc/M0-report.md`、`docs/poc/M4-report.md`，最終驗收矩陣在 `contracts/inbox/TestReport_sprint5.md`。剩下的是人工驗收項目（設計文件 5.4）。之後的工作依 `sprint/current/plan.md` 的任務順序進行，每完成一項就在 `sprint/current/status.md` 追加一列（只追加不改寫）。需求不清楚時列進設計文件 7.4，不要自己補。
 
 ## 常用指令
 
@@ -32,14 +32,18 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 開發工具（在 `build\<preset>\tools\`）：
 - `pty_run.exe [--send-after MS TEXT]... -- <程式>`：無 UI 在隨附 ConPTY 下跑程式，輸出畫面與 OSC 7501 時間線的 JSON
 - `session_bench.exe --probe <vt_probe.exe>`：吞吐、延遲、生命週期洩漏量測（Release 才有意義）
-- `vt_probe.exe query|report|echo|flood`：測試用的假 Agent
-- `apps\desktop\agent-ui.exe [--start "<profile>"] [--exit-after-ms N] [--report file.json]`：UI；後三個參數供自動化驗證
+- `vt_probe.exe query|report|echo|flood|counter|size|crash`：測試用的假 Agent
+- `soak.exe --probe <vt_probe.exe> --host <agent-host.exe> [--minutes N]`：host 長時間穩定性（handle、執行緒、記憶體趨勢）
+- `apps\desktop\agent-ui.exe [--pipe NAME] [--start "<profile>"] [--exit-after-ms N] [--report file.json]`：UI；參數供自動化驗證
+- `tools\qa\*.ps1`：QA-05、QA-07、QA-10、`screenshot_ui.ps1`（隔離的 host 加 PrintWindow 截圖與 report，用來檢查渲染）、`smoke_zip.ps1`；發布用 `scripts\package.ps1`（先建 Release）
+
+不要用自動化腳本反覆啟動又強制結束實際的 Claude Code：它會把這當成全螢幕渲染器故障，自行關掉該模式。渲染檢查用 PowerShell 或 vt_probe。
 
 ## 文件地圖
 
 | 檔案 | 內容 |
 |---|---|
-| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v1.9）。改設計就改這份，並在檔頭版本紀錄加一列 |
+| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.0）。改設計就改這份，並在檔頭版本紀錄加一列 |
 | `contracts/approved/PRD.md` | PRD 契約 v1.1.0（鎖定設計文件 v1.7；v1.8 未改需求）。需求變更要依憲法 6.3 升版 |
 | `contracts/inbox/TestReport_sprint*.md` | 每個 Sprint 的測試報告（QA，依 ADR_001 判定） |
 | `docs/poc/M0-report.md`、`docs/poc/evidence/` | M0 結論與實測 JSON |
@@ -84,6 +88,8 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 - 輸出內容不可觸發命令或寫剪貼簿（OSC 52 不註冊回呼）。
 
 **libvterm 0.3.3 的坑**：UTF-8 序列被切在兩次寫入之間時會產生 U+FFFD，`VtEngine::feed` 會暫存尾端不完整的序列（只延後、不丟），程序結束時 `flush()`。預設色的格子 RGB 一律為 0（標準形式），比較快照或走協定時才會相等。
+
+**終端機繪製**（`libs/ui/src/terminal_view.cpp`）：格寬取字型的真實 advance（mono 字型開 PixelSnapH），不可用 `CalcTextSize`，它會無條件進位，游標會越往右越偏。每格各自定位；寬字元放大填滿兩格並置中。字型是 Cascadia Mono／Segoe UI 合併正黑體，再合併 Segoe UI Symbol／Emoji；ImGui 用 vcpkg 的 `wchar32` feature。
 
 **Windows 細節**：子程序以 CREATE_SUSPENDED 建立、指派 KILL_ON_JOB_CLOSE Job 後才 Resume，Job 不設 BREAKAWAY_OK（設計文件優先於 skill 範例）。`PtyProcess::close()` 順序：ClosePseudoConsole → join reader → 釋放 handle（write mutex 保護）→ TerminateJobObject。中斷就是寫入 0x03（M0 實測對 PING、cmd 有效）。
 

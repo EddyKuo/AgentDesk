@@ -30,6 +30,7 @@ struct SessionView {
     std::string id;
     std::string name;
     std::string cwd;
+    std::string created_at;  // ISO 8601 UTC, from the host
     std::string profile_id;
     std::string process_state = "Unknown";
     std::optional<std::uint32_t> exit_code;

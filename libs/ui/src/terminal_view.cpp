@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cfloat>
+#include <cmath>
 
 #include "agentdesk/ui/imgui_adapter.hpp"
 
@@ -52,7 +54,59 @@ bool in_selection(CellPos p, CellPos a, CellPos b) {
     return true;
 }
 
+// Draws one cell's text so it fills its slot: a glyph narrower than the slot is centered (CJK
+// in a two-cell slot, full-width punctuation), never drawn at the font's own advance.
+void draw_cell_text(ImDrawList* dl, ImFont* font, float size, ImFontBaked* baked, float x, float y,
+                    float slot_w, ImU32 fg, const terminal::Cell& cell, std::string& scratch) {
+    // ImWchar is 32-bit (vcpkg imgui feature wchar32), so emoji outside the BMP render too.
+    if (cell.chars[1] == 0 && static_cast<char32_t>(static_cast<ImWchar>(cell.chars[0])) == cell.chars[0]) {
+        const auto c = static_cast<ImWchar>(cell.chars[0]);
+        float adv = baked->GetCharAdvance(c);
+        float draw_size = size;
+        float dy = 0.0f;
+        if (slot_w > adv * 1.15f && cell.width == 2) {
+            // CJK faces draw ideographs well inside their em box; at the Latin size they look
+            // spaced out in a two-cell slot. Scale up to fill ~94% of the slot, keeping the
+            // baseline (ascent ~80% of the size) where the Latin text has it.
+            const float k = std::min(1.3f, slot_w * 0.94f / adv);
+            draw_size = size * k;
+            adv *= k;
+            dy = -(draw_size - size) * 0.8f;
+        } else if (adv > slot_w * 1.05f) {
+            // A fallback symbol wider than its slot: shrink it into the cell instead of letting it
+            // overlap the next character.
+            const float k = slot_w * 0.95f / adv;
+            draw_size = size * k;
+            adv *= k;
+            dy = (size - draw_size) * 0.5f;
+        }
+        const float dx = adv < slot_w ? std::floor((slot_w - adv) * 0.5f) : 0.0f;
+        font->RenderChar(dl, draw_size, ImVec2(x + dx, y + dy), fg, c);
+        return;
+    }
+    scratch.clear();  // combining sequence or astral plane: let ImGui lay it out
+    for (const char32_t cp : cell.chars) {
+        if (cp == 0)
+            break;
+        terminal::append_utf8(scratch, cp);
+    }
+    const float adv =
+        font->CalcTextSizeA(size, FLT_MAX, 0.0f, scratch.data(), scratch.data() + scratch.size()).x;
+    const float dx = adv < slot_w ? std::floor((slot_w - adv) * 0.5f) : 0.0f;
+    dl->AddText(font, size, ImVec2(x + dx, y), fg, scratch.data(), scratch.data() + scratch.size());
+}
+
 }  // namespace
+
+bool is_wide_codepoint(char32_t cp) {
+    return (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0x303E) ||
+           (cp >= 0x3041 && cp <= 0x33FF) || (cp >= 0x3400 && cp <= 0x4DBF) ||
+           (cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0xA000 && cp <= 0xA4CF) ||
+           (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0xF900 && cp <= 0xFAFF) ||
+           (cp >= 0xFE30 && cp <= 0xFE4F) || (cp >= 0xFF00 && cp <= 0xFF60) ||
+           (cp >= 0xFFE0 && cp <= 0xFFE6) || (cp >= 0x1F300 && cp <= 0x1F64F) ||
+           (cp >= 0x1F900 && cp <= 0x1F9FF) || (cp >= 0x20000 && cp <= 0x3FFFD);
+}
 
 std::string TerminalView::selected_text() const {
     if (!line_sel_a_ || !line_sel_b_)
@@ -150,6 +204,22 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
     const Modifiers mods{io.KeyCtrl, io.KeyShift, io.KeyAlt};
     const bool alt_gr = mods.ctrl && mods.alt;  // AltGr arrives as Ctrl+Alt with a printable char
 
+    // Window shortcuts are not sent to the program.
+    if (mods.ctrl && !mods.alt) {
+        if (mods.shift && adapter::key_pressed_owned(ImGuiKey_T, str_id)) {
+            shortcut_ = AppShortcut::kNewSession;
+            return;
+        }
+        if (mods.shift && adapter::key_pressed_owned(ImGuiKey_W, str_id)) {
+            shortcut_ = AppShortcut::kClosePane;
+            return;
+        }
+        if (adapter::key_pressed_owned(ImGuiKey_Tab, str_id)) {
+            shortcut_ = mods.shift ? AppShortcut::kPrevTab : AppShortcut::kNextTab;
+            return;
+        }
+    }
+
     // Clipboard chords first: they decide what Ctrl+C means.
     for (const ImGuiKey key : {ImGuiKey_C, ImGuiKey_V}) {
         if (!adapter::key_pressed_owned(key, str_id))
@@ -216,10 +286,14 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
         return false;
     const terminal::ScreenSnapshot& snap = *snap_ptr;
 
-    if (fonts.mono != nullptr)
-        ImGui::PushFont(fonts.mono, 0.0f);
-    const float cell_w = ImGui::CalcTextSize("M").x;
-    const float cell_h = ImGui::GetTextLineHeight();
+    ImGui::PushFont(fonts.mono, fonts.mono_size);
+    ImFont* font = ImGui::GetFont();
+    const float font_size = ImGui::GetFontSize();
+    ImFontBaked* baked = ImGui::GetFontBaked();
+    // The real advance, not CalcTextSize (which rounds widths up: 12.09 px became 13 px and the
+    // cursor drifted right of the text). The mono font uses PixelSnapH, so this is integral.
+    const float cell_w = std::max(1.0f, std::round(baked->GetCharAdvance(static_cast<ImWchar>('M'))));
+    const float cell_h = std::round(ImGui::GetTextLineHeight());
 
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     handle_resize(source, grid_for_area(avail.x, avail.y, cell_w, cell_h), snap);
@@ -228,8 +302,7 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     const ImVec2 area_max(origin.x + std::max(avail.x, cell_w * 2), origin.y + std::max(avail.y, cell_h));
     const auto item = adapter::grid_item(str_id, origin, area_max, request_focus);
     if (!item.visible) {
-        if (fonts.mono != nullptr)
-            ImGui::PopFont();
+        ImGui::PopFont();
         return false;
     }
 
@@ -298,10 +371,26 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
         std::min(snap.rows, static_cast<int>((dl->GetClipRectMax().y - origin.y) / cell_h) + 1);
     std::string run;
     for (int view_row = 0; view_row < offset; ++view_row) {
+        // History is plain text: lay it out on the grid with an approximate width table.
         const auto& line = (*hist)[static_cast<std::size_t>(available - offset + view_row)];
         const float y = origin.y + static_cast<float>(view_row) * cell_h;
-        dl->AddText(ImVec2(origin.x, y), theme.default_fg, line.text.data(),
-                    line.text.data() + line.text.size());
+        int hcol = 0;
+        for (std::size_t i = 0; i < line.text.size() && hcol < snap.cols;) {
+            const auto b0 = static_cast<unsigned char>(line.text[i]);
+            const std::size_t len = b0 < 0x80 ? 1 : (b0 & 0xE0) == 0xC0 ? 2 : (b0 & 0xF0) == 0xE0 ? 3 : 4;
+            char32_t cp = len == 1 ? b0 : len == 2 ? (b0 & 0x1Fu) : len == 3 ? (b0 & 0x0Fu) : (b0 & 0x07u);
+            for (std::size_t m = 1; m < len && i + m < line.text.size(); ++m)
+                cp = (cp << 6) | (static_cast<unsigned char>(line.text[i + m]) & 0x3Fu);
+            i += len;
+            terminal::Cell hc;
+            hc.chars[0] = cp;
+            const int w = is_wide_codepoint(cp) ? 2 : 1;
+            if (cp != U' ') {
+                draw_cell_text(dl, font, font_size, baked, origin.x + static_cast<float>(hcol) * cell_w, y,
+                               cell_w * static_cast<float>(w), theme.default_fg, hc, run);
+            }
+            hcol += w;
+        }
     }
     for (int row = first_row; row < last_row - offset; ++row) {
         const float y = origin.y + static_cast<float>(row + offset) * cell_h;
@@ -318,45 +407,25 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
             }
             col = end;
         }
-        // Text: ASCII runs in one call; anything else positioned per cell so wide glyphs land on
-        // their two-cell slot regardless of the font's advance (skill §6).
+        // Text: every cell at its own grid position (skill §6), so a glyph whose advance differs
+        // from the cell width (CJK, full-width punctuation, symbols) can never shift the rest.
         col = 0;
         while (col < snap.cols) {
             const auto& cell = snap.at(row, col);
-            const ImU32 fg = colors_of(cell, theme).fg;
+            const int span = std::max<int>(1, cell.width);
             const float x = origin.x + static_cast<float>(col) * cell_w;
-            if (cell.width == 0 || cell.chars[0] == 0 || cell.chars[0] == U' ') {
-                ++col;
-                continue;
-            }
-            if (cell.chars[0] < 0x80 && cell.chars[1] == 0) {
-                run.clear();
-                int end = col;
-                while (end < snap.cols) {
-                    const auto& c = snap.at(row, end);
-                    if (c.width != 1 || c.chars[1] != 0 || c.chars[0] >= 0x80 ||
-                        colors_of(c, theme).fg != fg || c.attrs != cell.attrs) {
-                        break;
-                    }
-                    run.push_back(c.chars[0] == 0 ? ' ' : static_cast<char>(c.chars[0]));
-                    ++end;
+            if (cell.width != 0 && cell.chars[0] != 0) {
+                const ImU32 fg = colors_of(cell, theme).fg;
+                if (cell.chars[0] != U' ') {
+                    draw_cell_text(dl, font, font_size, baked, x, y, cell_w * static_cast<float>(span), fg,
+                                   cell, run);
                 }
-                dl->AddText(ImVec2(x, y), fg, run.data(), run.data() + run.size());
                 if (cell.attrs & terminal::kAttrUnderline) {
                     dl->AddLine(ImVec2(x, y + cell_h - 1),
-                                ImVec2(origin.x + static_cast<float>(end) * cell_w, y + cell_h - 1), fg);
+                                ImVec2(x + cell_w * static_cast<float>(span), y + cell_h - 1), fg);
                 }
-                col = end;
-                continue;
             }
-            run.clear();
-            for (const char32_t cp : cell.chars) {
-                if (cp == 0)
-                    break;
-                terminal::append_utf8(run, cp);
-            }
-            dl->AddText(ImVec2(x, y), fg, run.data(), run.data() + run.size());
-            col += std::max<int>(1, cell.width);
+            col += cell.width == 0 ? 1 : span;
         }
     }
 
@@ -395,7 +464,9 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
         dl->AddText(ImVec2(area_max.x - sz.x - 4, origin.y), IM_COL32(230, 230, 255, 255), tag.c_str());
     }
     if (offset == 0 && snap.cursor.visible && snap.cursor.row < snap.rows && snap.cursor.col < snap.cols) {
-        const ImVec2 caret_max(caret.x + cell_w, caret.y + cell_h);
+        // On the left half of a wide character the cursor covers both cells.
+        const int cursor_span = std::max<int>(1, snap.at(snap.cursor.row, snap.cursor.col).width);
+        const ImVec2 caret_max(caret.x + cell_w * static_cast<float>(cursor_span), caret.y + cell_h);
         if (item.active) {
             dl->AddRectFilled(caret, caret_max, (theme.cursor & 0x00FFFFFF) | 0x90000000);
         } else {
@@ -409,8 +480,7 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
         if (source.can_input())
             handle_keyboard(str_id, source, snap);
     }
-    if (fonts.mono != nullptr)
-        ImGui::PopFont();
+    ImGui::PopFont();
 
     draw_paste_popup(source);
     if (!notice_.empty()) {

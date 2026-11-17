@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <string>
@@ -17,6 +18,10 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 #include <psapi.h>
+#include <tlhelp32.h>
+// aclapi/sddl need windows.h first.
+#include <aclapi.h>
+#include <sddl.h>
 
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
@@ -579,4 +584,102 @@ TEST_F(HostFixture, ReattachFourSessionsUnderTwoSeconds) {
     std::cout << "[reattach] p50=" << ms[ms.size() / 2] << "ms p95=" << p95 << "ms max=" << ms.back()
               << "ms\n";
     EXPECT_LT(p95, 2000.0);
+}
+
+// Stability (design doc 1.5): exited sessions beyond the retention limit release their threads,
+// engines and history; their metadata stays listed.
+TEST_F(HostFixture, ExitedSessionsAreReleasedBeyondRetention) {
+    auto thread_count = [&] {
+        DWORD n = 0;
+        HANDLE snap = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        THREADENTRY32 te{sizeof(te)};
+        for (BOOL ok = ::Thread32First(snap, &te); ok; ok = ::Thread32Next(snap, &te)) {
+            if (te.th32OwnerProcessID == ::GetProcessId(host_.get()))
+                ++n;
+        }
+        ::CloseHandle(snap);
+        return n;
+    };
+    const DWORD baseline = thread_count();
+    std::vector<std::string> ids;
+    for (int i = 0; i < 12; ++i)
+        ids.push_back(create("echo", "churn" + std::to_string(i)));
+    for (const auto& id : ids)
+        ctl({L"stop", w(id), L"--force"});
+    ASSERT_TRUE(wait_until(
+        [&] {
+            const auto j = Json::parse(ctl({L"list", L"--json"}).out, nullptr, false);
+            if (j.is_discarded())
+                return false;
+            return std::all_of(j["sessions"].begin(), j["sessions"].end(),
+                               [](const Json& s) { return s["process_state"] == "Exited"; });
+        },
+        20s));
+    const auto j = Json::parse(ctl({L"list", L"--json"}).out);  // list prunes
+    int released = 0;
+    for (const auto& s : j["sessions"])
+        released += s.value("history_only", false) ? 1 : 0;
+    EXPECT_EQ(j["sessions"].size(), 12u);
+    EXPECT_EQ(released, 4);
+    EXPECT_LE(thread_count(), baseline + 8 * 2 + 4) << "baseline " << baseline;
+}
+
+// QA-17: the pipe's DACL grants access to SYSTEM and the current user only.
+TEST_F(HostFixture, PipeDaclAllowsOnlySystemAndCurrentUser) {
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    // Read the DACL from a client handle on the real pipe instance.
+    HANDLE h =
+        ::CreateFileW(pipe_.c_str(), GENERIC_READ | READ_CONTROL, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    ASSERT_NE(h, INVALID_HANDLE_VALUE);
+    win::UniqueHandle pipe_handle(h);
+    ASSERT_EQ(::GetSecurityInfo(pipe_handle.get(), SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                                nullptr, &dacl, nullptr, &sd),
+              static_cast<DWORD>(ERROR_SUCCESS));
+    ASSERT_NE(dacl, nullptr);
+    std::vector<std::wstring> sids;
+    for (DWORD i = 0; i < dacl->AceCount; ++i) {
+        void* ace = nullptr;
+        ASSERT_TRUE(::GetAce(dacl, i, &ace));
+        auto* allowed = static_cast<ACCESS_ALLOWED_ACE*>(ace);
+        ASSERT_EQ(allowed->Header.AceType, ACCESS_ALLOWED_ACE_TYPE);
+        LPWSTR text = nullptr;
+        ASSERT_TRUE(::ConvertSidToStringSidW(reinterpret_cast<PSID>(&allowed->SidStart), &text));
+        sids.emplace_back(text);
+        ::LocalFree(text);
+    }
+    ::LocalFree(sd);
+    std::sort(sids.begin(), sids.end());
+    std::vector<std::wstring> expected = {L"S-1-5-18", ipc::current_user_sid()};
+    std::sort(expected.begin(), expected.end());
+    EXPECT_EQ(sids, expected);  // no Everyone (S-1-1-0), no anonymous, no other users
+}
+
+// Design doc 3.9: diagnostics never contain what the user typed.
+TEST_F(HostFixture, HostLogNeverContainsInput) {
+    const auto id = create("echo", "secret");
+    ctl({L"send", w(id), L"--text", L"TOP-SECRET-TOKEN-1234", L"--enter"});
+    std::this_thread::sleep_for(500ms);
+    std::ifstream in(data_dir_ / L"host.log", std::ios::binary);
+    const std::string log((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_FALSE(log.empty());
+    EXPECT_EQ(log.find("TOP-SECRET"), std::string::npos);
+}
+
+// Non-ASCII output survives a resize: ConPTY repaints the screen after a resize, and the repaint
+// must still reach the engine as valid UTF-8 (cmd's banner is localized, e.g. Traditional Chinese).
+TEST_F(HostFixture, LocalizedOutputSurvivesResize) {
+    const auto id = create("cmd", "cjk");
+    auto c = connect();
+    ASSERT_TRUE(c);
+    ASSERT_TRUE(c->call("session.attach", {{"session", id}, {"want_control", true}}));
+    ASSERT_TRUE(wait_until([&] { return read(id).find("Microsoft") != std::string::npos; }, 10s));
+    const std::string before = read(id);
+    ASSERT_TRUE(c->call("session.resize", {{"session", id}, {"rows", 21}, {"cols", 67}}));
+    std::this_thread::sleep_for(1500ms);
+    const std::string after = read(id);
+    std::cout << "[before]\n" << before << "\n[after]\n" << after << std::endl;
+    EXPECT_EQ(before.find("\xEF\xBF\xBD"), std::string::npos) << "U+FFFD before resize";
+    EXPECT_EQ(after.find("\xEF\xBF\xBD"), std::string::npos) << "U+FFFD after resize";
+    c->close();
 }
