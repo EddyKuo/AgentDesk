@@ -20,6 +20,9 @@ plan: sprint/current/plan.md
 | 2026-11-17 | S1-4 | ⬜ | ✅ | libs/terminal：VtEngine（libvterm）、OSC 7501 rev 0.4 解析與紀錄、歷史上限、bracketed paste。發現並繞過 libvterm 0.3.3 bug：UTF-8 被切在兩次寫入之間且後接控制字元時產生 U+FFFD，改為暫存尾端不完整序列（不丟資料）。逐位元組切分測試通過 |
 | 2026-11-17 | S1-5 | ⬜ | ✅ | 內建 vs 隨附 ConPTY 實測（Windows 10.0.26300）：內建版本自行回 DA1 並丟掉 OSC 7501 查詢回覆；隨附 1.24.260710001 正確轉送且順序在 DA1 之前。兩者都轉送 7501 狀態回報與鍵盤位元組。**ADR-08 定案：隨附 ConPTY；凍結 OQ-04** |
 | 2026-11-17 | — | — | — | 里程碑 S1-M3（ConPTY 決策）達成；S1-M2 中「DA 與 OSC 7501 回覆順序正確」已由單元與整合測試涵蓋 |
+| 2026-11-17 | S1-2 | ⬜ | ✅ | 凍結 CLI：Claude Code 2.1.326（`%USERPROFILE%\.local\bin\claude.exe`，原生 exe，≥2.1.295 支援 OSC 7501）；Codex CLI 0.155.1（`%LOCALAPPDATA%\Programs\OpenAI\Codex\bin\codex.exe`，原生 exe）。兩者皆不需 cmd 啟動器。登入由 CLI 自行處理，未檢查帳號內容 |
+| 2026-11-17 | S1-8 | ⬜ | 🔄 | 無 UI 端到端（tools/pty_run，只啟動與 Ctrl+C 退出，未送 prompt）：Claude Code 在隨附 ConPTY 下送出 7501 查詢、2.3 秒回報 idle、退出時 clear；內建 ConPTY 下無任何狀態。Codex 不送 7501 查詢，可正常啟動與退出。證據：docs/poc/evidence/s1-8-*.json。UI 內操作待 S1-6；Codex hook 實測需修改使用者 ~/.codex 設定，留待使用者同意 |
+| 2026-11-17 | — | — | — | 新增 libs/host Session actor（M1 沿用）：引擎只在 actor 執行緒、快照合併發布、中斷 5 秒寬限後提示強制終止、OSC 7501 與 report-state 兩種來源、seq 去重。測試 75/75 |
 
 ## 契約狀態
 
