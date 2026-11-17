@@ -11,7 +11,8 @@ agentdesk_executable(unit_tests
     unit/command_line_test.cpp
     unit/input_mapping_test.cpp
     unit/protocol_test.cpp
-    unit/remote_screen_test.cpp)
+    unit/remote_screen_test.cpp
+    unit/workspace_test.cpp)
 target_link_libraries(unit_tests PRIVATE
     agentdesk::ui agentdesk::protocol agentdesk::terminal agentdesk::platform_win agentdesk::vterm
     nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock shell32)

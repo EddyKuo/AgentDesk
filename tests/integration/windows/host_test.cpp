@@ -23,6 +23,7 @@
 #include <aclapi.h>
 #include <sddl.h>
 
+#include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
@@ -681,5 +682,85 @@ TEST_F(HostFixture, LocalizedOutputSurvivesResize) {
     std::cout << "[before]\n" << before << "\n[after]\n" << after << std::endl;
     EXPECT_EQ(before.find("\xEF\xBF\xBD"), std::string::npos) << "U+FFFD before resize";
     EXPECT_EQ(after.find("\xEF\xBF\xBD"), std::string::npos) << "U+FFFD after resize";
+    c->close();
+}
+
+// The shared UI document: stored by the host, survives a host restart, and other watching
+// windows get the change (spaces, tabs and splits shared between screens).
+TEST_F(HostFixture, UiStateIsSharedAndPersisted) {
+    auto a = connect();
+    auto b = connect();
+    ASSERT_TRUE(a && b);
+    std::atomic<int> events{0};
+    Json last;
+    std::mutex m;
+    b->set_event_handler([&](agentdesk::protocol::Event e) {
+        if (e.event == "ui.state") {
+            std::lock_guard lock(m);
+            last = e.body;
+            ++events;
+        }
+    });
+    const auto g = b->call("ui.state.get", {{"watch", true}});
+    ASSERT_TRUE(g && g->result);
+    EXPECT_TRUE(g->result->at("doc").empty());
+    const Json doc = {{"version", 1}, {"spaces", Json::array({{{"id", "s1"}, {"name", "api"}}})}};
+    const auto set = a->call("ui.state.set", {{"doc", doc}});
+    ASSERT_TRUE(set && set->result);
+    ASSERT_TRUE(wait_until([&] { return events.load() == 1; }, 5s));
+    {
+        std::lock_guard lock(m);
+        EXPECT_EQ(last["doc"], doc);
+    }
+    EXPECT_TRUE(a->call("ui.state.set", {{"doc", "not an object"}})->error.has_value());
+    a->close();
+    b->close();
+    ::TerminateProcess(host_.get(), 99);
+    ::WaitForSingleObject(host_.get(), 5000);
+    start_host();
+    auto c = connect();
+    ASSERT_TRUE(c);
+    const auto again = c->call("ui.state.get", Json::object());
+    ASSERT_TRUE(again && again->result);
+    EXPECT_EQ(again->result->at("doc"), doc);
+    c->close();
+}
+
+// What runs in the terminal now: a shell that starts a program reports that program.
+TEST_F(HostFixture, ForegroundProgramFollowsChild) {
+    const auto id = create("cmd", "prog");
+    auto program = [&] {
+        const auto j = Json::parse(ctl({L"list", L"--json"}).out, nullptr, false);
+        return j.is_discarded() ? std::string() : j["sessions"][0].value("program", "");
+    };
+    ASSERT_TRUE(wait_until([&] { return program() == "cmd"; }, 10s)) << program();
+    ctl({L"send", w(id), L"--text", w("\"" + win::to_utf8(std::wstring(AGENTDESK_VT_PROBE)) + "\" echo"),
+         L"--enter"});
+    EXPECT_TRUE(wait_until([&] { return program() == "vt_probe"; }, 10s)) << program();
+}
+
+// worktree.add: a new branch checked out in its own folder; bad input is refused.
+TEST_F(HostFixture, WorktreeAddCreatesCheckout) {
+    const auto repo = data_dir_ / L"repo";
+    std::filesystem::create_directories(repo);
+    auto git = [&](std::vector<std::wstring> args) {
+        args.insert(args.begin(), {L"git", L"-C", repo.native()});
+        return agentdesk::host::run_tool(args, repo, 30s);
+    };
+    ASSERT_TRUE(git({L"init", L"-q"}).started) << "git not on PATH";
+    git({L"-c", L"user.email=t@example.invalid", L"-c", L"user.name=t", L"commit", L"-q", L"--allow-empty",
+         L"-m", L"init"});
+    auto c = connect();
+    ASSERT_TRUE(c);
+    const auto target = data_dir_ / L"wt" / L"feature-x";
+    const auto r = c->call("worktree.add",
+                           {{"repo", win::to_utf8(repo.native())},
+                            {"branch", "feature/x"},
+                            {"path", win::to_utf8(target.native())}},
+                           70s);
+    ASSERT_TRUE(r && r->result) << (r && r->error ? r->error_message : "no response");
+    EXPECT_TRUE(std::filesystem::exists(target / L".git"));
+    EXPECT_TRUE(c->call("worktree.add", {{"repo", win::to_utf8(repo.native())}, {"branch", "-x"}})
+                    ->error.has_value());
     c->close();
 }

@@ -5,6 +5,9 @@ agentdesk_library(agentdesk_ui
     src/imgui_adapter.cpp
     src/fonts.cpp
     src/terminal_view.cpp
+    src/workspace.cpp
+    src/keymap.cpp
+    src/git_info.cpp
     src/remote_screen.cpp
     src/host_client.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)

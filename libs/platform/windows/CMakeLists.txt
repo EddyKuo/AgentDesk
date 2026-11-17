@@ -5,7 +5,8 @@ agentdesk_library(agentdesk_platform_win
     src/conpty_api.cpp
     src/job.cpp
     src/pty_process.cpp
-    src/detached.cpp)
+    src/detached.cpp
+    src/process_tree.cpp)
 add_library(agentdesk::platform_win ALIAS agentdesk_platform_win)
 target_include_directories(agentdesk_platform_win PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # Headers include <windows.h>; consumers need the same lean/unicode definitions.

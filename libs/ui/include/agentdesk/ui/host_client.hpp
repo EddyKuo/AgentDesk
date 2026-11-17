@@ -31,6 +31,7 @@ struct SessionView {
     std::string name;
     std::string cwd;
     std::string created_at;  // ISO 8601 UTC, from the host
+    std::string program;     // what runs in the terminal now ("claude", "pwsh"), from the host
     std::string profile_id;
     std::string process_state = "Unknown";
     std::optional<std::uint32_t> exit_code;
@@ -106,6 +107,15 @@ public:
 
     // Fire-and-forget request executed on the worker thread.
     void post(std::string method, protocol::Json params);
+    // Request with a result; `done` runs on the worker thread (error empty on success).
+    void call(std::string method, protocol::Json params,
+              std::function<void(protocol::Json result, std::string error)> done,
+              std::chrono::milliseconds timeout = std::chrono::seconds(5));
+
+    // Shared UI document kept by the host (spaces, tabs, splits). take_ui_state() returns it
+    // once after connecting and whenever another window changed it.
+    std::optional<protocol::Json> take_ui_state();
+    void set_ui_state(protocol::Json doc);
 
 private:
     friend class RemoteSession;  // queues history/control requests on the worker
@@ -123,6 +133,7 @@ private:
     std::deque<Task> tasks_;
     std::map<std::string, std::shared_ptr<RemoteSession>> sessions_;
     std::vector<std::pair<std::string, std::string>> profiles_;
+    std::optional<protocol::Json> pending_ui_state_;
     std::string instance_id_;
     std::string last_error_;
     std::unique_ptr<ipc::PipeClient> client_;  // worker thread owns connect/close

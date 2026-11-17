@@ -79,6 +79,9 @@ private:
     protocol::Response do_history(const protocol::Request& req);
     protocol::Response do_state_report(const protocol::Request& req);
     protocol::Response do_shutdown(const protocol::Request& req);
+    protocol::Response do_ui_state_get(const ipc::ConnectionPtr& conn, const protocol::Request& req);
+    protocol::Response do_ui_state_set(const ipc::ConnectionPtr& conn, const protocol::Request& req);
+    protocol::Response do_worktree_add(const protocol::Request& req);
 
     // Resolves "session" (UUID or unique name). Sets `error` on failure. Takes mutex_.
     ManagedPtr resolve(const protocol::Request& req, std::optional<protocol::Response>& error);
@@ -101,6 +104,12 @@ private:
     };
     std::map<std::string, Dedupe> dedupe_;
     std::uint64_t next_snapshot_id_ = 1;
+    // Shared UI document (spaces, tabs, splits): opaque to the host, newest write wins, every
+    // watching client gets "ui.state" when it changes (herdr keeps its layout in the core too).
+    nlohmann::json ui_state_ = nlohmann::json::object();
+    std::uint64_t ui_state_rev_ = 0;
+    bool ui_state_loaded_ = false;
+    std::map<std::uint64_t, std::weak_ptr<ipc::Connection>> ui_watchers_;
 };
 
 }  // namespace agentdesk::host

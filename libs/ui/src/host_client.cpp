@@ -84,6 +84,8 @@ void update_view_from_json(SessionView& v, const Json& j) {
     v.name = j.value("name", v.name);
     v.cwd = j.value("cwd", v.cwd);
     v.created_at = j.value("created_at", v.created_at);
+    if (const auto p = j.find("program"); p != j.end() && p->is_string())
+        v.program = p->get<std::string>();
     v.profile_id = j.value("profile_id", v.profile_id);
     v.process_state = j.value("process_state", v.process_state);
     if (j.contains("exit_code")) {
@@ -176,28 +178,54 @@ bool RemoteSession::can_input() const {
 }
 
 void RemoteSession::request_history(std::size_t lines) {
-    lines = std::min<std::size_t>(lines, 200);  // history.read returns at most 200 lines
+    lines = std::min<std::size_t>(lines, 5000);
     {
         std::lock_guard lock(mutex_);
-        // Refetch when more lines are needed or the cached copy is over a second old (new output
-        // keeps pushing lines into history while the user is scrolled up).
+        // Refetch when more lines are needed or the cached copy is stale (new output keeps
+        // pushing lines into history while the user is scrolled up or searching).
         const auto now = std::chrono::steady_clock::now();
-        if (lines <= history_requested_ && now - history_fetched_at_ < 1s)
+        const auto max_age = lines > 400 ? 3s : 1s;
+        if (lines <= history_requested_ && now - history_fetched_at_ < max_age)
             return;
         history_requested_ = lines;
         history_fetched_at_ = now;
     }
     owner_.enqueue([self = this, lines](ipc::PipeClient& c) {
-        const auto r = c.call("history.read", {{"session", self->id_}, {"tail", true}, {"max_lines", lines}});
+        // history.read returns at most 200 lines (design doc 3.7): newest page by tail, then
+        // older pages by line id until enough lines or the oldest kept line.
+        const auto r = c.call("history.read", {{"session", self->id_}, {"tail", true}, {"max_lines", 200}});
         if (!r || !r->result)
             return;
-        auto out = std::make_shared<std::vector<HistoryLineText>>();
-        for (const auto& l : r->result->value("lines", Json::array())) {
-            out->push_back({l.value("line_id", static_cast<std::uint64_t>(0)), l.value("text", "")});
+        std::vector<HistoryLineText> lines_out;
+        for (const auto& l : r->result->value("lines", Json::array()))
+            lines_out.push_back({l.value("line_id", static_cast<std::uint64_t>(0)), l.value("text", "")});
+        const auto first_available =
+            r->result->value("first_available_line_id", static_cast<std::uint64_t>(0));
+        const bool truncated = r->result->value("truncated", false);
+        while (lines_out.size() < lines && !lines_out.empty() &&
+               lines_out.front().line_id > first_available) {
+            const std::uint64_t first = lines_out.front().line_id;
+            const std::uint64_t from = first > first_available + 200 ? first - 200 : first_available;
+            const auto page =
+                c.call("history.read", {{"session", self->id_},
+                                        {"from_line_id", from},
+                                        {"max_lines", static_cast<std::uint64_t>(first - from)}});
+            if (!page || !page->result)
+                break;
+            std::vector<HistoryLineText> older;
+            for (const auto& l : page->result->value("lines", Json::array())) {
+                const auto id = l.value("line_id", static_cast<std::uint64_t>(0));
+                if (id < first)
+                    older.push_back({id, l.value("text", "")});
+            }
+            if (older.empty())
+                break;
+            lines_out.insert(lines_out.begin(), older.begin(), older.end());
         }
+        auto out = std::make_shared<std::vector<HistoryLineText>>(std::move(lines_out));
         std::lock_guard lock(self->mutex_);
         self->history_ = std::move(out);
-        self->view_.history_truncated = r->result->value("truncated", false);
+        self->view_.history_truncated = truncated;
     });
 }
 
@@ -283,6 +311,32 @@ void HostClient::post(std::string method, Json params) {
     });
 }
 
+void HostClient::call(std::string method, Json params, std::function<void(Json, std::string)> done,
+                      std::chrono::milliseconds timeout) {
+    enqueue([this, method = std::move(method), params = std::move(params), done = std::move(done),
+             timeout](ipc::PipeClient& c) {
+        const auto r = c.call(method, params, timeout);
+        if (!done)
+            return;
+        if (!r)
+            done(Json(), "no response from agent-host");
+        else if (r->error)
+            done(Json(), std::string(protocol::to_string(*r->error)) + ": " + r->error_message);
+        else
+            done(r->result.value_or(Json::object()), "");
+        notify();
+    });
+}
+
+std::optional<Json> HostClient::take_ui_state() {
+    std::lock_guard lock(mutex_);
+    return std::exchange(pending_ui_state_, std::nullopt);
+}
+
+void HostClient::set_ui_state(Json doc) {
+    post("ui.state.set", {{"doc", std::move(doc)}});
+}
+
 void HostClient::request_start_host() {
     start_requested_ = true;
     cv_.notify_all();
@@ -366,6 +420,10 @@ bool HostClient::try_connect(bool allow_start) {
         std::lock_guard lock(mutex_);
         profiles_ = std::move(list);
     }
+    if (const auto r = client_->call("ui.state.get", {{"watch", true}}); r && r->result) {
+        std::lock_guard lock(mutex_);
+        pending_ui_state_ = r->result->value("doc", Json::object());
+    }
     refresh_sessions(*client_);
     notify();
     return true;
@@ -404,6 +462,14 @@ void HostClient::refresh_sessions(ipc::PipeClient& c) {
 }
 
 void HostClient::on_event(protocol::Event e) {
+    if (e.event == "ui.state") {
+        {
+            std::lock_guard lock(mutex_);
+            pending_ui_state_ = e.body.value("doc", Json::object());
+        }
+        notify();
+        return;
+    }
     const std::string id = e.body.value("session_id", "");
     std::shared_ptr<RemoteSession> s;
     {

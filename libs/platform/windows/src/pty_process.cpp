@@ -9,6 +9,7 @@
 
 #include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/win/process_tree.hpp"
 
 namespace agentdesk::platform::win {
 
@@ -227,6 +228,10 @@ std::optional<DWORD> PtyProcess::wait_exit(std::chrono::milliseconds timeout) co
         throw_last_error("GetExitCodeProcess");
     }
     return code;
+}
+
+std::string PtyProcess::foreground_program() const {
+    return agentdesk::platform::win::foreground_program(job_.get(), pid_);
 }
 
 void PtyProcess::close() {

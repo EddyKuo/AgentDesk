@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory)][string]$Out,
     [string]$BuildDir = '',
     [string]$Profile = 'chinese',
-    [int]$WaitSeconds = 6
+    [int]$WaitSeconds = 6,
+    [string]$Run = ''
 )
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -52,7 +53,9 @@ if ($env:SHOT_EXTRA) {  # extra sessions created before the UI starts: "profile:
         & (Join-Path $dir 'agentctl.exe') --pipe $pipe run --profile $pn[0] --name $pn[1] --cwd ([IO.Path]::GetTempPath()) | Out-Null
     }
 }
-$p = Start-Process $ui -ArgumentList @('--pipe', $pipe, '--start', $Profile, '--exit-after-ms', (($WaitSeconds + 1) * 1000), '--report', "`"$report`"") -PassThru -WorkingDirectory $here
+$uiArgs = @('--pipe', $pipe, '--start', $Profile, '--exit-after-ms', (($WaitSeconds + 1) * 1000), '--report', "`"$report`"")
+if ($Run) { $uiArgs += @('--run', "`"$Run`"") }
+$p = Start-Process $ui -ArgumentList $uiArgs -PassThru -WorkingDirectory $here
 Start-Sleep -Seconds $WaitSeconds
 $p.Refresh()
 $h = $p.MainWindowHandle

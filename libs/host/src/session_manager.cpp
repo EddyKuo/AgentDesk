@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/platform/win/error.hpp"
 
 namespace agentdesk::host {
@@ -175,6 +176,7 @@ void SessionManager::on_open(const ipc::ConnectionPtr&) {}
 
 void SessionManager::on_close(const ipc::ConnectionPtr& conn) {
     std::lock_guard lock(mutex_);
+    ui_watchers_.erase(conn->id());
     for (auto& [id, m] : sessions_) {
         m->subscribers.erase(conn->id());
         if (m->controller == conn->id())
@@ -237,7 +239,97 @@ Response SessionManager::dispatch(const ipc::ConnectionPtr& conn, const Request&
         return do_state_report(req);
     if (m == "host.shutdown")
         return do_shutdown(req);
+    if (m == "ui.state.get")
+        return do_ui_state_get(conn, req);
+    if (m == "ui.state.set")
+        return do_ui_state_set(conn, req);
+    if (m == "worktree.add")
+        return do_worktree_add(req);
     return bad(req, "unknown method: " + m);
+}
+
+Response SessionManager::do_ui_state_get(const ipc::ConnectionPtr& conn, const Request& req) {
+    std::lock_guard lock(mutex_);
+    if (!ui_state_loaded_) {
+        ui_state_loaded_ = true;
+        if (const auto j = read_json_with_backup(config_.data_dir / L"ui-state.json")) {
+            ui_state_ = j->value("doc", Json::object());
+            ui_state_rev_ = j->value("rev", static_cast<std::uint64_t>(0));
+        }
+    }
+    if (req.params.value("watch", false))
+        ui_watchers_[conn->id()] = conn;
+    return protocol::ok(req.id, {{"rev", ui_state_rev_}, {"doc", ui_state_}});
+}
+
+Response SessionManager::do_ui_state_set(const ipc::ConnectionPtr& conn, const Request& req) {
+    const auto it = req.params.find("doc");
+    if (it == req.params.end() || !it->is_object())
+        return bad(req, "doc must be an object");
+    if (it->dump().size() > 1024 * 1024)
+        return bad(req, "doc larger than 1 MiB");
+    std::lock_guard lock(mutex_);
+    ui_state_loaded_ = true;
+    ui_state_ = *it;
+    ++ui_state_rev_;
+    try {
+        write_json_atomic(config_.data_dir / L"ui-state.json",
+                          {{"schema_version", 1}, {"rev", ui_state_rev_}, {"doc", ui_state_}});
+    } catch (const std::exception&) {
+        // Like sessions.json: a write failure must not stop the host (kept in memory).
+    }
+    protocol::Event e;
+    e.event = "ui.state";
+    e.body = {{"rev", ui_state_rev_}, {"doc", ui_state_}, {"from", conn->id()}};
+    const auto payload = protocol::serialize(e);
+    for (auto w = ui_watchers_.begin(); w != ui_watchers_.end();) {
+        auto c = w->second.lock();
+        if (!c) {
+            w = ui_watchers_.erase(w);
+            continue;
+        }
+        if (c->id() != conn->id())
+            c->send(payload);
+        ++w;
+    }
+    return protocol::ok(req.id, {{"rev", ui_state_rev_}});
+}
+
+Response SessionManager::do_worktree_add(const Request& req) {
+    const std::string repo = req.params.value("repo", "");
+    const std::string branch = req.params.value("branch", "");
+    std::string path = req.params.value("path", "");
+    if (repo.empty() || branch.empty() || has_control_chars(branch) || branch.starts_with("-"))
+        return bad(req, "repo and branch are required; branch may not start with '-'");
+    const std::filesystem::path repo_path(win::to_wide(repo));
+    std::error_code ec;
+    if (!std::filesystem::is_directory(repo_path, ec))
+        return protocol::fail(req.id, ErrorCode::kBadRequest, "repo folder does not exist: " + repo);
+    if (path.empty()) {
+        wchar_t home[MAX_PATH]{};
+        const DWORD n = ::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
+        const auto base = std::filesystem::path(std::wstring(home, n)) / L".agentdesk" / L"worktrees";
+        const auto p = default_worktree_path(base, repo_path, branch).u8string();
+        path.assign(p.begin(), p.end());
+    }
+    const std::wstring wbranch = win::to_wide(branch);
+    const std::wstring wpath = win::to_wide(path);
+    // New branch first; if it already exists, check the existing branch out.
+    auto r = run_tool({L"git", L"-C", repo_path.native(), L"worktree", L"add", L"-b", wbranch, wpath},
+                      repo_path, std::chrono::seconds(60));
+    if (r.started && !r.timed_out && r.exit_code != 0 &&
+        r.output.find("already exists") != std::string::npos &&
+        r.output.find("branch") != std::string::npos) {
+        r = run_tool({L"git", L"-C", repo_path.native(), L"worktree", L"add", wpath, wbranch}, repo_path,
+                     std::chrono::seconds(60));
+    }
+    if (!r.started)
+        return protocol::fail(req.id, ErrorCode::kSpawnFailed, "git was not found on PATH");
+    if (r.timed_out)
+        return protocol::fail(req.id, ErrorCode::kInternal, "git worktree add timed out");
+    if (r.exit_code != 0)
+        return protocol::fail(req.id, ErrorCode::kBadRequest, "git worktree add failed: " + r.output);
+    return protocol::ok(req.id, {{"path", path}, {"branch", branch}, {"output", r.output}});
 }
 
 void SessionManager::prune_exited() {
@@ -426,6 +518,7 @@ Json SessionManager::describe(const Managed& m) const {
         j["rows"] = snap->rows;
         j["history_truncated"] = info.history_truncated;
         j["backpressure_waits"] = info.backpressure_waits;
+        j["program"] = m.session->foreground_program();
     } else {
         j["agent_state"] = "Unknown";
         j["history_only"] = true;  // Lost, or Exited and released to bound resources
