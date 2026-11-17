@@ -3,6 +3,8 @@
 #include <chrono>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <imgui.h>
 
@@ -29,7 +31,11 @@ public:
 
     // Earliest time a redraw is needed without new input (pending debounced resize).
     [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> next_deadline() const;
-    [[nodiscard]] bool has_selection() const { return sel_anchor_.has_value() && sel_end_.has_value(); }
+    [[nodiscard]] bool has_selection() const {
+        return (sel_anchor_.has_value() && sel_end_.has_value()) ||
+               (line_sel_a_.has_value() && line_sel_b_.has_value());
+    }
+    [[nodiscard]] int scroll_offset() const noexcept { return scroll_offset_; }
 
     TerminalTheme theme;
 
@@ -48,6 +54,13 @@ private:
     std::string paste_pending_;
     bool open_paste_popup_ = false;
     std::string notice_;
+    // Scrollback (design doc 3.4/3.5): lines of history shown above the live screen. While
+    // scrolled, selection works on whole lines keyed by history line_id (or a screen-row key).
+    int scroll_offset_ = 0;
+    std::optional<std::uint64_t> line_sel_a_;
+    std::optional<std::uint64_t> line_sel_b_;
+    std::vector<std::pair<std::uint64_t, std::string>> viewport_lines_;  // key, text (scrolled mode)
+    std::string selected_text() const;
 };
 
 }  // namespace agentdesk::ui

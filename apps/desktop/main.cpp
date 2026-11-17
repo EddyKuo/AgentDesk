@@ -1,6 +1,6 @@
-// agent-ui.exe (M0 prototype): Win32 + DX11 + Dear ImGui docking.
-// M0 runs sessions in-process through host::Session. From M2 the same views talk to
-// agent-host.exe over the named pipe instead (TerminalSource is the seam).
+// agent-ui.exe: Win32 + DX11 + Dear ImGui docking front end of agent-host.exe (design doc 4).
+// The UI holds no process or ConPTY: every session lives in the host. Closing the window only
+// detaches; "Exit and stop all sessions" is the explicit way to end the host (design doc 4.3).
 #include <d3d11.h>
 #include <dxgi.h>
 #include <windows.h>
@@ -11,7 +11,9 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -21,10 +23,11 @@
 #include <nlohmann/json.hpp>
 #include <shellapi.h>
 
-#include "agentdesk/host/session.hpp"
-#include "agentdesk/platform/win/conpty_api.hpp"
+#include "agentdesk/ipc/host_launcher.hpp"
+#include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/ui/fonts.hpp"
+#include "agentdesk/ui/host_client.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam,
@@ -33,9 +36,10 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 namespace {
 
 namespace win = agentdesk::platform::win;
-namespace host = agentdesk::host;
 namespace ui = agentdesk::ui;
+namespace ipc = agentdesk::ipc;
 using Clock = std::chrono::steady_clock;
+using Json = nlohmann::json;
 
 // ---------------------------------------------------------------- D3D11 plumbing
 struct Gfx {
@@ -48,8 +52,9 @@ struct Gfx {
     bool occluded = false;
 } g_gfx;
 
-HANDLE g_wake = nullptr;  // set by session threads; the UI loop wakes and redraws
+HANDLE g_wake = nullptr;  // set by IPC threads; the UI loop wakes and redraws
 float g_pending_dpi = 0.0f;
+std::atomic<bool> g_close_requested{false};
 
 void create_rtv() {
     ID3D11Texture2D* back = nullptr;
@@ -75,17 +80,13 @@ bool create_device(HWND hwnd) {
     sd.SampleDesc.Count = 1;
     sd.Windowed = TRUE;
     sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    UINT flags = 0;
-#ifndef NDEBUG
-    // D3D11_CREATE_DEVICE_DEBUG needs the Graphics Tools optional feature; not required.
-#endif
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0};
     D3D_FEATURE_LEVEL got{};
-    HRESULT hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, levels, 2,
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2,
                                                D3D11_SDK_VERSION, &sd, &g_gfx.swap, &g_gfx.device, &got,
                                                &g_gfx.context);
     if (hr == DXGI_ERROR_UNSUPPORTED) {  // no hardware device: WARP software rasterizer
-        hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags, levels, 2,
+        hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, levels, 2,
                                            D3D11_SDK_VERSION, &sd, &g_gfx.swap, &g_gfx.device, &got,
                                            &g_gfx.context);
     }
@@ -127,6 +128,9 @@ LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
             if ((wparam & 0xfff0) == SC_KEYMENU)
                 return 0;  // Alt must reach the terminal
             break;
+        case WM_CLOSE:
+            g_close_requested = true;  // window X = detach; the app decides (first-run notice)
+            return 0;
         case WM_DESTROY:
             ::PostQuitMessage(0);
             return 0;
@@ -136,149 +140,98 @@ LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     return ::DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
-// ---------------------------------------------------------------- sessions (M0: in-process)
-struct Profile {
-    std::string name;
-    std::filesystem::path executable;
-    std::vector<std::wstring> args;
+// ---------------------------------------------------------------- UI settings (ui.json)
+struct UiSettings {
+    bool close_notice_shown = false;
+    std::string last_cwd;
 };
 
-std::vector<Profile> detect_profiles() {
-    std::vector<Profile> out;
-    auto add = [&](const char* name, const wchar_t* exe, std::vector<std::wstring> args = {}) {
-        wchar_t buf[MAX_PATH]{};
-        if (::SearchPathW(nullptr, exe, L".exe", MAX_PATH, buf, nullptr) > 0) {
-            out.push_back({name, buf, std::move(args)});
-        }
-    };
-    add("Claude Code", L"claude.exe");
-    add("Codex CLI", L"codex.exe");
-    add("PowerShell 7", L"pwsh.exe", {L"-NoLogo"});
-    add("Windows PowerShell", L"powershell.exe", {L"-NoLogo"});
-    add("Command Prompt", L"cmd.exe");
-    return out;
+std::filesystem::path ui_settings_path() {
+    wchar_t buf[MAX_PATH]{};
+    const DWORD n = ::GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+    auto dir =
+        (n > 0 ? std::filesystem::path(std::wstring(buf, n)) : std::filesystem::temp_directory_path()) /
+        L"AgentDesk";
+    std::filesystem::create_directories(dir);
+    return dir / L"ui.json";
 }
 
-class LocalSource final : public ui::TerminalSource {
-public:
-    explicit LocalSource(host::Session& s) : session_(s) {}
-    std::shared_ptr<const agentdesk::terminal::ScreenSnapshot> snapshot() const override {
-        return session_.snapshot();
-    }
-    void send(host::InputEvent input) override { session_.send(std::move(input)); }
-    void resize(int rows, int cols) override { session_.resize(rows, cols); }
-    bool can_input() const override {
-        const auto s = session_.info().process_state;
-        return s == host::ProcessState::kRunning || s == host::ProcessState::kStopping;
-    }
+UiSettings load_ui_settings() {
+    UiSettings s;
+    std::ifstream in(ui_settings_path(), std::ios::binary);
+    if (!in)
+        return s;
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const auto j = Json::parse(ss.str(), nullptr, false);
+    if (j.is_discarded() || j.value("schema_version", 0) != 1)
+        return s;
+    s.close_notice_shown = j.value("close_notice_shown", false);
+    s.last_cwd = j.value("last_cwd", "");
+    return s;
+}
 
-private:
-    host::Session& session_;
-};
+void save_ui_settings(const UiSettings& s) {
+    const auto path = ui_settings_path();
+    const auto tmp = std::filesystem::path(path).concat(L".tmp");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out << Json{{"schema_version", 1},
+                    {"close_notice_shown", s.close_notice_shown},
+                    {"last_cwd", s.last_cwd}}
+                   .dump(2);
+    }
+    ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+}
 
-struct SessionItem {
-    int id = 0;
-    std::string name;
-    std::string profile;
-    std::string cwd;
-    std::unique_ptr<host::Session> session;
-    std::unique_ptr<LocalSource> source;
+// ---------------------------------------------------------------- app state
+struct ViewState {
     ui::TerminalView view;
-    bool view_open = true;
+    bool open = true;
     bool focus_next = true;
 };
 
 struct App {
-    win::ConPtyApi conpty;
-    std::vector<Profile> profiles;
-    std::vector<std::unique_ptr<SessionItem>> sessions;
-    int next_id = 1;
-    int selected = 0;
+    std::unique_ptr<ui::HostClient> host;
+    UiSettings settings;
+    std::map<std::string, ViewState> views;  // by session id
+    std::string selected;
     ui::FontSet fonts;
     char cwd_buf[512] = {};
     char name_buf[128] = {};
     int profile_index = 0;
-    std::string error;
+    std::string create_error;
     bool show_new_dialog = false;
+    bool show_exit_dialog = false;
+    bool show_close_notice = false;
+    bool exit_now = false;
+    std::string exit_error;
 };
 
-std::filesystem::path exe_dir() {
-    wchar_t buf[MAX_PATH]{};
-    const DWORD n = ::GetModuleFileNameW(nullptr, buf, MAX_PATH);
-    return std::filesystem::path(std::wstring(buf, n)).parent_path();
+const char* agent_label(const std::string& s) {
+    if (s == "Idle")
+        return "- Idle";
+    if (s == "Working")
+        return "* Working";
+    if (s == "Blocked")
+        return "! Blocked";
+    if (s == "Done")
+        return "v Done";
+    if (s == "Error")
+        return "x Error";
+    return "? Unknown";  // neutral; never shown as done (design doc 4.1)
 }
 
-const char* agent_label(host::AgentState s) {
-    switch (s) {
-        case host::AgentState::kUnknown:
-            return "? Unknown";
-        case host::AgentState::kIdle:
-            return "- Idle";
-        case host::AgentState::kWorking:
-            return "* Working";
-        case host::AgentState::kBlocked:
-            return "! Blocked";
-        case host::AgentState::kDone:
-            return "v Done";
-        case host::AgentState::kError:
-            return "x Error";
-    }
-    return "?";
-}
-
-ImVec4 agent_color(host::AgentState s) {
-    switch (s) {
-        case host::AgentState::kBlocked:
-            return ImVec4(1.0f, 0.65f, 0.2f, 1.0f);
-        case host::AgentState::kWorking:
-            return ImVec4(0.45f, 0.75f, 1.0f, 1.0f);
-        case host::AgentState::kDone:
-            return ImVec4(0.45f, 0.9f, 0.5f, 1.0f);
-        case host::AgentState::kError:
-            return ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
-        default:
-            return ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
-    }
-}
-
-void start_session(App& app) {
-    app.error.clear();
-    if (app.profiles.empty()) {
-        app.error = "No profiles found";
-        return;
-    }
-    const Profile& p = app.profiles[static_cast<std::size_t>(app.profile_index)];
-    auto item = std::make_unique<SessionItem>();
-    item->id = app.next_id++;
-    item->name = app.name_buf[0] ? app.name_buf : p.name;
-    item->profile = p.name;
-    item->cwd = app.cwd_buf;
-    host::SessionConfig cfg;
-    cfg.api = app.conpty;
-    cfg.spec.executable = p.executable;
-    cfg.spec.args = p.args;
-    try {
-        cfg.spec.cwd = win::to_wide(item->cwd);
-    } catch (const std::exception&) {
-        app.error = "cwd is not valid UTF-8";
-        return;
-    }
-    cfg.spec.size = {120, 40};
-    cfg.engine.rows = 40;
-    cfg.engine.cols = 120;
-    host::SessionListener listener;
-    listener.on_snapshot = [](auto) { ::SetEvent(g_wake); };
-    listener.on_info = [](const host::SessionInfo&) { ::SetEvent(g_wake); };
-    try {
-        item->session = host::Session::start(std::move(cfg), std::move(listener));
-    } catch (const std::exception& e) {
-        app.error = std::string("Start failed: ") + e.what();  // the form keeps its input (4.2)
-        return;
-    }
-    item->source = std::make_unique<LocalSource>(*item->session);
-    app.selected = item->id;
-    app.sessions.push_back(std::move(item));
-    app.show_new_dialog = false;
+ImVec4 agent_color(const std::string& s) {
+    if (s == "Blocked")
+        return ImVec4(1.0f, 0.65f, 0.2f, 1.0f);
+    if (s == "Working")
+        return ImVec4(0.45f, 0.75f, 1.0f, 1.0f);
+    if (s == "Done")
+        return ImVec4(0.45f, 0.9f, 0.5f, 1.0f);
+    if (s == "Error")
+        return ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
+    return ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
 }
 
 void draw_new_session(App& app) {
@@ -288,26 +241,96 @@ void draw_new_session(App& app) {
     }
     if (!ImGui::BeginPopupModal("New session", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         return;
+    const auto profiles = app.host->profiles();
+    app.profile_index = std::clamp(app.profile_index, 0, std::max(0, static_cast<int>(profiles.size()) - 1));
     if (ImGui::BeginCombo("Profile",
-                          app.profiles.empty() ? "(none)" : app.profiles[app.profile_index].name.c_str())) {
-        for (int i = 0; i < static_cast<int>(app.profiles.size()); ++i) {
-            if (ImGui::Selectable(app.profiles[i].name.c_str(), i == app.profile_index))
+                          profiles.empty()
+                              ? "(none)"
+                              : profiles[static_cast<std::size_t>(app.profile_index)].second.c_str())) {
+        for (int i = 0; i < static_cast<int>(profiles.size()); ++i) {
+            if (ImGui::Selectable(profiles[static_cast<std::size_t>(i)].second.c_str(),
+                                  i == app.profile_index))
                 app.profile_index = i;
         }
         ImGui::EndCombo();
     }
-    if (!app.profiles.empty()) {
-        const auto exe = app.profiles[app.profile_index].executable.u8string();
-        ImGui::TextDisabled("%s", reinterpret_cast<const char*>(exe.c_str()));
-    }
     ImGui::InputText("Working directory", app.cwd_buf, sizeof(app.cwd_buf));
     ImGui::InputText("Name", app.name_buf, sizeof(app.name_buf));
-    if (!app.error.empty())
-        ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", app.error.c_str());
+    if (!app.create_error.empty())
+        ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", app.create_error.c_str());
+    const bool can_start = app.host->connected() && !profiles.empty();
+    ImGui::BeginDisabled(!can_start);
     if (ImGui::Button("Start")) {
-        start_session(app);
-        if (app.error.empty())
-            ImGui::CloseCurrentPopup();
+        app.create_error = "Starting...";
+        app.settings.last_cwd = app.cwd_buf;  // reused next time; never silently replaced (4.2)
+        save_ui_settings(app.settings);
+        auto* error = &app.create_error;
+        app.host->create_session(profiles[static_cast<std::size_t>(app.profile_index)].first, app.cwd_buf,
+                                 app.name_buf, [error](std::string e) { *error = e.empty() ? "" : e; });
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Close"))
+        ImGui::CloseCurrentPopup();
+    if (app.create_error.empty() && ImGui::IsWindowAppearing() == false) {
+        // keep the dialog open; the user closes it explicitly so errors stay visible
+    }
+    ImGui::EndPopup();
+}
+
+void draw_exit_dialog(App& app, const std::vector<std::shared_ptr<ui::RemoteSession>>& sessions) {
+    if (app.show_exit_dialog) {
+        ImGui::OpenPopup("Exit and stop all sessions");
+        app.show_exit_dialog = false;
+        app.exit_error.clear();
+    }
+    if (!ImGui::BeginPopupModal("Exit and stop all sessions", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+    ImGui::TextUnformatted("These sessions will be force-stopped and agent-host will exit:");
+    int running = 0;
+    for (const auto& s : sessions) {
+        const auto v = s->view();
+        if (v.process_state != "Running" && v.process_state != "Stopping" && v.process_state != "Starting")
+            continue;
+        ++running;
+        ImGui::BulletText("%s  (%s)  %s", v.name.c_str(), v.process_state.c_str(), v.cwd.c_str());
+    }
+    if (running == 0)
+        ImGui::TextDisabled("(no running sessions)");
+    if (!app.exit_error.empty())
+        ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", app.exit_error.c_str());
+    if (ImGui::Button("Stop all and exit")) {
+        auto* exit_now = &app.exit_now;
+        auto* error = &app.exit_error;
+        app.host->shutdown_host(true, [exit_now, error](std::string e) {
+            if (e.empty())
+                *exit_now = true;
+            else
+                *error = e;
+            ::SetEvent(g_wake);
+        });
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel"))
+        ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+void draw_close_notice(App& app) {
+    if (app.show_close_notice) {
+        ImGui::OpenPopup("Sessions keep running");
+        app.show_close_notice = false;
+    }
+    if (!ImGui::BeginPopupModal("Sessions keep running", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+    ImGui::TextUnformatted(
+        "Closing this window only detaches. Your sessions keep running in agent-host,\n"
+        "and reopening AgentDesk reconnects to them.\n"
+        "Use File > Exit and stop all sessions to end everything.");
+    if (ImGui::Button("Close window")) {
+        app.settings.close_notice_shown = true;  // shown once (design doc 4.3)
+        save_ui_settings(app.settings);
+        app.exit_now = true;
     }
     ImGui::SameLine();
     if (ImGui::Button("Cancel"))
@@ -317,102 +340,157 @@ void draw_new_session(App& app) {
 
 void draw_ui(App& app) {
     ImGui::DockSpaceOverViewport();
+    const auto sessions = app.host->sessions();
+    const bool connected = app.host->connected();
 
     if (ImGui::BeginMainMenuBar()) {
-        if (ImGui::MenuItem("New session"))
+        if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("New session", nullptr, false, connected))
+                app.show_new_dialog = true;
+            if (ImGui::MenuItem("Exit and stop all sessions...", nullptr, false, connected))
+                app.show_exit_dialog = true;
+            ImGui::EndMenu();
+        }
+        if (ImGui::MenuItem("New session", nullptr, false, connected))
             app.show_new_dialog = true;
-        ImGui::TextDisabled("ConPTY: %s",
-                            app.conpty.bundled ? "bundled" : "inbox (status reports unavailable)");
         ImGui::EndMainMenuBar();
     }
     draw_new_session(app);
+    draw_exit_dialog(app, sessions);
+    draw_close_notice(app);
 
     ImGui::Begin("Sessions");
-    for (auto& item : app.sessions) {
-        const auto info = item->session->info();
-        ImGui::PushID(item->id);
-        if (ImGui::Selectable(item->name.c_str(), app.selected == item->id)) {
-            app.selected = item->id;
-            item->view_open = true;
-            item->focus_next = true;
+    for (const auto& s : sessions) {
+        const auto v = s->view();
+        ImGui::PushID(v.id.c_str());
+        if (ImGui::Selectable(v.name.c_str(), app.selected == v.id)) {
+            app.selected = v.id;
+            auto& vs = app.views[v.id];
+            vs.open = true;  // reopen a closed panel; the session never stopped (4.3)
+            vs.focus_next = true;
         }
-        ImGui::SameLine(180);
-        ImGui::TextDisabled("%s", std::string(host::to_string(info.process_state)).c_str());
-        ImGui::SameLine(260);
-        ImGui::TextColored(agent_color(info.agent.state), "%s", agent_label(info.agent.state));
-        ImGui::TextDisabled("  %s  |  %s", item->profile.c_str(), item->cwd.c_str());
+        ImGui::SameLine(170);
+        ImGui::TextDisabled("%s", v.process_state.c_str());
+        ImGui::SameLine(250);
+        ImGui::TextColored(agent_color(v.agent_state), "%s", agent_label(v.agent_state));
+        ImGui::TextDisabled("  %s  |  %s", v.profile_id.c_str(), v.cwd.c_str());
         ImGui::PopID();
     }
     ImGui::End();
 
-    SessionItem* selected = nullptr;
-    for (auto& item : app.sessions) {
-        if (!item->view_open)
+    std::shared_ptr<ui::RemoteSession> selected;
+    for (const auto& s : sessions) {
+        const auto v = s->view();
+        auto [it, inserted] = app.views.try_emplace(v.id);
+        if (inserted && app.selected.empty())
+            app.selected = v.id;
+        auto& vs = it->second;
+        if (!vs.open)
             continue;
-        const std::string title = item->name + "###term" + std::to_string(item->id);
+        const std::string title = v.name + "###term" + v.id;
         ImGui::SetNextWindowSize(ImVec2(900, 560), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin(title.c_str(), &item->view_open,
-                         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoNav)) {
-            const bool focused = item->view.draw("grid", *item->source, app.fonts, item->focus_next);
-            item->focus_next = false;
+        if (ImGui::Begin(title.c_str(), &vs.open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoNav)) {
+            if (!connected || v.lost) {
+                // Disconnected overlay: input disabled, never presented as Done (design doc 4.3).
+                ImGui::TextColored(
+                    ImVec4(1, 0.6f, 0.3f, 1), "%s",
+                    v.lost ? "Lost (owned by a previous agent-host)" : "Disconnected from agent-host");
+            } else if (!v.is_controller) {
+                ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.4f, 1),
+                                   "Read-only: another window controls this session");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Take control"))
+                    s->take_control();
+            }
+            const bool focused = vs.view.draw("grid", *s, app.fonts, vs.focus_next);
+            vs.focus_next = false;
             if (focused)
-                app.selected = item->id;
+                app.selected = v.id;
         }
         ImGui::End();
-        if (app.selected == item->id)
-            selected = item.get();
+        if (app.selected == v.id)
+            selected = s;
     }
 
     ImGui::Begin("Details");
-    if (selected != nullptr) {
-        const auto info = selected->session->info();
-        ImGui::Text("Process: %s  pid %u", std::string(host::to_string(info.process_state)).c_str(),
-                    info.pid);
-        if (info.exit_code)
-            ImGui::Text("Exit code: %u", *info.exit_code);
-        if (info.remaining_processes > 0)
-            ImGui::Text("Cleaning up %u child processes", info.remaining_processes);
-        ImGui::TextColored(agent_color(info.agent.state), "Agent: %s", agent_label(info.agent.state));
-        ImGui::Text("Source: %s", info.agent.source.empty() ? "(none)" : info.agent.source.c_str());
-        if (info.agent.state == host::AgentState::kUnknown &&
-            info.agent.last_state != host::AgentState::kUnknown) {
-            ImGui::TextDisabled("Last known: %s", agent_label(info.agent.last_state));
-        }
-        if (!info.agent.message.empty())
-            ImGui::TextWrapped("Message: %s", info.agent.message.c_str());
-        const auto snap = selected->session->snapshot();
-        ImGui::Text("Size: %d x %d   history truncated: %s", snap->cols, snap->rows,
-                    info.history_truncated ? "yes" : "no");
+    if (selected) {
+        const auto v = selected->view();
+        ImGui::Text("Process: %s  pid %u", v.process_state.c_str(), v.pid);
+        if (v.exit_code)
+            ImGui::Text("Exit code: %u", *v.exit_code);
+        if (v.remaining_processes > 0)
+            ImGui::Text("Cleaning up %u child processes", v.remaining_processes);
+        ImGui::TextColored(agent_color(v.agent_state), "Agent: %s", agent_label(v.agent_state));
+        ImGui::Text("Source: %s", v.agent_source.empty() ? "(none)" : v.agent_source.c_str());
+        if (v.agent_state == "Unknown" && v.last_agent_state != "Unknown")
+            ImGui::TextDisabled("Last known: %s", agent_label(v.last_agent_state));
+        if (!v.agent_message.empty())
+            ImGui::TextWrapped("Message: %s", v.agent_message.c_str());
+        ImGui::Text("Profile: %s", v.profile_id.c_str());
+        ImGui::TextWrapped("Directory: %s", v.cwd.c_str());
         ImGui::Separator();
-        const bool running = info.process_state == host::ProcessState::kRunning;
+        const bool running = v.process_state == "Running";
+        ImGui::BeginDisabled(!connected || v.lost);
         if (running && ImGui::Button("Stop (interrupt)"))
-            selected->session->interrupt();
-        if (info.process_state == host::ProcessState::kStopping) {
-            ImGui::TextDisabled(info.still_running_after_interrupt ? "Still running after interrupt"
-                                                                   : "Stopping...");
+            selected->stop(false);
+        if (v.process_state == "Stopping") {
+            ImGui::TextDisabled(v.still_running_after_interrupt ? "Still running after interrupt"
+                                                                : "Stopping...");
             if (ImGui::Button("Force stop"))
-                selected->session->force_stop();
+                selected->stop(true);
         }
-        if (running) {
+        if (running && v.is_controller) {
             ImGui::SameLine();
             if (ImGui::Button("Send Ctrl+C"))
-                selected->session->send(host::RawInput{std::string("\x03", 1)});
+                selected->send(agentdesk::host::RawInput{std::string("\x03", 1)});
         }
+        ImGui::EndDisabled();
     } else {
         ImGui::TextDisabled("No session selected");
     }
     ImGui::End();
+
+    // Status bar: host connection, control, size, truncation / overload (design doc 4.1).
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float h = ImGui::GetFrameHeight();
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x, vp->WorkPos.y + vp->WorkSize.y - h));
+    ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, h));
+    ImGui::Begin("##status", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                     ImGuiWindowFlags_NoNav);
+    if (connected) {
+        ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1), "host: connected");
+    } else {
+        ImGui::TextColored(ImVec4(1, 0.5f, 0.3f, 1), "host: disconnected (%s)",
+                           app.host->last_error().c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Start host"))
+            app.host->request_start_host();
+    }
+    if (app.host->host_dies_with_launcher()) {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(1, 0.7f, 0.2f, 1),
+                           "| agent-host will end when the launching terminal closes");
+    }
+    if (selected) {
+        const auto v = selected->view();
+        const auto snap = selected->snapshot();
+        ImGui::SameLine();
+        ImGui::TextDisabled("| %s | %dx%d%s%s", v.is_controller ? "input: this window" : "input: read-only",
+                            snap->cols, snap->rows, v.history_truncated ? " | history truncated" : "",
+                            v.backpressure_waits > 0 ? " | output throttled" : "");
+    }
+    ImGui::End();
 }
 
-}  // namespace
-
-namespace {
-
-// Developer options (M0 evidence runs): --start <profile name> [--exit-after-ms N] [--report file]
+// Developer options (automated checks): --start <profile id> [--exit-after-ms N] [--report file]
+// [--pipe NAME]
 struct DevOptions {
     std::string start_profile;
     long long exit_after_ms = 0;
     std::filesystem::path report;
+    std::wstring pipe;
 };
 
 DevOptions parse_dev_options() {
@@ -427,29 +505,34 @@ DevOptions parse_dev_options() {
             o.exit_after_ms = std::stoll(argv[++i]);
         else if (a == L"--report" && i + 1 < argc)
             o.report = argv[++i];
+        else if (a == L"--pipe" && i + 1 < argc)
+            o.pipe = argv[++i];
     }
     ::LocalFree(argv);
     return o;
 }
 
 void write_report(const App& app, const std::filesystem::path& path) {
-    nlohmann::json out = nlohmann::json::array();
-    for (const auto& item : app.sessions) {
-        const auto info = item->session->info();
-        const auto snap = item->session->snapshot();
-        nlohmann::json screen = nlohmann::json::array();
+    Json out = {{"connected", app.host->connected()}, {"host_instance_id", app.host->host_instance_id()}};
+    Json list = Json::array();
+    for (const auto& s : app.host->sessions()) {
+        const auto v = s->view();
+        const auto snap = s->snapshot();
+        Json screen = Json::array();
         for (int r = 0; r < snap->rows; ++r)
             screen.push_back(snap->row_text(r));
-        out.push_back({{"name", item->name},
-                       {"process_state", host::to_string(info.process_state)},
-                       {"agent_state", host::to_string(info.agent.state)},
-                       {"agent_source", info.agent.source},
-                       {"last_agent_state", host::to_string(info.agent.last_state)},
-                       {"cols", snap->cols},
-                       {"rows", snap->rows},
-                       {"bytes_from_program", info.bytes_from_program},
-                       {"screen", screen}});
+        list.push_back({{"id", v.id},
+                        {"name", v.name},
+                        {"process_state", v.process_state},
+                        {"pid", v.pid},
+                        {"agent_state", v.agent_state},
+                        {"agent_source", v.agent_source},
+                        {"is_controller", v.is_controller},
+                        {"cols", snap->cols},
+                        {"rows", snap->rows},
+                        {"screen", screen}});
     }
+    out["sessions"] = list;
     std::ofstream(path, std::ios::binary) << out.dump(2) << '\n';
 }
 
@@ -461,8 +544,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, wnd_proc,       0,      0, instance, nullptr, nullptr,
                    nullptr,    nullptr,    L"AgentDeskUi", nullptr};
     ::RegisterClassExW(&wc);
-    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"AgentDesk (M0 prototype)", WS_OVERLAPPEDWINDOW, 100, 100,
-                                1400, 900, nullptr, nullptr, instance, nullptr);
+    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"AgentDesk", WS_OVERLAPPEDWINDOW, 100, 100, 1400, 900,
+                                nullptr, nullptr, instance, nullptr);
     if (!create_device(hwnd)) {
         destroy_device();
         ::UnregisterClassW(wc.lpszClassName, instance);
@@ -478,56 +561,66 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;  // multi-viewports stay off in v1 (3.5)
     static std::string ini_path;
     {
-        wchar_t buf[MAX_PATH]{};
-        if (::GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH) > 0) {
-            const auto dir = std::filesystem::path(buf) / L"AgentDesk";
-            std::filesystem::create_directories(dir);
-            const auto u8 = (dir / L"imgui.ini").u8string();
-            ini_path.assign(u8.begin(), u8.end());
-            io.IniFilename = ini_path.c_str();
-        }
+        const auto u8 = ui_settings_path().parent_path().append(L"imgui.ini").u8string();
+        ini_path.assign(u8.begin(), u8.end());
+        io.IniFilename = ini_path.c_str();
     }
     ImGui::StyleColorsDark();
     const float dpi = ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd);
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.ScaleAllSizes(dpi);
-    style.FontScaleDpi = dpi;
+    ImGui::GetStyle().ScaleAllSizes(dpi);
+    ImGui::GetStyle().FontScaleDpi = dpi;
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(g_gfx.device, g_gfx.context);
 
     App app;
+    app.settings = load_ui_settings();
     app.fonts = ui::load_fonts(16.0f);
-    app.conpty = win::load_conpty(exe_dir());
-    app.profiles = detect_profiles();
     {
-        const auto cwd = std::filesystem::current_path().u8string();
-        std::snprintf(app.cwd_buf, sizeof(app.cwd_buf), "%s", reinterpret_cast<const char*>(cwd.c_str()));
-    }
-
-    if (!dev.start_profile.empty()) {
-        for (int i = 0; i < static_cast<int>(app.profiles.size()); ++i) {
-            if (app.profiles[i].name == dev.start_profile)
-                app.profile_index = i;
+        std::string cwd = app.settings.last_cwd;
+        if (cwd.empty()) {
+            const auto u8 = std::filesystem::current_path().u8string();
+            cwd.assign(u8.begin(), u8.end());
         }
-        start_session(app);
+        std::snprintf(app.cwd_buf, sizeof(app.cwd_buf), "%s", cwd.c_str());
     }
-    const auto launched = Clock::now();
+    ui::HostClientOptions hopts;
+    hopts.host_exe = ipc::sibling_executable(L"agent-host.exe");
+    hopts.pipe_name = dev.pipe.empty() ? ipc::default_pipe_name() : dev.pipe;
+    hopts.wake = [] { ::SetEvent(g_wake); };
+    app.host = std::make_unique<ui::HostClient>(hopts);
 
+    bool started_dev_session = dev.start_profile.empty();
+    const auto launched = Clock::now();
     bool running = true;
     int frames_to_draw = 3;
     while (running) {
-        if (dev.exit_after_ms > 0 && Clock::now() - launched > std::chrono::milliseconds(dev.exit_after_ms)) {
-            ::PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        if (!started_dev_session && app.host->connected()) {
+            started_dev_session = true;
+            app.host->create_session(dev.start_profile, app.cwd_buf, "", nullptr);
         }
-        // Event-driven: sleep until input, a session wake-up or the next view deadline (skill §2).
-        DWORD timeout = frames_to_draw > 0 ? 0 : (dev.exit_after_ms > 0 ? 200 : INFINITE);
-        for (const auto& item : app.sessions) {
-            if (const auto d = item->view.next_deadline()) {
+        if (dev.exit_after_ms > 0 && Clock::now() - launched > std::chrono::milliseconds(dev.exit_after_ms)) {
+            app.exit_now = true;
+        }
+        if (g_close_requested.exchange(false)) {
+            if (app.settings.close_notice_shown || dev.exit_after_ms > 0)
+                app.exit_now = true;
+            else
+                app.show_close_notice = true;
+        }
+        if (app.exit_now)
+            break;
+
+        // Event-driven: sleep until input, an IPC wake-up or the next view deadline.
+        DWORD timeout = frames_to_draw > 0 ? 0 : 1000;  // 1 s heartbeat for connection state
+        for (const auto& [id, vs] : app.views) {
+            if (const auto d = vs.view.next_deadline()) {
                 const auto ms =
                     std::chrono::duration_cast<std::chrono::milliseconds>(*d - Clock::now()).count();
                 timeout = std::min<DWORD>(timeout, static_cast<DWORD>(std::max<long long>(ms, 0) + 1));
             }
         }
+        if (dev.exit_after_ms > 0)
+            timeout = std::min<DWORD>(timeout, 100);
         const DWORD r = ::MsgWaitForMultipleObjectsEx(1, &g_wake, timeout, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         if (r == WAIT_OBJECT_0 || r == WAIT_TIMEOUT)
             frames_to_draw = std::max(frames_to_draw, 2);
@@ -587,7 +680,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     if (!dev.report.empty())
         write_report(app, dev.report);
-    app.sessions.clear();  // M0: sessions end with the window (host process arrives in M1)
+    app.host.reset();  // detach: sessions keep running in agent-host (design doc 4.3)
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();

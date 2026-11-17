@@ -1,0 +1,134 @@
+#pragma once
+
+// UI-side client of agent-host (design doc 2.1, 4.3). The UI thread never blocks on IPC:
+// requests run on a worker thread, events update per-session state, and a wake callback asks
+// the UI loop to redraw.
+
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <filesystem>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "agentdesk/ipc/pipe.hpp"
+#include "agentdesk/ui/remote_screen.hpp"
+#include "agentdesk/ui/terminal_source.hpp"
+
+namespace agentdesk::ui {
+
+class HostClient;
+
+struct SessionView {
+    std::string id;
+    std::string name;
+    std::string cwd;
+    std::string profile_id;
+    std::string process_state = "Unknown";
+    std::optional<std::uint32_t> exit_code;
+    std::uint32_t pid = 0;
+    std::string agent_state = "Unknown";
+    std::string agent_source;
+    std::string agent_kind;
+    std::string agent_message;
+    std::string last_agent_state = "Unknown";
+    bool still_running_after_interrupt = false;
+    std::uint32_t remaining_processes = 0;
+    bool history_truncated = false;
+    std::uint64_t backpressure_waits = 0;
+    bool lost = false;  // owned by a previous host instance
+    bool is_controller = false;
+    bool controlled_elsewhere = false;
+};
+
+class RemoteSession final : public TerminalSource {
+public:
+    RemoteSession(HostClient& owner, std::string id);
+
+    [[nodiscard]] std::shared_ptr<const terminal::ScreenSnapshot> snapshot() const override;
+    void send(host::InputEvent input) override;
+    void resize(int rows, int cols) override;
+    [[nodiscard]] bool can_input() const override;
+    void request_history(std::size_t lines) override;
+    [[nodiscard]] std::shared_ptr<const std::vector<HistoryLineText>> history() const override;
+
+    [[nodiscard]] SessionView view() const;
+    [[nodiscard]] const std::string& id() const noexcept { return id_; }
+    void take_control();
+    void stop(bool force);
+
+private:
+    friend class HostClient;
+    HostClient& owner_;
+    std::string id_;
+    mutable std::mutex mutex_;
+    RemoteScreen screen_;
+    SessionView view_;
+    bool attached_ = false;
+    bool resync_requested_ = false;
+    std::shared_ptr<const std::vector<HistoryLineText>> history_;
+    std::size_t history_requested_ = 0;
+};
+
+struct HostClientOptions {
+    std::filesystem::path host_exe;
+    std::wstring pipe_name;
+    std::function<void()> wake;  // called from background threads when something changed
+};
+
+class HostClient {
+public:
+    explicit HostClient(HostClientOptions options);
+    ~HostClient();
+    HostClient(const HostClient&) = delete;
+    HostClient& operator=(const HostClient&) = delete;
+
+    [[nodiscard]] bool connected() const noexcept { return connected_; }
+    [[nodiscard]] bool host_dies_with_launcher() const noexcept { return host_dies_with_launcher_; }
+    [[nodiscard]] std::string host_instance_id() const;
+    [[nodiscard]] std::string last_error() const;
+    [[nodiscard]] std::vector<std::shared_ptr<RemoteSession>> sessions() const;
+    [[nodiscard]] std::vector<std::pair<std::string, std::string>> profiles() const;  // id, name
+
+    void request_start_host();  // reconnect, starting agent-host.exe if needed
+    void create_session(std::string profile_id, std::string cwd, std::string name,
+                        std::function<void(std::string error)> done);
+    void shutdown_host(bool stop_sessions, std::function<void(std::string error)> done);
+
+    // Fire-and-forget request executed on the worker thread.
+    void post(std::string method, protocol::Json params);
+
+private:
+    friend class RemoteSession;  // queues history/control requests on the worker
+    using Task = std::function<void(ipc::PipeClient&)>;
+    void enqueue(Task task);
+    void worker_loop();
+    bool try_connect(bool allow_start);
+    void refresh_sessions(ipc::PipeClient& client);
+    void on_event(protocol::Event e);
+    void notify() const;
+
+    HostClientOptions options_;
+    mutable std::mutex mutex_;
+    std::condition_variable cv_;
+    std::deque<Task> tasks_;
+    std::map<std::string, std::shared_ptr<RemoteSession>> sessions_;
+    std::vector<std::pair<std::string, std::string>> profiles_;
+    std::string instance_id_;
+    std::string last_error_;
+    std::unique_ptr<ipc::PipeClient> client_;  // worker thread owns connect/close
+    std::atomic<bool> connected_{false};
+    std::atomic<bool> start_requested_{true};
+    std::atomic<bool> host_dies_with_launcher_{false};
+    std::atomic<bool> stop_{false};
+    std::thread worker_;
+};
+
+}  // namespace agentdesk::ui

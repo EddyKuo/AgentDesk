@@ -1,0 +1,40 @@
+{
+  "connected": true,
+  "host_instance_id": "ba26f951-4903-48f4-9508-567b96e06c87",
+  "sessions": [
+    {
+      "agent_source": "osc7501",
+      "agent_state": "Idle",
+      "cols": 67,
+      "id": "18538d38-fe2a-4f51-9401-0f866b17d1b8",
+      "is_controller": true,
+      "name": "Claude Code",
+      "pid": 39340,
+      "process_state": "Running",
+      "rows": 21,
+      "screen": [
+        "",
+        " ▐▛███▛█   Claude Code v2.1.326",
+        "▝▜██████▀  Opus 5.5 · Claude Max",
+        " ▝▝   ▝▝   D:\\src\\AgentDesk",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "                                               ◐ medium · /effort",
+        "───────────────────────────────────────────────────────────────────",
+        "❯ Try \"create a util logging.py that…\"",
+        "───────────────────────────────────────────────────────────────────",
+        "  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSI…",
+        "  [🔀 feature/sprint-3/m2-des…] [Opus 5.5] [🧠 ok]",
+        "  ⏵⏵ auto mode on (shift+tab to cycle)"
+      ]
+    }
+  ]
+}

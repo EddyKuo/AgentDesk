@@ -10,7 +10,8 @@ agentdesk_executable(unit_tests
     unit/vt_engine_test.cpp
     unit/command_line_test.cpp
     unit/input_mapping_test.cpp
-    unit/protocol_test.cpp)
+    unit/protocol_test.cpp
+    unit/remote_screen_test.cpp)
 target_link_libraries(unit_tests PRIVATE
     agentdesk::ui agentdesk::protocol agentdesk::terminal agentdesk::platform_win agentdesk::vterm
     nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock shell32)
@@ -26,11 +27,12 @@ agentdesk_executable(win_integration_tests
     integration/windows/host_test.cpp)
 target_link_libraries(win_integration_tests PRIVATE
     agentdesk::host agentdesk::ipc agentdesk::platform_win agentdesk::terminal nlohmann_json::nlohmann_json GTest::gtest_main)
-add_dependencies(win_integration_tests vt_probe agent-host agentctl)
+add_dependencies(win_integration_tests vt_probe agent-host agentctl agent-ui)
 target_compile_definitions(win_integration_tests PRIVATE
     AGENTDESK_VT_PROBE=L"$<TARGET_FILE:vt_probe>"
     AGENTDESK_HOST_EXE=L"$<TARGET_FILE:agent-host>"
     AGENTDESK_CTL_EXE=L"$<TARGET_FILE:agentctl>"
+    AGENTDESK_UI_DIR_CTL_EXE=L"$<TARGET_FILE_DIR:agent-ui>/agentctl.exe"
     AGENTDESK_BUNDLED_CONPTY_DIR=L"${PROJECT_SOURCE_DIR}/third_party/conpty/bin")
 gtest_discover_tests(win_integration_tests DISCOVERY_MODE PRE_TEST
     PROPERTIES LABELS "windows_integration" TIMEOUT 120)

@@ -328,6 +328,76 @@ TEST_F(HostFixture, HostCrashMarksSessionsLost) {
     EXPECT_EQ(ctl({L"send", w(id), L"--text", L"x"}).exit_code, 4u);  // Lost sessions take no input
 }
 
+// QA-20: a client started inside a kill-on-close job (like a terminal window) auto-starts the
+// host. With breakaway allowed the host survives the job; without it, the client warns first.
+namespace {
+
+struct JobRun {
+    bool host_alive_after_job_closed = false;
+    std::string stderr_text;
+};
+
+JobRun auto_start_host_inside_job(bool allow_breakaway, const std::wstring& pipe) {
+    JobRun out;
+    win::UniqueHandle job(::CreateJobObjectW(nullptr, nullptr));
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION li{};
+    li.BasicLimitInformation.LimitFlags =
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | (allow_breakaway ? JOB_OBJECT_LIMIT_BREAKAWAY_OK : 0);
+    ::SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &li, sizeof(li));
+
+    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+    HANDLE rd = nullptr;
+    HANDLE wr = nullptr;
+    ::CreatePipe(&rd, &wr, &sa, 0);
+    ::SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+    win::UniqueHandle read_end(rd);
+    win::UniqueHandle write_end(wr);
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdError = wr;
+    si.hStdOutput = wr;
+    std::wstring cmd = win::build_command_line(AGENTDESK_UI_DIR_CTL_EXE, {L"--pipe", pipe, L"list"});
+    PROCESS_INFORMATION pi{};
+    if (!::CreateProcessW(AGENTDESK_UI_DIR_CTL_EXE, cmd.data(), nullptr, nullptr, TRUE,
+                          CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        return out;
+    }
+    ::AssignProcessToJobObject(job.get(), pi.hProcess);
+    ::ResumeThread(pi.hThread);
+    write_end.reset();
+    char buf[4096];
+    DWORD n = 0;
+    while (::ReadFile(read_end.get(), buf, sizeof(buf), &n, nullptr) && n > 0)
+        out.stderr_text.append(buf, n);
+    ::WaitForSingleObject(pi.hProcess, 30000);
+    ::CloseHandle(pi.hThread);
+    ::CloseHandle(pi.hProcess);
+    job.reset();  // "close the terminal": kills everything still in the job
+    std::this_thread::sleep_for(500ms);
+    auto probe = ipc::PipeClient::connect(pipe, 2s);
+    out.host_alive_after_job_closed = probe != nullptr;
+    if (probe)
+        probe->call("host.shutdown", {{"stop_sessions", true}}, 5s);
+    return out;
+}
+
+}  // namespace
+
+TEST(HostLaunch, HostBreaksAwayFromLauncherJob) {
+    const auto pipe = L"\\\\.\\pipe\\AgentDeskJobTest-ok-" + std::to_wstring(::GetCurrentProcessId());
+    const auto r = auto_start_host_inside_job(true, pipe);
+    EXPECT_TRUE(r.host_alive_after_job_closed) << r.stderr_text;
+    EXPECT_EQ(r.stderr_text.find("warning"), std::string::npos) << r.stderr_text;
+}
+
+TEST(HostLaunch, WarnsWhenHostCannotLeaveKillOnCloseJob) {
+    const auto pipe = L"\\\\.\\pipe\\AgentDeskJobTest-trap-" + std::to_wstring(::GetCurrentProcessId());
+    const auto r = auto_start_host_inside_job(false, pipe);
+    EXPECT_NE(r.stderr_text.find("will end agent-host when it closes"), std::string::npos) << r.stderr_text;
+    EXPECT_FALSE(r.host_alive_after_job_closed);
+}
+
 // UI-less operation (M1 exit criterion): read, write and stop without any attached UI.
 TEST_F(HostFixture, StopWorksWithoutUi) {
     const auto id = create("echo", "headless");

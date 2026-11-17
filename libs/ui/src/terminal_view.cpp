@@ -54,6 +54,26 @@ bool in_selection(CellPos p, CellPos a, CellPos b) {
 
 }  // namespace
 
+std::string TerminalView::selected_text() const {
+    if (!line_sel_a_ || !line_sel_b_)
+        return {};
+    std::string out;
+    bool inside = false;
+    for (const auto& [key, text] : viewport_lines_) {
+        const bool edge = key == *line_sel_a_ || key == *line_sel_b_;
+        if (edge || inside) {
+            if (!out.empty())
+                out += "\r\n";
+            out += text;
+        }
+        if (edge && *line_sel_a_ != *line_sel_b_)
+            inside = !inside;
+        else if (edge)
+            break;
+    }
+    return out;
+}
+
 std::optional<Clock::time_point> TerminalView::next_deadline() const {
     if (pending_size_ && pending_size_ != requested_size_)
         return pending_since_ + kResizeDebounce;
@@ -136,9 +156,12 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
             continue;
         switch (classify_clipboard_chord(key, mods, has_selection())) {
             case ClipboardAction::kCopy:
-                ImGui::SetClipboardText(selection_text(snap, *sel_anchor_, *sel_end_).c_str());
+                ImGui::SetClipboardText(line_sel_a_ ? selected_text().c_str()
+                                                    : selection_text(snap, *sel_anchor_, *sel_end_).c_str());
                 sel_anchor_.reset();
                 sel_end_.reset();
+                line_sel_a_.reset();
+                line_sel_b_.reset();
                 return;
             case ClipboardAction::kPaste:
                 if (const char* clip = ImGui::GetClipboardText(); clip != nullptr)
@@ -154,10 +177,12 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
         if (!adapter::key_pressed_owned(key, str_id))
             continue;
         if (const auto mapped = map_named_key(key)) {
+            scroll_offset_ = 0;
             source.send(host::KeyInput{*mapped, to_terminal_mods(mods)});
         }
     }
     if (adapter::key_pressed_owned(ImGuiKey_F12, str_id)) {
+        scroll_offset_ = 0;
         source.send(host::KeyInput{terminal::Key::kF12, to_terminal_mods(mods)});
     }
 
@@ -170,6 +195,7 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
                 continue;
             if (mods.ctrl && mods.shift && (key == ImGuiKey_C || key == ImGuiKey_V))
                 continue;
+            scroll_offset_ = 0;
             source.send(host::TextInput{std::u32string(1, *ch), to_terminal_mods(mods)});
         }
     }
@@ -178,7 +204,8 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
     if (!mods.ctrl || alt_gr) {
         auto text = printable_from_queue(io.InputQueueCharacters.Data, io.InputQueueCharacters.Size);
         if (!text.empty())
-            source.send(host::TextInput{std::move(text), terminal::kModNone});
+            scroll_offset_ = 0;
+        source.send(host::TextInput{std::move(text), terminal::kModNone});
     }
 }
 
@@ -207,19 +234,56 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     }
 
     const GridSize grid{snap.rows, snap.cols};
-    // Mouse selection on the visible screen (line-id based history selection comes with M2 scrollback).
+    ImGuiIO& io = ImGui::GetIO();
+
+    // Mouse wheel scrolls into history (fetched asynchronously, newest 200 lines max).
+    if (item.hovered && io.MouseWheel != 0.0f) {
+        scroll_offset_ = std::clamp(scroll_offset_ + static_cast<int>(io.MouseWheel * 3.0f), 0, 200);
+    }
+    const auto hist = source.history();
+    if (scroll_offset_ > 0)
+        source.request_history(static_cast<std::size_t>(scroll_offset_ + snap.rows));
+    const int available = hist ? static_cast<int>(hist->size()) : 0;
+    const int offset = std::min({scroll_offset_, available, snap.rows});
+    if (offset == 0 && scroll_offset_ > 0 && hist)
+        scroll_offset_ = std::min(scroll_offset_, available);
+
+    constexpr std::uint64_t kScreenKey = 1ull << 62;  // screen rows: kScreenKey + row
+    auto row_key = [&](int view_row) -> std::uint64_t {
+        if (view_row < offset)
+            return (*hist)[static_cast<std::size_t>(available - offset + view_row)].line_id;
+        return kScreenKey + static_cast<std::uint64_t>(view_row - offset);
+    };
+    if (offset > 0) {
+        viewport_lines_.clear();
+        for (int r = 0; r < snap.rows; ++r) {
+            viewport_lines_.emplace_back(
+                row_key(r), r < offset ? (*hist)[static_cast<std::size_t>(available - offset + r)].text
+                                       : snap.row_text(r - offset));
+        }
+    }
+
     if (item.clicked) {
-        sel_anchor_ = cell_at(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y, origin.x, origin.y,
-                              cell_w, cell_h, grid);
+        const auto p = cell_at(io.MousePos.x, io.MousePos.y, origin.x, origin.y, cell_w, cell_h, grid);
+        sel_anchor_.reset();
         sel_end_.reset();
+        line_sel_a_.reset();
+        line_sel_b_.reset();
+        if (offset > 0) {
+            line_sel_a_ = row_key(p.row);  // scrolled: whole-line selection by line_id
+        } else {
+            sel_anchor_ = p;
+        }
         selecting_ = true;
     }
     if (selecting_) {
         if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-            const auto p = cell_at(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y, origin.x, origin.y,
-                                   cell_w, cell_h, grid);
-            if (p != *sel_anchor_ || sel_end_)
+            const auto p = cell_at(io.MousePos.x, io.MousePos.y, origin.x, origin.y, cell_w, cell_h, grid);
+            if (line_sel_a_) {
+                line_sel_b_ = row_key(p.row);
+            } else if (sel_anchor_ && (p != *sel_anchor_ || sel_end_)) {
                 sel_end_ = p;
+            }
         } else {
             selecting_ = false;
         }
@@ -233,8 +297,14 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     const int last_row =
         std::min(snap.rows, static_cast<int>((dl->GetClipRectMax().y - origin.y) / cell_h) + 1);
     std::string run;
-    for (int row = first_row; row < last_row; ++row) {
-        const float y = origin.y + static_cast<float>(row) * cell_h;
+    for (int view_row = 0; view_row < offset; ++view_row) {
+        const auto& line = (*hist)[static_cast<std::size_t>(available - offset + view_row)];
+        const float y = origin.y + static_cast<float>(view_row) * cell_h;
+        dl->AddText(ImVec2(origin.x, y), theme.default_fg, line.text.data(),
+                    line.text.data() + line.text.size());
+    }
+    for (int row = first_row; row < last_row - offset; ++row) {
+        const float y = origin.y + static_cast<float>(row + offset) * cell_h;
         // Backgrounds as merged runs of equal colour.
         int col = 0;
         while (col < snap.cols) {
@@ -290,7 +360,20 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
         }
     }
 
-    if (has_selection()) {
+    if (line_sel_a_ && line_sel_b_) {
+        bool inside = false;
+        for (int r = 0; r < snap.rows; ++r) {
+            const auto key = row_key(r);
+            const bool edge = key == *line_sel_a_ || key == *line_sel_b_;
+            if (edge || inside) {
+                const float y = origin.y + static_cast<float>(r) * cell_h;
+                dl->AddRectFilled(ImVec2(origin.x, y), ImVec2(area_max.x, y + cell_h), theme.selection);
+            }
+            if (edge && *line_sel_a_ != *line_sel_b_)
+                inside = !inside;
+        }
+    }
+    if (sel_anchor_ && sel_end_) {
         for (int row = first_row; row < last_row; ++row) {
             for (int c = 0; c < snap.cols; ++c) {
                 if (!in_selection({row, c}, *sel_anchor_, *sel_end_))
@@ -303,8 +386,15 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     }
 
     const ImVec2 caret(origin.x + static_cast<float>(snap.cursor.col) * cell_w,
-                       origin.y + static_cast<float>(snap.cursor.row) * cell_h);
-    if (snap.cursor.visible && snap.cursor.row < snap.rows && snap.cursor.col < snap.cols) {
+                       origin.y + static_cast<float>(snap.cursor.row + offset) * cell_h);
+    if (offset > 0) {
+        const std::string tag = "scrollback +" + std::to_string(offset) + (available >= 200 ? " (max)" : "");
+        const ImVec2 sz = ImGui::CalcTextSize(tag.c_str());
+        dl->AddRectFilled(ImVec2(area_max.x - sz.x - 8, origin.y), ImVec2(area_max.x, origin.y + cell_h),
+                          IM_COL32(60, 60, 90, 220));
+        dl->AddText(ImVec2(area_max.x - sz.x - 4, origin.y), IM_COL32(230, 230, 255, 255), tag.c_str());
+    }
+    if (offset == 0 && snap.cursor.visible && snap.cursor.row < snap.rows && snap.cursor.col < snap.cols) {
         const ImVec2 caret_max(caret.x + cell_w, caret.y + cell_h);
         if (item.active) {
             dl->AddRectFilled(caret, caret_max, (theme.cursor & 0x00FFFFFF) | 0x90000000);
