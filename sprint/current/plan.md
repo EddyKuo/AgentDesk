@@ -1,12 +1,12 @@
 ---
 sprint: 1
-start_date: TBD            # 使用者下令開始寫程式的日期
+start_date: 2026-11-17
 complexity: M
 execution_mode: standard
 estimated_sprints: 5
 qa_agent_enabled: true
 sprint_phase: S_feature
-status: ready               # 規劃完成，等使用者下令開工
+status: active
 ---
 
 # Sprint 1：M0 技術 POC
@@ -29,7 +29,7 @@ status: ready               # 規劃完成，等使用者下令開工
 
 | ID | Agent | 依賴 | 產出 | Skills | 狀態 |
 |-----|-------|------|------|--------|------|
-| S1-1 | RD | — | 建置骨架：git repo、CMakePresets（vcvars x64＋Ninja）、vcpkg manifest（imgui docking、gtest）、`third_party/libvterm` 0.3.3 與 notices、空的 gtest 目標可以 `ctest` 通過；凍結 OQ-05（選定 JSON 套件）與 OQ-07，結果寫入 status | rd/lang-cpp、qa/framework-gtest | ⬜ |
+| S1-1 | RD | — | 建置骨架：git repo、CMakePresets（vcvars x64＋Ninja）、vcpkg manifest（imgui docking、gtest）、`third_party/libvterm` 0.3.3 與 notices、空的 gtest 目標可以 `ctest` 通過；凍結 OQ-05（選定 JSON 套件）與 OQ-07，結果寫入 status | rd/lang-cpp、qa/framework-gtest | ✅ |
 | S1-2 | RD | — | 凍結 CLI：記錄 Claude Code（需 ≥ v2.1.295）與 Codex CLI 的精確版本、安裝路徑、原生 exe 或 cmd 啟動器、登入方式（5.2 第 1 項） | shared/domain-coding-agents | ⬜ |
 | S1-3 | RD | S1-1 | `libs/platform/windows` 最小版：ConPTY 建立／讀寫／resize／關閉、Job Object、argv quoting；能跑 pwsh 並正確關閉 | rd/platform-windows-conpty | ⬜ |
 | S1-4 | RD | S1-1 | `libs/terminal` 最小版：libvterm 封裝、UTF-8 分段、DA／DSR 與 `OSC 7501 ; ?` 回覆、快照；逐位元組切分 fixture 測試通過（5.2 第 2 項）；按鍵編碼檢查（5.2 第 8 項）；字寬與 emoji 限制實測並列表（5.2 第 6 項後半） | rd/engine-terminal-vt、qa/framework-gtest | ⬜ |
@@ -57,7 +57,7 @@ status: ready               # 規劃完成，等使用者下令開工
 
 | ID | 項目 | 退出條件 | 狀態 |
 |----|------|---------|------|
-| S1-M1 | 建置可重現 | 乾淨 clone 在 vcvars x64 中 `cmake --preset` → `cmake --build` → `ctest` 全綠，沒有安裝任何新工具 | ⬜ |
+| S1-M1 | 建置可重現 | 乾淨 clone 在 vcvars x64 中 `cmake --preset` → `cmake --build` → `ctest` 全綠，沒有安裝任何新工具 | ✅ |
 | S1-M2 | 終端機核心可用 | VT fixture 逐位元組切分全部一致；DA 與 OSC 7501 回覆順序正確 | ⬜ |
 | S1-M3 | ConPTY 決策 | ADR-08 有實測證據並定案 | ⬜ |
 | S1-M4 | 真實 Agent 可操作 | Claude Code 在原型中可輸入、縮放、顯示；停止不死鎖 | ⬜ |
