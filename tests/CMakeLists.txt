@@ -8,9 +8,10 @@ agentdesk_executable(unit_tests
     unit/toolchain_smoke_test.cpp
     unit/program_status_test.cpp
     unit/vt_engine_test.cpp
-    unit/command_line_test.cpp)
+    unit/command_line_test.cpp
+    unit/input_mapping_test.cpp)
 target_link_libraries(unit_tests PRIVATE
-    agentdesk::terminal agentdesk::platform_win agentdesk::vterm
+    agentdesk::ui agentdesk::terminal agentdesk::platform_win agentdesk::vterm
     nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock shell32)
 target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}")
 gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)

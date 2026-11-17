@@ -1,0 +1,35 @@
+[
+  {
+    "agent_source": "osc7501",
+    "agent_state": "Idle",
+    "bytes_from_program": 1400,
+    "cols": 67,
+    "last_agent_state": "Unknown",
+    "name": "Claude Code",
+    "process_state": "Running",
+    "rows": 21,
+    "screen": [
+      "",
+      " ▐▛███▛█   Claude Code v2.1.326",
+      "▝▜██████▀  Opus 5.5 · Claude Max",
+      " ▝▝   ▝▝   D:\\src\\AgentDesk",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "                                               ◐ medium · /effort",
+      "───────────────────────────────────────────────────────────────────",
+      "❯ Try \"fix typecheck errors\"",
+      "───────────────────────────────────────────────────────────────────",
+      "  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSI…",
+      "  [🔀 feature/sprint-1/s1-1-b…] [Opus 5.5] [🧠 ok]",
+      "  ⏵⏵ auto mode on (shift+tab to cycle)"
+    ]
+  }
+]

@@ -17,6 +17,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(AgentDeskDefaults)
+include(AgentDeskConPty)
 
 option(AGENTDESK_BUILD_TESTS "Build AgentDesk tests" ON)
 option(AGENTDESK_BUILD_APPS "Build AgentDesk executables" ON)
