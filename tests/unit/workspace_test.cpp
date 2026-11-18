@@ -215,7 +215,7 @@ TEST(Keymap, HerdrSectionsObjectsAndValidation) {
     EXPECT_FALSE(k.global(*Keymap::parse("ctrl-shift-t")).has_value());  // to the program
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-j")), "tab.next");
     EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-shift-f")), "terminal");
-    EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-v")), "terminal.paste");
+    EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-v")), "terminal.paste_image");
 
     const auto errs = k.apply({{"windows", {{"f5", "tab.new"}}}, {"global", {{"f6", "no.such"}}}}, known);
     EXPECT_EQ(errs.size(), 2u);
@@ -320,7 +320,7 @@ TEST(Keymap, DefaultFileAppliesCleanly) {
     EXPECT_TRUE(k.apply(file, [](std::string_view) { return true; }).empty());
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-t")), "tab.new");
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-3")), "tab.select:3");
-    EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-v")), "terminal.paste");
+    EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-v")), "terminal.paste_image");
     EXPECT_EQ(Keymap::defaults().global_map(), k.global_map());
 }
 

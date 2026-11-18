@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <set>
 
+#include "agentdesk/ui/clipboard.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
 
 namespace agentdesk::ui {
@@ -17,6 +18,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr auto kResizeDebounce = std::chrono::milliseconds(50);  // design doc 3.5
 constexpr std::uint64_t kScreenKey = 1ull << 62;                 // screen rows: kScreenKey + row
+constexpr auto kDragScrollEvery = std::chrono::milliseconds(50);  // herdr src/terminal.rs:1174
 
 constexpr std::array<ImGuiKey, 26> kNamedKeys = {
     ImGuiKey_Enter,   ImGuiKey_KeypadEnter, ImGuiKey_Tab,       ImGuiKey_Backspace,  ImGuiKey_Escape,
@@ -150,41 +152,54 @@ void draw_text_line(ImDrawList* dl, ImFont* font, float size, ImFontBaked* baked
     }
 }
 
-}  // namespace
+// Combined lines of one frame: fetched history (oldest first), then the screen rows. Keys name a
+// line across frames: a history line_id, or kScreenKey + screen row.
+struct Lines {
+    const std::vector<HistoryLineText>* hist = nullptr;
+    const terminal::ScreenSnapshot* snap = nullptr;
 
-bool is_wide_codepoint(char32_t cp) {
-    return (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0x303E) ||
-           (cp >= 0x3041 && cp <= 0x33FF) || (cp >= 0x3400 && cp <= 0x4DBF) ||
-           (cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0xA000 && cp <= 0xA4CF) ||
-           (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0xF900 && cp <= 0xFAFF) ||
-           (cp >= 0xFE30 && cp <= 0xFE4F) || (cp >= 0xFF00 && cp <= 0xFF60) ||
-           (cp >= 0xFFE0 && cp <= 0xFFE6) || (cp >= 0x1F300 && cp <= 0x1F64F) ||
-           (cp >= 0x1F900 && cp <= 0x1F9FF) || (cp >= 0x20000 && cp <= 0x3FFFD);
-}
-
-std::string TerminalView::selected_text() const {
-    if (!line_sel_a_ || !line_sel_b_)
-        return {};
-    std::string out;
-    bool inside = false;
-    for (const auto& [key, text] : viewport_lines_) {
-        const bool edge = key == *line_sel_a_ || key == *line_sel_b_;
-        if (edge || inside) {
-            if (!out.empty())
-                out += "\r\n";
-            out += text;
-        }
-        if (edge && *line_sel_a_ != *line_sel_b_)
-            inside = !inside;
-        else if (edge)
-            break;
+    [[nodiscard]] int available() const { return hist != nullptr ? static_cast<int>(hist->size()) : 0; }
+    [[nodiscard]] int total() const { return available() + snap->rows; }
+    [[nodiscard]] std::uint64_t key(int idx) const {
+        if (idx < available())
+            return (*hist)[static_cast<std::size_t>(idx)].line_id;
+        return kScreenKey + static_cast<std::uint64_t>(idx - available());
     }
-    return out;
-}
+    [[nodiscard]] int index(std::uint64_t key) const {
+        if (key >= kScreenKey)
+            return available() + std::min(static_cast<int>(key - kScreenKey), snap->rows - 1);
+        if (hist == nullptr)
+            return 0;
+        const auto it = std::lower_bound(hist->begin(), hist->end(), key,
+                                         [](const HistoryLineText& l, std::uint64_t k) { return l.line_id < k; });
+        return static_cast<int>(it - hist->begin());
+    }
+    [[nodiscard]] bool wrapped(int idx) const {
+        if (idx < available())
+            return (*hist)[static_cast<std::size_t>(idx)].wrapped;
+        return snap->row_wrapped(idx - available());
+    }
+    [[nodiscard]] LineCells cells(int idx) const {
+        if (idx < available()) {
+            const auto& l = (*hist)[static_cast<std::size_t>(idx)];
+            return cells_from_text(l.text, l.wrapped);
+        }
+        const int r = idx - available();
+        LineCells out;
+        const auto first = snap->cells.begin() + static_cast<std::ptrdiff_t>(r) * snap->cols;
+        out.cells.assign(first, first + snap->cols);
+        out.wrapped = snap->row_wrapped(r);
+        return out;
+    }
+};
+
+}  // namespace
 
 std::optional<Clock::time_point> TerminalView::next_deadline() const {
     if (pending_size_ && pending_size_ != requested_size_)
         return pending_since_ + kResizeDebounce;
+    if (selecting_)
+        return drag_scrolled_at_ + kDragScrollEvery;  // keeps scrolling while held past an edge
     return std::nullopt;
 }
 
@@ -253,17 +268,55 @@ void TerminalView::draw_paste_popup(TerminalSource& source) {
 }
 
 void TerminalView::clear_selection() {
-    sel_anchor_.reset();
-    sel_end_.reset();
-    line_sel_a_.reset();
-    line_sel_b_.reset();
+    sel_a_.reset();
+    sel_b_.reset();
+    selecting_ = false;
 }
 
 void TerminalView::copy_selection(const terminal::ScreenSnapshot& snap) {
-    if (line_sel_a_ && line_sel_b_)
-        ImGui::SetClipboardText(selected_text().c_str());
-    else if (sel_anchor_ && sel_end_)
-        ImGui::SetClipboardText(selection_text(snap, *sel_anchor_, *sel_end_).c_str());
+    if (!sel_a_ || !sel_b_)
+        return;
+    const Lines lines{hist_.get(), &snap};
+    int ia = lines.index(sel_a_->key);
+    int ib = lines.index(sel_b_->key);
+    CellPos a{0, sel_a_->col};
+    CellPos b{0, sel_b_->col};
+    if (ib < ia || (ib == ia && b.col < a.col)) {
+        std::swap(ia, ib);
+        std::swap(a, b);
+    }
+    std::vector<LineCells> cells;
+    for (int i = ia; i <= ib; ++i)
+        cells.push_back(lines.cells(i));
+    b.row = ib - ia;
+    const std::string text = selection_text(cells, a, b);
+    if (!text.empty())
+        ImGui::SetClipboardText(text.c_str());
+}
+
+void TerminalView::paste_paths(TerminalSource& source, const std::vector<std::string>& paths) {
+    if (const auto text = quote_paths(paths))
+        request_paste(source, *text);
+    else
+        notice_ = "Paths containing control characters cannot be pasted safely";
+}
+
+void TerminalView::paste_clipboard(TerminalSource& source, bool full) {
+    const ClipboardContent clip = read_clipboard();
+    if (full && !clip.files.empty()) {
+        paste_paths(source, clip.files);  // copied files paste as if dropped
+        return;
+    }
+    if (clip.text) {
+        // Windows console programs expect the terminal to paste clipboard text.
+        request_paste(source, *clip.text);
+        return;
+    }
+    if (full && !clip.image)
+        return;
+    // An image alone (a screenshot): Ctrl+V, so the program reads the clipboard itself.
+    scroll_offset_ = 0;
+    source.send(host::TextInput{std::u32string(1, U'v'), terminal::kModCtrl});
 }
 
 void TerminalView::run_command(const std::string& cmd, TerminalSource& source,
@@ -274,15 +327,17 @@ void TerminalView::run_command(const std::string& cmd, TerminalSource& source,
     } else if (cmd == "terminal.copy") {
         copy_selection(snap);
     } else if (cmd == "terminal.paste") {
-        if (const char* clip = ImGui::GetClipboardText(); clip != nullptr)
-            request_paste(source, clip);
+        paste_clipboard(source, true);
+    } else if (cmd == "terminal.paste_image") {
+        paste_clipboard(source, false);
     } else if (cmd == "terminal.search") {
         open_search();
     } else if (cmd == "terminal.select_all") {
+        // The screen and its history (herdr src/vt.rs:1144). Key 0 is before every history line.
         clear_selection();
-        scroll_offset_ = 0;
-        sel_anchor_ = CellPos{0, 0};
-        sel_end_ = CellPos{snap.rows - 1, snap.cols - 1};
+        source.request_history(static_cast<std::size_t>(kMaxScrollback));
+        sel_a_ = SelPoint{0, 0};
+        sel_b_ = SelPoint{kScreenKey + static_cast<std::uint64_t>(std::max(0, snap.rows - 1)), snap.cols - 1};
     } else if (cmd == "terminal.scroll:-page") {
         scroll_offset_ = std::min(scroll_offset_ + snap.rows, kMaxScrollback);
     } else if (cmd == "terminal.scroll:page") {
@@ -350,11 +405,13 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
             continue;
         if (const auto mapped = map_named_key(key)) {
             scroll_offset_ = 0;
+            clear_selection();  // typing clears a selection (herdr src/terminal.rs:1025-1028)
             source.send(host::KeyInput{*mapped, to_terminal_mods(mods)});
         }
     }
     if (!consumed.contains(ImGuiKey_F12) && adapter::key_pressed_owned(ImGuiKey_F12, str_id)) {
         scroll_offset_ = 0;
+        clear_selection();
         source.send(host::KeyInput{terminal::Key::kF12, to_terminal_mods(mods)});
     }
 
@@ -366,6 +423,7 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
             if (!ch || consumed.contains(k) || !adapter::key_pressed_owned(key, str_id))
                 continue;
             scroll_offset_ = 0;
+            clear_selection();
             source.send(host::TextInput{std::u32string(1, *ch), to_terminal_mods(mods)});
         }
     }
@@ -602,15 +660,17 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
 
     const GridSize grid{snap.rows, snap.cols};
     ImGuiIO& io = ImGui::GetIO();
+    hovered_ = item.hovered;
+    hist_ = source.history();
     for (auto& c : std::exchange(requested_, {}))
         run_command(c, source, snap);
+    for (auto& paths : std::exchange(dropped_, {})) {
+        if (source.can_input())
+            paste_paths(source, paths);
+    }
 
     // ---- mouse to the program (it turned reporting on; Shift keeps the mouse for AgentDesk)
     const bool report_mouse = snap.mouse != terminal::MouseMode::kNone && !io.KeyShift && scroll_offset_ == 0;
-    if (report_mouse || mouse_buttons_ != 0) {
-        forward_mouse(source, snap, item.hovered,
-                      cell_at(io.MousePos.x, io.MousePos.y, origin.x, origin.y, cell_w, cell_h, grid));
-    }
     // Wheel in a full-screen program that does not read the mouse: arrow keys, like xterm's
     // alternate scroll mode (there is no history to scroll on the alternate screen).
     const bool wheel_as_keys = !report_mouse && snap.alt_screen && snap.mouse == terminal::MouseMode::kNone &&
@@ -626,12 +686,13 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
         scroll_offset_ = std::clamp(scroll_offset_ + static_cast<int>(io.MouseWheel * 3.0f * scroll_speed), 0,
                                     kMaxScrollback);
     }
-    const auto hist = source.history();
     if (scroll_offset_ > 0 || search_open_) {
         source.request_history(static_cast<std::size_t>(
             search_open_ ? kMaxScrollback : std::min(scroll_offset_ + snap.rows * 2, kMaxScrollback)));
     }
-    const int available = hist ? static_cast<int>(hist->size()) : 0;
+    const auto hist = hist_;
+    const Lines lines{hist.get(), &snap};
+    const int available = lines.available();
     last_available_ = available;
     scroll_offset_ = std::min(scroll_offset_, available + snap.rows);  // a little past: fetch more
     if (search_open_)
@@ -644,23 +705,106 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     }
     const int offset = std::min(scroll_offset_, available);
     const int top = available - offset;  // combined index of the first view row
-    auto row_key = [&](int view_row) -> std::uint64_t {
-        const int idx = top + view_row;
-        if (idx < available)
-            return (*hist)[static_cast<std::size_t>(idx)].line_id;
-        return kScreenKey + static_cast<std::uint64_t>(idx - available);
-    };
-    auto row_text = [&](int view_row) -> std::string {
-        const int idx = top + view_row;
-        if (idx < available)
-            return (*hist)[static_cast<std::size_t>(idx)].text;
-        return snap.row_text(idx - available);
-    };
-    if (offset > 0) {
-        viewport_lines_.clear();
-        for (int r = 0; r < snap.rows; ++r)
-            viewport_lines_.emplace_back(row_key(r), row_text(r));
+    const CellPos mouse_cell = cell_at(io.MousePos.x, io.MousePos.y, origin.x, origin.y, cell_w, cell_h, grid);
+
+    // ---- Ctrl+hover links (herdr src/terminal.rs:1141-1166, 1486-1489): OSC 8 links, then URLs
+    // and file paths in the text. Opened only by the person's own Ctrl+click (2521-2528).
+    const bool link_key = io.KeyCtrl && !io.KeyShift && !io.KeyAlt;
+    const int mouse_line = top + mouse_cell.row;
+    if (!link_key || !item.hovered) {
+        hover_link_ = HoverLink{};
+    } else if (hover_link_.line != mouse_line || hover_link_.col != mouse_cell.col || hover_link_.seq != snap.seq ||
+               hover_link_.available != available) {
+        HoverLink h;
+        h.line = mouse_line;
+        h.col = mouse_cell.col;
+        h.seq = snap.seq;
+        h.available = available;
+        const std::string cwd = source.cwd();
+        bool osc8 = false;
+        if (mouse_line >= available) {
+            const int r = mouse_line - available;
+            for (const auto& l : snap.links) {
+                if (l.row == r && mouse_cell.col >= l.col0 && mouse_cell.col < l.col1) {
+                    osc8 = true;
+                    if (auto t = resolve_link(l.uri, cwd)) {
+                        h.target = std::move(t);
+                        h.spans.push_back({mouse_line, {l.col0, l.col1}});
+                    }
+                    break;
+                }
+            }
+        }
+        // Text of lines [first, last], joined: in joined lines only an existing file proves the
+        // join right.
+        auto try_lines = [&](int first, int last) {
+            std::string text;
+            std::vector<std::pair<int, std::pair<int, int>>> where;  // per byte: line, cells
+            std::size_t at = std::string::npos;
+            for (int i = first; i <= last; ++i) {
+                const LineCells lc = lines.cells(i);
+                for (int c = 0; c < static_cast<int>(lc.cells.size()); ++c) {
+                    const auto& cell = lc.cells[static_cast<std::size_t>(c)];
+                    if (cell.width == 0)
+                        continue;
+                    const int span = std::max<int>(1, cell.width);
+                    if (i == mouse_line && mouse_cell.col >= c && mouse_cell.col < c + span)
+                        at = text.size();
+                    const std::size_t before = text.size();
+                    if (cell.chars[0] == 0) {
+                        text.push_back(' ');
+                    } else {
+                        for (const char32_t cp : cell.chars) {
+                            if (cp == 0)
+                                break;
+                            terminal::append_utf8(text, cp);
+                        }
+                    }
+                    for (std::size_t b = before; b < text.size(); ++b)
+                        where.push_back({i, {c, c + span}});
+                }
+            }
+            if (at == std::string::npos)
+                return false;
+            const auto range = find_link(text, at);
+            if (!range)
+                return false;
+            auto t = resolve_link(text.substr(range->first, range->second - range->first), cwd);
+            if (!t || (first != last && !t->file))
+                return false;
+            h.target = std::move(t);
+            for (std::size_t b = range->first; b < range->second; ++b) {
+                const auto& [line, cells] = where[b];
+                if (!h.spans.empty() && h.spans.back().first == line)
+                    h.spans.back().second.second = std::max(h.spans.back().second.second, cells.second);
+                else
+                    h.spans.push_back({line, cells});
+            }
+            return true;
+        };
+        if (!osc8 && mouse_line >= 0 && mouse_line < lines.total()) {
+            int first = mouse_line;
+            int last = mouse_line;
+            while (first > 0 && lines.wrapped(first - 1) && mouse_line - first < 8)
+                --first;
+            while (last + 1 < lines.total() && lines.wrapped(last) && last - mouse_line < 8)
+                ++last;
+            if (!try_lines(first, last) && first != last)
+                try_lines(mouse_line, mouse_line);
+        }
+        hover_link_ = std::move(h);
     }
+    bool link_clicked = false;
+    if (link_key && item.hovered && hover_link_.target) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            open_link(*hover_link_.target);
+            link_clicked = true;
+        }
+    }
+
+    if ((report_mouse || mouse_buttons_ != 0) && !link_clicked)
+        forward_mouse(source, snap, item.hovered, mouse_cell);
 
     // ---- scrollbar (only when there is history to scroll to)
     const float bar_w = std::max(6.0f, std::round(cell_w * 0.5f));
@@ -683,56 +827,68 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
         }
     }
 
-    // ---- mouse selection: click, drag, double-click word, triple-click line
-    if (item.clicked && !over_bar && !report_mouse) {
-        const auto p = cell_at(io.MousePos.x, io.MousePos.y, origin.x, origin.y, cell_w, cell_h, grid);
+    // ---- mouse selection: click, drag, double-click word, triple-click line. Cells of history
+    // lines select the same way as the screen's.
+    auto point_at = [&](CellPos p) { return SelPoint{lines.key(top + p.row), p.col}; };
+    if (item.clicked && !over_bar && !report_mouse && !link_clicked) {
+        const CellPos p = mouse_cell;
+        const int idx = top + p.row;
         clear_selection();
         const int clicks = io.MouseClickedCount[ImGuiMouseButton_Left];
-        if (offset > 0 || clicks >= 3) {
-            line_sel_a_ = row_key(p.row);
-            if (clicks >= 2) {
-                line_sel_b_ = line_sel_a_;
-                if (offset == 0) {  // triple click on the live screen: the whole row
-                    sel_anchor_ = CellPos{p.row, 0};
-                    sel_end_ = CellPos{p.row, snap.cols - 1};
-                    line_sel_a_.reset();
-                    line_sel_b_.reset();
-                }
-            }
-            selecting_ = clicks < 2;
-        } else if (clicks == 2) {
+        if (clicks == 2) {
+            const LineCells lc = lines.cells(idx);
+            const int n = static_cast<int>(lc.cells.size());
+            auto ch = [&](int c) -> char32_t {
+                if (c < 0 || c >= n)
+                    return 0;
+                const auto& cell = lc.cells[static_cast<std::size_t>(c)];
+                if (cell.width == 0 && c > 0)
+                    return lc.cells[static_cast<std::size_t>(c - 1)].chars[0];  // right half of a wide char
+                return cell.chars[0];
+            };
             int a = p.col;
             int b = p.col;
-            auto ch = [&](int c) { return snap.at(p.row, c).chars[0]; };
             while (a > 0 && is_word_char(ch(a - 1)))
                 --a;
-            while (b + 1 < snap.cols && (is_word_char(ch(b + 1)) || snap.at(p.row, b + 1).width == 0))
+            while (b + 1 < n && is_word_char(ch(b + 1)))
                 ++b;
             if (is_word_char(ch(p.col))) {
-                sel_anchor_ = CellPos{p.row, a};
-                sel_end_ = CellPos{p.row, b};
+                sel_a_ = SelPoint{lines.key(idx), a};
+                sel_b_ = SelPoint{lines.key(idx), b};
             }
-            selecting_ = false;
+        } else if (clicks >= 3) {
+            // The whole line, through its soft wraps.
+            int first = idx;
+            int last = idx;
+            while (first > 0 && lines.wrapped(first - 1))
+                --first;
+            while (last + 1 < lines.total() && lines.wrapped(last))
+                ++last;
+            sel_a_ = SelPoint{lines.key(first), 0};
+            sel_b_ = SelPoint{lines.key(last), std::max(snap.cols, static_cast<int>(lines.cells(last).cells.size())) - 1};
         } else {
-            sel_anchor_ = p;
+            sel_a_ = point_at(p);
             selecting_ = true;
+            drag_scrolled_at_ = Clock::now();
         }
         if (!selecting_ && copy_on_select && has_selection())
             copy_selection(snap);
     }
     if (selecting_) {
         if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-            // Dragging past the top or bottom edge scrolls while held.
-            if (io.MousePos.y < origin.y)
-                scroll_offset_ = std::min(scroll_offset_ + 1, kMaxScrollback);
-            else if (io.MousePos.y > area_max.y && scroll_offset_ > 0)
-                --scroll_offset_;
-            const auto p = cell_at(io.MousePos.x, io.MousePos.y, origin.x, origin.y, cell_w, cell_h, grid);
-            if (line_sel_a_) {
-                line_sel_b_ = row_key(p.row);
-            } else if (sel_anchor_ && (p != *sel_anchor_ || sel_end_)) {
-                sel_end_ = p;
+            // Held past the top or bottom edge: 1-5 lines every 50 ms (herdr src/terminal.rs:1172-1192).
+            const auto now = Clock::now();
+            if (now - drag_scrolled_at_ >= kDragScrollEvery) {
+                drag_scrolled_at_ = now;
+                const int n = selection_scroll_lines(io.MousePos.y - origin.y, cell_h, snap.rows);
+                if (n < 0)
+                    scroll_offset_ = std::min(scroll_offset_ - n, kMaxScrollback);
+                else if (n > 0)
+                    scroll_offset_ = std::max(0, scroll_offset_ - n);
             }
+            const SelPoint end = point_at(mouse_cell);
+            if (sel_a_ && (end != *sel_a_ || sel_b_))
+                sel_b_ = end;
         } else {
             selecting_ = false;
             if (copy_on_select && has_selection())
@@ -741,6 +897,9 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     }
     if (item.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !(report_mouse && right_click_to_program))
         open_context_menu_ = true;
+    // Middle-click pastes when the program doesn't take it (herdr src/terminal.rs:2567-2576).
+    if (item.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle) && !report_mouse && source.can_input())
+        paste_clipboard(source, true);
 
     // ---- paint
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -805,28 +964,36 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
                           i == match_index_ ? theme.match_current : theme.match, 2.0f);
     }
 
-    if (line_sel_a_ && line_sel_b_) {
-        bool inside = false;
+    if (sel_a_ && sel_b_) {
+        int ia = lines.index(sel_a_->key);
+        int ib = lines.index(sel_b_->key);
+        int ca = sel_a_->col;
+        int cb = sel_b_->col;
+        if (ib < ia || (ib == ia && cb < ca)) {
+            std::swap(ia, ib);
+            std::swap(ca, cb);
+        }
         for (int r = 0; r < snap.rows; ++r) {
-            const auto key = row_key(r);
-            const bool edge = key == *line_sel_a_ || key == *line_sel_b_;
-            if (edge || inside) {
-                const float y = origin.y + static_cast<float>(r) * cell_h;
-                dl->AddRectFilled(ImVec2(origin.x, y), ImVec2(area_max.x, y + cell_h), theme.selection);
-            }
-            if (edge && *line_sel_a_ != *line_sel_b_)
-                inside = !inside;
+            const int idx = top + r;
+            if (idx < ia || idx > ib)
+                continue;
+            const int c0 = std::max(0, idx == ia ? ca : 0);
+            const int c1 = std::min(snap.cols - 1, idx == ib ? cb : snap.cols - 1);
+            if (c1 < c0)
+                continue;
+            const float y = origin.y + static_cast<float>(r) * cell_h;
+            dl->AddRectFilled(ImVec2(origin.x + static_cast<float>(c0) * cell_w, y),
+                              ImVec2(origin.x + static_cast<float>(c1 + 1) * cell_w, y + cell_h), theme.selection);
         }
     }
-    if (sel_anchor_ && sel_end_ && offset == 0) {
-        for (int row = 0; row < snap.rows; ++row) {
-            for (int c = 0; c < snap.cols; ++c) {
-                if (!in_selection({row, c}, *sel_anchor_, *sel_end_))
-                    continue;
-                const ImVec2 a(origin.x + static_cast<float>(c) * cell_w,
-                               origin.y + static_cast<float>(row) * cell_h);
-                dl->AddRectFilled(a, ImVec2(a.x + cell_w, a.y + cell_h), theme.selection);
-            }
+    if (link_key && item.hovered && hover_link_.target) {
+        for (const auto& [line, cols] : hover_link_.spans) {
+            const int r = line - top;
+            if (r < 0 || r >= snap.rows)
+                continue;
+            const float y = origin.y + static_cast<float>(r + 1) * cell_h - 1.0f;
+            dl->AddLine(ImVec2(origin.x + static_cast<float>(cols.first) * cell_w, y),
+                        ImVec2(origin.x + static_cast<float>(cols.second) * cell_w, y), theme.default_fg);
         }
     }
 

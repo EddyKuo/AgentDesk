@@ -64,6 +64,7 @@ public:
     [[nodiscard]] bool can_input() const override;
     void request_history(std::size_t lines) override;
     [[nodiscard]] std::shared_ptr<const std::vector<HistoryLineText>> history() const override;
+    [[nodiscard]] std::string cwd() const override;
 
     [[nodiscard]] SessionView view() const;
     [[nodiscard]] const std::string& id() const noexcept { return id_; }

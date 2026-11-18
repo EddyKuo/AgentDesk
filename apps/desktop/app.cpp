@@ -11,6 +11,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <deque>
 #include <filesystem>
@@ -364,7 +365,7 @@ Settings load_settings() {
         s.theme_light = j.value("theme_light", light ? s.theme : std::string("paper"));
     }
     s.zoom = std::clamp(j.value("zoom", 1.0f), 0.5f, 3.0f);
-    s.font_size = std::clamp(j.value("font_size", 14.0f), 9.0f, 28.0f);
+    s.font_size = std::clamp(j.value("font_size", 14.0f), 8.0f, 32.0f);  // the stepper's 8-32
     s.sounds = j.value("sounds", true);
     s.toasts = j.value("toasts", true);
     s.copy_on_select = j.value("copy_on_select", true);
@@ -1149,6 +1150,7 @@ private:
                     r.started = true;
                     r.exit_code = res->value("exit_code", 1ul);
                     r.output = res->value("output", "");
+                    r.error = res->value("error", "");
                 }
                 return r;
             }
@@ -1265,6 +1267,12 @@ public:
     std::string preview_path;  // relative; empty = tree
     std::string preview_text;
     std::string preview_message;
+    // Selection in the read-only preview: (line, byte) ends; line -1 = none.
+    int sel_line_a = -1;
+    std::size_t sel_byte_a = 0;
+    int sel_line_b = -1;
+    std::size_t sel_byte_b = 0;
+    bool sel_dragging = false;
     // Changes
     std::string changes_cwd;
     std::string changes_machine;
@@ -1362,6 +1370,8 @@ public:
         preview_path = rel;
         preview_text.clear();
         preview_message = "Loading file\xE2\x80\xA6";
+        sel_line_a = sel_line_b = -1;
+        sel_dragging = false;
         post([this, mc = files_machine, root = files_root, rel] { load_preview(mc, root, rel); });
     }
     void close_preview() {
@@ -1389,9 +1399,10 @@ public:
     }
     void commit() {
         std::lock_guard lock(mutex);
+        // herdr changes/main.js commit(): this.message.trim()
         std::string msg = commit_msg;
-        while (!msg.empty() && (msg.back() == ' ' || msg.back() == '\n'))
-            msg.pop_back();
+        const auto first = msg.find_first_not_of(" \t\r\n");
+        msg = first == std::string::npos ? std::string() : msg.substr(first, msg.find_last_not_of(" \t\r\n") - first + 1);
         if (msg.empty() || repo_top.empty() || committing || changes_loading)
             return;
         committing = true;
@@ -1405,10 +1416,8 @@ public:
             if (r.started && r.exit_code == 0) {
                 commit_msg[0] = 0;
             } else {
-                std::string out = r.output;
-                while (!out.empty() && (out.back() == '\n' || out.back() == '\r'))
-                    out.pop_back();
-                commit_note = "Commit failed: " + (r.started ? out : std::string("git not found"));
+                // (stderr || stdout).trim(), as herdr shows it
+                commit_note = "Commit failed: " + (r.started ? r.message() : std::string("git not found"));
             }
             changes_at_ = {};
         });
@@ -1490,6 +1499,7 @@ private:
                 r.started = true;
                 r.exit_code = res->value("exit_code", 1ul);
                 r.output = res->value("output", "");
+                r.error = res->value("error", "");
             }
             return r;
         }
@@ -1533,6 +1543,7 @@ private:
         }
         return r;
     }
+    // Changes list (herdr changes/main.js): conflicts first.
     static char letter_of(const std::string& xy) {
         if (xy.find('U') != std::string::npos || xy == "AA" || xy == "DD")
             return 'U';
@@ -1540,6 +1551,16 @@ private:
             return 'D';
         if (xy == "??" || xy.find('A') != std::string::npos)
             return 'A';
+        return 'M';
+    }
+    // Files tree marks (herdr files/main.js:99): added first, then U, D, M.
+    static char file_mark_of(const std::string& xy) {
+        if (xy == "??" || xy.find('A') != std::string::npos)
+            return 'A';
+        if (xy.find('U') != std::string::npos)
+            return 'U';
+        if (xy.find('D') != std::string::npos)
+            return 'D';
         return 'M';
     }
 
@@ -1583,7 +1604,7 @@ private:
                         continue;
                     rel = rel.substr(prefix.size() + 1);
                 }
-                m[rel] = letter_of(xy);
+                m[rel] = file_mark_of(xy);
             }
         }
         std::lock_guard lock(mutex);
@@ -2103,13 +2124,19 @@ struct App::State {
     char feedback_buf[4096] = {};
     std::string feedback_note;
     int welcome_page = 0;
+    ImVec2 welcome_pos{-1.0f, -1.0f};  // top-left once the person dragged it (herdr: Drag to move)
     bool show_machine_add = false;
-    std::vector<std::pair<std::string, std::string>> ssh_hosts;
+    std::vector<std::pair<std::string, std::string>> ssh_hosts;  // alias, what it reaches
+    // Add a machine (herdr machine-add): target -> "adding" or why it could not be added.
+    std::map<std::string, std::string> machine_add_state;
+    std::set<std::string> machine_add_pending;  // needs the person to answer something first
+    std::string machine_add_copied;
     char machine_buf[256] = {};
     std::string confirm_title, confirm_detail, confirm_ok, confirm_command;
     std::string settings_tab;  // tab to select when the settings window opens
     bool show_worktree_open = false;
     std::vector<WorktreeEntry> worktree_list;
+    std::string worktree_not_repo;  // Open worktree outside git: the folder (shown in the dialog)
     std::string worktree_machine;  // machine the listed worktrees are on
     char wt_filter[128] = {};
     int wt_sel = 0;
@@ -2309,13 +2336,18 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
             return std::nullopt;
         auto done = std::make_shared<std::promise<std::optional<Json>>>();
         auto result = done->get_future();
+        // git worktree add/remove may take minutes (herdr worktree/main.js:205-207, 243).
+        const auto args = params.find("args");
+        const bool slow = method == "git.run" && args != params.end() && args->is_array() && !args->empty() &&
+                          (*args)[0] == "worktree";
+        const auto wait = std::chrono::seconds(slow ? 600 : 60);
         h->call(
             method, params,
             [done](Json r, std::string error) {
                 done->set_value(error.empty() ? std::optional<Json>(std::move(r)) : std::nullopt);
             },
-            std::chrono::seconds(60));
-        if (result.wait_for(std::chrono::seconds(65)) != std::future_status::ready)
+            wait);
+        if (result.wait_for(wait + std::chrono::seconds(5)) != std::future_status::ready)
             return std::nullopt;
         return result.get();
     };
@@ -2399,6 +2431,18 @@ void App::on_close_requested() {
 
 void App::on_focus_changed(bool focused) {
     s_->window_focused = focused;
+}
+
+void App::on_files_dropped(std::vector<std::string> paths) {
+    std::string target;
+    for (const auto& [id, vs] : s_->views) {
+        if (vs.view.hovered())
+            target = id;
+    }
+    if (target.empty())
+        target = s_->ws.focused_session();
+    if (const auto it = s_->views.find(target); it != s_->views.end())
+        it->second.view.drop_paths(std::move(paths));
 }
 
 bool App::exit_requested() const {
@@ -2816,8 +2860,17 @@ host::ToolResult git_at(App::State& s, const std::string& machine, const std::st
         r.started = true;
         r.exit_code = res->value("exit_code", 1ul);
         r.output = res->value("output", "");
+        r.error = res->value("error", "");
     }
     return r;
+}
+
+// Text without surrounding whitespace (JavaScript's trim()).
+std::string trimmed(const std::string& t) {
+    const auto a = t.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos)
+        return {};
+    return t.substr(a, t.find_last_not_of(" \t\r\n") - a + 1);
 }
 
 // What removing a linked worktree would lose (herdr worktree.js): uncommitted changes, and
@@ -2841,18 +2894,39 @@ WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std:
     r.dirty = st.started && st.exit_code == 0 && !st.output.empty();
     const auto subs = git_at(s, machine, top, {L"submodule", L"status", L"--recursive"});
     std::stringstream ss(subs.started && subs.exit_code == 0 ? subs.output : std::string());
+    std::vector<std::string> paths;
     for (std::string line; std::getline(ss, line);) {
-        // " <sha> <path> (<describe>)"
-        std::stringstream ls(line.size() > 1 ? line.substr(1) : std::string());
+        // "<flag><sha> <path> (<describe>)"; '-': never checked out (herdr skips those too)
+        if (line.empty() || line[0] == '-')
+            continue;
+        std::stringstream ls(line.substr(1));
         std::string sha, path;
         ls >> sha >> path;
-        if (path.empty())
-            continue;
+        if (!path.empty())
+            paths.push_back(path);
+    }
+    for (const auto& path : paths) {
         r.submodules = true;
-        const auto sp = p / win::to_wide(path);
-        const auto ahead = git_at(s, machine, win::to_utf8(sp.native()), {L"rev-list", L"--count", L"@{u}..HEAD"});
-        if (ahead.started && (ahead.exit_code != 0 || std::atoi(ahead.output.c_str()) > 0))
-            r.unpushed.push_back(path);  // no upstream counts as unpushed
+        // herdr defaults/mods/worktree/main.js:100-110: commits that exist nowhere else, i.e. on
+        // no remote and not the commit the parent pins (git fetches that by hash, so it is often
+        // on no remote branch). The parent is the deepest other submodule containing it.
+        std::string parent;
+        for (const auto& other : paths) {
+            if (other.size() > parent.size() && path.size() > other.size() && path.compare(0, other.size(), other) == 0 &&
+                path[other.size()] == '/')
+                parent = other;
+        }
+        const auto parent_dir = parent.empty() ? p : p / win::to_wide(parent);
+        const std::string inner = parent.empty() ? path : path.substr(parent.size() + 1);
+        const auto pinned = git_at(s, machine, win::to_utf8(parent_dir.native()),
+                                   {L"rev-parse", L"HEAD:" + win::to_wide(inner)});
+        std::vector<std::wstring> args = {L"rev-list", L"-n1", L"--all", L"--not", L"--remotes"};
+        std::string pin = pinned.started && pinned.exit_code == 0 ? trimmed(pinned.output) : std::string();
+        if (!pin.empty())
+            args.push_back(win::to_wide(pin));
+        const auto local = git_at(s, machine, win::to_utf8((p / win::to_wide(path)).native()), args);
+        if (!local.started || local.exit_code != 0 || !trimmed(local.output).empty())
+            r.unpushed.push_back(path);  // a check that failed counts as at risk
     }
     return r;
 }
@@ -2861,11 +2935,11 @@ std::string worktree_remove_text(const std::string& top, const WorktreeRisk& r) 
     std::string t = "Closes the space and deletes " + display_path(top) + ". The branch stays.";
     if (r.dirty)
         t += "\n\nIt has uncommitted changes: they will be lost.";
-    if (!r.unpushed.empty()) {
-        t += "\n\nSubmodules with commits that are not pushed: ";
+    if (!r.unpushed.empty()) {  // herdr worktree/main.js render()
+        t += "\n\nSubmodule ";
         for (std::size_t i = 0; i < r.unpushed.size(); ++i)
             t += (i ? ", " : "") + r.unpushed[i];
-        t += ". They will be lost.";
+        t += " has commits that aren't pushed anywhere: they will be lost.";
     }
     return t;
 }
@@ -3165,10 +3239,25 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         // Existing worktrees of the focused repo (git worktree list --porcelain, bare and prunable
         // skipped): main checkout first, then by the branch's last commit, newest first.
         s.worktree_list.clear();
+        s.worktree_not_repo.clear();
         const std::string cwd = s.focused_cwd();
         const std::string machine = s.machine_of[s.ws.focused_session()];
         s.worktree_machine = machine;
         const auto g = s.git.get(cwd, machine);
+        // herdr worktree/main.js checkouts(): each branch's last commit date, from its ref.
+        std::map<std::string, long long> when;
+        if (!cwd.empty()) {
+            const auto refs = git_at(s, machine, cwd,
+                                     {L"for-each-ref", L"--format=%(refname:short)%09%(committerdate:unix)", L"refs/heads"});
+            std::stringstream rs(refs.started && refs.exit_code == 0 ? refs.output : std::string());
+            for (std::string l; std::getline(rs, l);) {
+                if (!l.empty() && l.back() == '\r')
+                    l.pop_back();
+                const auto tab = l.find('\t');
+                if (tab != std::string::npos)
+                    when[l.substr(0, tab)] = std::atoll(l.c_str() + tab + 1);
+            }
+        }
         if (!cwd.empty()) {
             const auto r = git_at(s, machine, cwd, {L"worktree", L"list", L"--porcelain"});
             std::stringstream ss(r.output + "\n");
@@ -3192,16 +3281,18 @@ std::string exec_command(App::State& s, const std::string& cmd) {
                     skip = true;
                 } else if (l.empty() && !e.path.empty()) {
                     if (!skip) {
-                        e.main = _stricmp(e.path.c_str(), g.common_top.c_str()) == 0;
-                        const auto t = git_at(s, machine, e.path, {L"log", L"-1", L"--format=%ct"},
-                                              std::chrono::seconds(5));
-                        e.time = std::atoll(t.output.c_str());
-                        const long long age = static_cast<long long>(std::time(nullptr)) - e.time;
-                        e.age = e.time == 0        ? std::string()
-                                : age < 3600       ? std::to_string(std::max(1LL, age / 60)) + "m"
-                                : age < 86400      ? std::to_string(age / 3600) + "h"
-                                : age < 86400 * 60 ? std::to_string(age / 86400) + "d"
-                                                   : std::to_string(age / (86400 * 30)) + "mo";
+                        e.main = s.worktree_list.empty();  // git lists the main checkout first
+                        // A detached checkout has no branch, so no date (herdr: at 0, no age).
+                        const auto it = e.branch.empty() ? when.end() : when.find(e.branch);
+                        e.time = it != when.end() ? it->second : 0;
+                        // herdr ago(): rounded, minutes at least 1.
+                        const double d = static_cast<double>(static_cast<long long>(std::time(nullptr)) - e.time);
+                        auto round_to = [](double v) { return std::to_string(static_cast<long long>(std::floor(v + 0.5))); };
+                        e.age = e.time <= 0           ? std::string()
+                                : d < 3600.0          ? std::to_string(std::max(1LL, static_cast<long long>(std::floor(d / 60.0 + 0.5)))) + "m"
+                                : d < 86400.0         ? round_to(d / 3600.0) + "h"
+                                : d < 86400.0 * 60.0  ? round_to(d / 86400.0) + "d"
+                                                      : round_to(d / 86400.0 / 30.0) + "mo";
                         s.worktree_list.push_back(e);
                     }
                     e = {};
@@ -3214,8 +3305,9 @@ std::string exec_command(App::State& s, const std::string& cmd) {
                                  return a2.time > b2.time;
                              });
         }
+        // Outside git the dialog itself says so (herdr renderOpen).
         if (s.worktree_list.empty())
-            return "not a git checkout: Open worktree needs a terminal in a git repository";
+            s.worktree_not_repo = cwd.empty() ? std::string("This folder") : display_path(cwd);
         s.show_worktree_open = true;
     } else if (name == "worktree.open_at") {
         // arg: "<machine>|<path>": a space on that machine already in the checkout, else a new one.
@@ -3299,10 +3391,10 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         if (name == "worktree.remove_force")
             argv.push_back(L"--force");
         argv.push_back(win::to_wide(top));
-        const auto r = git_at(s, machine, main, argv);
+        const auto r = git_at(s, machine, main, argv, std::chrono::seconds(600));  // herdr worktree.js 243
         s.git.invalidate(top);
-        if (!r.started || r.exit_code != 0)
-            return r.started ? r.output : std::string("git did not run");
+        if (!r.started || r.exit_code != 0)  // shown as "worktree.remove failed: ..."
+            return r.started ? r.message() : std::string("git did not run");
     } else if (name == "tab.move") {
         if (auto* sp = s.ws.active())
             s.ws.move_tab(s.ws.active_space, sp->active_tab, sp->active_tab + (arg == "left" ? -1 : 1));
@@ -3372,7 +3464,7 @@ std::string exec_command(App::State& s, const std::string& cmd) {
                name == "terminal.select_all" || name == "terminal.scroll") {
         // Run by the focused terminal on its next frame (palette, keys.json in global).
         if (!focused.empty())
-            s.views[focused].view.request(name == "terminal.paste_image" ? std::string("terminal.paste") : cmd);
+            s.views[focused].view.request(cmd);
     } else if (name == "worktree.new") {
         s.show_worktree = true;
         s.wt_error.clear();
@@ -6229,6 +6321,412 @@ void panel_header(App::State& s, ImDrawList* dl, ImVec2 a, float w, const char* 
     dl->AddLine(ImVec2(a.x, a.y + h), ImVec2(a.x + w, a.y + h), g_pal->border);
 }
 
+// ---- read-only code preview (herdr files/main.js:141-144 shows files in a read-only editor with
+// syntax colours: keyword ansi5, string ansi2, comment dim, function ansi4, type ansi3, number ansi1,
+// constant ansi6). A small lexer stands in for the editor's tree-sitter grammars.
+enum class CodeTok : std::uint8_t { kText, kKeyword, kString, kComment, kFunction, kType, kNumber, kConstant };
+
+struct CodeLang {
+    std::string_view line_comment;   // "" = none
+    std::string_view line_comment2;  // a second form ("#" next to "//" in PHP, ";" in INI)
+    std::string_view block_open;     // "" = none
+    std::string_view block_close;
+    bool code = true;  // false: plain text, no colours
+};
+
+CodeLang code_lang(const std::string& path) {
+    std::string ext;
+    const auto dot = path.find_last_of('.');
+    const auto slash = path.find_last_of('/');
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+        ext = path.substr(dot + 1);
+    for (auto& c : ext)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+    for (auto& c : name)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    static const std::set<std::string> kSlash = {"c",  "h",    "cpp", "hpp",   "cc",   "cxx",  "hh",   "inl",  "cs",
+                                                 "java", "kt", "kts", "swift", "go",   "rs",   "js",   "jsx",  "ts",
+                                                 "tsx", "mjs", "cjs", "mts",   "cts",  "css",  "scss", "less", "zig",
+                                                 "dart", "scala", "glsl", "hlsl", "proto", "jsonc", "json5", "m", "mm"};
+    static const std::set<std::string> kHash = {"py", "pyw", "sh",  "bash", "zsh", "fish", "ps1",  "psm1", "psd1", "rb",
+                                                "yaml", "yml", "toml", "cmake", "r", "pl", "pm",   "conf", "nix",  "mk",
+                                                "tf", "hcl", "gitignore", "gitattributes", "editorconfig", "env", "dockerignore"};
+    if (kSlash.contains(ext))
+        return {"//", "", "/*", "*/"};
+    if (ext == "php")
+        return {"//", "#", "/*", "*/"};
+    if (kHash.contains(ext) || name == "cmakelists.txt" || name == "dockerfile" || name == "makefile")
+        return {"#", "", "", ""};
+    if (ext == "ini" || ext == "cfg" || ext == "reg")
+        return {";", "#", "", ""};
+    if (ext == "lua" || ext == "sql" || ext == "hs")
+        return {"--", "", ext == "lua" ? "--[[" : "/*", ext == "lua" ? "]]" : "*/"};
+    if (ext == "html" || ext == "htm" || ext == "xml" || ext == "svg" || ext == "vue" || ext == "svelte" ||
+        ext == "xaml" || ext == "csproj" || ext == "props" || ext == "targets" || ext == "vcxproj")
+        return {"", "", "<!--", "-->"};
+    if (ext == "json")
+        return {"", "", "", ""};
+    if (ext == "bat" || ext == "cmd")
+        return {"rem ", "::", "", ""};
+    return {"", "", "", "", false};
+}
+
+bool code_keyword(std::string_view w) {
+    static const std::set<std::string_view> kWords = {
+        "if", "else", "elif", "for", "while", "do", "switch", "case", "default", "break", "continue", "return",
+        "goto", "try", "catch", "finally", "throw", "throws", "new", "delete", "class", "struct", "enum", "union",
+        "interface", "namespace", "using", "typedef", "template", "typename", "public", "private", "protected",
+        "static", "const", "constexpr", "consteval", "constinit", "volatile", "extern", "inline", "virtual",
+        "override", "final", "explicit", "friend", "operator", "sizeof", "alignof", "decltype", "auto", "mutable",
+        "noexcept", "co_await", "co_return", "co_yield", "import", "export", "from", "as", "package", "module",
+        "def", "lambda", "pass", "with", "yield", "async", "await", "in", "is", "not", "and", "or", "del",
+        "global", "nonlocal", "assert", "raise", "except", "fn", "let", "mut", "impl", "trait", "pub", "crate",
+        "mod", "use", "match", "loop", "where", "move", "ref", "dyn", "unsafe", "extends", "implements",
+        "instanceof", "typeof", "var", "function", "this", "super", "self", "void", "func", "go", "defer",
+        "chan", "select", "type", "range", "map", "fallthrough", "end", "then", "local", "begin", "until",
+        "elseif", "fi", "esac", "done", "echo", "export", "readonly", "when", "val", "object", "companion",
+        "override", "sealed", "open", "internal", "suspend", "foreach", "of", "satisfies", "declare", "abstract",
+        "int", "char", "bool", "float", "double", "long", "short", "unsigned", "signed", "string"};
+    return kWords.contains(w);
+}
+
+bool code_constant(std::string_view w) {
+    static const std::set<std::string_view> kConst = {"true", "false", "null", "nullptr", "nil", "None", "True",
+                                                      "False", "undefined", "NULL", "NaN", "Infinity"};
+    if (kConst.contains(w))
+        return true;
+    // ALL_CAPS names (two letters or more).
+    bool upper = false;
+    for (const char c : w) {
+        if (std::islower(static_cast<unsigned char>(c)))
+            return false;
+        upper = upper || std::isupper(static_cast<unsigned char>(c));
+    }
+    return upper && w.size() > 1;
+}
+
+struct CodeSpan {
+    std::size_t a = 0;
+    std::size_t b = 0;
+    CodeTok tok = CodeTok::kText;
+};
+
+// One line's coloured spans; `in_block` carries an open block comment to the next line.
+void highlight_code_line(std::string_view line, const CodeLang& lang, bool& in_block, std::vector<CodeSpan>& out) {
+    out.clear();
+    if (!lang.code) {
+        out.push_back({0, line.size(), CodeTok::kText});
+        return;
+    }
+    auto ident = [](unsigned char c) { return std::isalnum(c) != 0 || c == '_' || c == '$' || c >= 0x80; };
+    std::size_t i = 0;
+    std::size_t text_from = 0;
+    auto flush_text = [&](std::size_t upto) {
+        if (upto > text_from)
+            out.push_back({text_from, upto, CodeTok::kText});
+    };
+    auto emit = [&](std::size_t a, std::size_t b, CodeTok t) {
+        flush_text(a);
+        out.push_back({a, b, t});
+        text_from = b;
+    };
+    auto starts = [&](std::size_t at, std::string_view tok) {
+        return !tok.empty() && line.substr(at, tok.size()) == tok;
+    };
+    while (i < line.size()) {
+        if (in_block) {
+            const auto end = line.find(lang.block_close, i);
+            const std::size_t b = end == std::string_view::npos ? line.size() : end + lang.block_close.size();
+            emit(i, b, CodeTok::kComment);
+            i = b;
+            in_block = end == std::string_view::npos;
+            continue;
+        }
+        const auto c = static_cast<unsigned char>(line[i]);
+        if (starts(i, lang.block_open)) {
+            in_block = true;
+            const std::size_t from = i;
+            i += lang.block_open.size();
+            const auto end = line.find(lang.block_close, i);
+            const std::size_t b = end == std::string_view::npos ? line.size() : end + lang.block_close.size();
+            emit(from, b, CodeTok::kComment);
+            i = b;
+            in_block = end == std::string_view::npos;
+            continue;
+        }
+        if (starts(i, lang.line_comment) || starts(i, lang.line_comment2)) {
+            emit(i, line.size(), CodeTok::kComment);
+            i = line.size();
+            break;
+        }
+        if (c == '"' || c == '\'' || c == '`') {
+            std::size_t j = i + 1;
+            while (j < line.size() && line[j] != static_cast<char>(c))
+                j += line[j] == '\\' ? 2 : 1;
+            j = std::min(j + 1, line.size());
+            emit(i, j, CodeTok::kString);
+            i = j;
+            continue;
+        }
+        if (std::isdigit(c) != 0 && (i == 0 || !ident(static_cast<unsigned char>(line[i - 1])))) {
+            std::size_t j = i + 1;
+            while (j < line.size() && (std::isalnum(static_cast<unsigned char>(line[j])) != 0 || line[j] == '.' ||
+                                       line[j] == '_' || line[j] == '\''))
+                ++j;
+            emit(i, j, CodeTok::kNumber);
+            i = j;
+            continue;
+        }
+        if (ident(c) && std::isdigit(c) == 0) {
+            std::size_t j = i + 1;
+            while (j < line.size() && ident(static_cast<unsigned char>(line[j])))
+                ++j;
+            const std::string_view w = line.substr(i, j - i);
+            std::size_t k = j;
+            while (k < line.size() && line[k] == ' ')
+                ++k;
+            CodeTok t = CodeTok::kText;
+            if (code_keyword(w))
+                t = CodeTok::kKeyword;
+            else if (code_constant(w))
+                t = CodeTok::kConstant;
+            else if (k < line.size() && line[k] == '(')
+                t = CodeTok::kFunction;
+            else if (std::isupper(c) != 0)
+                t = CodeTok::kType;
+            if (t != CodeTok::kText)
+                emit(i, j, t);
+            i = j;
+            continue;
+        }
+        ++i;
+    }
+    flush_text(line.size());
+}
+
+ImU32 code_color(CodeTok t) {
+    switch (t) {
+        case CodeTok::kKeyword:
+            return mix(g_pal->needs_you, g_pal->info, 0.5f);  // magenta (ansi5)
+        case CodeTok::kString:
+            return g_pal->done;  // green (ansi2)
+        case CodeTok::kComment:
+            return g_pal->faint;  // dim
+        case CodeTok::kFunction:
+            return g_pal->info;  // blue (ansi4)
+        case CodeTok::kType:
+            return g_pal->working;  // yellow (ansi3)
+        case CodeTok::kNumber:
+            return g_pal->needs_you;  // red (ansi1)
+        case CodeTok::kConstant:
+            return mix(g_pal->info, g_pal->done, 0.5f);  // cyan (ansi6)
+        default:
+            return g_pal->text;
+    }
+}
+
+// Line starts and the block-comment state at each line start, recomputed when the text changes.
+struct CodeLayout {
+    const std::string* text = nullptr;
+    std::size_t size = 0;
+    std::string path;
+    std::vector<std::size_t> starts;
+    std::vector<std::uint8_t> in_block;
+};
+
+void layout_code(CodeLayout& L, const std::string& text, const std::string& path) {
+    if (L.text == &text && L.size == text.size() && L.path == path)
+        return;
+    L.text = &text;
+    L.size = text.size();
+    L.path = path;
+    L.starts = {0};
+    for (std::size_t i = 0; i < text.size(); ++i)
+        if (text[i] == '\n')
+            L.starts.push_back(i + 1);
+    const CodeLang lang = code_lang(path);
+    L.in_block.assign(L.starts.size(), 0);
+    bool block = false;
+    std::vector<CodeSpan> spans;
+    for (std::size_t n = 0; n < L.starts.size(); ++n) {
+        L.in_block[n] = block ? 1 : 0;
+        if (lang.block_open.empty())
+            continue;
+        const std::size_t a = L.starts[n];
+        const std::size_t b = n + 1 < L.starts.size() ? L.starts[n + 1] - 1 : text.size();
+        highlight_code_line(std::string_view(text).substr(a, b - a), lang, block, spans);
+    }
+}
+
+// Selectable read-only text with line numbers: drag selects, double-click a word, Ctrl+A all,
+// Ctrl+C (or the right-click Copy) copies. Caller holds the panel mutex.
+void draw_code_preview(App::State& s, SidePanels& p, ImVec2 size) {
+    static CodeLayout layout;
+    const std::string& text = p.preview_text;
+    layout_code(layout, text, p.preview_path);
+    const CodeLang lang = code_lang(p.preview_path);
+    ImGui::BeginChild("##preview", size, ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoBackground);
+    ImGui::PushFont(s.fonts.mono, fpx(12));
+    ImFont* font = ImGui::GetFont();
+    const float fs = ImGui::GetFontSize();
+    const float lh = std::round(ImGui::GetTextLineHeightWithSpacing());
+    const float text_x = px(48);
+    ImDrawList* d = ImGui::GetWindowDrawList();
+    const int n = static_cast<int>(layout.starts.size());
+    auto line_end = [&](int i) {
+        std::size_t b = i + 1 < n ? layout.starts[static_cast<std::size_t>(i) + 1] - 1 : text.size();
+        const std::size_t a = layout.starts[static_cast<std::size_t>(i)];
+        if (b > a && text[b - 1] == '\r')
+            --b;
+        return b;
+    };
+    auto width_of = [&](std::size_t a, std::size_t b) {
+        return b > a ? font->CalcTextSizeA(fs, FLT_MAX, 0, text.data() + a, text.data() + b).x : 0.0f;
+    };
+    std::size_t longest = 0;
+    for (int i = 0; i < n; ++i)
+        longest = std::max(longest, line_end(i) - layout.starts[static_cast<std::size_t>(i)]);
+    const float content_w = text_x + static_cast<float>(longest) * fs * 0.62f + px(20);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float top = origin.y + px(4);
+    // Mouse -> (line, byte): the byte boundary nearest the pointer.
+    auto hit = [&](ImVec2 m) -> std::pair<int, std::size_t> {
+        const int line = std::clamp(static_cast<int>(std::floor((m.y - top) / lh)), 0, std::max(0, n - 1));
+        const std::size_t a = layout.starts[static_cast<std::size_t>(line)];
+        const std::size_t b = line_end(line);
+        float x = origin.x + text_x;
+        std::size_t i = a;
+        while (i < b) {
+            std::size_t j = i + 1;
+            while (j < b && (static_cast<unsigned char>(text[j]) & 0xC0) == 0x80)
+                ++j;
+            const float w = width_of(i, j);
+            if (m.x < x + w * 0.5f)
+                break;
+            x += w;
+            i = j;
+        }
+        return {line, i};
+    };
+    const bool hovered = ImGui::IsWindowHovered();
+    const ImGuiIO& io = ImGui::GetIO();
+    if (hovered && io.MousePos.x >= origin.x + text_x - px(4))
+        ImGui::SetMouseCursor(ImGuiMouseCursor_TextInput);
+    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && n > 0) {
+        const auto [line, at] = hit(io.MousePos);
+        if (io.MouseClickedCount[ImGuiMouseButton_Left] == 2) {
+            std::size_t a = at, b = at;
+            const std::size_t la = layout.starts[static_cast<std::size_t>(line)], lb = line_end(line);
+            auto word = [&](std::size_t k) {
+                const auto c = static_cast<unsigned char>(text[k]);
+                return std::isalnum(c) != 0 || c == '_' || c >= 0x80;
+            };
+            while (a > la && word(a - 1))
+                --a;
+            while (b < lb && word(b))
+                ++b;
+            p.sel_line_a = p.sel_line_b = line;
+            p.sel_byte_a = a;
+            p.sel_byte_b = b;
+        } else {
+            p.sel_line_a = p.sel_line_b = line;
+            p.sel_byte_a = p.sel_byte_b = at;
+            p.sel_dragging = true;
+        }
+    }
+    if (p.sel_dragging) {
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            const auto [line, at] = hit(io.MousePos);
+            p.sel_line_b = line;
+            p.sel_byte_b = at;
+            const float wy0 = ImGui::GetWindowPos().y;
+            if (io.MousePos.y < wy0)  // drag past an edge scrolls
+                ImGui::SetScrollY(ImGui::GetScrollY() - lh);
+            else if (io.MousePos.y > wy0 + ImGui::GetWindowHeight())
+                ImGui::SetScrollY(ImGui::GetScrollY() + lh);
+        } else {
+            p.sel_dragging = false;
+        }
+    }
+    auto selected = [&]() -> std::string {
+        if (p.sel_line_a < 0 || p.sel_line_b < 0)
+            return {};
+        std::size_t a = p.sel_byte_a, b = p.sel_byte_b;
+        if (a > b)
+            std::swap(a, b);
+        return text.substr(a, b - a);
+    };
+    const bool focused = ImGui::IsWindowFocused();
+    if (focused && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false) && n > 0) {
+        p.sel_line_a = 0;
+        p.sel_byte_a = 0;
+        p.sel_line_b = n - 1;
+        p.sel_byte_b = line_end(n - 1);
+    }
+    if (focused && io.KeyCtrl && (ImGui::IsKeyPressed(ImGuiKey_C, false) || ImGui::IsKeyPressed(ImGuiKey_Insert, false))) {
+        if (const std::string t = selected(); !t.empty())
+            ImGui::SetClipboardText(t.c_str());
+    }
+    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        ImGui::OpenPopup("##preview-menu");
+    if (ImGui::BeginPopup("##preview-menu")) {
+        const std::string t = selected();
+        if (ImGui::MenuItem("Copy", "Ctrl+C", false, !t.empty()))
+            ImGui::SetClipboardText(t.c_str());
+        if (ImGui::MenuItem("Select all", "Ctrl+A") && n > 0) {
+            p.sel_line_a = 0;
+            p.sel_byte_a = 0;
+            p.sel_line_b = n - 1;
+            p.sel_byte_b = line_end(n - 1);
+        }
+        ImGui::EndPopup();
+    }
+    std::size_t s0 = 0, s1 = 0;
+    if (p.sel_line_a >= 0 && p.sel_line_b >= 0) {
+        s0 = std::min(p.sel_byte_a, p.sel_byte_b);
+        s1 = std::max(p.sel_byte_a, p.sel_byte_b);
+    }
+    ImGuiListClipper clip;
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, top));
+    clip.Begin(n, lh);
+    std::vector<CodeSpan> spans;
+    while (clip.Step()) {
+        for (int i = clip.DisplayStart; i < clip.DisplayEnd; ++i) {
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            ImGui::Dummy(ImVec2(content_w, lh));
+            const std::size_t la = layout.starts[static_cast<std::size_t>(i)];
+            const std::size_t lb = line_end(i);
+            const float ty = a.y + (lh - fs) * 0.5f;
+            const std::string num = std::to_string(i + 1);
+            d->AddText(font, fs, ImVec2(a.x + px(10), ty), g_pal->faint, num.c_str());
+            const float x0 = a.x + text_x;
+            // Selection behind the text; a selected line break shows as a little extra width.
+            if (s1 > s0 && s0 <= lb && s1 >= la) {
+                const std::size_t ca = std::clamp(s0, la, lb);
+                const std::size_t cb = std::clamp(s1, la, lb);
+                const float xa = x0 + width_of(la, ca);
+                float xb = x0 + width_of(la, cb);
+                if (s1 > lb)
+                    xb += fs * 0.5f;
+                if (xb > xa)
+                    d->AddRectFilled(ImVec2(xa, a.y), ImVec2(xb, a.y + lh), alpha(g_pal->focus, 70));
+            }
+            bool block = layout.in_block[static_cast<std::size_t>(i)] != 0;
+            highlight_code_line(std::string_view(text).substr(la, lb - la), lang, block, spans);
+            float x = x0;
+            for (const auto& sp : spans) {
+                const char* b0 = text.data() + la + sp.a;
+                const char* b1 = text.data() + la + sp.b;
+                d->AddText(font, fs, ImVec2(x, ty), code_color(sp.tok), b0, b1);
+                x += font->CalcTextSizeA(fs, FLT_MAX, 0, b0, b1).x;
+            }
+        }
+    }
+    ImGui::PopFont();
+    ImGui::EndChild();
+}
+
 void draw_files_panel(App::State& s, ImVec2 pos, ImVec2 size) {
     auto& p = *s.panels;
     std::string machine;
@@ -6242,43 +6740,21 @@ void draw_files_panel(App::State& s, ImVec2 pos, ImVec2 size) {
     const float top = pos.y + px(42) + 1;
     ImGui::SetCursorScreenPos(ImVec2(pos.x + 1, top));
     if (previewing) {
-        // Read-only preview in the terminal font at 12 (files.js 130-148).
-        ImGui::BeginChild("##preview", ImVec2(size.x - 2, pos.y + size.y - top - px(4)), ImGuiChildFlags_None,
-                          ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoBackground);
-        ImGui::PushFont(s.fonts.mono, fpx(12));
-        ImGui::Dummy(ImVec2(0, px(4)));
+        // Read-only editor in the terminal font at 12 (herdr files/main.js:141-144).
+        const ImVec2 area(size.x - 2, pos.y + size.y - top - px(4));
         if (!p.preview_message.empty() && p.preview_text.empty()) {
+            ImGui::BeginChild("##preview", area, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+            ImGui::PushFont(s.fonts.mono, fpx(12));
+            ImGui::Dummy(ImVec2(0, px(4)));
             ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
             ImGui::SetCursorPosX(px(10));
             ImGui::TextUnformatted(p.preview_message.c_str());
             ImGui::PopStyleColor();
+            ImGui::PopFont();
+            ImGui::EndChild();
         } else {
-            ImGuiListClipper clip;
-            // Line starts, computed once per frame (files up to 400k characters).
-            std::vector<std::size_t> starts = {0};
-            for (std::size_t i = 0; i < p.preview_text.size(); ++i)
-                if (p.preview_text[i] == '\n')
-                    starts.push_back(i + 1);
-            clip.Begin(static_cast<int>(starts.size()));
-            while (clip.Step()) {
-                for (int i = clip.DisplayStart; i < clip.DisplayEnd; ++i) {
-                    const std::size_t a = starts[static_cast<std::size_t>(i)];
-                    std::size_t b = i + 1 < static_cast<int>(starts.size()) ? starts[static_cast<std::size_t>(i) + 1] - 1
-                                                                              : p.preview_text.size();
-                    if (b > a && p.preview_text[b - 1] == '\r')
-                        --b;
-                    const std::string num = std::to_string(i + 1);
-                    ImGui::SetCursorPosX(px(10));
-                    ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
-                    ImGui::TextUnformatted(num.c_str());
-                    ImGui::PopStyleColor();
-                    ImGui::SameLine(px(48));
-                    ImGui::TextUnformatted(p.preview_text.c_str() + a, p.preview_text.c_str() + b);
-                }
-            }
+            draw_code_preview(s, p, area);
         }
-        ImGui::PopFont();
-        ImGui::EndChild();
         lock.unlock();
         if (back)
             p.close_preview();
@@ -6385,8 +6861,9 @@ void draw_changes_panel(App::State& s, ImVec2 pos, ImVec2 size) {
         adds += c.add;
         dels += c.del;
     }
-    if (!p.changes.empty()) {
-        const std::string badge = std::to_string(p.changes.size()) + (p.changes.size() == 1 ? " file" : " files");
+    {
+        // herdr changes/main.js render(): always "<n> files" and +add −del, even at 0.
+        const std::string badge = std::to_string(p.changes.size()) + " files";
         const ImVec2 bt = s.fonts.ui->CalcTextSizeA(fpx(10), FLT_MAX, 0, badge.c_str());
         dl->AddRect(ImVec2(x, cy - bt.y * 0.5f - px(1)), ImVec2(x + bt.x + px(10), cy + bt.y * 0.5f + px(1)), g_pal->border,
                     px(4));
@@ -6403,10 +6880,12 @@ void draw_changes_panel(App::State& s, ImVec2 pos, ImVec2 size) {
 
     const float footer_h = px(32) + px(16) + (p.commit_note.empty() ? 0.0f : px(18));
     const float body_top = pos.y + hh + 1;
-    const float body_h = pos.y + size.y - footer_h - body_top;
-    // File list: grows to fit (28 per row + 12), at least 44, then the diff takes the rest.
-    const float list_h = std::clamp(static_cast<float>(p.changes.size()) * px(28) + px(12) + (p.changes_more ? px(20) : 0.0f),
-                                    px(44), std::max(px(44), body_h * 0.45f));
+    const float limited_h = p.changes_more ? px(22) : 0.0f;
+    const float body_h = pos.y + size.y - footer_h - body_top - limited_h;
+    // herdr: the list and the diff are both flex_1 (equal halves); the list is at least 44 px and
+    // at most its rows (28 each + 12), and the diff takes what the list leaves.
+    const float list_h = std::clamp(body_h * 0.5f, px(44),
+                                    std::max(px(44), static_cast<float>(p.changes.size()) * px(28) + px(12)));
     std::string select;
     ImGui::SetCursorScreenPos(ImVec2(pos.x + 1, body_top));
     ImGui::BeginChild("##changes", ImVec2(size.x - 2, list_h), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
@@ -6471,14 +6950,16 @@ void draw_changes_panel(App::State& s, ImVec2 pos, ImVec2 size) {
             note(p.changes_error);
         else if (p.changes.empty())
             note(p.repo_top.empty() ? "Loading changes\xE2\x80\xA6" : "No uncommitted changes");
-        if (p.changes_more)
-            note("Showing the first 1,000 changed files");
     }
     ImGui::EndChild();
     dl->AddLine(ImVec2(pos.x, body_top + list_h), ImVec2(pos.x + size.x, body_top + list_h), g_pal->border);
+    if (p.changes_more) {  // its own row under the list (herdr: px 12, py 4, 11 px, dim)
+        dl->AddText(s.fonts.ui, fpx(11), ImVec2(pos.x + px(12), body_top + list_h + 1 + px(4)), g_pal->faint,
+                    "Showing the first 1,000 changed files");
+    }
 
     // Diff: unified, one number column, +/- prefix removed, 9 % green/red rows, terminal font 11.
-    const float diff_top = body_top + list_h + 1;
+    const float diff_top = body_top + list_h + 1 + limited_h;
     ImGui::SetCursorScreenPos(ImVec2(pos.x + 1, diff_top));
     ImGui::BeginChild("##diff", ImVec2(size.x - 2, std::max(px(20), pos.y + size.y - footer_h - diff_top)),
                       ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoBackground);
@@ -6540,8 +7021,16 @@ void draw_changes_panel(App::State& s, ImVec2 pos, ImVec2 size) {
     ImGui::SetNextItemWidth(size.x - px(20) - bw - px(8));
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(10), (px(32) - ImGui::GetFontSize()) * 0.5f));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, px(8));
+    // Esc leaves the box and keeps the message (herdr changes/main.js on_key_down); ImGui would
+    // revert the edit, so the text from before the key is put back.
+    static std::string typed;
+    const bool esc = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
     bool commit = ImGui::InputTextWithHint("##commitmsg", "Commit message", p.commit_msg, sizeof p.commit_msg,
                                            ImGuiInputTextFlags_EnterReturnsTrue);
+    if (ImGui::IsItemActive())
+        typed = p.commit_msg;
+    else if (ImGui::IsItemDeactivated() && esc)
+        std::snprintf(p.commit_msg, sizeof p.commit_msg, "%s", typed.c_str());
     std::string msg = p.commit_msg;
     const bool can = !msg.empty() && msg.find_first_not_of(" \n") != std::string::npos && !p.repo_top.empty() &&
                      !p.committing && !p.changes_loading;
@@ -7858,31 +8347,7 @@ void draw_rename(App::State& s) {
 // ------------------------------------------------------------------ worktrees (herdr mods/worktree)
 // herdr slug: runs of characters other than letters, digits and "._-" become "-", trimmed.
 std::string branch_slug(const std::string& b) {
-    std::string out;
-    bool dash = false;
-    for (const char ch : b) {
-        const unsigned char c = static_cast<unsigned char>(ch);
-        if (std::isalnum(c) || c == '.' || c == '_' || c == '-' || c >= 0x80) {
-            out += ch;
-            dash = false;
-        } else if (!dash) {
-            out += '-';
-            dash = true;
-        }
-    }
-    while (!out.empty() && out.front() == '-')
-        out.erase(out.begin());
-    while (!out.empty() && out.back() == '-')
-        out.pop_back();
-    if (out.empty()) {
-        std::uint32_t h = 2166136261u;
-        for (const unsigned char c : b)
-            h = (h ^ c) * 16777619u;
-        char buf[16];
-        std::snprintf(buf, sizeof buf, "branch-%08x", h);
-        out = buf;
-    }
-    return out;
+    return host::worktree_slug(b);  // herdr worktree/main.js slug(), shared with the host's default
 }
 
 void draw_worktree(App::State& s) {
@@ -7944,9 +8409,7 @@ void draw_worktree(App::State& s) {
     ImGui::TextDisabled("%s", s.wt_busy ? "working\xE2\x80\xA6" : "\xE2\x86\xB5 create \xC2\xB7 esc cancel");
     cancel = cancel || ImGui::IsKeyPressed(ImGuiKey_Escape) || dialog_outside_click();
     if (create && !s.wt_busy) {
-        std::string branch = s.wt_branch;
-        while (!branch.empty() && branch.back() == ' ')
-            branch.pop_back();
+        const std::string branch = trimmed(s.wt_branch);  // herdr create(): this.text.trim()
         if (branch.empty()) {
             std::lock_guard lock(s.placements_mutex);
             s.wt_error = "Type a branch name.";
@@ -8014,8 +8477,9 @@ void draw_worktree_open(App::State& s) {
     pop_overlay_style();
     if (!open)
         return;
-    const GitInfo g = s.git.get(s.focused_cwd());
+    const GitInfo g = s.git.get(s.focused_cwd(), s.worktree_machine);
     const std::string repo = folder_name(g.common_top.empty() ? g.top : g.common_top);
+    const bool no_repo = !s.worktree_not_repo.empty();
     std::string f = s.wt_filter;
     for (auto& c : f)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -8032,7 +8496,17 @@ void draw_worktree_open(App::State& s) {
         std::snprintf(count, sizeof count, "%zu checkouts", s.worktree_list.size());
     else
         std::snprintf(count, sizeof count, "%zu/%zu checkouts", shown.size(), s.worktree_list.size());
-    bool close = overlay_title(s, ("Open worktree of " + repo).c_str());
+    bool close = overlay_title(s, no_repo ? "Open worktree" : ("Open worktree of " + repo).c_str());
+    if (no_repo) {
+        ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
+        ImGui::TextWrapped("%s is not in a git repository.", s.worktree_not_repo.c_str());
+        ImGui::PopStyleColor();
+        ImGui::TextDisabled("\xE2\x86\x91\xE2\x86\x93 choose \xC2\xB7 \xE2\x86\xB5 open \xC2\xB7 esc close");
+        if (close || ImGui::IsKeyPressed(ImGuiKey_Escape))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return;
+    }
     ImGui::TextDisabled("%s", count);
     if (ImGui::IsWindowAppearing())
         ImGui::SetKeyboardFocusHere();
@@ -8049,9 +8523,13 @@ void draw_worktree_open(App::State& s) {
     }
     std::string go;
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
-    ImGui::BeginChild("##wtl", ImVec2(0, std::min(px(330), static_cast<float>(n) * px(44) + px(4))), ImGuiChildFlags_None,
-                      ImGuiWindowFlags_NoBackground);
+    ImGui::BeginChild("##wtl", ImVec2(0, std::min(px(330), static_cast<float>(std::max(n, 1)) * px(44) + px(4))),
+                      ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
     ImDrawList* d = ImGui::GetWindowDrawList();
+    if (n == 0) {  // herdr: p 10, dim
+        ImGui::SetCursorPos(ImVec2(px(10), px(10)));
+        ImGui::TextDisabled("No matching worktrees.");
+    }
     const auto cwds = s.session_cwds();
     for (int i = 0; i < n; ++i) {
         const auto& e = *shown[static_cast<std::size_t>(i)];
@@ -8073,10 +8551,20 @@ void draw_worktree_open(App::State& s) {
             d->AddText(s.fonts.ui, fpx(11), ImVec2(x, a.y + px(8)), g_pal->faint, "main checkout");
         }
         // "open" if a space shows it, else the age of its last commit.
+        // herdr spaceOf(): a terminal in the checkout's folder, the deepest checkout winning.
+        auto inside = [](const std::string& p, const std::string& dir) {
+            return _strnicmp(p.c_str(), dir.c_str(), dir.size()) == 0 &&
+                   (p.size() == dir.size() || p[dir.size()] == '\\' || p[dir.size()] == '/');
+        };
         bool shown_in_space = false;
-        for (const auto& [id, cwd] : cwds)
-            if (_strnicmp(cwd.c_str(), e.path.c_str(), e.path.size()) == 0)
-                shown_in_space = true;
+        for (const auto& [id, cwd] : cwds) {
+            if (!inside(cwd, e.path))
+                continue;
+            const bool deeper = std::any_of(s.worktree_list.begin(), s.worktree_list.end(), [&](const WorktreeEntry& o) {
+                return o.path.size() > e.path.size() && inside(cwd, o.path);
+            });
+            shown_in_space = shown_in_space || !deeper;
+        }
         const std::string right = shown_in_space ? std::string("open") : e.age;
         const float rw = s.fonts.ui->CalcTextSizeA(fpx(11.5f), FLT_MAX, 0, right.c_str()).x;
         d->AddText(s.fonts.ui, fpx(11.5f), ImVec2(a.x + w - px(12) - rw, a.y + px(8)),
@@ -8123,8 +8611,22 @@ void settings_row(App::State& s, const char* label, const char* note, float cont
     dl->AddText(s.fonts.ui, fpx(13), ImVec2(p.x, p.y + px(4)), g_pal->text, label);
     float h = px(30);
     if (note != nullptr && *note != 0) {
-        text_clipped(dl, s.fonts.ui, fpx(11.5f), ImVec2(p.x, p.y + px(22)), g_pal->faint, note, w - control_w - px(16));
-        h = px(44);
+        // herdr settings row(): the note wraps, 18 px a line, beside the control (gap 16).
+        const float wrap = std::max(px(80), w - control_w - px(16));
+        const char* t = note;
+        const char* end = note + std::strlen(note);
+        float y = p.y + px(22);
+        while (t < end) {
+            const char* brk = s.fonts.ui->CalcWordWrapPosition(fpx(11.5f), t, end, wrap);
+            if (brk == t)
+                brk = t + 1;
+            dl->AddText(s.fonts.ui, fpx(11.5f), ImVec2(p.x, y), g_pal->faint, t, brk);
+            y += px(18);
+            t = brk;
+            while (t < end && (*t == ' ' || *t == '\n'))
+                ++t;
+        }
+        h = y - p.y + px(4);
     }
     ImGui::SetCursorScreenPos(ImVec2(p.x + w - control_w, p.y + px(2)));
     ImGui::SetNextItemWidth(control_w);
@@ -8454,29 +8956,14 @@ void draw_settings(App::State& s) {
             if (stepper(s, "tsize", s.settings.font_size, 1.0f, 8.0f, 32.0f, "%.0f px"))
                 changed = true;
             settings_row_done(s);
-            // Terminal font weight: the weights the family has.
-            settings_row(s, "Terminal font weight", nullptr, px(200));
-            const auto* fam =
-                find_family(s.settings.terminal_font.empty() ? std::string("JetBrains Mono") : s.settings.terminal_font);
-            static constexpr std::pair<int, const char*> kWeightNames[] = {
-                {100, "Thin"}, {200, "Extra light"}, {300, "Light"}, {400, "Regular"}, {500, "Medium"},
-                {600, "Semibold"}, {700, "Bold"}, {800, "Extra bold"}, {900, "Black"}};
-            auto weight_label = [&](int w) {
-                for (const auto& [v, n] : kWeightNames)
-                    if (v == w)
-                        return std::string(n) + " " + std::to_string(w);
-                return std::to_string(w);
-            };
-            ImGui::SetNextItemWidth(px(200));
-            if (ImGui::BeginCombo("##tweight", weight_label(s.settings.terminal_weight).c_str())) {
-                if (fam != nullptr)
-                    for (const auto& [fw, file] : fam->weights)
-                        if (ImGui::Selectable(weight_label(fw).c_str(), fw == s.settings.terminal_weight)) {
-                            s.settings.terminal_weight = fw;
-                            apply_terminal_font(s);
-                            changed = true;
-                        }
-                ImGui::EndCombo();
+            // herdr settings main.js:546-548: a 100-900 stepper (step 100); the family's nearest
+            // face is used (FontFamily::file_for).
+            settings_row(s, "Terminal font weight", "Bold text stays at 700.", px(180));
+            float weight = static_cast<float>(s.settings.terminal_weight);
+            if (stepper(s, "tweight", weight, 100.0f, 100.0f, 900.0f, "%.0f")) {
+                s.settings.terminal_weight = static_cast<int>(weight);
+                apply_terminal_font(s);
+                changed = true;
             }
             settings_row_done(s);
         }
@@ -8539,23 +9026,83 @@ void draw_settings(App::State& s) {
                            "shows that machine's spaces and agents here; they keep running there while this PC "
                            "sleeps. The other computer needs AgentDesk and key-based ssh login.");
         settings_section(s, "Machines");
+        // herdr settings main.js machineRow(): Rename and Remove; both ask inline first.
+        static std::string edit_machine;   // the row being edited
+        static std::string edit_action;    // "rename" or "rm"
+        static char rename_buf[128] = {};
+        static bool focus_rename = false;
+        static std::string machine_notice;
+        if (ImGui::IsWindowAppearing()) {
+            edit_machine.clear();
+            machine_notice.clear();
+        }
         int remove = -1;
+        int rename = -1;
+        std::string new_name;
         for (int i = 0; i < static_cast<int>(s.settings.machines.size()); ++i) {
             const auto& m = s.settings.machines[static_cast<std::size_t>(i)];
             ImGui::PushID(i);
             const bool on = s.machine_connected(m.name);
             const ImVec2 a = ImGui::GetCursorScreenPos();
-            ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, px(40)));
+            const float rw = ImGui::GetContentRegionAvail().x;
+            ImGui::Dummy(ImVec2(rw, px(40)));
             ImDrawList* d = ImGui::GetWindowDrawList();
             draw_icon(s, d, ui::icon::kServer, fpx(14), ImVec2(a.x + px(10), a.y + px(20)), g_pal->dim);
             d->AddText(s.fonts.ui_medium, fpx(13), ImVec2(a.x + px(28), a.y + px(6)), g_pal->text, m.name.c_str());
             d->AddText(s.fonts.ui, fpx(11.5f), ImVec2(a.x + px(28), a.y + px(23)), g_pal->faint, m.target.c_str());
-            d->AddCircleFilled(ImVec2(a.x + ImGui::GetContentRegionAvail().x - px(90), a.y + px(20)), px(3),
-                               on ? g_pal->done : g_pal->faint);
-            ImGui::SetCursorScreenPos(ImVec2(a.x + ImGui::GetContentRegionAvail().x - px(76), a.y + px(8)));
-            if (ImGui::SmallButton("Remove"))
-                remove = i;
+            const float bw_rename = ImGui::CalcTextSize("Rename").x + ImGui::GetStyle().FramePadding.x * 2;
+            const float bw_remove = ImGui::CalcTextSize("Remove").x + ImGui::GetStyle().FramePadding.x * 2;
+            const float bx = a.x + rw - bw_remove - bw_rename - px(6);
+            d->AddCircleFilled(ImVec2(bx - px(14), a.y + px(20)), px(3), on ? g_pal->done : g_pal->faint);
+            ImGui::SetCursorScreenPos(ImVec2(bx, a.y + px(8)));
+            if (ImGui::SmallButton("Rename")) {
+                edit_machine = m.name;
+                edit_action = "rename";
+                std::snprintf(rename_buf, sizeof rename_buf, "%s", m.name.c_str());
+                machine_notice.clear();
+                focus_rename = true;
+            }
+            ImGui::SameLine(0, px(6));
+            if (ImGui::SmallButton("Remove")) {
+                edit_machine = m.name;
+                edit_action = "rm";
+                machine_notice.clear();
+            }
             ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + px(40)));
+            if (edit_machine == m.name && edit_action == "rm") {
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(28));
+                ImGui::TextColored(v4(g_pal->dim), "Remove %s? Its terminals keep running there.", m.name.c_str());
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(28));
+                if (ImGui::Button("Cancel"))
+                    edit_machine.clear();
+                ImGui::SameLine(0, px(6));
+                if (ImGui::Button("Remove machine"))
+                    remove = i;
+            } else if (edit_machine == m.name && edit_action == "rename") {
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(28));
+                ImGui::TextDisabled("New name (addresses using the old name stop working)");
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(28));
+                ImGui::SetNextItemWidth(std::max(px(120), rw - px(28) - px(150)));
+                if (std::exchange(focus_rename, false))
+                    ImGui::SetKeyboardFocusHere();
+                const bool enter = ImGui::InputText("##rename", rename_buf, sizeof rename_buf,
+                                                    ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+                ImGui::SameLine(0, px(6));
+                if (ImGui::Button("Cancel"))
+                    edit_machine.clear();
+                ImGui::SameLine(0, px(6));
+                if (ImGui::Button("Save") || enter) {
+                    const std::string name = trimmed(rename_buf);
+                    const bool taken = std::any_of(s.settings.machines.begin(), s.settings.machines.end(),
+                                                   [&](const MachineConfig& o) { return o.name == name; });
+                    if (!name.empty() && name != m.name && !taken) {
+                        rename = i;
+                        new_name = name;
+                    } else if (name == m.name || name.empty()) {
+                        edit_machine.clear();
+                    }
+                }
+            }
             if (!on)
                 for (const auto& r : s.remotes)
                     if (r.cfg.name == m.name && !r.host->last_error().empty())
@@ -8563,9 +9110,31 @@ void draw_settings(App::State& s) {
             ImGui::PopID();
         }
         if (s.settings.machines.empty())
-            ImGui::TextDisabled("No machines yet.");
+            ImGui::TextDisabled("No other machines yet.");
+        if (!machine_notice.empty())
+            ImGui::TextColored(v4(g_pal->done), "%s", machine_notice.c_str());
         if (remove >= 0) {
+            machine_notice = "Removed " + s.settings.machines[static_cast<std::size_t>(remove)].name +
+                             "; its terminals keep running there.";
             s.settings.machines.erase(s.settings.machines.begin() + remove);
+            edit_machine.clear();
+            changed = true;
+            start_remotes(s);
+        }
+        if (rename >= 0) {
+            auto& m = s.settings.machines[static_cast<std::size_t>(rename)];
+            const std::string old = m.name;
+            m.name = new_name;
+            for (auto& sp : s.ws.spaces)
+                if (sp.machine == old)
+                    sp.machine = new_name;
+            for (auto& f : s.settings.folded_machines)
+                if (f == old)
+                    f = new_name;
+            machine_notice = "Renamed " + old + " to " + new_name + ".";
+            edit_machine.clear();
+            s.doc_dirty = true;
+            s.doc_dirty_at = Clock::now();
             changed = true;
             start_remotes(s);
         }
@@ -8583,7 +9152,10 @@ void draw_settings(App::State& s) {
         changed |= ImGui::Checkbox("##snd", &s.settings.sounds);
         settings_row_done(s);
         auto sound_row = [&](const char* label, const std::string& file, bool blocked) {
-            settings_row(s, label, file.empty() ? "AgentDesk's sound" : file.c_str(), px(70));
+            // herdr settings main.js:743: the file's name, not its path.
+            const auto slash = file.find_last_of("\\/");
+            const std::string name = slash == std::string::npos ? file : file.substr(slash + 1);
+            settings_row(s, label, file.empty() ? "AgentDesk's sound" : name.c_str(), px(70));
             if (ImGui::Button(blocked ? "Play##b" : "Play##d", ImVec2(px(70), 0)))
                 play_alert(s, blocked);
             settings_row_done(s);
@@ -8686,11 +9258,17 @@ void draw_welcome(App::State& s) {
         ImGui::OpenPopup("##welcome");
         s.show_welcome = false;
         s.welcome_page = 0;
+        s.welcome_pos = ImVec2(-1.0f, -1.0f);
     }
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     const float w = std::min(px(660), vp->WorkSize.x - px(16));
     const float h = std::min(px(600), vp->WorkSize.y - px(16));
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + (vp->WorkSize.y - h) * 0.5f));
+    if (s.welcome_pos.x < 0.0f)
+        s.welcome_pos = ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + (vp->WorkSize.y - h) * 0.5f);
+    // Keep the header reachable when the window shrinks.
+    s.welcome_pos.x = std::clamp(s.welcome_pos.x, vp->WorkPos.x - w + px(80), vp->WorkPos.x + vp->WorkSize.x - px(80));
+    s.welcome_pos.y = std::clamp(s.welcome_pos.y, vp->WorkPos.y, vp->WorkPos.y + vp->WorkSize.y - px(52));
+    ImGui::SetNextWindowPos(s.welcome_pos);
     ImGui::SetNextWindowSize(ImVec2(w, h));
     push_overlay_style();
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(32), px(28)));
@@ -8702,6 +9280,50 @@ void draw_welcome(App::State& s) {
     if (!open)
         return;
     int& page = s.welcome_page;
+    // Header (herdr welcome main.js:491-520): logo, "Welcome to AgentDesk", "Drag to move" and a
+    // close button. Only the header drags the window, and only it shows the grab hand.
+    bool skip = false;
+    {
+        ImDrawList* hd = ImGui::GetWindowDrawList();
+        const ImVec2 wp = ImGui::GetWindowPos();
+        const float hh = px(52);
+        const float cy = wp.y + hh * 0.5f;
+        float x = wp.x + px(20);
+        const float m = px(24);
+        hd->AddRectFilled(ImVec2(x, cy - m * 0.5f), ImVec2(x + m, cy + m * 0.5f), g_pal->focus, px(6));
+        hd->AddRectFilled(ImVec2(x + px(6), cy - px(5)), ImVec2(x + px(17), cy - px(2)), g_pal->card, px(1));
+        hd->AddRectFilled(ImVec2(x + px(6), cy + px(2)), ImVec2(x + px(13), cy + px(5)), g_pal->card, px(1));
+        x += m + px(10);
+        const char* kTitle = "Welcome to AgentDesk";
+        const ImVec2 tt = s.fonts.ui_bold->CalcTextSizeA(fpx(14), FLT_MAX, 0, kTitle);
+        hd->AddText(s.fonts.ui_bold, fpx(14), ImVec2(x, cy - tt.y * 0.5f), g_pal->text, kTitle);
+        const float close_x = wp.x + w - px(12) - px(26);
+        const ImVec2 dt = s.fonts.ui->CalcTextSizeA(fpx(11.5f), FLT_MAX, 0, "Drag to move");
+        hd->AddText(s.fonts.ui, fpx(11.5f), ImVec2(close_x - px(10) - dt.x, cy - dt.y * 0.5f), g_pal->faint, "Drag to move");
+        ImGui::SetCursorScreenPos(ImVec2(close_x, cy - px(13)));
+        if (ImGui::InvisibleButton("##w-close", ImVec2(px(26), px(26))))
+            skip = true;
+        const bool close_hov = ImGui::IsItemHovered();
+        if (close_hov)
+            hd->AddRectFilled(ImVec2(close_x, cy - px(13)), ImVec2(close_x + px(26), cy + px(13)), g_pal->hover, px(7));
+        draw_icon(s, hd, ui::icon::kClose, fpx(14), ImVec2(close_x + px(13), cy), close_hov ? g_pal->text : g_pal->dim);
+        ImGui::SetCursorScreenPos(wp);
+        ImGui::InvisibleButton("##w-drag", ImVec2(std::max(1.0f, close_x - px(4) - wp.x), hh));
+        if (ImGui::IsItemHovered() || ImGui::IsItemActive())
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
+            s.welcome_pos.x += ImGui::GetIO().MouseDelta.x;
+            s.welcome_pos.y += ImGui::GetIO().MouseDelta.y;
+        }
+        hd->AddLine(ImVec2(wp.x, wp.y + hh), ImVec2(wp.x + w, wp.y + hh), g_pal->border);
+        hd->AddLine(ImVec2(wp.x, wp.y + h - px(56)), ImVec2(wp.x + w, wp.y + h - px(56)), g_pal->border);
+        // The page scrolls between the header and the footer (herdr w-body, padding 22).
+        ImGui::SetCursorScreenPos(ImVec2(wp.x, wp.y + hh + 1));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(22), px(22)));
+        ImGui::BeginChild("##w-body", ImVec2(w, h - hh - 1 - px(57)), ImGuiChildFlags_AlwaysUseWindowPadding,
+                          ImGuiWindowFlags_NoBackground);
+        ImGui::PopStyleVar();
+    }
     auto title = [&](const char* t, const char* sub) {
         ImGui::PushFont(s.fonts.ui_bold, fpx(20));
         ImGui::TextWrapped("%s", t);
@@ -8778,6 +9400,16 @@ void draw_welcome(App::State& s) {
                     s.settings.panels.erase(std::remove(s.settings.panels.begin(), s.settings.panels.end(), id),
                                             s.settings.panels.end());
                 changed = true;
+                // herdr togglePanel(): turning one on shows it at once; turning off the one shown
+                // (or the last one) hides the panel.
+                if (auto* sp = s.ws.active()) {
+                    if (on)
+                        sp->panel = id;
+                    else if (sp->panel == id || s.settings.panels.empty())
+                        sp->panel.clear();
+                    s.doc_dirty = true;
+                    s.doc_dirty_at = Clock::now();
+                }
             }
             ImGui::SameLine();
             ImGui::TextDisabled("%s", text);
@@ -8811,8 +9443,10 @@ void draw_welcome(App::State& s) {
         ImGui::EndChild();
         ImGui::PopStyleColor();
     }
+    ImGui::Dummy(ImVec2(0, px(20)));
+    ImGui::EndChild();
     // Footer: dots, Back / Next.
-    const float fy = ImGui::GetWindowPos().y + h - px(56);
+    const float fy = ImGui::GetWindowPos().y + h - px(56) + px(12);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     for (int i = 0; i < 4; ++i)
         dl->AddCircleFilled(ImVec2(ImGui::GetWindowPos().x + px(36) + static_cast<float>(i) * px(14), fy + px(15)), px(3.5f),
@@ -8834,7 +9468,8 @@ void draw_welcome(App::State& s) {
     fwd = ImGui::Button(next, ImVec2(px(108), px(30)));
     primary_button_style(false);
     const bool typing = ImGui::GetIO().WantTextInput;
-    if (!typing && (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)))
+    // herdr: Enter or Right goes on; on the last page only Enter finishes.
+    if (!typing && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && page < 3)))
         fwd = true;
     if (!typing && ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && page > 0)
         back = true;
@@ -8851,7 +9486,7 @@ void draw_welcome(App::State& s) {
                 run_command(s, "space.new");
         }
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    if (skip || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         s.settings.welcomed = "skipped";
         changed = true;
         ImGui::CloseCurrentPopup();
@@ -8862,60 +9497,149 @@ void draw_welcome(App::State& s) {
 }
 
 // ------------------------------------------------------------------ add a machine (herdr machine-add)
-// Hosts from ~/.ssh/config (Include followed), or typed "user@host"; adding connects at once.
+// Port of herdr defaults/mods/machine-add/main.js parseConfig/includeFiles: named Host entries (no
+// patterns), "Key value" or "Key=value", a Match block belongs to no host, Include followed 16
+// deep (~/ is home, relative is under ~/.ssh, * ? [ match files).
 std::vector<std::pair<std::string, std::string>> ssh_config_hosts() {
-    std::vector<std::pair<std::string, std::string>> out;  // alias, user@hostname
-    wchar_t home[MAX_PATH]{};
-    if (::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH) == 0)
-        return out;
-    const std::filesystem::path ssh = std::filesystem::path(home) / L".ssh";
-    std::set<std::string> seen;
-    std::function<void(const std::filesystem::path&, int)> read = [&](const std::filesystem::path& file, int depth) {
-        if (depth > 16)
-            return;
-        std::ifstream in(file);
-        std::vector<std::string> current;
-        std::string user, hostname;
-        auto flush = [&] {
-            for (const auto& alias : current) {
-                if (alias.find_first_of("*?!") != std::string::npos || seen.contains(alias))
-                    continue;
-                seen.insert(alias);
-                out.emplace_back(alias, (user.empty() ? "" : user + "@") + (hostname.empty() ? alias : hostname));
+    struct Host {
+        std::string alias;
+        std::vector<std::string> aliases;
+        std::string hostname, user;
+    };
+    std::vector<Host> hosts;
+    wchar_t home_buf[MAX_PATH]{};
+    if (::GetEnvironmentVariableW(L"USERPROFILE", home_buf, MAX_PATH) == 0)
+        return {};
+    const std::filesystem::path home(home_buf);
+    auto include_files = [&](const std::string& value) {
+        std::vector<std::filesystem::path> files;
+        std::vector<std::string> words;
+        for (std::size_t i = 0; i < value.size();) {
+            while (i < value.size() && std::isspace(static_cast<unsigned char>(value[i])))
+                ++i;
+            if (i >= value.size())
+                break;
+            std::size_t j = i;
+            if (value[i] == '"') {
+                j = value.find('"', i + 1);
+                words.push_back(value.substr(i + 1, (j == std::string::npos ? value.size() : j) - i - 1));
+                i = j == std::string::npos ? value.size() : j + 1;
+                continue;
             }
-            current.clear();
-            user.clear();
-            hostname.clear();
-        };
-        for (std::string line; std::getline(in, line);) {
-            std::stringstream ss(line);
-            std::string key;
-            ss >> key;
+            while (j < value.size() && !std::isspace(static_cast<unsigned char>(value[j])))
+                ++j;
+            words.push_back(value.substr(i, j - i));
+            i = j;
+        }
+        for (const auto& w : words) {
+            std::filesystem::path p;
+            if (w.rfind("~/", 0) == 0 || w.rfind("~\\", 0) == 0)
+                p = home / win::to_wide(w.substr(2));
+            else if (std::filesystem::path(win::to_wide(w)).is_absolute() || w.rfind("/", 0) == 0)
+                p = win::to_wide(w);
+            else
+                p = home / L".ssh" / win::to_wide(w);
+            p.make_preferred();
+            if (w.find_first_of("*?[") == std::string::npos) {
+                files.push_back(p);
+                continue;
+            }
+            // A pattern in the file name: the files it matches, in name order.
+            WIN32_FIND_DATAW fd{};
+            const HANDLE h = ::FindFirstFileW(p.c_str(), &fd);
+            std::vector<std::filesystem::path> found;
+            if (h != INVALID_HANDLE_VALUE) {
+                do {
+                    if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+                        found.push_back(p.parent_path() / fd.cFileName);
+                } while (::FindNextFileW(h, &fd));
+                ::FindClose(h);
+            }
+            std::sort(found.begin(), found.end());
+            files.insert(files.end(), found.begin(), found.end());
+        }
+        return files;
+    };
+    auto known = [&](const std::string& name) {
+        return std::any_of(hosts.begin(), hosts.end(), [&](const Host& x) {
+            return x.alias == name || std::find(x.aliases.begin(), x.aliases.end(), name) != x.aliases.end();
+        });
+    };
+    std::function<void(const std::filesystem::path&, int)> parse = [&](const std::filesystem::path& file, int depth) {
+        std::ifstream in(file, std::ios::binary);
+        if (!in)
+            return;
+        int cur = -1;  // index into hosts; -1: lines belong to no pickable host
+        for (std::string raw; std::getline(in, raw);) {
+            const std::string line = trimmed(raw);
+            // ^([^\s#=]+)\s*=?\s*(.*)$
+            std::size_t k = 0;
+            while (k < line.size() && !std::isspace(static_cast<unsigned char>(line[k])) && line[k] != '#' && line[k] != '=')
+                ++k;
+            if (k == 0)
+                continue;
+            std::string key = line.substr(0, k);
             for (auto& c : key)
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (key == "host") {
-                flush();
-                for (std::string a; ss >> a;)
-                    current.push_back(a);
-            } else if (key == "hostname") {
-                ss >> hostname;
-            } else if (key == "user") {
-                ss >> user;
-            } else if (key == "include") {
-                for (std::string inc; ss >> inc;) {
-                    std::filesystem::path p(win::to_wide(inc));
-                    if (p.is_relative())
-                        p = ssh / p;
-                    std::error_code ec;
-                    if (std::filesystem::is_regular_file(p, ec))
-                        read(p, depth + 1);
+            std::size_t v = k;
+            while (v < line.size() && std::isspace(static_cast<unsigned char>(line[v])))
+                ++v;
+            if (v < line.size() && line[v] == '=')
+                ++v;
+            const std::string value = trimmed(line.substr(v));
+            if (key == "host" || key == "match") {
+                std::vector<std::string> names;
+                if (key == "host") {
+                    std::stringstream ss(value);
+                    for (std::string h; ss >> h;)
+                        if (h.find_first_of("*?!") == std::string::npos && !known(h) &&
+                            std::find(names.begin(), names.end(), h) == names.end())
+                            names.push_back(h);
                 }
+                cur = -1;
+                if (!names.empty()) {
+                    hosts.push_back({names[0], std::vector<std::string>(names.begin() + 1, names.end()), {}, {}});
+                    cur = static_cast<int>(hosts.size()) - 1;
+                }
+            } else if (key == "include" && depth < 16) {
+                for (const auto& f : include_files(value))
+                    parse(f, depth + 1);
+            } else if (cur >= 0 && key == "hostname") {
+                hosts[static_cast<std::size_t>(cur)].hostname = value;
+            } else if (cur >= 0 && key == "user") {
+                hosts[static_cast<std::size_t>(cur)].user = value;
             }
         }
-        flush();
     };
-    read(ssh / L"config", 0);
+    try {
+        parse(home / L".ssh" / L"config", 0);
+    } catch (const std::exception&) {
+        // a name that is not UTF-8: keep what was read
+    }
+    std::vector<std::pair<std::string, std::string>> out;
+    for (const auto& h : hosts) {
+        std::string sub = h.user.empty() ? h.hostname : h.hostname.empty() ? h.user : h.user + "@" + h.hostname;
+        if (sub.empty() && !h.aliases.empty()) {
+            sub = "also ";
+            for (std::size_t i = 0; i < h.aliases.size(); ++i)
+                sub += (i ? ", " : "") + h.aliases[i];
+        }
+        out.emplace_back(h.alias, sub);
+    }
     return out;
+}
+
+// herdr machine-add shellArg(): a target as a shell reads it.
+std::string shell_arg(const std::string& target) {
+    const bool plain = !target.empty() && std::all_of(target.begin(), target.end(), [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) != 0 || std::string_view("_@%+=:,./-").find(c) != std::string_view::npos;
+    });
+    if (plain)
+        return target;
+    std::string out = "'";
+    for (const char c : target)
+        out += c == '\'' ? std::string("'\\''") : std::string(1, c);
+    return out + "'";
 }
 
 void draw_machine_add(App::State& s) {
@@ -8924,6 +9648,8 @@ void draw_machine_add(App::State& s) {
         s.show_machine_add = false;
         s.ssh_hosts = ssh_config_hosts();
         s.machine_buf[0] = 0;
+        std::erase_if(s.machine_add_state, [](const auto& kv) { return kv.second != "adding"; });
+        s.machine_add_pending.clear();
     }
     center_next(px(560), 0.12f);
     push_overlay_style();
@@ -8937,58 +9663,170 @@ void draw_machine_add(App::State& s) {
                        "this PC sleeps. It needs AgentDesk there and key-based ssh login.");
     ImGui::PopStyleColor();
     ImGui::Dummy(ImVec2(0, px(6)));
-    auto added = [&](const std::string& target) {
+    // A machine counts as added once it answers (herdr: `hc machine add` succeeded).
+    auto machine_of_target = [&](const std::string& target) -> const MachineConfig* {
         for (const auto& m : s.settings.machines)
             if (m.target == target || m.name == target)
-                return true;
-        return false;
+                return &m;
+        return nullptr;
     };
-    auto add = [&](const std::string& name, const std::string& target) {
-        s.settings.machines.push_back({name, target, ""});
-        save_settings(s.settings);
-        start_remotes(s);
+    auto added = [&](const std::string& target) {
+        const auto* m = machine_of_target(target);
+        return m != nullptr && !s.machine_add_state.contains(target);
     };
-    settings_section(s, s.ssh_hosts.empty() ? "Your ssh config lists no hosts" : "From your ssh config");
-    for (const auto& [alias, where] : s.ssh_hosts) {
-        if (added(alias))
+    // herdr add(): connect at once; "Connecting" until it answers or says why not.
+    auto add = [&](std::string target) {
+        target = trimmed(target);
+        if (target.empty() || s.machine_add_state[target] == "adding")
+            return;
+        s.machine_add_pending.erase(target);
+        s.machine_add_state[target] = "adding";
+        if (machine_of_target(target) == nullptr) {
+            const auto at = target.find('@');
+            std::string name = at == std::string::npos ? target : target.substr(at + 1);
+            while (std::any_of(s.settings.machines.begin(), s.settings.machines.end(),
+                               [&](const MachineConfig& m) { return m.name == name; }))
+                name += "-2";
+            s.settings.machines.push_back({name, target, ""});
+            save_settings(s.settings);
+            start_remotes(s);
+        }
+    };
+    // Follow the connections being made: answered -> added; refused -> not added, and why.
+    for (auto it = s.machine_add_state.begin(); it != s.machine_add_state.end();) {
+        const std::string target = it->first;
+        const auto* m = machine_of_target(target);
+        if (it->second != "adding" || m == nullptr) {
+            ++it;
             continue;
+        }
+        if (s.machine_connected(m->name)) {
+            if (trimmed(s.machine_buf) == target)
+                s.machine_buf[0] = 0;
+            it = s.machine_add_state.erase(it);
+            continue;
+        }
+        std::string why;
+        {
+            std::lock_guard lock(s.remotes_mutex);
+            for (const auto& r : s.remotes)
+                if (r.cfg.name == m->name)
+                    why = r.host->last_error();
+        }
+        if (!why.empty()) {
+            std::string low = why;
+            for (auto& c : low)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            const bool answer = low.find("password") != std::string::npos || low.find("passphrase") != std::string::npos ||
+                                low.find("host key") != std::string::npos ||
+                                low.find("permission denied") != std::string::npos || low.find("login") != std::string::npos;
+            if (answer) {
+                s.machine_add_pending.insert(target);
+                it->second = "Couldn't add " + target +
+                             " here: it needs you to answer something (a password, a new host key, or installing "
+                             "AgentDesk there). Run `ssh " + shell_arg(target) +
+                             "` in a terminal, then add it again.";
+            } else {
+                it->second = why;
+            }
+            // Not added: it stays out of the machine list until it answers.
+            const std::string name = m->name;
+            std::erase_if(s.settings.machines, [&](const MachineConfig& x) { return x.name == name; });
+            save_settings(s.settings);
+            start_remotes(s);
+        }
+        ++it;
+    }
+    // One row (herdr row()): server icon, name, where it goes, then Added / Connecting / Add.
+    auto row = [&](const std::string& target, const std::string& label, const std::string& sub) {
+        const auto st = s.machine_add_state.find(target);
+        const bool done = added(target);
+        const bool adding = st != s.machine_add_state.end() && st->second == "adding";
+        const bool idle = !done && st == s.machine_add_state.end();
         const ImVec2 a = ImGui::GetCursorScreenPos();
-        ImGui::PushID(alias.c_str());
+        ImGui::PushID(target.c_str());
         const float rw = ImGui::GetContentRegionAvail().x;
-        const bool clicked = ImGui::InvisibleButton("##h", ImVec2(rw, px(40)));
+        bool clicked = ImGui::InvisibleButton("##h", ImVec2(rw, px(40)));
         const bool hov = ImGui::IsItemHovered();
         ImDrawList* d = ImGui::GetWindowDrawList();
         if (hov)
-            d->AddRectFilled(a, ImVec2(a.x + rw, a.y + px(40)), g_pal->hover, px(7));
-        draw_icon(s, d, ui::icon::kServer, fpx(14), ImVec2(a.x + px(14), a.y + px(20)), g_pal->dim);
-        d->AddText(s.fonts.ui_medium, fpx(13), ImVec2(a.x + px(32), a.y + px(20) - fpx(13) * 0.6f), g_pal->text, alias.c_str());
-        const float aw = s.fonts.ui_medium->CalcTextSizeA(fpx(13), FLT_MAX, 0, alias.c_str()).x;
-        d->AddText(s.fonts.ui, fpx(12), ImVec2(a.x + px(40) + aw, a.y + px(20) - fpx(12) * 0.6f), g_pal->faint, where.c_str());
-        d->AddText(s.fonts.ui_medium, fpx(12), ImVec2(a.x + rw - px(40), a.y + px(20) - fpx(12) * 0.6f), g_pal->focus, "Add");
-        if (clicked)
-            add(alias, alias);
+            d->AddRectFilled(a, ImVec2(a.x + rw, a.y + px(40)), g_pal->hover, px(8));
+        const float cy = a.y + px(20);
+        draw_icon(s, d, ui::icon::kServer, fpx(15), ImVec2(a.x + px(17), cy), g_pal->dim);
+        d->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(35), cy - fpx(13) * 0.6f), g_pal->text, label.c_str());
+        const float lw = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, label.c_str()).x;
+        const char* right = done ? "\xE2\x9C\x93 Added" : adding ? "Connecting\xE2\x80\xA6" : "Add";
+        const float rtw = s.fonts.ui_medium->CalcTextSizeA(fpx(12), FLT_MAX, 0, right).x;
+        text_clipped(d, s.fonts.ui, fpx(12), ImVec2(a.x + px(45) + lw, cy - fpx(12) * 0.6f), g_pal->faint, sub,
+                     std::max(0.0f, rw - px(45) - lw - rtw - px(34)));
+        const ImVec2 ra(a.x + rw - px(10) - rtw - (idle ? px(20) : 0.0f), cy - px(13));
+        if (idle) {
+            d->AddRectFilled(ra, ImVec2(ra.x + rtw + px(20), ra.y + px(26)), raised_color(), px(7));
+            d->AddRect(ra, ImVec2(ra.x + rtw + px(20), ra.y + px(26)), g_pal->border, px(7));
+        }
+        d->AddText(s.fonts.ui_medium, fpx(12), ImVec2(ra.x + (idle ? px(10) : 0.0f), cy - fpx(12) * 0.6f),
+                   done ? g_pal->done : adding ? g_pal->dim : g_pal->text, right);
+        if (clicked && idle)
+            add(target);
+        ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + px(40)));
+        if (st != s.machine_add_state.end() && st->second != "adding") {
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(35));
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + rw - px(45));
+            ImGui::TextColored(v4(g_pal->needs_you), "%s", st->second.c_str());
+            ImGui::PopTextWrapPos();
+            if (s.machine_add_pending.contains(target)) {
+                const std::string command = "ssh " + shell_arg(target);
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(35));
+                if (ImGui::SmallButton(s.machine_add_copied == command ? "Copied" : "Copy")) {
+                    ImGui::SetClipboardText(command.c_str());
+                    s.machine_add_copied = command;
+                }
+            }
+            if (ImGui::SmallButton("Try again"))
+                add(target);
+            ImGui::Dummy(ImVec2(0, px(6)));
+        }
         ImGui::PopID();
-    }
-    for (const auto& m : s.settings.machines) {
-        ImGui::TextDisabled("%s", m.name.c_str());
-        ImGui::SameLine();
-        ImGui::TextColored(v4(g_pal->done), "\xE2\x9C\x93 Added");
-    }
+    };
+    settings_section(s, s.ssh_hosts.empty() ? "Your ssh config lists no hosts" : "From your ssh config");
+    // herdr ma-hosts: at most 280 px, then it scrolls.
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, px(280)));
+    ImGui::BeginChild("##ma-hosts", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY, ImGuiWindowFlags_NoBackground);
+    for (const auto& [alias, where] : s.ssh_hosts)
+        if (!added(alias))
+            row(alias, alias, where);
+    ImGui::EndChild();
+    for (const auto& m : s.settings.machines)
+        if (added(m.target))
+            row(m.target, m.name, m.target);
     settings_section(s, "Or type how ssh reaches it");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - px(90));
     const bool enter = ImGui::InputTextWithHint("##target", "user@host", s.machine_buf, sizeof s.machine_buf,
                                                 ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::SameLine(0, px(8));
-    ImGui::BeginDisabled(s.machine_buf[0] == 0);
+    const std::string typed = trimmed(s.machine_buf);
+    ImGui::BeginDisabled(typed.empty());
     primary_button_style(true);
     const bool go = ImGui::Button("Add", ImVec2(px(80), 0)) || enter;
     primary_button_style(false);
     ImGui::EndDisabled();
-    if (go && s.machine_buf[0] != 0) {
-        std::string t = s.machine_buf;
-        const auto at = t.find('@');
-        add(at == std::string::npos ? t : t.substr(at + 1), t);
-        s.machine_buf[0] = 0;
+    if (go && !typed.empty())
+        add(typed);
+    // The typed target's state under the box (herdr: Connecting, why not, or what to answer).
+    if (const auto st = s.machine_add_state.find(typed); !typed.empty() && st != s.machine_add_state.end()) {
+        ImGui::PushTextWrapPos(0.0f);
+        if (st->second == "adding")
+            ImGui::TextDisabled("Connecting\xE2\x80\xA6");
+        else
+            ImGui::TextColored(v4(g_pal->needs_you), "%s", st->second.c_str());
+        ImGui::PopTextWrapPos();
+        if (s.machine_add_pending.contains(typed)) {
+            const std::string command = "ssh " + shell_arg(typed);
+            if (ImGui::SmallButton(s.machine_add_copied == command ? "Copied##t" : "Copy##t")) {
+                ImGui::SetClipboardText(command.c_str());
+                s.machine_add_copied = command;
+            }
+        }
     }
     if (close || ImGui::IsKeyPressed(ImGuiKey_Escape) || dialog_outside_click())
         ImGui::CloseCurrentPopup();

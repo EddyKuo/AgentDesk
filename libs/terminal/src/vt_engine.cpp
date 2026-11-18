@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <string>
+#include <tuple>
 
 #include <vterm.h>
 
@@ -13,6 +15,8 @@ constexpr std::size_t kMaxTitleBytes = 1024;
 constexpr std::size_t kMaxCwdBytes = 4096;
 constexpr std::size_t kMaxPasteBytes = 1024 * 1024;
 constexpr std::uint32_t kContinuation = 0xFFFFFFFFu;
+constexpr std::size_t kMaxLinks = 1024;
+constexpr std::size_t kMaxLinkBytes = 2048;
 
 VTermModifier to_vterm_mods(std::uint8_t mods) {
     unsigned m = VTERM_MOD_NONE;
@@ -136,8 +140,12 @@ struct VtEngine::Callbacks {
         self(user).bump();
         return 1;
     }
-    static int moverect(VTermRect, VTermRect, void* user) {
-        self(user).bump();
+    static int moverect(VTermRect dest, VTermRect src, void* user) {
+        auto& e = self(user);
+        // Full-width moves are scrolls: OSC 8 links ride along with their rows.
+        if (src.start_col == 0 && src.end_col == e.cols_ && dest.start_col == 0 && dest.end_col == e.cols_)
+            e.move_links(src.start_row, src.end_row, dest.start_row, dest.end_row, dest.start_row - src.start_row);
+        e.bump();
         return 1;
     }
     static int movecursor(VTermPos pos, VTermPos, int visible, void* user) {
@@ -156,6 +164,8 @@ struct VtEngine::Callbacks {
                 break;
             case VTERM_PROP_ALTSCREEN:
                 e.alt_screen_ = val->boolean != 0;
+                e.links_.clear();
+                e.open_link_.reset();
                 break;
             case VTERM_PROP_MOUSE:
                 e.mouse_mode_ = val->number == VTERM_PROP_MOUSE_CLICK  ? MouseMode::kClick
@@ -260,7 +270,9 @@ VtEngine::VtEngine(const VtEngineOptions& options, EngineEvents events)
     vterm_screen_set_unrecognised_fallbacks(screen_, &kFallbacks, this);
 
     vterm_screen_enable_altscreen(screen_, 1);
-    vterm_screen_set_damage_merge(screen_, VTERM_DAMAGE_SCROLL);
+    // Row merging (not SCROLL): scrolls reach moverect as they happen, so OSC 8 link positions
+    // recorded mid-write stay in step with the screen.
+    vterm_screen_set_damage_merge(screen_, VTERM_DAMAGE_ROW);
     vterm_screen_reset(screen_, 1);
     // OSC 52 stays disabled: no selection callbacks are registered (design doc 3.9).
 }
@@ -288,6 +300,7 @@ void VtEngine::feed(std::string_view bytes) {
     if (bytes.empty()) {
         return;
     }
+    watch_win32_mode(bytes);
     // libvterm 0.3.3 emits U+FFFD when a UTF-8 sequence is split across two
     // vterm_input_write calls and control characters follow (reproduced, see M0 report).
     // Hold back at most 3 trailing bytes of an incomplete sequence and prepend them to the
@@ -326,11 +339,68 @@ void VtEngine::resize(int rows, int cols) {
     cols_ = cols;
     vterm_set_size(vt_.get(), rows, cols);
     vterm_screen_flush_damage(screen_);
+    links_.clear();
+    open_link_.reset();
     ++generation_;
     bump();
 }
 
+// Port of herdr src/win32_keys.rs (Win32Input::watch, latest): libvterm ignores DEC mode 9001,
+// so the request is read from the output as it streams by, including one split across writes.
+void VtEngine::watch_win32_mode(std::string_view bytes) {
+    static constexpr std::string_view kOn = "\x1b[?9001h";
+    static constexpr std::string_view kOff = "\x1b[?9001l";
+    constexpr std::size_t kKeep = kOn.size() - 1;
+    auto latest = [](std::string_view b) -> std::optional<bool> {
+        const auto on = b.rfind(kOn);
+        const auto off = b.rfind(kOff);
+        if (on != std::string_view::npos)
+            return off == std::string_view::npos || on > off;
+        if (off != std::string_view::npos)
+            return false;
+        return std::nullopt;
+    };
+    std::string edge = std::exchange(win32_tail_, {});
+    edge.append(bytes.substr(0, std::min(bytes.size(), kKeep)));
+    if (auto on = latest(bytes); on.has_value())
+        win32_on_ = *on;
+    else if (auto e = latest(edge); e.has_value())
+        win32_on_ = *e;
+    const std::string_view end = bytes.size() >= kKeep ? bytes : std::string_view(edge);
+    win32_tail_.assign(end.substr(end.size() - std::min(end.size(), kKeep)));
+}
+
+namespace {
+
+// herdr src/win32_keys.rs:44-55: a key pressed and released as win32-input-mode events,
+// `CSI Vk;Sc;Uc;Kd;Cs;Rc _` (Shift 0x10, left Ctrl 0x08, left Alt 0x02 held, repeat 1).
+std::string win32_key(unsigned vk, unsigned scan, unsigned typed, std::uint8_t mods) {
+    const unsigned held = ((mods & kModShift) ? 0x10u : 0u) | ((mods & kModCtrl) ? 0x08u : 0u) |
+                          ((mods & kModAlt) ? 0x02u : 0u);
+    std::string out;
+    for (const int down : {1, 0}) {
+        out += "\x1b[" + std::to_string(vk) + ';' + std::to_string(scan) + ';' + std::to_string(typed) + ';' +
+               std::to_string(down) + ';' + std::to_string(held) + ";1_";
+    }
+    return out;
+}
+
+}  // namespace
+
 void VtEngine::key(Key key, std::uint8_t mods) {
+    // herdr src/terminal.rs:1645-1652: with win32-input-mode on, modified Enter and Escape go as
+    // win32 key events (Shift+Enter reaches the program; ConPTY would otherwise merge a bare
+    // Escape with the next key into an Alt chord).
+    if (win32_on_) {
+        if (key == Key::kEnter && (mods & (kModShift | kModCtrl | kModAlt)) != 0) {
+            pty_input_ += win32_key(13, 28, (mods & kModCtrl) ? 10 : 13, mods);
+            return;
+        }
+        if (key == Key::kEscape) {
+            pty_input_ += win32_key(27, 1, 27, mods);
+            return;
+        }
+    }
     vterm_keyboard_key(vt_.get(), to_vterm_key(key), to_vterm_mods(mods));
 }
 
@@ -358,12 +428,29 @@ void VtEngine::paste(std::string_view utf8) {
         throw std::invalid_argument("paste contains NUL");
     }
     // Bracketed paste markers are emitted only when the program enabled mode 2004.
+    const std::size_t before = pty_input_.size();
     vterm_keyboard_start_paste(vt_.get());
+    const bool bracketed = pty_input_.size() != before;
     std::string body(utf8);
-    // An embedded end marker would let pasted text escape the bracket: strip it.
-    static constexpr std::string_view kEnd = "\x1b[201~";
-    for (auto pos = body.find(kEnd); pos != std::string::npos; pos = body.find(kEnd, pos)) {
-        body.erase(pos, kEnd.size());
+    if (bracketed) {
+        // An embedded end marker would let pasted text escape the bracket: strip it.
+        static constexpr std::string_view kEnd = "\x1b[201~";
+        for (auto pos = body.find(kEnd); pos != std::string::npos; pos = body.find(kEnd, pos)) {
+            body.erase(pos, kEnd.size());
+        }
+    } else {
+        // herdr src/vt.rs:1631 (paste_bytes): without bracketed paste, line breaks are Enter (CR).
+        std::string cr;
+        cr.reserve(body.size());
+        for (std::size_t i = 0; i < body.size(); ++i) {
+            if (body[i] == '\r' && i + 1 < body.size() && body[i + 1] == '\n') {
+                cr.push_back('\r');
+                ++i;
+            } else {
+                cr.push_back(body[i] == '\n' ? '\r' : body[i]);
+            }
+        }
+        body = std::move(cr);
     }
     pty_input_.append(body);
     vterm_keyboard_end_paste(vt_.get());
@@ -419,6 +506,11 @@ void VtEngine::push_history(int cols, const void* vterm_cells) {
     for (int i = 0; i < cols; ++i) {
         line.cells.push_back(convert(&cells[i]));
     }
+    // libvterm has already shifted its line info when the screen pushes the top row: row 0's
+    // continuation flag now says whether the pushed row ran on into it (one-line scrolls; a
+    // multi-line scroll keeps the flag of its last pushed row only).
+    if (rows_ > 0)
+        line.wrapped = vterm_state_get_lineinfo(vterm_obtain_state(vt_.get()), 0)->continuation != 0;
     history_bytes_ += line.cells.size() * sizeof(Cell) + sizeof(HistoryLine);
     history_.push_back(std::move(line));
     // Whichever limit is reached first evicts the oldest lines (design doc 3.4).
@@ -512,9 +604,61 @@ void VtEngine::handle_osc(int command, std::string body) {
                 cwd_uri_ = sanitize_display_text(body, kMaxCwdBytes);
             }
             return;
+        case 8: {
+            // OSC 8 ; params ; URI  (empty URI closes the link). Only remembered for an explicit
+            // Ctrl+click by the person; output never opens anything (design doc 3.9).
+            const auto semi = body.find(';');
+            if (semi == std::string::npos)
+                return;
+            std::string uri = body.substr(semi + 1);
+            if (open_link_ && cursor_.row >= open_link_->first.row) {
+                const CursorState from = open_link_->first;
+                const std::string target = std::move(open_link_->second);
+                open_link_.reset();
+                for (int row = from.row; row <= cursor_.row && row < rows_; ++row) {
+                    const int c0 = row == from.row ? from.col : 0;
+                    const int c1 = row == cursor_.row ? cursor_.col : cols_;
+                    if (c1 <= c0)
+                        continue;
+                    if (links_.size() >= kMaxLinks)
+                        links_.erase(links_.begin());
+                    links_.push_back({Hyperlink{row, c0, c1, target}, cells_text(row, c0, c1)});
+                }
+            }
+            open_link_.reset();
+            if (!uri.empty() && uri.size() <= kMaxLinkBytes &&
+                std::none_of(uri.begin(), uri.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20; }))
+                open_link_.emplace(cursor_, std::move(uri));
+            return;
+        }
         default:
-            return;  // OSC 8 and others: ignored in M0
+            return;
     }
+}
+
+std::string VtEngine::cells_text(int row, int col0, int col1) const {
+    std::string out;
+    for (int col = std::max(0, col0); col < std::min(col1, cols_); ++col) {
+        VTermScreenCell cell{};
+        vterm_screen_get_cell(screen_, VTermPos{row, col}, &cell);
+        for (std::size_t i = 0; i < kMaxCharsPerCell && cell.chars[i] != 0 && cell.chars[i] != kContinuation; ++i)
+            append_utf8(out, static_cast<char32_t>(cell.chars[i]));
+        out.push_back('\x1f');  // cell separator, so blanks count
+    }
+    return out;
+}
+
+void VtEngine::move_links(int src_row0, int src_row1, int dest_row0, int dest_row1, int dy) {
+    std::erase_if(links_, [&](TrackedLink& t) {
+        const int row = t.link.row;
+        if (row >= src_row0 && row < src_row1) {
+            t.link.row = row + dy;
+            return t.link.row < 0 || t.link.row >= rows_;
+        }
+        return row >= dest_row0 && row < dest_row1;  // overwritten by the moved rows
+    });
+    if (open_link_ && open_link_->first.row >= src_row0 && open_link_->first.row < src_row1)
+        open_link_->first.row += dy;
 }
 
 void VtEngine::on_process_exit() {
@@ -540,6 +684,17 @@ ScreenSnapshot VtEngine::snapshot() const {
             snap.cells.push_back(convert(&cell));
         }
     }
+    // A row is soft-wrapped when the next row is marked as its continuation.
+    const VTermState* state = vterm_obtain_state(vt_.get());
+    snap.wrapped.assign(static_cast<std::size_t>(rows_), 0);
+    for (int row = 0; row + 1 < rows_; ++row)
+        snap.wrapped[static_cast<std::size_t>(row)] = vterm_state_get_lineinfo(state, row + 1)->continuation ? 1 : 0;
+    for (const auto& t : links_) {
+        if (t.link.row < rows_ && cells_text(t.link.row, t.link.col0, t.link.col1) == t.text)
+            snap.links.push_back(t.link);
+    }
+    std::sort(snap.links.begin(), snap.links.end(),
+              [](const Hyperlink& a, const Hyperlink& b) { return std::tie(a.row, a.col0) < std::tie(b.row, b.col0); });
     return snap;
 }
 

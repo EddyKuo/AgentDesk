@@ -221,7 +221,8 @@ void RemoteSession::request_history(std::size_t lines) {
             return;
         std::vector<HistoryLineText> lines_out;
         for (const auto& l : r->result->value("lines", Json::array()))
-            lines_out.push_back({l.value("line_id", static_cast<std::uint64_t>(0)), l.value("text", "")});
+            lines_out.push_back(
+                {l.value("line_id", static_cast<std::uint64_t>(0)), l.value("text", ""), l.value("wrapped", false)});
         const auto first_available =
             r->result->value("first_available_line_id", static_cast<std::uint64_t>(0));
         const bool truncated = r->result->value("truncated", false);
@@ -239,7 +240,7 @@ void RemoteSession::request_history(std::size_t lines) {
             for (const auto& l : page->result->value("lines", Json::array())) {
                 const auto id = l.value("line_id", static_cast<std::uint64_t>(0));
                 if (id < first)
-                    older.push_back({id, l.value("text", "")});
+                    older.push_back({id, l.value("text", ""), l.value("wrapped", false)});
             }
             if (older.empty())
                 break;
@@ -260,6 +261,13 @@ std::shared_ptr<const std::vector<HistoryLineText>> RemoteSession::history() con
 SessionView RemoteSession::view() const {
     std::lock_guard lock(mutex_);
     return view_;
+}
+
+std::string RemoteSession::cwd() const {
+    if (owner_.options_.connector)
+        return {};  // another machine's folder is not a path here
+    std::lock_guard lock(mutex_);
+    return view_.cwd;
 }
 
 void RemoteSession::take_control() {

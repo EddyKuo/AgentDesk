@@ -815,7 +815,54 @@ TEST_F(HostFixture, WorktreeAddCreatesCheckout) {
     EXPECT_TRUE(std::filesystem::exists(target / L".git"));
     EXPECT_TRUE(c->call("worktree.add", {{"repo", win::to_utf8(repo.native())}, {"branch", "-x"}})
                     ->error.has_value());
+    // A branch that exists is checked out (show-ref, not git's wording; herdr worktree/main.js).
+    git({L"branch", L"existing"});
+    const auto again = data_dir_ / L"wt" / L"existing";
+    const auto r2 = c->call("worktree.add",
+                            {{"repo", win::to_utf8(repo.native())},
+                             {"branch", "existing"},
+                             {"path", win::to_utf8(again.native())}},
+                            70s);
+    ASSERT_TRUE(r2 && r2->result) << (r2 && r2->error ? r2->error_message : "no response");
+    EXPECT_TRUE(std::filesystem::exists(again / L".git"));
+    // A failure reports git's stderr, not its stdout.
+    const auto bad = c->call("worktree.add", {{"repo", win::to_utf8(repo.native())},
+                                              {"branch", "existing"},
+                                              {"path", win::to_utf8((data_dir_ / L"wt" / L"dup").native())}},
+                             70s);
+    ASSERT_TRUE(bad && bad->error);
+    EXPECT_NE(bad->error_message.find("existing"), std::string::npos) << bad->error_message;
     c->close();
+}
+
+// run_tool keeps stdout (parsed) apart from stderr (messages) and has no 64 KiB cap.
+TEST(GitTools, RunToolSeparatesStreamsAndKeepsLargeOutput) {
+    wchar_t sys[MAX_PATH]{};
+    ::GetSystemDirectoryW(sys, MAX_PATH);
+    const auto cmd = std::filesystem::path(sys) / L"cmd.exe";
+    const auto r = agentdesk::host::run_tool({cmd.native(), L"/d", L"/c", L"echo out& echo err 1>&2"},
+                                             std::filesystem::temp_directory_path(), 30s);
+    ASSERT_TRUE(r.started);
+    EXPECT_EQ(r.output, "out\r\n");
+    EXPECT_EQ(r.error, "err \r\n");
+    EXPECT_EQ(r.message(), "err");
+    // About 200 KiB on stdout arrives whole.
+    const auto big = agentdesk::host::run_tool(
+        {cmd.native(), L"/d", L"/c", L"for /l %i in (1,1,4000) do @echo 0123456789012345678901234567890123456789012345"},
+        std::filesystem::temp_directory_path(), 60s);
+    ASSERT_TRUE(big.started);
+    EXPECT_EQ(big.output.size(), 4000u * 48u);
+}
+
+TEST(GitTools, WorktreeSlugMatchesHerdr) {
+    using agentdesk::host::worktree_slug;
+    EXPECT_EQ(worktree_slug("feature/x"), "feature-x");
+    EXPECT_EQ(worktree_slug("--fix: a b--"), "fix-a-b");
+    EXPECT_EQ(worktree_slug("中文/分支"), "中文-分支");
+    EXPECT_EQ(worktree_slug("v1.2_rc-1"), "v1.2_rc-1");
+    EXPECT_EQ(worktree_slug("///").rfind("branch-", 0), 0u);
+    EXPECT_EQ(worktree_slug("///").size(), 15u);
+    EXPECT_NE(worktree_slug("///"), worktree_slug("??"));
 }
 
 // Agent collaboration (herdr-style helpers): a sub-agent records its parent, gets its first task

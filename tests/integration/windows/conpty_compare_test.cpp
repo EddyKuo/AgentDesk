@@ -194,4 +194,23 @@ TEST_P(ConPtyCompareTest, KeyboardBytesArriveUnchanged) {
     EXPECT_TRUE(host.process().wait_exit(10s).has_value());
 }
 
+// herdr src/win32_keys.rs: ConPTY asks its viewer for win32-input-mode; the engine notices and
+// sends Shift+Enter as win32 key events, which ConPTY turns back into Enter for the program.
+TEST_P(ConPtyCompareTest, Win32InputModeShiftEnterReachesProgram) {
+    ProbeHost host(api_, L"echo");
+    std::this_thread::sleep_for(300ms);
+    ASSERT_TRUE(host.with_engine([](VtEngine& e) { return e.win32_input(); })) << hex(host.raw().substr(0, 200));
+    host.process().write("hi");
+    const std::string keys = host.with_engine([](VtEngine& e) {
+        e.key(agentdesk::terminal::Key::kEnter, agentdesk::terminal::kModShift);
+        return e.take_pty_input();
+    });
+    EXPECT_EQ(keys.rfind("\x1b[13;28;13;1;16;1_", 0), 0u);
+    host.process().write(keys);
+    ASSERT_TRUE(host.wait_text("PROBE-ECHO:", 15s)) << host.raw();
+    EXPECT_NE(host.raw().find("PROBE-ECHO:6869"), std::string::npos) << host.raw();
+    host.process().write("quit\r");
+    EXPECT_TRUE(host.process().wait_exit(10s).has_value());
+}
+
 INSTANTIATE_TEST_SUITE_P(Variants, ConPtyCompareTest, ::testing::Values("inbox", "bundled"));
