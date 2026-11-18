@@ -104,6 +104,11 @@ struct FloatPlace {
 };
 // Dropped with its center at (x, y) in a node w x h: the nearest edge, the third along it.
 FloatPlace snap_float(float x, float y, float w, float h);
+// herdr floats.rs 71-75: ease out with a small overshoot, so the snap feels like a spring
+// (t in 0..1; 0 at the drop, 1 home). A dropped float springs home over kSnapMs (floats.rs 17).
+float spring(float t);
+inline constexpr float kSnapMs = 360.0f;
+inline constexpr float kDragStart = 4.0f;  // floats.rs 16: a press moves it from this far
 // Its top left in the node (origin ox, oy; size w x h) for a block of bw x bh.
 std::array<float, 2> float_home(float ox, float oy, float w, float h, float bw, float bh, FloatPlace place,
                                 float margin);

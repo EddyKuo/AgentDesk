@@ -1846,8 +1846,20 @@ void clippy(App::State& s, Box owner) {
     const auto home = k98::float_home(owner.x0, owner.y0, owner.w(), owner.h(), cw, ch, place, m);
     ImVec2 at(snap(home[0]), snap(home[1]));
     const ImVec2 mouse = ImGui::GetIO().MousePos;
-    if (w.clippy.moving)
+    if (w.clippy.moving) {
         at = ImVec2(snap(mouse.x - cw * w.clippy.grab.x), snap(mouse.y - ch * w.clippy.grab.y));
+    } else if (w.clippy.spring_from) {
+        // floats.rs 212-215: left = 1 - spring(elapsed / 360 ms), the body offset by from * left.
+        const float ms = std::chrono::duration<float, std::milli>(Clock::now() - w.clippy.spring_start).count();
+        const float left = 1.0f - k98::spring(ms / k98::kSnapMs);
+        if (ms >= k98::kSnapMs) {
+            w.clippy.spring_from.reset();
+        } else {
+            at = ImVec2(snap(at.x + w.clippy.spring_from->x * left), snap(at.y + w.clippy.spring_from->y * left));
+            if (s.config.wake)
+                s.config.wake();  // floats.rs 326: frames while anything moves
+        }
+    }
     ImGui::SetNextWindowPos(at);
     ImGui::SetNextWindowSize(ImVec2(cw, ch));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
@@ -1918,8 +1930,9 @@ void clippy(App::State& s, Box owner) {
     ImGui::End();
     if (w.clippy.pressing) {
         if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-            if (!w.clippy.moving &&
-                std::hypot(mouse.x - w.clippy.down.x, mouse.y - w.clippy.down.y) >= 4 * s.dpi)
+            // floats.rs 261-262: the larger of the two distances, from 4 px.
+            if (!w.clippy.moving && std::max(std::abs(mouse.x - w.clippy.down.x),
+                                             std::abs(mouse.y - w.clippy.down.y)) >= k98::kDragStart * s.dpi)
                 w.clippy.moving = true;
         } else {
             if (w.clippy.moving) {
@@ -1928,6 +1941,11 @@ void clippy(App::State& s, Box owner) {
                 const auto to = k98::snap_float(cx, cy, owner.w(), owner.h());
                 set_shared(s, "win98.float.clippy",
                            Json{{"edge", k98::edge_name(to.edge)}, {"align", k98::align_name(to.align)}});
+                // floats.rs 288-297: spring from where it was let go to its new home.
+                const auto next = k98::float_home(owner.x0, owner.y0, owner.w(), owner.h(), cw, ch, to, m);
+                w.clippy.spring_from = ImVec2(mouse.x - cw * w.clippy.grab.x - next[0],
+                                              mouse.y - ch * w.clippy.grab.y - next[1]);
+                w.clippy.spring_start = Clock::now();
             }
             w.clippy.pressing = w.clippy.moving = false;
         }

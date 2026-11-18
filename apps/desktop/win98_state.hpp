@@ -108,6 +108,9 @@ struct Clippy {
     bool moving = false;
     ImVec2 down{};
     ImVec2 grab{};  // the share of its size from its top left
+    // floats.rs 64-69 FloatAnim: its offset from home when dropped, easing to zero.
+    std::optional<ImVec2> spring_from;
+    Clock::time_point spring_start{};
 };
 
 struct W98 {
