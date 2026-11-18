@@ -98,6 +98,32 @@ public:
     // Blocks until the root process exited (or timeout). Returns the exit code.
     std::optional<std::uint32_t> wait_exit(std::chrono::milliseconds timeout) const;
 
+    // ---- agent-host's self-update (design doc 7.4 OQ-09; herdr src/update.rs 236, docs/
+    // commands.md 547: "terminals keep running"). The old host freezes each session and hands
+    // its state and handles to the new host, which adopts them.
+    struct Frozen {
+        std::string state;  // engine + session state (save format of this build)
+        // The live terminal's handles, owned by *this; nullopt when the program already exited.
+        std::optional<platform::win::PtyHandles> handles;
+    };
+    // Whether this session's terminal could be handed over (bundled ConPTY), without changing it.
+    [[nodiscard]] bool can_hand_over(std::string* why) const;
+    // Stops reading at a byte where no escape sequence is half read, writes every pending input
+    // byte, stops reacting to the program's exit and returns the state. nullopt with `why` when
+    // that did not work within `timeout`; then call resume().
+    std::optional<Frozen> freeze(std::chrono::milliseconds timeout, std::string* why);
+    // The handover failed: read, write and watch the program again.
+    void resume();
+    // The new host holds duplicates of every handle: close ours without ending anything. Destroy
+    // the session afterwards.
+    void release_after_handover();
+    // In the new host: a session from frozen state and duplicated handles, not running yet (no
+    // threads; nothing read or written). Throws when the state or handles do not check out.
+    static std::unique_ptr<Session> adopt(SessionConfig config, SessionListener listener, std::string_view state,
+                                          const std::optional<platform::win::PtyHandles>& handles);
+    // The takeover is final: start reading, writing and watching.
+    void start_adopted();
+
 private:
     struct OutputChunk {
         std::string bytes;
@@ -120,7 +146,14 @@ private:
         std::shared_ptr<std::promise<std::vector<terminal::HistoryLine>>> result;
         bool tail = false;
     };
-    using Command = std::variant<OutputChunk, InputEvent, ResizeCmd, InterruptCmd, ReportCmd, HistoryCmd>;
+    struct FreezeCmd {
+        std::chrono::steady_clock::time_point deadline;
+        std::shared_ptr<std::promise<std::string>> result;  // state, or empty with error set
+        std::shared_ptr<std::string> error;
+    };
+    struct UnfreezeCmd {};
+    using Command = std::variant<OutputChunk, InputEvent, ResizeCmd, InterruptCmd, ReportCmd, HistoryCmd,
+                                 FreezeCmd, UnfreezeCmd>;
 
     explicit Session(SessionConfig config, SessionListener listener);
     void post(Command cmd);
@@ -135,6 +168,9 @@ private:
     void handle(InterruptCmd& c);
     void handle(ReportCmd& c);
     void handle(HistoryCmd& c);
+    void handle(FreezeCmd& c);
+    void handle(UnfreezeCmd& c);
+    [[nodiscard]] std::string save_session_state() const;  // actor thread
     void on_root_exit();
     void on_engine_status(const terminal::StatusReport& report);
     void refresh_agent_from_engine();
@@ -163,6 +199,11 @@ private:
     std::condition_variable write_cv_;
     std::deque<std::string> write_queue_;
     bool writer_stop_ = false;
+    bool writer_busy_ = false;  // a chunk is being written (guarded by write_mutex_)
+    std::condition_variable writer_idle_cv_;
+
+    // handover: the actor neither watches nor reacts to the program's exit (actor thread only)
+    bool frozen_ = false;
 
     // published state
     mutable std::mutex state_mutex_;

@@ -88,6 +88,10 @@ public:
     void close();
 
     // ---- agent-host's handover (design doc 7.4 OQ-09)
+    [[nodiscard]] bool closed() const {
+        std::lock_guard lock(close_mutex_);
+        return closed_;
+    }
     // Stops the reader between two reads: every byte it read reached the sink, the rest stays in
     // the pipe. False when it did not stop within `timeout` (then call resume_reader()).
     bool pause_reader(std::chrono::milliseconds timeout);
@@ -127,7 +131,7 @@ private:
     std::mutex reader_mutex_;
     std::condition_variable reader_cv_;
     bool reader_done_ = false;
-    std::mutex close_mutex_;  // lock order: close_mutex_ before write_mutex_
+    mutable std::mutex close_mutex_;  // lock order: close_mutex_ before write_mutex_
     std::mutex write_mutex_;
     bool closed_ = false;
 };

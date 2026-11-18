@@ -227,8 +227,10 @@ bool is_pipe(HANDLE h) {
 }  // namespace
 
 bool PtyProcess::pause_reader(std::chrono::milliseconds timeout) {
+    // close() joins the reader too: one of them at a time. The reader never waits for this lock.
+    std::lock_guard close_lock(close_mutex_);
     pause_requested_ = true;
-    if (!reader_.joinable())
+    if (closed_ || !reader_.joinable())
         return true;
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
@@ -279,6 +281,7 @@ std::optional<PtyHandles> PtyProcess::handover_handles(std::string* why) const {
         *why = "the system's ConPTY cannot hand terminals to another agent-host";
         return std::nullopt;
     }
+    std::lock_guard close_lock(close_mutex_);
     if (closed_ || pcon_ == nullptr) {
         *why = "the terminal is closed";
         return std::nullopt;

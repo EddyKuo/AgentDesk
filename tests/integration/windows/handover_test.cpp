@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include "agentdesk/host/session.hpp"
 #include "agentdesk/platform/win/conpty_api.hpp"
 #include "agentdesk/platform/win/pty_process.hpp"
 
@@ -134,6 +135,99 @@ TEST(Handover, AdoptRefusesHandlesThatDoNotBelongTogether) {
     const auto before = out.get().size();
     EXPECT_TRUE(wait_until([&] { return out.get().size() > before; }, 5s));
     a->close();
+}
+
+namespace {
+
+agentdesk::host::SessionConfig counter_config() {
+    agentdesk::host::SessionConfig c;
+    c.api = bundled();
+    c.spec.executable = AGENTDESK_VT_PROBE;
+    c.spec.args = {L"counter"};
+    c.spec.cwd = std::filesystem::temp_directory_path();
+    c.spec.size = {60, 8};
+    c.engine.rows = 8;
+    c.engine.cols = 60;
+    return c;
+}
+
+int last_count(const agentdesk::host::Session& s) {
+    const auto snap = s.snapshot();
+    int best = 0;
+    for (int r = 0; r < snap->rows; ++r) {
+        const auto t = snap->row_text(r);
+        if (t.rfind("COUNT ", 0) == 0)
+            best = std::max(best, std::atoi(t.c_str() + 6));
+    }
+    return best;
+}
+
+}  // namespace
+
+// A whole session moves: screen, history (with its line ids), seq and the running program.
+TEST(Handover, SessionMovesWithScreenAndHistory) {
+    using agentdesk::host::Session;
+    auto a = Session::start(counter_config());
+    ASSERT_TRUE(wait_until([&] { return a->history_tail(100).size() > 3; }, 20s)) << "history fills";
+    std::string why;
+    ASSERT_TRUE(a->can_hand_over(&why)) << why;
+    auto frozen = a->freeze(5s, &why);
+    ASSERT_TRUE(frozen.has_value()) << why;
+    ASSERT_TRUE(frozen->handles.has_value());
+    const auto screen_before = a->snapshot();
+    const auto history_before = a->history_tail(100);
+    const int count_before = last_count(*a);
+    win::PtyHandles copy = *frozen->handles;
+    for (HANDLE* h : {&copy.signal, &copy.reference, &copy.conhost, &copy.input_write, &copy.output_read,
+                      &copy.process, &copy.job})
+        *h = dup(*h);
+    a->release_after_handover();
+    a.reset();
+
+    auto b = Session::adopt(counter_config(), {}, frozen->state, copy);
+    // Before starting: exactly the screen and history the old owner had.
+    EXPECT_EQ(b->snapshot()->cells, screen_before->cells);
+    EXPECT_EQ(b->snapshot()->seq, screen_before->seq);
+    b->start_adopted();
+    const auto history_after = b->history_tail(100);
+    ASSERT_GE(history_after.size(), history_before.size());
+    for (std::size_t i = 0; i < history_before.size(); ++i) {
+        EXPECT_EQ(history_after[i].line_id, history_before[i].line_id);
+        EXPECT_EQ(history_after[i].cells, history_before[i].cells);
+    }
+    EXPECT_EQ(b->info().process_state, agentdesk::host::ProcessState::kRunning);
+    EXPECT_TRUE(wait_until([&] { return last_count(*b) >= count_before + 5; }, 10s)) << "keeps counting";
+    // Counting is contiguous across the seam: every number appears, in history or on screen.
+    std::string all;
+    for (const auto& l : b->history(0, 10000)) {
+        for (const auto& c : l.cells)
+            if (c.chars[0] != 0)
+                all.push_back(static_cast<char>(c.chars[0]));
+        all.push_back('\n');
+    }
+    for (int r = 0; r < b->snapshot()->rows; ++r)
+        all += b->snapshot()->row_text(r) + "\n";
+    for (int n = count_before; n < count_before + 5; ++n)
+        EXPECT_NE(all.find("COUNT " + std::to_string(n) + "\n"), std::string::npos) << n;
+    b->force_stop();
+    EXPECT_TRUE(b->wait_exit(10s).has_value());
+}
+
+// A failed handover leaves the session as it was.
+TEST(Handover, ResumeAfterFreezeCarriesOn) {
+    using agentdesk::host::Session;
+    auto a = Session::start(counter_config());
+    ASSERT_TRUE(wait_until([&] { return last_count(*a) >= 2; }, 10s));
+    std::string why;
+    auto frozen = a->freeze(5s, &why);
+    ASSERT_TRUE(frozen.has_value()) << why;
+    const int at = last_count(*a);
+    std::this_thread::sleep_for(600ms);
+    EXPECT_EQ(last_count(*a), at) << "frozen: nothing read";
+    a->resume();
+    EXPECT_TRUE(wait_until([&] { return last_count(*a) >= at + 4; }, 10s));
+    a->force_stop();
+    EXPECT_TRUE(a->wait_exit(10s).has_value());
 }
 
 // The system's ConPTY has no ConptyPackPseudoConsole: it cannot hand over, and says so.
