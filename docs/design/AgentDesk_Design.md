@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.8 | 2026-11-19 | 依 herdr 移植更新檢查與使用統計（Settings › Updates、Privacy），沒有內建伺服器；新增待決事項 OQ-09（agent-host 單獨更新） |
 | 2.7 | 2026-11-18 | 對照 herdr-app 原始碼（commit 321c9a8）逐行比對約 400 項，補齊約 58 項：分割樹改為多子節點與權重、分頁與焦點規則、側欄與 Agent 清單、選單與對話框、Terminals 版面、win32-input-mode、複製貼上與連結、Files／Changes、worktree、設定與歡迎頁 |
 | 2.6 | 2026-11-18 | 依 herdr 規格逐項比對（約 150 項）補齊缺漏與差異，見 5.6 最後一列與「刻意保留的差異」 |
 | 2.5 | 2026-11-18 | 使用者要求全部用 C++：新增 ADR-17（mod 改為 C++ DLL，取代 ADR-14）；Codex 狀態 hook 改為 `agentctl hook` |
@@ -666,6 +667,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | OQ-06 | 輸出過載政策：**已決定** 背壓（M0） | M0 結果 |
 | OQ-07 | 第三方套件取得方式：**已決定** vcpkg manifest（baseline `afa249f`）；libvterm 原始碼收錄於 third_party | Sprint 1 的 S1-1 凍結 |
 | OQ-08 | 授權：**已決定** MIT License（2026-11-16，ADR-10） | 使用者 |
+| OQ-09 | agent-host 要不要能單獨更新（herdr 的 `app.update_core`／`hc update`，終端機不中斷）：agent-host 沒有自我更新、終端機會隨它結束，目前只隨 AgentDesk 的 zip 一起更新 | 使用者 |
 
 ## 8. 官方參考資料
 
