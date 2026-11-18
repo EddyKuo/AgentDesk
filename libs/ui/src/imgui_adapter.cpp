@@ -31,6 +31,11 @@ GridItem grid_item(const char* str_id, ImVec2 min, ImVec2 max, bool request_focu
         g.ActiveIdNoClearOnFocusLoss = true;
         ImGui::KeepAliveID(id);
         ImGui::SetActiveIdUsingAllKeyboardKeys();
+        // Active only to own the keyboard: other items stay hoverable, so the first click on a
+        // button elsewhere works and right-click menus (tabs, spaces) open. A selection drag that
+        // started in the grid keeps the mouse to itself.
+        g.ActiveIdAllowOverlap = !(ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+                                   bb.Contains(g.IO.MouseClickedPos[ImGuiMouseButton_Left]));
     }
     return out;
 }
