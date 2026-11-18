@@ -1020,6 +1020,7 @@ private:
                     r.started = true;
                     r.exit_code = res->value("exit_code", 1ul);
                     r.output = res->value("output", "");
+                    r.error = res->value("error", "");
                 }
                 return r;
             }
@@ -1129,6 +1130,12 @@ public:
     std::string preview_path;  // relative; empty = tree
     std::string preview_text;
     std::string preview_message;
+    // Selection in the read-only preview: (line, byte) ends; line -1 = none.
+    int sel_line_a = -1;
+    std::size_t sel_byte_a = 0;
+    int sel_line_b = -1;
+    std::size_t sel_byte_b = 0;
+    bool sel_dragging = false;
     // Changes
     std::string changes_cwd;
     std::string changes_machine;
@@ -1226,6 +1233,8 @@ public:
         preview_path = rel;
         preview_text.clear();
         preview_message = "Loading file\xE2\x80\xA6";
+        sel_line_a = sel_line_b = -1;
+        sel_dragging = false;
         post([this, mc = files_machine, root = files_root, rel] { load_preview(mc, root, rel); });
     }
     void close_preview() {
@@ -1253,9 +1262,10 @@ public:
     }
     void commit() {
         std::lock_guard lock(mutex);
+        // herdr changes/main.js commit(): this.message.trim()
         std::string msg = commit_msg;
-        while (!msg.empty() && (msg.back() == ' ' || msg.back() == '\n'))
-            msg.pop_back();
+        const auto first = msg.find_first_not_of(" \t\r\n");
+        msg = first == std::string::npos ? std::string() : msg.substr(first, msg.find_last_not_of(" \t\r\n") - first + 1);
         if (msg.empty() || repo_top.empty() || committing || changes_loading)
             return;
         committing = true;
@@ -1269,10 +1279,8 @@ public:
             if (r.started && r.exit_code == 0) {
                 commit_msg[0] = 0;
             } else {
-                std::string out = r.output;
-                while (!out.empty() && (out.back() == '\n' || out.back() == '\r'))
-                    out.pop_back();
-                commit_note = "Commit failed: " + (r.started ? out : std::string("git not found"));
+                // (stderr || stdout).trim(), as herdr shows it
+                commit_note = "Commit failed: " + (r.started ? r.message() : std::string("git not found"));
             }
             changes_at_ = {};
         });
@@ -1354,6 +1362,7 @@ private:
                 r.started = true;
                 r.exit_code = res->value("exit_code", 1ul);
                 r.output = res->value("output", "");
+                r.error = res->value("error", "");
             }
             return r;
         }
@@ -1397,6 +1406,7 @@ private:
         }
         return r;
     }
+    // Changes list (herdr changes/main.js): conflicts first.
     static char letter_of(const std::string& xy) {
         if (xy.find('U') != std::string::npos || xy == "AA" || xy == "DD")
             return 'U';
@@ -1404,6 +1414,16 @@ private:
             return 'D';
         if (xy == "??" || xy.find('A') != std::string::npos)
             return 'A';
+        return 'M';
+    }
+    // Files tree marks (herdr files/main.js:99): added first, then U, D, M.
+    static char file_mark_of(const std::string& xy) {
+        if (xy == "??" || xy.find('A') != std::string::npos)
+            return 'A';
+        if (xy.find('U') != std::string::npos)
+            return 'U';
+        if (xy.find('D') != std::string::npos)
+            return 'D';
         return 'M';
     }
 
@@ -1447,7 +1467,7 @@ private:
                         continue;
                     rel = rel.substr(prefix.size() + 1);
                 }
-                m[rel] = letter_of(xy);
+                m[rel] = file_mark_of(xy);
             }
         }
         std::lock_guard lock(mutex);
@@ -2150,13 +2170,18 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
             return std::nullopt;
         auto done = std::make_shared<std::promise<std::optional<Json>>>();
         auto result = done->get_future();
+        // git worktree add/remove may take minutes (herdr worktree/main.js:205-207, 243).
+        const auto args = params.find("args");
+        const bool slow = method == "git.run" && args != params.end() && args->is_array() && !args->empty() &&
+                          (*args)[0] == "worktree";
+        const auto wait = std::chrono::seconds(slow ? 600 : 60);
         h->call(
             method, params,
             [done](Json r, std::string error) {
                 done->set_value(error.empty() ? std::optional<Json>(std::move(r)) : std::nullopt);
             },
-            std::chrono::seconds(60));
-        if (result.wait_for(std::chrono::seconds(65)) != std::future_status::ready)
+            wait);
+        if (result.wait_for(wait + std::chrono::seconds(5)) != std::future_status::ready)
             return std::nullopt;
         return result.get();
     };
@@ -2669,8 +2694,17 @@ host::ToolResult git_at(App::State& s, const std::string& machine, const std::st
         r.started = true;
         r.exit_code = res->value("exit_code", 1ul);
         r.output = res->value("output", "");
+        r.error = res->value("error", "");
     }
     return r;
+}
+
+// Text without surrounding whitespace (JavaScript's trim()).
+std::string trimmed(const std::string& t) {
+    const auto a = t.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos)
+        return {};
+    return t.substr(a, t.find_last_not_of(" \t\r\n") - a + 1);
 }
 
 // What removing a linked worktree would lose (herdr worktree.js): uncommitted changes, and
@@ -2694,18 +2728,39 @@ WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std:
     r.dirty = st.started && st.exit_code == 0 && !st.output.empty();
     const auto subs = git_at(s, machine, top, {L"submodule", L"status", L"--recursive"});
     std::stringstream ss(subs.started && subs.exit_code == 0 ? subs.output : std::string());
+    std::vector<std::string> paths;
     for (std::string line; std::getline(ss, line);) {
-        // " <sha> <path> (<describe>)"
-        std::stringstream ls(line.size() > 1 ? line.substr(1) : std::string());
+        // "<flag><sha> <path> (<describe>)"; '-': never checked out (herdr skips those too)
+        if (line.empty() || line[0] == '-')
+            continue;
+        std::stringstream ls(line.substr(1));
         std::string sha, path;
         ls >> sha >> path;
-        if (path.empty())
-            continue;
+        if (!path.empty())
+            paths.push_back(path);
+    }
+    for (const auto& path : paths) {
         r.submodules = true;
-        const auto sp = p / win::to_wide(path);
-        const auto ahead = git_at(s, machine, win::to_utf8(sp.native()), {L"rev-list", L"--count", L"@{u}..HEAD"});
-        if (ahead.started && (ahead.exit_code != 0 || std::atoi(ahead.output.c_str()) > 0))
-            r.unpushed.push_back(path);  // no upstream counts as unpushed
+        // herdr defaults/mods/worktree/main.js:100-110: commits that exist nowhere else, i.e. on
+        // no remote and not the commit the parent pins (git fetches that by hash, so it is often
+        // on no remote branch). The parent is the deepest other submodule containing it.
+        std::string parent;
+        for (const auto& other : paths) {
+            if (other.size() > parent.size() && path.size() > other.size() && path.compare(0, other.size(), other) == 0 &&
+                path[other.size()] == '/')
+                parent = other;
+        }
+        const auto parent_dir = parent.empty() ? p : p / win::to_wide(parent);
+        const std::string inner = parent.empty() ? path : path.substr(parent.size() + 1);
+        const auto pinned = git_at(s, machine, win::to_utf8(parent_dir.native()),
+                                   {L"rev-parse", L"HEAD:" + win::to_wide(inner)});
+        std::vector<std::wstring> args = {L"rev-list", L"-n1", L"--all", L"--not", L"--remotes"};
+        std::string pin = pinned.started && pinned.exit_code == 0 ? trimmed(pinned.output) : std::string();
+        if (!pin.empty())
+            args.push_back(win::to_wide(pin));
+        const auto local = git_at(s, machine, win::to_utf8((p / win::to_wide(path)).native()), args);
+        if (!local.started || local.exit_code != 0 || !trimmed(local.output).empty())
+            r.unpushed.push_back(path);  // a check that failed counts as at risk
     }
     return r;
 }
@@ -2714,11 +2769,11 @@ std::string worktree_remove_text(const std::string& top, const WorktreeRisk& r) 
     std::string t = "Closes the space and deletes " + display_path(top) + ". The branch stays.";
     if (r.dirty)
         t += "\n\nIt has uncommitted changes: they will be lost.";
-    if (!r.unpushed.empty()) {
-        t += "\n\nSubmodules with commits that are not pushed: ";
+    if (!r.unpushed.empty()) {  // herdr worktree/main.js render()
+        t += "\n\nSubmodule ";
         for (std::size_t i = 0; i < r.unpushed.size(); ++i)
             t += (i ? ", " : "") + r.unpushed[i];
-        t += ". They will be lost.";
+        t += " has commits that aren't pushed anywhere: they will be lost.";
     }
     return t;
 }
@@ -3114,9 +3169,9 @@ void run_command(App::State& s, const std::string& cmd) {
         if (name == "worktree.remove_force")
             argv.push_back(L"--force");
         argv.push_back(win::to_wide(top));
-        const auto r = git_at(s, machine, main, argv);
+        const auto r = git_at(s, machine, main, argv, std::chrono::seconds(600));
         if (!r.started || r.exit_code != 0)
-            s.toast("Could not remove the worktree", r.started ? r.output : std::string("git did not run"), "",
+            s.toast("Could not remove the worktree", r.started ? r.message() : std::string("git did not run"), "",
                     g_pal->needs_you, 10);
         s.git.invalidate(top);
     } else if (name == "tab.move") {
@@ -5482,6 +5537,412 @@ void panel_header(App::State& s, ImDrawList* dl, ImVec2 a, float w, const char* 
     dl->AddLine(ImVec2(a.x, a.y + h), ImVec2(a.x + w, a.y + h), g_pal->border);
 }
 
+// ---- read-only code preview (herdr files/main.js:141-144 shows files in a read-only editor with
+// syntax colours: keyword ansi5, string ansi2, comment dim, function ansi4, type ansi3, number ansi1,
+// constant ansi6). A small lexer stands in for the editor's tree-sitter grammars.
+enum class CodeTok : std::uint8_t { kText, kKeyword, kString, kComment, kFunction, kType, kNumber, kConstant };
+
+struct CodeLang {
+    std::string_view line_comment;   // "" = none
+    std::string_view line_comment2;  // a second form ("#" next to "//" in PHP, ";" in INI)
+    std::string_view block_open;     // "" = none
+    std::string_view block_close;
+    bool code = true;  // false: plain text, no colours
+};
+
+CodeLang code_lang(const std::string& path) {
+    std::string ext;
+    const auto dot = path.find_last_of('.');
+    const auto slash = path.find_last_of('/');
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+        ext = path.substr(dot + 1);
+    for (auto& c : ext)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+    for (auto& c : name)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    static const std::set<std::string> kSlash = {"c",  "h",    "cpp", "hpp",   "cc",   "cxx",  "hh",   "inl",  "cs",
+                                                 "java", "kt", "kts", "swift", "go",   "rs",   "js",   "jsx",  "ts",
+                                                 "tsx", "mjs", "cjs", "mts",   "cts",  "css",  "scss", "less", "zig",
+                                                 "dart", "scala", "glsl", "hlsl", "proto", "jsonc", "json5", "m", "mm"};
+    static const std::set<std::string> kHash = {"py", "pyw", "sh",  "bash", "zsh", "fish", "ps1",  "psm1", "psd1", "rb",
+                                                "yaml", "yml", "toml", "cmake", "r", "pl", "pm",   "conf", "nix",  "mk",
+                                                "tf", "hcl", "gitignore", "gitattributes", "editorconfig", "env", "dockerignore"};
+    if (kSlash.contains(ext))
+        return {"//", "", "/*", "*/"};
+    if (ext == "php")
+        return {"//", "#", "/*", "*/"};
+    if (kHash.contains(ext) || name == "cmakelists.txt" || name == "dockerfile" || name == "makefile")
+        return {"#", "", "", ""};
+    if (ext == "ini" || ext == "cfg" || ext == "reg")
+        return {";", "#", "", ""};
+    if (ext == "lua" || ext == "sql" || ext == "hs")
+        return {"--", "", ext == "lua" ? "--[[" : "/*", ext == "lua" ? "]]" : "*/"};
+    if (ext == "html" || ext == "htm" || ext == "xml" || ext == "svg" || ext == "vue" || ext == "svelte" ||
+        ext == "xaml" || ext == "csproj" || ext == "props" || ext == "targets" || ext == "vcxproj")
+        return {"", "", "<!--", "-->"};
+    if (ext == "json")
+        return {"", "", "", ""};
+    if (ext == "bat" || ext == "cmd")
+        return {"rem ", "::", "", ""};
+    return {"", "", "", "", false};
+}
+
+bool code_keyword(std::string_view w) {
+    static const std::set<std::string_view> kWords = {
+        "if", "else", "elif", "for", "while", "do", "switch", "case", "default", "break", "continue", "return",
+        "goto", "try", "catch", "finally", "throw", "throws", "new", "delete", "class", "struct", "enum", "union",
+        "interface", "namespace", "using", "typedef", "template", "typename", "public", "private", "protected",
+        "static", "const", "constexpr", "consteval", "constinit", "volatile", "extern", "inline", "virtual",
+        "override", "final", "explicit", "friend", "operator", "sizeof", "alignof", "decltype", "auto", "mutable",
+        "noexcept", "co_await", "co_return", "co_yield", "import", "export", "from", "as", "package", "module",
+        "def", "lambda", "pass", "with", "yield", "async", "await", "in", "is", "not", "and", "or", "del",
+        "global", "nonlocal", "assert", "raise", "except", "fn", "let", "mut", "impl", "trait", "pub", "crate",
+        "mod", "use", "match", "loop", "where", "move", "ref", "dyn", "unsafe", "extends", "implements",
+        "instanceof", "typeof", "var", "function", "this", "super", "self", "void", "func", "go", "defer",
+        "chan", "select", "type", "range", "map", "fallthrough", "end", "then", "local", "begin", "until",
+        "elseif", "fi", "esac", "done", "echo", "export", "readonly", "when", "val", "object", "companion",
+        "override", "sealed", "open", "internal", "suspend", "foreach", "of", "satisfies", "declare", "abstract",
+        "int", "char", "bool", "float", "double", "long", "short", "unsigned", "signed", "string"};
+    return kWords.contains(w);
+}
+
+bool code_constant(std::string_view w) {
+    static const std::set<std::string_view> kConst = {"true", "false", "null", "nullptr", "nil", "None", "True",
+                                                      "False", "undefined", "NULL", "NaN", "Infinity"};
+    if (kConst.contains(w))
+        return true;
+    // ALL_CAPS names (two letters or more).
+    bool upper = false;
+    for (const char c : w) {
+        if (std::islower(static_cast<unsigned char>(c)))
+            return false;
+        upper = upper || std::isupper(static_cast<unsigned char>(c));
+    }
+    return upper && w.size() > 1;
+}
+
+struct CodeSpan {
+    std::size_t a = 0;
+    std::size_t b = 0;
+    CodeTok tok = CodeTok::kText;
+};
+
+// One line's coloured spans; `in_block` carries an open block comment to the next line.
+void highlight_code_line(std::string_view line, const CodeLang& lang, bool& in_block, std::vector<CodeSpan>& out) {
+    out.clear();
+    if (!lang.code) {
+        out.push_back({0, line.size(), CodeTok::kText});
+        return;
+    }
+    auto ident = [](unsigned char c) { return std::isalnum(c) != 0 || c == '_' || c == '$' || c >= 0x80; };
+    std::size_t i = 0;
+    std::size_t text_from = 0;
+    auto flush_text = [&](std::size_t upto) {
+        if (upto > text_from)
+            out.push_back({text_from, upto, CodeTok::kText});
+    };
+    auto emit = [&](std::size_t a, std::size_t b, CodeTok t) {
+        flush_text(a);
+        out.push_back({a, b, t});
+        text_from = b;
+    };
+    auto starts = [&](std::size_t at, std::string_view tok) {
+        return !tok.empty() && line.substr(at, tok.size()) == tok;
+    };
+    while (i < line.size()) {
+        if (in_block) {
+            const auto end = line.find(lang.block_close, i);
+            const std::size_t b = end == std::string_view::npos ? line.size() : end + lang.block_close.size();
+            emit(i, b, CodeTok::kComment);
+            i = b;
+            in_block = end == std::string_view::npos;
+            continue;
+        }
+        const auto c = static_cast<unsigned char>(line[i]);
+        if (starts(i, lang.block_open)) {
+            in_block = true;
+            const std::size_t from = i;
+            i += lang.block_open.size();
+            const auto end = line.find(lang.block_close, i);
+            const std::size_t b = end == std::string_view::npos ? line.size() : end + lang.block_close.size();
+            emit(from, b, CodeTok::kComment);
+            i = b;
+            in_block = end == std::string_view::npos;
+            continue;
+        }
+        if (starts(i, lang.line_comment) || starts(i, lang.line_comment2)) {
+            emit(i, line.size(), CodeTok::kComment);
+            i = line.size();
+            break;
+        }
+        if (c == '"' || c == '\'' || c == '`') {
+            std::size_t j = i + 1;
+            while (j < line.size() && line[j] != static_cast<char>(c))
+                j += line[j] == '\\' ? 2 : 1;
+            j = std::min(j + 1, line.size());
+            emit(i, j, CodeTok::kString);
+            i = j;
+            continue;
+        }
+        if (std::isdigit(c) != 0 && (i == 0 || !ident(static_cast<unsigned char>(line[i - 1])))) {
+            std::size_t j = i + 1;
+            while (j < line.size() && (std::isalnum(static_cast<unsigned char>(line[j])) != 0 || line[j] == '.' ||
+                                       line[j] == '_' || line[j] == '\''))
+                ++j;
+            emit(i, j, CodeTok::kNumber);
+            i = j;
+            continue;
+        }
+        if (ident(c) && std::isdigit(c) == 0) {
+            std::size_t j = i + 1;
+            while (j < line.size() && ident(static_cast<unsigned char>(line[j])))
+                ++j;
+            const std::string_view w = line.substr(i, j - i);
+            std::size_t k = j;
+            while (k < line.size() && line[k] == ' ')
+                ++k;
+            CodeTok t = CodeTok::kText;
+            if (code_keyword(w))
+                t = CodeTok::kKeyword;
+            else if (code_constant(w))
+                t = CodeTok::kConstant;
+            else if (k < line.size() && line[k] == '(')
+                t = CodeTok::kFunction;
+            else if (std::isupper(c) != 0)
+                t = CodeTok::kType;
+            if (t != CodeTok::kText)
+                emit(i, j, t);
+            i = j;
+            continue;
+        }
+        ++i;
+    }
+    flush_text(line.size());
+}
+
+ImU32 code_color(CodeTok t) {
+    switch (t) {
+        case CodeTok::kKeyword:
+            return mix(g_pal->needs_you, g_pal->info, 0.5f);  // magenta (ansi5)
+        case CodeTok::kString:
+            return g_pal->done;  // green (ansi2)
+        case CodeTok::kComment:
+            return g_pal->faint;  // dim
+        case CodeTok::kFunction:
+            return g_pal->info;  // blue (ansi4)
+        case CodeTok::kType:
+            return g_pal->working;  // yellow (ansi3)
+        case CodeTok::kNumber:
+            return g_pal->needs_you;  // red (ansi1)
+        case CodeTok::kConstant:
+            return mix(g_pal->info, g_pal->done, 0.5f);  // cyan (ansi6)
+        default:
+            return g_pal->text;
+    }
+}
+
+// Line starts and the block-comment state at each line start, recomputed when the text changes.
+struct CodeLayout {
+    const std::string* text = nullptr;
+    std::size_t size = 0;
+    std::string path;
+    std::vector<std::size_t> starts;
+    std::vector<std::uint8_t> in_block;
+};
+
+void layout_code(CodeLayout& L, const std::string& text, const std::string& path) {
+    if (L.text == &text && L.size == text.size() && L.path == path)
+        return;
+    L.text = &text;
+    L.size = text.size();
+    L.path = path;
+    L.starts = {0};
+    for (std::size_t i = 0; i < text.size(); ++i)
+        if (text[i] == '\n')
+            L.starts.push_back(i + 1);
+    const CodeLang lang = code_lang(path);
+    L.in_block.assign(L.starts.size(), 0);
+    bool block = false;
+    std::vector<CodeSpan> spans;
+    for (std::size_t n = 0; n < L.starts.size(); ++n) {
+        L.in_block[n] = block ? 1 : 0;
+        if (lang.block_open.empty())
+            continue;
+        const std::size_t a = L.starts[n];
+        const std::size_t b = n + 1 < L.starts.size() ? L.starts[n + 1] - 1 : text.size();
+        highlight_code_line(std::string_view(text).substr(a, b - a), lang, block, spans);
+    }
+}
+
+// Selectable read-only text with line numbers: drag selects, double-click a word, Ctrl+A all,
+// Ctrl+C (or the right-click Copy) copies. Caller holds the panel mutex.
+void draw_code_preview(App::State& s, SidePanels& p, ImVec2 size) {
+    static CodeLayout layout;
+    const std::string& text = p.preview_text;
+    layout_code(layout, text, p.preview_path);
+    const CodeLang lang = code_lang(p.preview_path);
+    ImGui::BeginChild("##preview", size, ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoBackground);
+    ImGui::PushFont(s.fonts.mono, fpx(12));
+    ImFont* font = ImGui::GetFont();
+    const float fs = ImGui::GetFontSize();
+    const float lh = std::round(ImGui::GetTextLineHeightWithSpacing());
+    const float text_x = px(48);
+    ImDrawList* d = ImGui::GetWindowDrawList();
+    const int n = static_cast<int>(layout.starts.size());
+    auto line_end = [&](int i) {
+        std::size_t b = i + 1 < n ? layout.starts[static_cast<std::size_t>(i) + 1] - 1 : text.size();
+        const std::size_t a = layout.starts[static_cast<std::size_t>(i)];
+        if (b > a && text[b - 1] == '\r')
+            --b;
+        return b;
+    };
+    auto width_of = [&](std::size_t a, std::size_t b) {
+        return b > a ? font->CalcTextSizeA(fs, FLT_MAX, 0, text.data() + a, text.data() + b).x : 0.0f;
+    };
+    std::size_t longest = 0;
+    for (int i = 0; i < n; ++i)
+        longest = std::max(longest, line_end(i) - layout.starts[static_cast<std::size_t>(i)]);
+    const float content_w = text_x + static_cast<float>(longest) * fs * 0.62f + px(20);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float top = origin.y + px(4);
+    // Mouse -> (line, byte): the byte boundary nearest the pointer.
+    auto hit = [&](ImVec2 m) -> std::pair<int, std::size_t> {
+        const int line = std::clamp(static_cast<int>(std::floor((m.y - top) / lh)), 0, std::max(0, n - 1));
+        const std::size_t a = layout.starts[static_cast<std::size_t>(line)];
+        const std::size_t b = line_end(line);
+        float x = origin.x + text_x;
+        std::size_t i = a;
+        while (i < b) {
+            std::size_t j = i + 1;
+            while (j < b && (static_cast<unsigned char>(text[j]) & 0xC0) == 0x80)
+                ++j;
+            const float w = width_of(i, j);
+            if (m.x < x + w * 0.5f)
+                break;
+            x += w;
+            i = j;
+        }
+        return {line, i};
+    };
+    const bool hovered = ImGui::IsWindowHovered();
+    const ImGuiIO& io = ImGui::GetIO();
+    if (hovered && io.MousePos.x >= origin.x + text_x - px(4))
+        ImGui::SetMouseCursor(ImGuiMouseCursor_TextInput);
+    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && n > 0) {
+        const auto [line, at] = hit(io.MousePos);
+        if (io.MouseClickedCount[ImGuiMouseButton_Left] == 2) {
+            std::size_t a = at, b = at;
+            const std::size_t la = layout.starts[static_cast<std::size_t>(line)], lb = line_end(line);
+            auto word = [&](std::size_t k) {
+                const auto c = static_cast<unsigned char>(text[k]);
+                return std::isalnum(c) != 0 || c == '_' || c >= 0x80;
+            };
+            while (a > la && word(a - 1))
+                --a;
+            while (b < lb && word(b))
+                ++b;
+            p.sel_line_a = p.sel_line_b = line;
+            p.sel_byte_a = a;
+            p.sel_byte_b = b;
+        } else {
+            p.sel_line_a = p.sel_line_b = line;
+            p.sel_byte_a = p.sel_byte_b = at;
+            p.sel_dragging = true;
+        }
+    }
+    if (p.sel_dragging) {
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            const auto [line, at] = hit(io.MousePos);
+            p.sel_line_b = line;
+            p.sel_byte_b = at;
+            const float wy0 = ImGui::GetWindowPos().y;
+            if (io.MousePos.y < wy0)  // drag past an edge scrolls
+                ImGui::SetScrollY(ImGui::GetScrollY() - lh);
+            else if (io.MousePos.y > wy0 + ImGui::GetWindowHeight())
+                ImGui::SetScrollY(ImGui::GetScrollY() + lh);
+        } else {
+            p.sel_dragging = false;
+        }
+    }
+    auto selected = [&]() -> std::string {
+        if (p.sel_line_a < 0 || p.sel_line_b < 0)
+            return {};
+        std::size_t a = p.sel_byte_a, b = p.sel_byte_b;
+        if (a > b)
+            std::swap(a, b);
+        return text.substr(a, b - a);
+    };
+    const bool focused = ImGui::IsWindowFocused();
+    if (focused && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false) && n > 0) {
+        p.sel_line_a = 0;
+        p.sel_byte_a = 0;
+        p.sel_line_b = n - 1;
+        p.sel_byte_b = line_end(n - 1);
+    }
+    if (focused && io.KeyCtrl && (ImGui::IsKeyPressed(ImGuiKey_C, false) || ImGui::IsKeyPressed(ImGuiKey_Insert, false))) {
+        if (const std::string t = selected(); !t.empty())
+            ImGui::SetClipboardText(t.c_str());
+    }
+    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        ImGui::OpenPopup("##preview-menu");
+    if (ImGui::BeginPopup("##preview-menu")) {
+        const std::string t = selected();
+        if (ImGui::MenuItem("Copy", "Ctrl+C", false, !t.empty()))
+            ImGui::SetClipboardText(t.c_str());
+        if (ImGui::MenuItem("Select all", "Ctrl+A") && n > 0) {
+            p.sel_line_a = 0;
+            p.sel_byte_a = 0;
+            p.sel_line_b = n - 1;
+            p.sel_byte_b = line_end(n - 1);
+        }
+        ImGui::EndPopup();
+    }
+    std::size_t s0 = 0, s1 = 0;
+    if (p.sel_line_a >= 0 && p.sel_line_b >= 0) {
+        s0 = std::min(p.sel_byte_a, p.sel_byte_b);
+        s1 = std::max(p.sel_byte_a, p.sel_byte_b);
+    }
+    ImGuiListClipper clip;
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, top));
+    clip.Begin(n, lh);
+    std::vector<CodeSpan> spans;
+    while (clip.Step()) {
+        for (int i = clip.DisplayStart; i < clip.DisplayEnd; ++i) {
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            ImGui::Dummy(ImVec2(content_w, lh));
+            const std::size_t la = layout.starts[static_cast<std::size_t>(i)];
+            const std::size_t lb = line_end(i);
+            const float ty = a.y + (lh - fs) * 0.5f;
+            const std::string num = std::to_string(i + 1);
+            d->AddText(font, fs, ImVec2(a.x + px(10), ty), g_pal->faint, num.c_str());
+            const float x0 = a.x + text_x;
+            // Selection behind the text; a selected line break shows as a little extra width.
+            if (s1 > s0 && s0 <= lb && s1 >= la) {
+                const std::size_t ca = std::clamp(s0, la, lb);
+                const std::size_t cb = std::clamp(s1, la, lb);
+                const float xa = x0 + width_of(la, ca);
+                float xb = x0 + width_of(la, cb);
+                if (s1 > lb)
+                    xb += fs * 0.5f;
+                if (xb > xa)
+                    d->AddRectFilled(ImVec2(xa, a.y), ImVec2(xb, a.y + lh), alpha(g_pal->focus, 70));
+            }
+            bool block = layout.in_block[static_cast<std::size_t>(i)] != 0;
+            highlight_code_line(std::string_view(text).substr(la, lb - la), lang, block, spans);
+            float x = x0;
+            for (const auto& sp : spans) {
+                const char* b0 = text.data() + la + sp.a;
+                const char* b1 = text.data() + la + sp.b;
+                d->AddText(font, fs, ImVec2(x, ty), code_color(sp.tok), b0, b1);
+                x += font->CalcTextSizeA(fs, FLT_MAX, 0, b0, b1).x;
+            }
+        }
+    }
+    ImGui::PopFont();
+    ImGui::EndChild();
+}
+
 void draw_files_panel(App::State& s, ImVec2 pos, ImVec2 size) {
     auto& p = *s.panels;
     std::string machine;
@@ -5495,43 +5956,21 @@ void draw_files_panel(App::State& s, ImVec2 pos, ImVec2 size) {
     const float top = pos.y + px(42) + 1;
     ImGui::SetCursorScreenPos(ImVec2(pos.x + 1, top));
     if (previewing) {
-        // Read-only preview in the terminal font at 12 (files.js 130-148).
-        ImGui::BeginChild("##preview", ImVec2(size.x - 2, pos.y + size.y - top - px(4)), ImGuiChildFlags_None,
-                          ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoBackground);
-        ImGui::PushFont(s.fonts.mono, fpx(12));
-        ImGui::Dummy(ImVec2(0, px(4)));
+        // Read-only editor in the terminal font at 12 (herdr files/main.js:141-144).
+        const ImVec2 area(size.x - 2, pos.y + size.y - top - px(4));
         if (!p.preview_message.empty() && p.preview_text.empty()) {
+            ImGui::BeginChild("##preview", area, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+            ImGui::PushFont(s.fonts.mono, fpx(12));
+            ImGui::Dummy(ImVec2(0, px(4)));
             ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
             ImGui::SetCursorPosX(px(10));
             ImGui::TextUnformatted(p.preview_message.c_str());
             ImGui::PopStyleColor();
+            ImGui::PopFont();
+            ImGui::EndChild();
         } else {
-            ImGuiListClipper clip;
-            // Line starts, computed once per frame (files up to 400k characters).
-            std::vector<std::size_t> starts = {0};
-            for (std::size_t i = 0; i < p.preview_text.size(); ++i)
-                if (p.preview_text[i] == '\n')
-                    starts.push_back(i + 1);
-            clip.Begin(static_cast<int>(starts.size()));
-            while (clip.Step()) {
-                for (int i = clip.DisplayStart; i < clip.DisplayEnd; ++i) {
-                    const std::size_t a = starts[static_cast<std::size_t>(i)];
-                    std::size_t b = i + 1 < static_cast<int>(starts.size()) ? starts[static_cast<std::size_t>(i) + 1] - 1
-                                                                              : p.preview_text.size();
-                    if (b > a && p.preview_text[b - 1] == '\r')
-                        --b;
-                    const std::string num = std::to_string(i + 1);
-                    ImGui::SetCursorPosX(px(10));
-                    ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
-                    ImGui::TextUnformatted(num.c_str());
-                    ImGui::PopStyleColor();
-                    ImGui::SameLine(px(48));
-                    ImGui::TextUnformatted(p.preview_text.c_str() + a, p.preview_text.c_str() + b);
-                }
-            }
+            draw_code_preview(s, p, area);
         }
-        ImGui::PopFont();
-        ImGui::EndChild();
         lock.unlock();
         if (back)
             p.close_preview();
@@ -5638,8 +6077,9 @@ void draw_changes_panel(App::State& s, ImVec2 pos, ImVec2 size) {
         adds += c.add;
         dels += c.del;
     }
-    if (!p.changes.empty()) {
-        const std::string badge = std::to_string(p.changes.size()) + (p.changes.size() == 1 ? " file" : " files");
+    {
+        // herdr changes/main.js render(): always "<n> files" and +add −del, even at 0.
+        const std::string badge = std::to_string(p.changes.size()) + " files";
         const ImVec2 bt = s.fonts.ui->CalcTextSizeA(fpx(10), FLT_MAX, 0, badge.c_str());
         dl->AddRect(ImVec2(x, cy - bt.y * 0.5f - px(1)), ImVec2(x + bt.x + px(10), cy + bt.y * 0.5f + px(1)), g_pal->border,
                     px(4));
@@ -5656,10 +6096,12 @@ void draw_changes_panel(App::State& s, ImVec2 pos, ImVec2 size) {
 
     const float footer_h = px(32) + px(16) + (p.commit_note.empty() ? 0.0f : px(18));
     const float body_top = pos.y + hh + 1;
-    const float body_h = pos.y + size.y - footer_h - body_top;
-    // File list: grows to fit (28 per row + 12), at least 44, then the diff takes the rest.
-    const float list_h = std::clamp(static_cast<float>(p.changes.size()) * px(28) + px(12) + (p.changes_more ? px(20) : 0.0f),
-                                    px(44), std::max(px(44), body_h * 0.45f));
+    const float limited_h = p.changes_more ? px(22) : 0.0f;
+    const float body_h = pos.y + size.y - footer_h - body_top - limited_h;
+    // herdr: the list and the diff are both flex_1 (equal halves); the list is at least 44 px and
+    // at most its rows (28 each + 12), and the diff takes what the list leaves.
+    const float list_h = std::clamp(body_h * 0.5f, px(44),
+                                    std::max(px(44), static_cast<float>(p.changes.size()) * px(28) + px(12)));
     std::string select;
     ImGui::SetCursorScreenPos(ImVec2(pos.x + 1, body_top));
     ImGui::BeginChild("##changes", ImVec2(size.x - 2, list_h), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
@@ -5724,14 +6166,16 @@ void draw_changes_panel(App::State& s, ImVec2 pos, ImVec2 size) {
             note(p.changes_error);
         else if (p.changes.empty())
             note(p.repo_top.empty() ? "Loading changes\xE2\x80\xA6" : "No uncommitted changes");
-        if (p.changes_more)
-            note("Showing the first 1,000 changed files");
     }
     ImGui::EndChild();
     dl->AddLine(ImVec2(pos.x, body_top + list_h), ImVec2(pos.x + size.x, body_top + list_h), g_pal->border);
+    if (p.changes_more) {  // its own row under the list (herdr: px 12, py 4, 11 px, dim)
+        dl->AddText(s.fonts.ui, fpx(11), ImVec2(pos.x + px(12), body_top + list_h + 1 + px(4)), g_pal->faint,
+                    "Showing the first 1,000 changed files");
+    }
 
     // Diff: unified, one number column, +/- prefix removed, 9 % green/red rows, terminal font 11.
-    const float diff_top = body_top + list_h + 1;
+    const float diff_top = body_top + list_h + 1 + limited_h;
     ImGui::SetCursorScreenPos(ImVec2(pos.x + 1, diff_top));
     ImGui::BeginChild("##diff", ImVec2(size.x - 2, std::max(px(20), pos.y + size.y - footer_h - diff_top)),
                       ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoBackground);
@@ -5793,8 +6237,16 @@ void draw_changes_panel(App::State& s, ImVec2 pos, ImVec2 size) {
     ImGui::SetNextItemWidth(size.x - px(20) - bw - px(8));
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(10), (px(32) - ImGui::GetFontSize()) * 0.5f));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, px(8));
+    // Esc leaves the box and keeps the message (herdr changes/main.js on_key_down); ImGui would
+    // revert the edit, so the text from before the key is put back.
+    static std::string typed;
+    const bool esc = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
     bool commit = ImGui::InputTextWithHint("##commitmsg", "Commit message", p.commit_msg, sizeof p.commit_msg,
                                            ImGuiInputTextFlags_EnterReturnsTrue);
+    if (ImGui::IsItemActive())
+        typed = p.commit_msg;
+    else if (ImGui::IsItemDeactivated() && esc)
+        std::snprintf(p.commit_msg, sizeof p.commit_msg, "%s", typed.c_str());
     std::string msg = p.commit_msg;
     const bool can = !msg.empty() && msg.find_first_not_of(" \n") != std::string::npos && !p.repo_top.empty() &&
                      !p.committing && !p.changes_loading;
@@ -6996,31 +7448,7 @@ void draw_rename(App::State& s) {
 // ------------------------------------------------------------------ worktrees (herdr mods/worktree)
 // herdr slug: runs of characters other than letters, digits and "._-" become "-", trimmed.
 std::string branch_slug(const std::string& b) {
-    std::string out;
-    bool dash = false;
-    for (const char ch : b) {
-        const unsigned char c = static_cast<unsigned char>(ch);
-        if (std::isalnum(c) || c == '.' || c == '_' || c == '-' || c >= 0x80) {
-            out += ch;
-            dash = false;
-        } else if (!dash) {
-            out += '-';
-            dash = true;
-        }
-    }
-    while (!out.empty() && out.front() == '-')
-        out.erase(out.begin());
-    while (!out.empty() && out.back() == '-')
-        out.pop_back();
-    if (out.empty()) {
-        std::uint32_t h = 2166136261u;
-        for (const unsigned char c : b)
-            h = (h ^ c) * 16777619u;
-        char buf[16];
-        std::snprintf(buf, sizeof buf, "branch-%08x", h);
-        out = buf;
-    }
-    return out;
+    return host::worktree_slug(b);  // herdr worktree/main.js slug(), shared with the host's default
 }
 
 void draw_worktree(App::State& s) {
@@ -7082,9 +7510,7 @@ void draw_worktree(App::State& s) {
     ImGui::TextDisabled("%s", s.wt_busy ? "working\xE2\x80\xA6" : "\xE2\x86\xB5 create \xC2\xB7 esc cancel");
     cancel = cancel || ImGui::IsKeyPressed(ImGuiKey_Escape);
     if (create && !s.wt_busy) {
-        std::string branch = s.wt_branch;
-        while (!branch.empty() && branch.back() == ' ')
-            branch.pop_back();
+        const std::string branch = trimmed(s.wt_branch);  // herdr create(): this.text.trim()
         if (branch.empty()) {
             std::lock_guard lock(s.placements_mutex);
             s.wt_error = "Type a branch name.";
