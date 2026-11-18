@@ -138,6 +138,10 @@ int wmain(int argc, wchar_t** argv) {
         return run_report();
     if (mode == L"echo")
         return run_echo();
+    if (mode == L"mouse") {  // asks for click reporting (SGR), then echoes input like "echo"
+        write_out("\x1b[?1000h\x1b[?1006h");
+        return run_echo();
+    }
     if (mode == L"size") {  // QA-04: report the console size the child actually sees
         for (;;) {
             CONSOLE_SCREEN_BUFFER_INFO info{};

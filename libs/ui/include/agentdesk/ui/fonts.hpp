@@ -65,6 +65,9 @@ inline constexpr const char* kWorktree = "\xEE\xA9\xA3";  // U+EA63 codicon repo
 inline constexpr const char* kLayers = "\xEE\xAF\x92";  // U+EBD2 codicon layers
 inline constexpr const char* kClock = "\xEE\xAA\x82";  // U+EA82 codicon clock
 inline constexpr const char* kCommand = "\xEE\xAA\x93";  // U+EA93 codicon symbol-key
+inline constexpr const char* kComment = "\xEE\xA9\xAB";  // U+EA6B codicon comment
+inline constexpr const char* kExtensions = "\xEE\xAB\xA6";  // U+EAE6 codicon extensions
+inline constexpr const char* kPalette = "\xEE\xAD\x9C";  // U+EB5C codicon symbol-color
 inline constexpr const char* kWarning = "\xEE\xA9\xAC";  // U+EA6C codicon warning
 }  // namespace icon
 

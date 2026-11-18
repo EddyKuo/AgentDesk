@@ -200,6 +200,7 @@ Json encode_snapshot_meta(const terminal::ScreenSnapshot& s) {
             {"cols", s.cols},
             {"cursor", {{"row", s.cursor.row}, {"col", s.cursor.col}, {"visible", s.cursor.visible}}},
             {"alt_screen", s.alt_screen},
+            {"mouse", static_cast<int>(s.mouse)},
             {"title", s.title}};
 }
 

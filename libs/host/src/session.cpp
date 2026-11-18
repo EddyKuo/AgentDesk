@@ -372,6 +372,7 @@ void Session::handle(InputEvent& c) {
                        }
                    },
                    [&](RawInput& raw) { queue_pty_bytes(std::move(raw.bytes)); },
+                   [&](MouseInput& m) { engine_->mouse(m.row, m.col, m.button, m.action, m.mods); },
                },
                c);
     queue_pty_bytes(engine_->take_pty_input());

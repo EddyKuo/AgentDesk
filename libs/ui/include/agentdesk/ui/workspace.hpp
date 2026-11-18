@@ -37,6 +37,7 @@ struct Tab {
     std::string focused;                            // session id
     std::string zoomed;                             // session id shown alone, or empty
     std::map<std::string, std::string> pane_names;  // session id -> name
+    bool settled = false;  // herdr tab.settle: put away (not in the tab bar), still running
 };
 
 struct Space {
@@ -59,6 +60,7 @@ public:
     std::vector<Space> spaces;
     int active_space = 0;
     std::set<std::string> pinned;  // agents pinned to the top of the agents list
+    std::set<std::string> right_click_program;  // terminals whose right-clicks go to the program
 
     // ---- queries
     [[nodiscard]] PaneLoc find(const std::string& session) const;
@@ -95,7 +97,15 @@ public:
     // ---- focus and selection
     void focus(const std::string& session);  // selects its space and tab too
     void select_space(int index);
-    void select_tab(int index);  // in the active space
+    void select_tab(int index);  // in the active space (shows it again if it was put away)
+    // Ctrl+1..9: the n-th tab (1-based) not put away, in the active space.
+    void select_shown_tab(int n);
+    // herdr tab.settle: hides a tab from the bar until it is shown or needs you. The last tab
+    // still shown in its space cannot be put away (returns false).
+    bool settle_tab(int space, int tab);
+    void unsettle_tab(int space, int tab);
+    // Shows the tab holding `session` again; true if it was put away.
+    bool unsettle_session(const std::string& session);
     void cycle_tab(int delta);
     void cycle_space(int delta);
     // Moves focus to the neighbouring pane in `dir` (tab layout inside `area`).

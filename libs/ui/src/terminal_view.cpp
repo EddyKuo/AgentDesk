@@ -407,6 +407,9 @@ void TerminalView::draw_context_menu(TerminalSource& source, const terminal::Scr
         commands_.emplace_back("pane.zoom");
     if (ImGui::MenuItem("Rename pane..."))
         commands_.emplace_back("pane.rename");
+    // herdr pane menu: where right-clicks go (only matters while the program reads the mouse).
+    if (ImGui::MenuItem(right_click_to_program ? "Use AgentDesk right-click menu" : "Send right-clicks to pane"))
+        commands_.emplace_back(right_click_to_program ? "terminal.right_click:menu" : "terminal.right_click:program");
     if (!parent_name.empty() && ImGui::MenuItem(("Send back to " + parent_name).c_str()))
         commands_.emplace_back("pane.park");
     ImGui::Separator();
@@ -504,6 +507,49 @@ void TerminalView::draw_search_bar(ImVec2 area_min, ImVec2 area_max) {
     }
 }
 
+void TerminalView::forward_mouse(TerminalSource& source, const terminal::ScreenSnapshot& snap, bool hovered,
+                                 CellPos cell) {
+    ImGuiIO& io = ImGui::GetIO();
+    std::uint8_t mods = terminal::kModNone;
+    if (io.KeyCtrl)
+        mods |= terminal::kModCtrl;
+    if (io.KeyAlt)
+        mods |= terminal::kModAlt;
+    const bool reporting = snap.mouse != terminal::MouseMode::kNone && !io.KeyShift;
+    auto send = [&](int button, terminal::MouseAction action) {
+        source.send(host::MouseInput{cell.row, cell.col, button, action, mods});
+    };
+    // ImGui buttons 0/1/2 = left/right/middle; terminal buttons 1/3/2.
+    static constexpr std::pair<ImGuiMouseButton, int> kButtons[] = {
+        {ImGuiMouseButton_Left, 1}, {ImGuiMouseButton_Middle, 2}, {ImGuiMouseButton_Right, 3}};
+    for (const auto& [ib, tb] : kButtons) {
+        const std::uint8_t bit = static_cast<std::uint8_t>(1u << tb);
+        if (tb == 3 && !right_click_to_program)
+            continue;  // right-click opens AgentDesk's menu
+        if (reporting && hovered && ImGui::IsMouseClicked(ib)) {
+            mouse_buttons_ |= bit;
+            send(tb, terminal::MouseAction::kPress);
+        }
+        if ((mouse_buttons_ & bit) != 0 && ImGui::IsMouseReleased(ib)) {
+            mouse_buttons_ = static_cast<std::uint8_t>(mouse_buttons_ & ~bit);
+            send(tb, terminal::MouseAction::kRelease);
+        }
+    }
+    if (!reporting)
+        return;
+    if (hovered && io.MouseWheel != 0.0f) {
+        const int n = std::max(1, static_cast<int>(std::round(std::abs(io.MouseWheel))));
+        for (int i = 0; i < n; ++i)
+            send(io.MouseWheel > 0 ? 4 : 5, terminal::MouseAction::kPress);
+    }
+    // Motion: while a button is held (drag mode) or always (any-motion mode), once per cell.
+    const bool want_move = snap.mouse == terminal::MouseMode::kMove ||
+                           (snap.mouse == terminal::MouseMode::kDrag && mouse_buttons_ != 0);
+    if (want_move && (hovered || mouse_buttons_ != 0) && last_mouse_cell_ != cell)
+        send(0, terminal::MouseAction::kMove);
+    last_mouse_cell_ = cell;
+}
+
 bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSet& fonts,
                         bool request_focus) {
     const auto snap_ptr = source.snapshot();
@@ -540,8 +586,24 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     const GridSize grid{snap.rows, snap.cols};
     ImGuiIO& io = ImGui::GetIO();
 
+    // ---- mouse to the program (it turned reporting on; Shift keeps the mouse for AgentDesk)
+    const bool report_mouse = snap.mouse != terminal::MouseMode::kNone && !io.KeyShift && scroll_offset_ == 0;
+    if (report_mouse || mouse_buttons_ != 0) {
+        forward_mouse(source, snap, item.hovered,
+                      cell_at(io.MousePos.x, io.MousePos.y, origin.x, origin.y, cell_w, cell_h, grid));
+    }
+    // Wheel in a full-screen program that does not read the mouse: arrow keys, like xterm's
+    // alternate scroll mode (there is no history to scroll on the alternate screen).
+    const bool wheel_as_keys = !report_mouse && snap.alt_screen && snap.mouse == terminal::MouseMode::kNone &&
+                               !io.KeyShift && scroll_offset_ == 0;
+    if (item.hovered && io.MouseWheel != 0.0f && wheel_as_keys) {
+        const int n = std::max(1, static_cast<int>(std::round(std::abs(io.MouseWheel) * 3.0f * scroll_speed)));
+        for (int i = 0; i < n; ++i)
+            source.send(host::KeyInput{io.MouseWheel > 0 ? terminal::Key::kUp : terminal::Key::kDown});
+    }
+
     // ---- history window: combined lines = fetched history (oldest first) + screen rows.
-    if (item.hovered && io.MouseWheel != 0.0f) {
+    if (item.hovered && io.MouseWheel != 0.0f && !report_mouse && !wheel_as_keys) {
         scroll_offset_ = std::clamp(scroll_offset_ + static_cast<int>(io.MouseWheel * 3.0f * scroll_speed), 0,
                                     kMaxScrollback);
     }
@@ -603,7 +665,7 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     }
 
     // ---- mouse selection: click, drag, double-click word, triple-click line
-    if (item.clicked && !over_bar) {
+    if (item.clicked && !over_bar && !report_mouse) {
         const auto p = cell_at(io.MousePos.x, io.MousePos.y, origin.x, origin.y, cell_w, cell_h, grid);
         clear_selection();
         const int clicks = io.MouseClickedCount[ImGuiMouseButton_Left];
@@ -658,7 +720,7 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
                 copy_selection(snap);
         }
     }
-    if (item.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+    if (item.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !(report_mouse && right_click_to_program))
         open_context_menu_ = true;
 
     // ---- paint

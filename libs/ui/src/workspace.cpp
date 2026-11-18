@@ -1,5 +1,7 @@
 #include "agentdesk/ui/workspace.hpp"
 
+#include <utility>
+
 #include <windows.h>
 
 #include <algorithm>
@@ -400,6 +402,7 @@ void Workspace::focus(const std::string& session) {
     sp.active_tab = loc.tab;
     Tab& t = sp.tabs[static_cast<std::size_t>(loc.tab)];
     t.focused = session;
+    t.settled = false;  // showing a terminal brings its tab back
     if (!t.zoomed.empty() && t.zoomed != session)
         t.zoomed.clear();
 }
@@ -411,16 +414,73 @@ void Workspace::select_space(int index) {
 
 void Workspace::select_tab(int index) {
     Space* sp = active();
-    if (sp != nullptr && index >= 0 && index < static_cast<int>(sp->tabs.size()))
+    if (sp != nullptr && index >= 0 && index < static_cast<int>(sp->tabs.size())) {
         sp->active_tab = index;
+        sp->tabs[static_cast<std::size_t>(index)].settled = false;
+    }
+}
+
+void Workspace::select_shown_tab(int n) {
+    Space* sp = active();
+    if (sp == nullptr)
+        return;
+    for (int i = 0; i < static_cast<int>(sp->tabs.size()); ++i)
+        if (!sp->tabs[static_cast<std::size_t>(i)].settled && --n == 0) {
+            sp->active_tab = i;
+            return;
+        }
+}
+
+bool Workspace::settle_tab(int space, int tab) {
+    if (space < 0 || space >= static_cast<int>(spaces.size()))
+        return false;
+    Space& sp = spaces[static_cast<std::size_t>(space)];
+    if (tab < 0 || tab >= static_cast<int>(sp.tabs.size()) || sp.tabs[static_cast<std::size_t>(tab)].settled)
+        return false;
+    // The nearest tab still shown, preferring the right (herdr selects the one that slides in).
+    int next = -1;
+    for (int d = 1; d < static_cast<int>(sp.tabs.size()) && next < 0; ++d)
+        for (const int i : {tab + d, tab - d})
+            if (i >= 0 && i < static_cast<int>(sp.tabs.size()) && !sp.tabs[static_cast<std::size_t>(i)].settled) {
+                next = i;
+                break;
+            }
+    if (next < 0)
+        return false;
+    sp.tabs[static_cast<std::size_t>(tab)].settled = true;
+    if (sp.active_tab == tab)
+        sp.active_tab = next;
+    return true;
+}
+
+void Workspace::unsettle_tab(int space, int tab) {
+    if (space >= 0 && space < static_cast<int>(spaces.size()) && tab >= 0 &&
+        tab < static_cast<int>(spaces[static_cast<std::size_t>(space)].tabs.size()))
+        spaces[static_cast<std::size_t>(space)].tabs[static_cast<std::size_t>(tab)].settled = false;
+}
+
+bool Workspace::unsettle_session(const std::string& session) {
+    const auto loc = find(session);
+    if (loc.space < 0)
+        return false;
+    Tab& t = spaces[static_cast<std::size_t>(loc.space)].tabs[static_cast<std::size_t>(loc.tab)];
+    return std::exchange(t.settled, false);
 }
 
 void Workspace::cycle_tab(int delta) {
     Space* sp = active();
     if (sp == nullptr || sp->tabs.empty())
         return;
+    // Wraps and skips tabs put away (herdr tab.next / tab.prev).
     const int n = static_cast<int>(sp->tabs.size());
-    sp->active_tab = ((sp->active_tab + delta) % n + n) % n;
+    int i = sp->active_tab;
+    for (int step = 0; step < n; ++step) {
+        i = ((i + delta) % n + n) % n;
+        if (!sp->tabs[static_cast<std::size_t>(i)].settled) {
+            sp->active_tab = i;
+            return;
+        }
+    }
 }
 
 void Workspace::cycle_space(int delta) {
@@ -539,6 +599,7 @@ Json Workspace::to_json() const {
                             {"root", node_to_json(t.root)},
                             {"focused", t.focused},
                             {"zoomed", t.zoomed},
+                            {"settled", t.settled},
                             {"pane_names", t.pane_names}});
         }
         sp.push_back({{"id", s.id},
@@ -552,7 +613,8 @@ Json Workspace::to_json() const {
     return {{"version", 1},
             {"active_space", active_space},
             {"spaces", std::move(sp)},
-            {"pinned", std::vector<std::string>(pinned.begin(), pinned.end())}};
+            {"pinned", std::vector<std::string>(pinned.begin(), pinned.end())},
+            {"right_click_program", std::vector<std::string>(right_click_program.begin(), right_click_program.end())}};
 }
 
 Workspace Workspace::from_json(const Json& j) {
@@ -574,17 +636,24 @@ Workspace Workspace::from_json(const Json& j) {
             tab.root = node_from_json(t.value("root", Json::object()));
             tab.focused = t.value("focused", "");
             tab.zoomed = t.value("zoomed", "");
+            tab.settled = t.value("settled", false);
             if (const auto pn = t.find("pane_names"); pn != t.end() && pn->is_object())
                 tab.pane_names = pn->get<std::map<std::string, std::string>>();
             if (!w.sessions_in(tab).empty())
                 sp.tabs.push_back(std::move(tab));
         }
-        if (!sp.tabs.empty())
+        if (!sp.tabs.empty()) {
+            sp.active_tab = std::clamp(sp.active_tab, 0, static_cast<int>(sp.tabs.size()) - 1);
+            sp.tabs[static_cast<std::size_t>(sp.active_tab)].settled = false;  // the shown tab is never away
             w.spaces.push_back(std::move(sp));
+        }
     }
     for (const auto& p : j.value("pinned", Json::array()))
         if (p.is_string())
             w.pinned.insert(p.get<std::string>());
+    for (const auto& p : j.value("right_click_program", Json::array()))
+        if (p.is_string())
+            w.right_click_program.insert(p.get<std::string>());
     w.active_space =
         std::clamp(j.value("active_space", 0), 0, std::max(0, static_cast<int>(w.spaces.size()) - 1));
     return w;

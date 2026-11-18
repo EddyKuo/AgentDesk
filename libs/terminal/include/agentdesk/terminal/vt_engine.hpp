@@ -54,12 +54,18 @@ struct CursorState {
 
 // Immutable copy of the visible screen. `generation` changes on resize/reset; `seq` grows with
 // every change, so consumers can detect gaps (design doc 3.7).
+// Mouse reporting the program turned on. Only then do clicks and the wheel go to it.
+enum class MouseMode : std::uint8_t { kNone, kClick, kDrag, kMove };
+
+enum class MouseAction : std::uint8_t { kPress, kRelease, kMove };
+
 struct ScreenSnapshot {
     int rows = 0;
     int cols = 0;
     std::vector<Cell> cells;  // row-major, rows * cols
     CursorState cursor;
     bool alt_screen = false;
+    MouseMode mouse = MouseMode::kNone;  // what the program asked to receive (DECSET 1000/1002/1003)
     std::string title;
     std::uint64_t generation = 0;
     std::uint64_t seq = 0;
@@ -151,6 +157,11 @@ public:
     void key(Key key, std::uint8_t mods = kModNone);
     void text(char32_t codepoint, std::uint8_t mods = kModNone);
     void paste(std::string_view utf8);
+    // Mouse event at a cell (0-based), encoded per the program's mouse mode and protocol
+    // (X10/UTF-8/SGR). button: 1 left, 2 middle, 3 right, 4/5 wheel up/down, 0 for a plain move.
+    // Ignored while the program has mouse reporting off; moves are sent only when it asked.
+    void mouse(int row, int col, int button, MouseAction action, std::uint8_t mods = kModNone);
+    [[nodiscard]] MouseMode mouse_mode() const noexcept { return mouse_mode_; }
 
     // Bytes to write to the PTY input, in order: query replies (DA/DSR/CPR/OSC 7501) and
     // encoded input. The caller must write them before any later input.
@@ -196,6 +207,7 @@ private:
     bool history_truncated_ = false;
     CursorState cursor_;
     bool alt_screen_ = false;
+    MouseMode mouse_mode_ = MouseMode::kNone;
     std::string title_;
     std::string title_pending_;
     std::string osc_;

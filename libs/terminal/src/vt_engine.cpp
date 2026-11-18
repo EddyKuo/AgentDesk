@@ -157,6 +157,12 @@ struct VtEngine::Callbacks {
             case VTERM_PROP_ALTSCREEN:
                 e.alt_screen_ = val->boolean != 0;
                 break;
+            case VTERM_PROP_MOUSE:
+                e.mouse_mode_ = val->number == VTERM_PROP_MOUSE_CLICK  ? MouseMode::kClick
+                                : val->number == VTERM_PROP_MOUSE_DRAG ? MouseMode::kDrag
+                                : val->number == VTERM_PROP_MOUSE_MOVE ? MouseMode::kMove
+                                                                       : MouseMode::kNone;
+                break;
             case VTERM_PROP_TITLE: {
                 const VTermStringFragment& f = val->string;
                 if (f.initial) {
@@ -330,6 +336,18 @@ void VtEngine::key(Key key, std::uint8_t mods) {
 
 void VtEngine::text(char32_t codepoint, std::uint8_t mods) {
     vterm_keyboard_unichar(vt_.get(), static_cast<uint32_t>(codepoint), to_vterm_mods(mods));
+}
+
+void VtEngine::mouse(int row, int col, int button, MouseAction action, std::uint8_t mods) {
+    if (mouse_mode_ == MouseMode::kNone)
+        return;
+    row = std::clamp(row, 0, std::max(0, rows_ - 1));
+    col = std::clamp(col, 0, std::max(0, cols_ - 1));
+    const VTermModifier m = to_vterm_mods(mods);
+    // libvterm reports a move only when a button is held (drag mode) or in any-motion mode.
+    vterm_mouse_move(vt_.get(), row, col, m);
+    if (action != MouseAction::kMove && button >= 1 && button <= 5)
+        vterm_mouse_button(vt_.get(), button, action == MouseAction::kPress, m);
 }
 
 void VtEngine::paste(std::string_view utf8) {
@@ -510,6 +528,7 @@ ScreenSnapshot VtEngine::snapshot() const {
     snap.cols = cols_;
     snap.cursor = cursor_;
     snap.alt_screen = alt_screen_;
+    snap.mouse = mouse_mode_;
     snap.title = title_;
     snap.generation = generation_;
     snap.seq = seq_;

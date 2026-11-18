@@ -886,6 +886,16 @@ Response SessionManager::do_input(const ipc::ConnectionPtr& conn, const Request&
         session->send(PasteInput{text});
     } else if (kind == "raw") {
         session->send(RawInput{p.value("bytes", "")});
+    } else if (kind == "mouse") {
+        const std::string action = p.value("action", "press");
+        const int button = p.value("button", 0);
+        if (button < 0 || button > 5 || (action != "press" && action != "release" && action != "move"))
+            return bad(req, "bad mouse event");
+        session->send(MouseInput{std::clamp(p.value("row", 0), 0, 10000), std::clamp(p.value("col", 0), 0, 10000), button,
+                                 action == "press"     ? terminal::MouseAction::kPress
+                                 : action == "release" ? terminal::MouseAction::kRelease
+                                                       : terminal::MouseAction::kMove,
+                                 mods_from_json(p.value("mods", Json::object()))});
     } else {
         return bad(req, "unknown input kind");
     }

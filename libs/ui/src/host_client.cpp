@@ -167,6 +167,15 @@ void RemoteSession::send(host::InputEvent input) {
             } else if constexpr (std::is_same_v<T, host::PasteInput>) {
                 params["kind"] = "paste";
                 params["text"] = e.utf8;
+            } else if constexpr (std::is_same_v<T, host::MouseInput>) {
+                params["kind"] = "mouse";
+                params["row"] = e.row;
+                params["col"] = e.col;
+                params["button"] = e.button;
+                params["action"] = e.action == terminal::MouseAction::kPress     ? "press"
+                                   : e.action == terminal::MouseAction::kRelease ? "release"
+                                                                                 : "move";
+                params["mods"] = mods_json(e.mods);
             } else {
                 params["kind"] = "raw";
                 params["bytes"] = e.bytes;
