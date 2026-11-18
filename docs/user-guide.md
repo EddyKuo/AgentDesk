@@ -166,31 +166,36 @@ Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy
 
 ## Mod
 
-Mod 是放在 `%LOCALAPPDATA%\AgentDesk\mods\<名稱>\main.lua` 的 Lua 小程式，可以對 Agent 狀態做出反應、加命令面板項目、在側欄或 Details 加面板、在分頁和 Agent 列加文字。在「設定 > Mods」啟用或停用、看錯誤、重新載入。命令面板的「Duplicate mod」把一個 mod 的資料夾複製成 `<名稱>-copy`，預設不啟用。第一次啟動會寫入三個範例，預設都不啟用：
+Mod 是用 C++ 寫的 DLL，放在 `%LOCALAPPDATA%\AgentDesk\mods\<名稱>\mod.dll`，旁邊可以有 `mod.json`（說明文字）和 `settings.json`（mod 自己的設定）。它可以對 Agent 狀態做出反應、加命令面板項目、在側欄或 Details 加面板、在分頁和 Agent 列加文字、啟動程式。在「設定 > Mods」啟用或停用、看錯誤、重新載入。命令面板的「Duplicate mod」把一個 mod 的資料夾複製成 `<名稱>-copy`，預設不啟用。第一次啟動會放入三個範例，預設都不啟用：
 
 - `tab-timer`：在分頁顯示 Agent 已工作多久。
 - `ntfy-notify`：Agent 需要你時推播到手機。在它的 `settings.json` 填入 ntfy.sh 的 topic 後啟用。
 - `agent-summary`：側欄面板，顯示需要你、工作中、閒置的數量。
 
-範例：
+自己寫 mod：zip 裡的 `sdk\include` 有介面標頭檔，`sdk\examples` 是三個範例的原始碼。用 VS 2022 編譯成 DLL，檔名 `mod.dll`；`sdk` 資料夾的 `CMakeLists.txt` 可以直接編出所有範例。最小的例子：
 
-```lua
--- 有 Agent 需要我時跳通知並切過去
-agentdesk.on("agent_state", function(ev)
-  if ev.state == "Blocked" then
-    agentdesk.notify(ev.title .. " needs you")
-    agentdesk.run("agent.focus:" .. ev.session)
-  end
-end)
+```cpp
+#include <agentdesk/mod_sdk.hpp>
 
-agentdesk.panel{ id = "hello", title = "Hello", where = "sidebar", draw = function(ui)
-  if ui:button("Count agents") then agentdesk.notify(#agentdesk.sessions() .. " sessions") end
-end }
+class Hello : public agentdesk::mod::Mod {
+public:
+    Hello() { host().add_command("count", "Count agents"); }
+    void on_event(const std::string& event, const agentdesk::mod::Json& ev) override {
+        if (event == "agent_state" && ev.value("state", "") == "Blocked") {
+            host().notify(ev.value("title", "") + " needs you");
+            host().run("agent.focus:" + ev.value("session", ""));
+        }
+    }
+    void command(const std::string&) override {
+        host().notify(std::to_string(host().sessions().size()) + " sessions");
+    }
+};
+AGENTDESK_MOD(Hello, "Says when an agent needs you")
 ```
 
-可用的函式：`on(事件, fn)`（agent_state、session_added、session_exited、tick）、`sessions()`、`focused()`、`run(命令)`、`send(session, 文字, 是否按 Enter)`、`notify(標題, 內文)`、`exec({程式, 參數...})`、`setting(鍵, 預設值)`、`command(id, 名稱, fn)`、`panel{...}`（`ui:text`、`ui:button`、`ui:separator`、`ui:progress`、`ui:row`、`ui:badge`）、`decorate("tab"|"agent", fn)`。
+`host()` 提供 `run(命令)`、`send(session, 文字, 是否按 Enter)`、`notify(標題, 內文)`、`exec({程式, 參數...})`、`add_command(id, 名稱)`、`sessions()`、`setting(鍵, 預設值)`。可以覆寫的有 `on_event`（agent_state、session_added、session_exited、tick）、`panels(位置)`（用 `Panel` 的 `text`、`row`、`badge`、`progress`、`button`、`separator` 組出面板）、`click`、`decorate("tab"|"agent", ...)`、`command`。不用 C++ 的話，也可以直接實作 `mod_api.h` 的 C 介面。
 
-Mod 在沙盒中執行：不能讀寫檔案、不能執行 shell、不能載入其他程式碼；`exec` 直接啟動程式，不經過 shell。執行太久或反覆出錯的 mod 會被停用，錯誤顯示在設定頁。
+Mod 在 AgentDesk 裡以你的權限執行，跟你安裝的其他程式一樣，所以只啟用你信任的 mod。`exec` 直接啟動程式，不經過 shell。mod 當掉（例如記憶體存取錯誤）時會被停用，錯誤顯示在設定頁，AgentDesk 照常執行；但 mod 卡在無窮迴圈時，整個介面會停住。舊版的 Lua mod（`main.lua`）已不支援，設定頁會顯示錯誤；三個範例會自動換成 C++ 版本，原本的 `settings.json` 保留。
 
 ## agentctl（命令列）
 
