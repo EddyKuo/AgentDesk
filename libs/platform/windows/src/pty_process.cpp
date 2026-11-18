@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cwctype>
+#include <filesystem>
 #include <limits>
 #include <stdexcept>
 #include <system_error>
@@ -177,10 +178,14 @@ void PtyProcess::reader_loop() noexcept {
     } done{this};
     std::array<char, kReadChunk> buffer{};
     for (;;) {
+        if (pause_requested_) {
+            return;  // handover: the rest stays in the pipe for the next reader
+        }
         DWORD read = 0;
         if (!::ReadFile(output_read_.get(), buffer.data(), static_cast<DWORD>(buffer.size()), &read,
                         nullptr)) {
-            // ERROR_BROKEN_PIPE is the normal end once the pseudoconsole is closed.
+            // ERROR_BROKEN_PIPE is the normal end once the pseudoconsole is closed;
+            // ERROR_OPERATION_ABORTED is pause_reader() cancelling a read that got nothing.
             return;
         }
         if (read == 0) {
@@ -190,6 +195,180 @@ void PtyProcess::reader_loop() noexcept {
         // throwing sink is a programming error and terminates (fail fast, IL-4).
         on_output_(std::span<const char>(buffer.data(), read));
     }
+}
+
+// ---- agent-host's handover (design doc 7.4 OQ-09)
+
+namespace {
+
+// The bundled ConPTY's HPCON (microsoft/terminal v1.24.11911.0 src/winconpty/winconpty.h 11-41;
+// fetch_conpty pins that build by hash). Only read after the checks in looks_like_conhost.
+struct PseudoConsoleLayout {
+    HANDLE signal;
+    HANDLE reference;
+    HANDLE conhost;
+};
+
+bool is_open_console(HANDLE process) {
+    if (process == nullptr || ::GetProcessId(process) == 0)
+        return false;
+    wchar_t path[MAX_PATH * 2]{};
+    DWORD n = MAX_PATH * 2;
+    if (!::QueryFullProcessImageNameW(process, 0, path, &n))
+        return false;
+    const std::wstring name = lower(std::filesystem::path(std::wstring(path, n)).filename().native());
+    return name == L"openconsole.exe";
+}
+
+bool is_pipe(HANDLE h) {
+    return h != nullptr && h != INVALID_HANDLE_VALUE && ::GetFileType(h) == FILE_TYPE_PIPE;
+}
+
+}  // namespace
+
+bool PtyProcess::pause_reader(std::chrono::milliseconds timeout) {
+    pause_requested_ = true;
+    if (!reader_.joinable())
+        return true;
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    for (;;) {
+        {
+            std::unique_lock lock(reader_mutex_);
+            if (reader_cv_.wait_for(lock, std::chrono::milliseconds(20), [&] { return reader_done_; }))
+                break;
+        }
+        if (std::chrono::steady_clock::now() >= deadline)
+            return false;
+        // A synchronous ReadFile on an anonymous pipe returns ERROR_OPERATION_ABORTED with
+        // nothing read; a read that already got bytes completes normally and reaches the sink.
+        ::CancelSynchronousIo(reader_.native_handle());
+    }
+    reader_.join();
+    return true;
+}
+
+void PtyProcess::resume_reader() {
+    std::lock_guard lock(close_mutex_);
+    if (closed_)
+        return;
+    if (reader_.joinable())
+        reader_.join();
+    {
+        std::lock_guard reader_lock(reader_mutex_);
+        reader_done_ = false;
+    }
+    pause_requested_ = false;
+    reader_ = std::thread([this] { reader_loop(); });
+}
+
+std::string PtyProcess::read_available(std::size_t max) {
+    DWORD available = 0;
+    if (!output_read_ || !::PeekNamedPipe(output_read_.get(), nullptr, 0, nullptr, &available, nullptr) ||
+        available == 0)
+        return {};
+    std::string out(std::min<std::size_t>(available, max), '\0');
+    DWORD read = 0;
+    if (!::ReadFile(output_read_.get(), out.data(), static_cast<DWORD>(out.size()), &read, nullptr))
+        return {};
+    out.resize(read);
+    return out;
+}
+
+std::optional<PtyHandles> PtyProcess::handover_handles(std::string* why) const {
+    if (!api_.bundled || api_.pack == nullptr) {
+        *why = "the system's ConPTY cannot hand terminals to another agent-host";
+        return std::nullopt;
+    }
+    if (closed_ || pcon_ == nullptr) {
+        *why = "the terminal is closed";
+        return std::nullopt;
+    }
+    const auto* layout = static_cast<const PseudoConsoleLayout*>(static_cast<const void*>(pcon_));
+    if (!is_pipe(layout->signal) || layout->reference == nullptr ||
+        layout->reference == INVALID_HANDLE_VALUE || !is_open_console(layout->conhost)) {
+        *why = "this ConPTY build keeps its console differently; it cannot be handed over";
+        return std::nullopt;
+    }
+    PtyHandles h;
+    h.signal = layout->signal;
+    h.reference = layout->reference;
+    h.conhost = layout->conhost;
+    h.input_write = input_write_.get();
+    h.output_read = output_read_.get();
+    h.process = process_.get();
+    h.job = job_.get();
+    h.pid = pid_;
+    return h;
+}
+
+void PtyProcess::release_after_handover() {
+    std::lock_guard lock(close_mutex_);
+    if (closed_)
+        return;
+    closed_ = true;
+    if (reader_.joinable())
+        reader_.join();  // paused by the handover
+    // The bundled ClosePseudoConsole only closes the three member handles and frees the struct
+    // (winconpty.cpp 393-430). The new host holds duplicates of all three, so the signal pipe is
+    // not broken and OpenConsole keeps running.
+    if (pcon_ != nullptr) {
+        api_.close(pcon_);
+        pcon_ = nullptr;
+    }
+    {
+        std::lock_guard write_lock(write_mutex_);
+        input_write_.reset();
+    }
+    output_read_.reset();
+    process_.reset();
+    // job_ closes with *this: the new host's handle keeps the job (and KILL_ON_JOB_CLOSE) alive.
+}
+
+std::unique_ptr<PtyProcess> PtyProcess::adopt(const ConPtyApi& api, const PtyHandles& handles,
+                                              PtyOutputSink on_output) {
+    // Own every handle first, so any failure below closes all of them (the old host still holds
+    // its own and keeps the terminal).
+    UniqueHandle signal(handles.signal);
+    UniqueHandle reference(handles.reference);
+    UniqueHandle conhost(handles.conhost);
+    UniqueHandle process(handles.process);
+    UniqueHandle job(handles.job);
+    std::unique_ptr<PtyProcess> self(new PtyProcess(api, std::move(on_output)));
+    self->input_write_.reset(handles.input_write);
+    self->output_read_.reset(handles.output_read);
+    if (!self->on_output_)
+        throw std::invalid_argument("PtyProcess::adopt: output sink is required");
+    if (api.pack == nullptr)
+        throw std::runtime_error("this agent-host's ConPTY cannot take over terminals");
+    // The handle is the authority, not a PID: it must be the process the old host started.
+    if (!is_valid(process) || handles.pid == 0 || ::GetProcessId(process.get()) != handles.pid)
+        throw std::runtime_error("handed over process does not match its id");
+    // Kept apart from *this until everything checked out: a refused adoption must only close
+    // its duplicates, never terminate the job (close() would).
+    KillOnCloseJob adopted_job(std::move(job));  // throws unless kill-on-close
+    BOOL in_job = FALSE;
+    if (!::IsProcessInJob(process.get(), adopted_job.get(), &in_job) || !in_job)
+        throw std::runtime_error("handed over process is not in its job");
+    if (!is_pipe(self->input_write_.get()) || !is_pipe(self->output_read_.get()) || !is_pipe(signal.get()))
+        throw std::runtime_error("handed over terminal pipes are not pipes");
+    if (!is_valid(reference) || !is_open_console(conhost.get()))
+        throw std::runtime_error("handed over console host is not OpenConsole");
+    HPCON pcon = nullptr;
+    if (const HRESULT hr = api.pack(conhost.get(), reference.get(), signal.get(), &pcon); FAILED(hr))
+        throw_hresult(hr, "ConptyPackPseudoConsole");
+    // The packed HPCON owns these three now; ClosePseudoConsole closes them.
+    (void)conhost.release();
+    (void)reference.release();
+    (void)signal.release();
+    self->pcon_ = pcon;
+    self->process_ = std::move(process);
+    self->pid_ = handles.pid;
+    self->job_ = std::move(adopted_job);
+    {
+        std::lock_guard lock(self->reader_mutex_);
+        self->reader_done_ = true;  // no reader until resume_reader()
+    }
+    return self;
 }
 
 void PtyProcess::write(std::string_view bytes) {

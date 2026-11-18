@@ -45,6 +45,7 @@ agentdesk_executable(win_integration_tests
     integration/windows/session_test.cpp
     integration/windows/pipe_test.cpp
     integration/windows/host_test.cpp
+    integration/windows/handover_test.cpp
     integration/windows/updates_test.cpp)
 target_link_libraries(win_integration_tests PRIVATE psapi advapi32 ws2_32 agentdesk::ui
     agentdesk::host agentdesk::ipc agentdesk::platform_win agentdesk::terminal nlohmann_json::nlohmann_json GTest::gtest_main)

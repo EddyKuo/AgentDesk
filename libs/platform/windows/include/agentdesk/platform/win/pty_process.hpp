@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <functional>
@@ -39,6 +40,21 @@ struct PtySpawnSpec {
 // Called on the reader thread with each chunk in order. Must not block for long.
 using PtyOutputSink = std::function<void(std::span<const char>)>;
 
+// agent-host's handover (design doc 7.4 OQ-09): everything that keeps one terminal alive. The
+// first three are the bundled ConPTY's HPCON members (microsoft/terminal v1.24.11911.0
+// src/winconpty/winconpty.h 11-41): the signal pipe (resize), the \Reference handle that keeps
+// the console server up, and the OpenConsole process.
+struct PtyHandles {
+    HANDLE signal = nullptr;
+    HANDLE reference = nullptr;
+    HANDLE conhost = nullptr;
+    HANDLE input_write = nullptr;
+    HANDLE output_read = nullptr;
+    HANDLE process = nullptr;
+    HANDLE job = nullptr;
+    DWORD pid = 0;
+};
+
 // One child process attached to a pseudoconsole, inside a kill-on-close job.
 // Threading: the reader thread is owned here; write()/resize()/interrupt() may be called from
 // any single thread at a time (the caller serializes them); close() must not run on the
@@ -71,9 +87,32 @@ public:
     // releases pipes and the job (which kills any remaining descendants). Idempotent.
     void close();
 
+    // ---- agent-host's handover (design doc 7.4 OQ-09)
+    // Stops the reader between two reads: every byte it read reached the sink, the rest stays in
+    // the pipe. False when it did not stop within `timeout` (then call resume_reader()).
+    bool pause_reader(std::chrono::milliseconds timeout);
+    // Starts reading again (after pause_reader, or first time for an adopted process).
+    void resume_reader();
+    // With the reader paused: up to `max` bytes the pipe holds now; never waits.
+    std::string read_available(std::size_t max);
+    // This process's handles, to duplicate into the new host. nullopt with `why` when this
+    // pseudoconsole cannot be handed over (inbox ConPTY, or an HPCON that does not look like the
+    // bundled ConPTY's). The handles stay owned by *this.
+    std::optional<PtyHandles> handover_handles(std::string* why) const;
+    // After the new host confirmed it holds duplicates of every handle: closes ours without
+    // ending anything (no ClosePseudoConsole signal beyond closing handles, no TerminateJobObject).
+    // The reader must be paused. *this is closed afterwards.
+    void release_after_handover();
+    // In the new host: takes ownership of handles the old host duplicated into this process and
+    // checks them (process id, job membership, kill-on-close, OpenConsole). The reader starts with
+    // resume_reader(). Throws when anything does not check out; all handles are then closed.
+    static std::unique_ptr<PtyProcess> adopt(const ConPtyApi& api, const PtyHandles& handles,
+                                             PtyOutputSink on_output);
+
 private:
     PtyProcess(const ConPtyApi& api, PtyOutputSink on_output);
     void reader_loop() noexcept;
+    std::atomic<bool> pause_requested_{false};
 
     ConPtyApi api_;
     PtyOutputSink on_output_;

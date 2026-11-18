@@ -1,5 +1,7 @@
 #include "agentdesk/platform/win/job.hpp"
 
+#include <stdexcept>
+
 #include "agentdesk/platform/win/error.hpp"
 
 namespace agentdesk::platform::win {
@@ -12,6 +14,18 @@ KillOnCloseJob::KillOnCloseJob() : job_(::CreateJobObjectW(nullptr, nullptr)) {
     info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     if (!::SetInformationJobObject(job_.get(), JobObjectExtendedLimitInformation, &info, sizeof(info))) {
         throw_last_error("SetInformationJobObject");
+    }
+}
+
+KillOnCloseJob::KillOnCloseJob(UniqueHandle existing) : job_(std::move(existing)) {
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION info{};
+    if (!is_valid(job_) || !::QueryInformationJobObject(job_.get(), JobObjectExtendedLimitInformation, &info,
+                                                        sizeof(info), nullptr)) {
+        throw_last_error("QueryInformationJobObject(handed over job)");
+    }
+    if ((info.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) == 0 ||
+        (info.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_BREAKAWAY_OK) != 0) {
+        throw std::runtime_error("handed over job does not kill its processes on close");
     }
 }
 
