@@ -26,6 +26,10 @@ struct FontSet {
 // (Segoe UI, Cascadia Mono) when the bundled files are missing.
 FontSet load_fonts(float mono_size_px, float ui_size_px);
 
+// A terminal font from a file (empty: the bundled JetBrains Mono), merged like load_fonts does.
+// Fonts can be added while running (ImGui 1.92 dynamic atlas).
+ImFont* load_terminal_font(const std::wstring& file, float size_px);
+
 // Icon glyphs of the bundled Symbols Nerd Font (VS Code codicons at their own code points; each
 // verified present in the font's cmap). Draw them with FontSet::icons.
 namespace icon {

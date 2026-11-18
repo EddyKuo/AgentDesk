@@ -21,6 +21,7 @@ New-Item -ItemType Directory -Force $stage, (Join-Path $stage 'conpty\x64'), (Jo
 
 foreach ($f in @('agent-ui.exe', 'agent-host.exe', 'agentctl.exe')) { Copy-Item (Join-Path $bin $f) $stage }
 Copy-Item -Recurse (Join-Path $bin 'fonts') (Join-Path $stage 'fonts')
+Copy-Item -Recurse (Join-Path $bin 'sounds') (Join-Path $stage 'sounds')
 Copy-Item (Join-Path $bin 'conpty\conpty.dll') (Join-Path $stage 'conpty')
 Copy-Item (Join-Path $bin 'conpty\x64\OpenConsole.exe') (Join-Path $stage 'conpty\x64')
 Copy-Item (Join-Path $root 'third_party\conpty\LICENSE') (Join-Path $stage 'conpty\LICENSE')

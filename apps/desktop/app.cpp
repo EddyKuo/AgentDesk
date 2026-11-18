@@ -259,6 +259,13 @@ struct Settings {
     float panel_width = 368;     // right panel (Files / Changes), 280..900
     std::string agents_sort = "priority";  // or "space"
     std::vector<std::string> palette_recent;  // last 20 palette commands, newest first
+    std::string terminal_font;   // "" = JetBrains Mono (bundled)
+    float line_height = 1.0f;    // terminal cell height multiplier
+    float cell_width = 1.0f;     // terminal cell width multiplier
+    std::string sound_done;      // MP3 replacing the bundled sounds
+    std::string sound_blocked;
+    std::string welcomed;        // "", "finished" or "skipped"
+    std::vector<std::string> panels = {"files", "changes"};  // panel buttons in the tab bar
 };
 
 std::filesystem::path data_dir() {
@@ -306,6 +313,18 @@ Settings load_settings() {
     s.spaces_share = std::clamp(j.value("spaces_share", 0.5f), 0.1f, 0.9f);
     s.panel_width = std::clamp(j.value("panel_width", 368.0f), 280.0f, 900.0f);
     s.agents_sort = j.value("agents_sort", std::string("priority"));
+    s.terminal_font = j.value("terminal_font", "");
+    s.line_height = std::clamp(j.value("line_height", 1.0f), 0.8f, 2.0f);
+    s.cell_width = std::clamp(j.value("cell_width", 1.0f), 0.8f, 2.0f);
+    s.sound_done = j.value("sound_done", "");
+    s.sound_blocked = j.value("sound_blocked", "");
+    s.welcomed = j.value("welcomed", "");
+    if (const auto it = j.find("panels"); it != j.end() && it->is_array()) {
+        s.panels.clear();
+        for (const auto& p : *it)
+            if (p.is_string())
+                s.panels.push_back(p.get<std::string>());
+    }
     for (const auto& r : j.value("palette_recent", Json::array()))
         if (r.is_string())
             s.palette_recent.push_back(r.get<std::string>());
@@ -358,6 +377,13 @@ void save_settings(const Settings& s) {
             {"panel_width", s.panel_width},
             {"agents_sort", s.agents_sort},
             {"palette_recent", s.palette_recent},
+            {"terminal_font", s.terminal_font},
+            {"line_height", s.line_height},
+            {"cell_width", s.cell_width},
+            {"sound_done", s.sound_done},
+            {"sound_blocked", s.sound_blocked},
+            {"welcomed", s.welcomed},
+            {"panels", s.panels},
             {"mods_enabled", std::vector<std::string>(s.mods_enabled.begin(), s.mods_enabled.end())},
             {"layout", s.layout},
             {"machines", [&] {
@@ -735,6 +761,7 @@ constexpr CommandInfo kCommands[] = {
     {"worktree.remove", "Remove worktree"},
     {"machine.add", "Add machine"},
     {"panel:files", "Show / hide the Files panel"},
+    {"app.welcome", "Welcome"},
     {"panel:changes", "Show / hide the Changes panel"},
     {"pane.rename", "Rename pane"},
     {"tab.rename", "Rename tab"},
@@ -1695,6 +1722,13 @@ struct App::State {
     bool picker_reset = true;
     bool picker_earlier = false;
     char help_buf[128] = {};
+    std::string settings_section;
+    float settings_row_end = 0;
+    bool show_welcome = false;
+    int welcome_page = 0;
+    bool show_machine_add = false;
+    std::vector<std::pair<std::string, std::string>> ssh_hosts;
+    char machine_buf[256] = {};
     std::string confirm_title, confirm_detail, confirm_ok, confirm_command;
     std::string settings_tab;  // tab to select when the settings window opens
     bool show_worktree_open = false;
@@ -1817,6 +1851,7 @@ struct App::State {
 // ------------------------------------------------------------------ construction
 namespace {
 void start_remotes(App::State& s);
+std::vector<std::pair<std::string, std::wstring>> terminal_fonts();
 }  // namespace
 
 App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_unique<State>()) {
@@ -1848,6 +1883,9 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     s_->layouts = load_layouts();
     s_->mods = std::make_unique<ui::ModHost>(data_dir() / L"mods");
     s_->mods->load(s_->settings.mods_enabled);
+    // herdr: the welcome opens on the first run (until it is finished or skipped).
+    if (s_->settings.welcomed.empty() && !s_->config.automated)
+        s_->show_welcome = true;
 }
 
 namespace {
@@ -1890,6 +1928,10 @@ ui::HostClient& App::host() {
 void App::load_fonts() {
     s_->fonts = ui::load_fonts(s_->settings.font_size, 13.0f);  // herdr UI base 13, scaled by ui_scale()
     ImGui::GetIO().FontDefault = s_->fonts.ui;
+    if (!s_->settings.terminal_font.empty())
+        for (const auto& [name, file] : terminal_fonts())
+            if (name == s_->settings.terminal_font)
+                s_->fonts.mono = ui::load_terminal_font(file, s_->settings.font_size);
 }
 
 void App::apply_scale(float dpi) {
@@ -2217,6 +2259,8 @@ void run_mods(App::State& s) {
         s.pending_mod_commands.push_back(c);
 }
 
+void play_alert(App::State& s, bool blocked);
+
 void update_attention(App::State& s) {
     const ui::Tab* tab = s.ws.active_tab();
     std::set<std::string> visible;
@@ -2230,17 +2274,21 @@ void update_attention(App::State& s) {
     for (const auto& [id, v] : s.views_by_id) {
         const bool looking = s.window_focused && visible.contains(id);
         if (s.attention.update(id, v.agent_state, looking) && !s.config.automated) {
+            // herdr: the sound plays either way; the note shows when you were not looking.
             const bool blocked = v.agent_state == "Blocked";
             const std::string title = s.pane_title(id);
-            s.toast(blocked ? title + " needs you" : title + " finished",
-                    v.agent_message.empty() ? display_path(v.cwd) : v.agent_message, id,
-                    blocked ? g_pal->needs_you : g_pal->done);
             if (s.settings.sounds)
-                ::PlaySoundW(blocked ? L"SystemExclamation" : L"SystemAsterisk", nullptr,
-                             SND_ALIAS | SND_ASYNC | SND_NODEFAULT);
-            if (!s.window_focused) {
-                FLASHWINFO fi{sizeof(fi), s.config.hwnd, FLASHW_TRAY | FLASHW_TIMERNOFG, 3, 0};
-                ::FlashWindowEx(&fi);
+                play_alert(s, blocked);
+            if (!looking) {
+                std::string where;
+                const auto loc = s.ws.find(id);
+                if (loc.space >= 0) {
+                    const auto& t = s.ws.spaces[static_cast<std::size_t>(loc.space)].tabs[static_cast<std::size_t>(loc.tab)];
+                    where = s.ws.space_title(loc.space, s.session_cwds()) + " / " +
+                            (t.name.empty() ? std::to_string(loc.tab + 1) : t.name);
+                }
+                s.toast(blocked ? title + " needs you" : title + " finished",
+                        v.agent_message.empty() ? where : v.agent_message, id, blocked ? g_pal->needs_you : g_pal->focus);
             }
         }
         // A program that ends with an error right after it was started here: say why.
@@ -2484,8 +2532,9 @@ void run_command(App::State& s, const std::string& cmd) {
     } else if (name == "window.close") {
         ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
     } else if (name == "machine.add") {
-        s.settings_tab = "Machines";
-        s.show_settings = true;
+        s.show_machine_add = true;
+    } else if (name == "app.welcome") {
+        s.show_welcome = true;
     } else if (name == "worktree.open") {
         // Existing worktrees of the focused repo (git worktree list); picking one opens a space there.
         s.worktree_list.clear();
@@ -3924,8 +3973,13 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
         }
         right -= px(3);
     };
-    panel_button("##p-changes", ui::icon::kChanges, "Changes", "changes");
-    panel_button("##p-files", ui::icon::kFile, "Files", "files");
+    auto wants = [&](const char* p) {
+        return std::find(s.settings.panels.begin(), s.settings.panels.end(), p) != s.settings.panels.end();
+    };
+    if (wants("changes"))
+        panel_button("##p-changes", ui::icon::kChanges, "Changes", "changes");
+    if (wants("files"))
+        panel_button("##p-files", ui::icon::kFile, "Files", "files");
     right -= px(6);
 
     float x = pos.x + px(10);
@@ -4285,6 +4339,8 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
         vs.view.keymap = &s.keymap;
         vs.view.copy_on_select = s.settings.copy_on_select;
         vs.view.scroll_speed = s.settings.scroll_speed;
+        vs.view.line_height = s.settings.line_height;
+        vs.view.cell_width = s.settings.cell_width;
         vs.view.theme.default_bg = g_pal->term_bg;
         vs.view.theme.default_fg = g_pal->term_fg;
         vs.view.theme.cursor = g_pal->cursor;
@@ -6090,212 +6146,717 @@ void draw_worktree(App::State& s) {
     ImGui::EndPopup();
 }
 
+// ------------------------------------------------------------------ settings (herdr settings.js)
+// Modal 620 px high, left navigation 190 px; every change applies and saves at once (no Save).
+void settings_section(App::State& s, const char* title) {
+    ImGui::Dummy(ImVec2(0, px(10)));
+    ImGui::PushFont(s.fonts.ui_medium, fpx(11));
+    ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
+    std::string up;
+    for (const char* c = title; *c != 0; ++c)
+        up += static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
+    ImGui::TextUnformatted(up.c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(2)));
+}
+
+// A labelled row: label + optional note on the left, control on the right (call the control
+// after this returns, the cursor is placed for it).
+void settings_row(App::State& s, const char* label, const char* note, float control_w) {
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddText(s.fonts.ui, fpx(13), ImVec2(p.x, p.y + px(4)), g_pal->text, label);
+    float h = px(30);
+    if (note != nullptr && *note != 0) {
+        text_clipped(dl, s.fonts.ui, fpx(11.5f), ImVec2(p.x, p.y + px(22)), g_pal->faint, note, w - control_w - px(16));
+        h = px(44);
+    }
+    ImGui::SetCursorScreenPos(ImVec2(p.x + w - control_w, p.y + px(2)));
+    ImGui::SetNextItemWidth(control_w);
+    s.settings_row_end = p.y + h;
+}
+void settings_row_done(App::State& s) {
+    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, s.settings_row_end));
+    ImGui::SetCursorPosX(ImGui::GetStyle().WindowPadding.x);
+    ImGui::Dummy(ImVec2(0, px(2)));
+}
+
+// "−  NN%  +" stepper (herdr zoom / size steppers). Returns true when the value changed.
+bool stepper(App::State& s, const char* id, float& v, float step, float lo, float hi, const char* fmt, float scale = 1.0f) {
+    bool changed = false;
+    ImGui::PushID(id);
+    ImGui::PushStyleColor(ImGuiCol_Button, v4(raised_color()));
+    if (ImGui::Button("\xE2\x88\x92", ImVec2(px(28), px(26)))) {
+        v = std::clamp(std::round((v - step) / step) * step, lo, hi);
+        changed = true;
+    }
+    ImGui::SameLine(0, px(4));
+    char b[32];
+    std::snprintf(b, sizeof b, fmt, v * scale);
+    const float tw = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, b).x;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(px(56), px(26)));
+    ImGui::GetWindowDrawList()->AddText(s.fonts.ui, fpx(13), ImVec2(p.x + (px(56) - tw) * 0.5f, p.y + px(13) - fpx(13) * 0.6f),
+                                        g_pal->text, b);
+    ImGui::SameLine(0, px(4));
+    if (ImGui::Button("+", ImVec2(px(28), px(26)))) {
+        v = std::clamp(std::round((v + step) / step) * step, lo, hi);
+        changed = true;
+    }
+    ImGui::PopStyleColor();
+    ImGui::PopID();
+    return changed;
+}
+
+// Terminal fonts offered in Settings: the bundled default, then monospace faces Windows ships.
+std::vector<std::pair<std::string, std::wstring>> terminal_fonts() {
+    std::vector<std::pair<std::string, std::wstring>> out = {{"Default (JetBrains Mono)", L""}};
+    wchar_t buf[MAX_PATH]{};
+    const UINT n = ::GetWindowsDirectoryW(buf, MAX_PATH);
+    const std::filesystem::path dir = std::filesystem::path(std::wstring(buf, n)) / L"Fonts";
+    std::error_code ec;
+    for (const auto& [name, file] : std::vector<std::pair<std::string, std::wstring>>{
+             {"Cascadia Mono", L"CascadiaMono.ttf"}, {"Cascadia Code", L"CascadiaCode.ttf"},
+             {"Consolas", L"consola.ttf"}, {"Lucida Console", L"lucon.ttf"}, {"Courier New", L"cour.ttf"}})
+        if (std::filesystem::is_regular_file(dir / file, ec))
+            out.emplace_back(name, (dir / file).native());
+    return out;
+}
+
+void play_alert(App::State& s, bool blocked);
+
 void draw_settings(App::State& s) {
     if (s.show_settings) {
         ImGui::OpenPopup("##settings");
         s.show_settings = false;
+        if (!s.settings_tab.empty())
+            s.settings_section = s.settings_tab;
+        s.settings_tab.clear();
     }
-    center_next(px(560), 0.1f);
-    if (!ImGui::BeginPopupModal("##settings", nullptr,
-                                ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize))
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float w = std::min(px(820), vp->WorkSize.x - px(16));
+    const float h = std::min(px(620), vp->WorkSize.y - px(16));
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + (vp->WorkSize.y - h) * 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(w, h));
+    push_overlay_style();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    const bool open = ImGui::BeginPopupModal("##settings", nullptr,
+                                             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+    ImGui::PopStyleVar();
+    pop_overlay_style();
+    if (!open)
         return;
-    heading(s, "Settings");
     bool changed = false;
-    if (ImGui::BeginTabBar("##st")) {
-        if (ImGui::BeginTabItem("Look", nullptr, s.settings_tab == "Look" ? ImGuiTabItemFlags_SetSelected : 0)) {
-            ImGui::TextDisabled("Theme");
-            for (const auto& p : kPalettes) {
-                if (ImGui::RadioButton(p.label, g_pal == &p)) {
-                    g_pal = &p;
-                    s.settings.theme = p.id;
-                    apply_style(s.dpi, ui_scale(s.settings));
-                    changed = true;
-                }
-                ImGui::SameLine();
-            }
-            ImGui::NewLine();
-            ImGui::TextDisabled("Zoom (whole window)");
-            ImGui::SetNextItemWidth(-1);
-            if (ImGui::SliderFloat("##zoom", &s.settings.zoom, 0.6f, 2.0f, "%.1fx")) {
-                g_scale = s.dpi * ui_scale(s.settings);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 wp = ImGui::GetWindowPos();
+    // Left navigation (190 px): heading, sections.
+    const float nav_w = px(190);
+    dl->AddRectFilled(wp, ImVec2(wp.x + nav_w, wp.y + h), g_pal->sidebar, px(8), ImDrawFlags_RoundCornersLeft);
+    dl->AddLine(ImVec2(wp.x + nav_w, wp.y), ImVec2(wp.x + nav_w, wp.y + h), g_pal->border);
+    dl->AddText(s.fonts.ui_bold, fpx(15), ImVec2(wp.x + px(18), wp.y + px(18)), g_pal->text, "Settings");
+    struct Section {
+        const char* name;
+        const char* glyph;
+    };
+    static constexpr Section kSections[] = {{"Look", ui::icon::kLayers},   {"Machines", ui::icon::kServer},
+                                            {"Alerts", ui::icon::kWarning}, {"Mods", ui::icon::kCommand},
+                                            {"Updates", ui::icon::kClock},  {"Privacy", ui::icon::kCheck}};
+    if (s.settings_section.empty())
+        s.settings_section = "Look";
+    float ny = wp.y + px(56);
+    for (const auto& sec : kSections) {
+        const ImVec2 a(wp.x + px(8), ny);
+        ImGui::SetCursorScreenPos(a);
+        ImGui::PushID(sec.name);
+        if (ImGui::InvisibleButton("##nav", ImVec2(nav_w - px(16), px(30))))
+            s.settings_section = sec.name;
+        const bool hov = ImGui::IsItemHovered();
+        ImGui::PopID();
+        const bool on = s.settings_section == sec.name;
+        if (on || hov)
+            dl->AddRectFilled(a, ImVec2(a.x + nav_w - px(16), a.y + px(30)), on ? g_pal->selected : g_pal->hover, px(7));
+        draw_icon(s, dl, sec.glyph, fpx(14), ImVec2(a.x + px(17), a.y + px(15)), on || hov ? g_pal->text : g_pal->dim);
+        dl->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(34), a.y + px(15) - fpx(13) * 0.6f), on || hov ? g_pal->text : g_pal->dim,
+                    sec.name);
+        ny += px(32);
+    }
+    // Content.
+    ImGui::SetCursorScreenPos(ImVec2(wp.x + nav_w + 1, wp.y));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(24), px(18)));
+    ImGui::BeginChild("##settings-body", ImVec2(w - nav_w - 1, h), ImGuiChildFlags_AlwaysUseWindowPadding,
+                      ImGuiWindowFlags_NoBackground);
+    ImGui::PopStyleVar();
+    bool close = overlay_title(s, s.settings_section.c_str());
+    const std::string& sec = s.settings_section;
+    if (sec == "Look") {
+        settings_section(s, "Layout");
+        for (const auto& l : s.layouts) {
+            const bool on = l.name == s.settings.layout;
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            const float cw = px(120), ch = px(56);
+            ImGui::PushID(l.name.c_str());
+            if (ImGui::InvisibleButton("##lay", ImVec2(cw, ch)))
+                run_command(s, "layout:" + l.name);
+            ImGui::PopID();
+            ImDrawList* d = ImGui::GetWindowDrawList();
+            d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), raised_color(), px(8));
+            d->AddRect(a, ImVec2(a.x + cw, a.y + ch), on ? g_pal->focus : g_pal->border, px(8), 0, on ? 2.0f : 1.0f);
+            std::string label = l.name == "workspace" ? std::string("AgentDesk") : l.name;
+            label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[0])));
+            d->AddText(s.fonts.ui_medium, fpx(12.5f), ImVec2(a.x + px(10), a.y + ch - px(22)), g_pal->text, label.c_str());
+            ImGui::SameLine(0, px(8));
+            if (ImGui::GetContentRegionAvail().x < cw)
+                ImGui::NewLine();
+        }
+        ImGui::NewLine();
+        settings_section(s, "Theme");
+        for (const auto& p : kPalettes) {
+            const bool on = g_pal == &p;
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            const float cw = px(120), ch = px(64);
+            ImGui::PushID(p.id);
+            if (ImGui::InvisibleButton("##theme", ImVec2(cw, ch))) {
+                g_pal = &p;
+                s.settings.theme = p.id;
                 apply_style(s.dpi, ui_scale(s.settings));
                 changed = true;
             }
-            ImGui::TextDisabled("Interface text size (sidebar, tabs, menus)");
-            ImGui::SetNextItemWidth(-1);
-            if (ImGui::SliderFloat("##uitext", &s.settings.ui_text, 11.0f, 24.0f, "%.0f px")) {
-                g_scale = s.dpi * ui_scale(s.settings);
-                apply_style(s.dpi, ui_scale(s.settings));
-                changed = true;
-            }
-            ImGui::TextDisabled("Terminal font size");
-            ImGui::SetNextItemWidth(-1);
-            changed |= ImGui::SliderFloat("##font", &s.settings.font_size, 9.0f, 28.0f, "%.0f px");
-            s.fonts.mono_size = s.settings.font_size / ui_text_factor(s.settings);
-            ImGui::EndTabItem();
+            ImGui::PopID();
+            ImDrawList* d = ImGui::GetWindowDrawList();
+            d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), p.bg, px(8));
+            d->AddRectFilled(ImVec2(a.x, a.y), ImVec2(a.x + px(30), a.y + ch), p.sidebar, px(8), ImDrawFlags_RoundCornersLeft);
+            d->AddCircleFilled(ImVec2(a.x + px(46), a.y + px(16)), px(4), p.focus);
+            d->AddCircleFilled(ImVec2(a.x + px(58), a.y + px(16)), px(4), p.done);
+            d->AddCircleFilled(ImVec2(a.x + px(70), a.y + px(16)), px(4), p.needs_you);
+            d->AddRect(a, ImVec2(a.x + cw, a.y + ch), on ? g_pal->focus : g_pal->border, px(8), 0, on ? 2.0f : 1.0f);
+            d->AddText(s.fonts.ui_medium, fpx(12), ImVec2(a.x + px(38), a.y + ch - px(22)), p.text, p.label);
+            ImGui::SameLine(0, px(8));
+            if (ImGui::GetContentRegionAvail().x < cw)
+                ImGui::NewLine();
         }
-        if (ImGui::BeginTabItem("Terminal", nullptr, s.settings_tab == "Terminal" ? ImGuiTabItemFlags_SetSelected : 0)) {
-            {
-                const auto profiles = s.host->profiles();
-                const std::string current = pick_shell(s.settings.shell_profile, profiles);
-                std::string label = current.empty() ? std::string("(none found)") : current;
-                for (const auto& [id, pname] : profiles)
-                    if (id == current)
-                        label = pname;
-                ImGui::TextDisabled("Shell for new spaces, tabs and splits");
-                ImGui::SetNextItemWidth(-1);
-                if (ImGui::BeginCombo("##shell", label.c_str())) {
-                    for (const auto& [id, pname] : profiles) {
-                        if (ImGui::Selectable(pname.c_str(), id == current)) {
-                            s.settings.shell_profile = id;
-                            changed = true;
-                        }
-                    }
-                    ImGui::EndCombo();
-                }
-                ImGui::TextDisabled("Claude Code, Codex and other programs: %s, or type them in the shell.",
-                                    s.keymap.chord_for("agent.new").c_str());
-            }
-            changed |=
-                ImGui::Checkbox("Copy selection when the mouse is released", &s.settings.copy_on_select);
-            ImGui::TextDisabled("Wheel scroll speed");
-            ImGui::SetNextItemWidth(-1);
-            changed |= ImGui::SliderFloat("##scroll", &s.settings.scroll_speed, 0.2f, 5.0f, "%.1fx");
-            if (ImGui::Button("Edit keys.json"))
-                run_command(s, "app.keys");
-            for (const auto& e : s.keymap_errors)
-                ImGui::TextColored(v4(g_pal->needs_you), "keys.json: cannot use \"%s\"", e.c_str());
-            ImGui::EndTabItem();
+        ImGui::NewLine();
+        settings_section(s, "Size and fonts");
+        settings_row(s, "Zoom", "Everything: terminals, panels, text.", px(180));
+        if (stepper(s, "zoom", s.settings.zoom, 0.1f, 0.5f, 3.0f, "%.0f%%", 100.0f)) {
+            g_scale = s.dpi * ui_scale(s.settings);
+            apply_style(s.dpi, ui_scale(s.settings));
+            changed = true;
         }
-        if (ImGui::BeginTabItem("Alerts", nullptr, s.settings_tab == "Alerts" ? ImGuiTabItemFlags_SetSelected : 0)) {
-            ImGui::TextWrapped("When an agent needs you, or finishes while you are not looking at it:");
-            changed |= ImGui::Checkbox("Play a sound", &s.settings.sounds);
-            changed |= ImGui::Checkbox("Show a notification in the corner", &s.settings.toasts);
-            if (ImGui::Button("Test: needs you")) {
-                ::PlaySoundW(L"SystemExclamation", nullptr, SND_ALIAS | SND_ASYNC | SND_NODEFAULT);
-                s.toast("An agent needs you", "Example notification", "", g_pal->needs_you);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Test: finished")) {
-                ::PlaySoundW(L"SystemAsterisk", nullptr, SND_ALIAS | SND_ASYNC | SND_NODEFAULT);
-                s.toast("An agent finished", "Example notification", "", g_pal->done);
-            }
-            ImGui::EndTabItem();
+        settings_row_done(s);
+        settings_row(s, "Interface text", "Sidebar, tabs, menus and panels, at 100% zoom.", px(180));
+        if (stepper(s, "uitext", s.settings.ui_text, 1.0f, 11.0f, 24.0f, "%.0f px")) {
+            g_scale = s.dpi * ui_scale(s.settings);
+            apply_style(s.dpi, ui_scale(s.settings));
+            changed = true;
         }
-        if (ImGui::BeginTabItem("Mods", nullptr, s.settings_tab == "Mods" ? ImGuiTabItemFlags_SetSelected : 0)) {
-            ImGui::TextWrapped(
-                "Mods are small Lua programs in the mods folder (one folder per mod, main.lua). "
-                "They can react to agents, add commands, panels and tab text. They run in a "
-                "sandbox without file access; agentdesk.exec can start programs.");
-            for (const auto& m : s.mods->mods()) {
-                ImGui::PushID(m.name.c_str());
-                bool on = s.settings.mods_enabled.contains(m.name);
-                if (ImGui::Checkbox(m.name.c_str(), &on)) {
-                    if (on)
-                        s.settings.mods_enabled.insert(m.name);
-                    else
-                        s.settings.mods_enabled.erase(m.name);
-                    changed = true;
-                    s.mods->load(s.settings.mods_enabled);
-                }
-                if (!m.description.empty()) {
-                    ImGui::SameLine();
-                    ImGui::TextDisabled("%s", m.description.c_str());
-                }
-                if (!m.error.empty())
-                    ImGui::TextColored(v4(g_pal->needs_you), "  %s", m.error.c_str());
-                ImGui::PopID();
-            }
-            if (s.mods->mods().empty())
-                ImGui::TextDisabled("No mods yet.");
-            if (ImGui::Button("Reload"))
-                run_command(s, "mods.reload");
-            ImGui::SameLine();
-            if (ImGui::Button("Open mods folder"))
-                run_command(s, "mods.folder");
-            ImGui::Separator();
-            ImGui::TextDisabled("Layout");
-            for (const auto& l : s.layouts) {
-                if (ImGui::RadioButton(l.name.c_str(), l.name == s.settings.layout))
-                    run_command(s, "layout:" + l.name);
-                ImGui::SameLine();
-            }
-            ImGui::NewLine();
-            ImGui::TextDisabled(
-                "Add your own in the layouts folder next to mods (one JSON file per layout).");
-            ImGui::EndTabItem();
-        }
-        if (ImGui::BeginTabItem("Machines", nullptr, s.settings_tab == "Machines" ? ImGuiTabItemFlags_SetSelected : 0)) {
-            ImGui::TextWrapped(
-                "Other computers reachable over SSH. AgentDesk runs \"ssh <target> agentctl bridge\" "
-                "and shows that machine's spaces and agents here; they keep running there when this "
-                "PC sleeps. The other computer needs AgentDesk installed and key-based ssh login.");
-            int remove = -1;
-            for (int i = 0; i < static_cast<int>(s.settings.machines.size()); ++i) {
-                const auto& m = s.settings.machines[static_cast<std::size_t>(i)];
-                ImGui::PushID(i);
-                const bool on = s.machine_connected(m.name);
-                ImGui::TextColored(v4(on ? g_pal->done : g_pal->faint), "%s", on ? "connected" : "offline");
-                ImGui::SameLine(px(100));
-                ImGui::Text("%s  (%s)", m.name.c_str(), m.target.c_str());
-                ImGui::SameLine(ImGui::GetContentRegionMax().x - px(70));
-                if (ImGui::SmallButton("Remove"))
-                    remove = i;
-                if (!on) {
-                    for (const auto& r : s.remotes)
-                        if (r.cfg.name == m.name && !r.host->last_error().empty())
-                            ImGui::TextColored(v4(g_pal->needs_you), "  %s", r.host->last_error().c_str());
-                    ImGui::TextDisabled(
-                        "  If it asks for a password or a host key, run  ssh %s  once in your own terminal.",
-                        m.target.c_str());
-                }
-                ImGui::PopID();
-            }
-            if (remove >= 0) {
-                s.settings.machines.erase(s.settings.machines.begin() + remove);
-                changed = true;
-                start_remotes(s);
-            }
-            ImGui::Separator();
-            static char name[64], target[128], ctl[256];
-            ImGui::TextDisabled("Add a machine");
-            ImGui::SetNextItemWidth(px(150));
-            ImGui::InputTextWithHint("##mname", "name", name, sizeof name);
-            ImGui::SameLine();
+        settings_row_done(s);
+        {
+            const auto fonts = terminal_fonts();
+            std::string current = fonts.front().first;
+            for (const auto& [name, file] : fonts)
+                if (name == s.settings.terminal_font)
+                    current = name;
+            settings_row(s, "Terminal font", nullptr, px(200) + px(10) + px(120));
             ImGui::SetNextItemWidth(px(200));
-            ImGui::InputTextWithHint("##mtarget", "user@host or ssh alias", target, sizeof target);
-            ImGui::SetNextItemWidth(-1);
-            ImGui::InputTextWithHint("##mctl", "agentctl path there (optional; default: agentctl on PATH)",
-                                     ctl, sizeof ctl);
-            ImGui::BeginDisabled(name[0] == '\0' || target[0] == '\0');
-            if (ImGui::Button("Add machine")) {
-                s.settings.machines.push_back({name, target, ctl});
-                name[0] = target[0] = ctl[0] = '\0';
-                changed = true;
-                start_remotes(s);
+            if (ImGui::BeginCombo("##tfont", current.c_str())) {
+                for (const auto& [name, file] : fonts) {
+                    if (ImGui::Selectable(name.c_str(), name == current)) {
+                        s.settings.terminal_font = file.empty() ? std::string() : name;
+                        s.fonts.mono = ui::load_terminal_font(file, s.settings.font_size);
+                        changed = true;
+                    }
+                }
+                ImGui::EndCombo();
             }
-            ImGui::EndDisabled();
-            ImGui::EndTabItem();
+            ImGui::SameLine(0, px(10));
+            if (stepper(s, "tsize", s.settings.font_size, 1.0f, 8.0f, 32.0f, "%.0f px"))
+                changed = true;
+            settings_row_done(s);
         }
-        if (ImGui::BeginTabItem("Worktrees", nullptr, s.settings_tab == "Worktrees" ? ImGuiTabItemFlags_SetSelected : 0)) {
+        settings_row(s, "Terminal line height", nullptr, px(180));
+        changed |= stepper(s, "lh", s.settings.line_height, 0.1f, 0.8f, 2.0f, "%.0f%%", 100.0f);
+        settings_row_done(s);
+        settings_row(s, "Terminal cell width", nullptr, px(180));
+        changed |= stepper(s, "cw", s.settings.cell_width, 0.05f, 0.8f, 2.0f, "%.0f%%", 100.0f);
+        settings_row_done(s);
+        settings_row(s, "Terminal scroll speed", nullptr, px(180));
+        changed |= stepper(s, "ss", s.settings.scroll_speed, 0.1f, 0.1f, 5.0f, "%.0f%%", 100.0f);
+        settings_row_done(s);
+        settings_section(s, "Terminals");
+        {
+            const auto profiles = s.host->profiles();
+            const std::string cur = pick_shell(s.settings.shell_profile, profiles);
+            std::string label = cur.empty() ? std::string("(none found)") : cur;
+            for (const auto& [id, pname] : profiles)
+                if (id == cur)
+                    label = pname;
+            settings_row(s, "Shell", "New spaces, tabs and splits open it in the focused folder.", px(220));
+            if (ImGui::BeginCombo("##shell", label.c_str())) {
+                for (const auto& [id, pname] : profiles)
+                    if (ImGui::Selectable(pname.c_str(), id == cur)) {
+                        s.settings.shell_profile = id;
+                        changed = true;
+                    }
+                ImGui::EndCombo();
+            }
+            settings_row_done(s);
+        }
+        settings_row(s, "Copy on select", "Copy the selection when the mouse is released.", px(40));
+        changed |= ImGui::Checkbox("##cos", &s.settings.copy_on_select);
+        settings_row_done(s);
+        settings_row(s, "Keys", "keys.json: change any shortcut.", px(120));
+        if (ImGui::Button("Edit keys.json", ImVec2(px(120), 0)))
+            run_command(s, "app.keys");
+        settings_row_done(s);
+        for (const auto& e : s.keymap_errors)
+            ImGui::TextColored(v4(g_pal->needs_you), "keys.json: cannot use \"%s\"", e.c_str());
+        {
             static char buf[512];
-            if (ImGui::IsItemActivated() || buf[0] == '\0')
+            if (ImGui::IsWindowAppearing() || buf[0] == '\0')
                 std::snprintf(buf, sizeof buf, "%s", s.settings.worktree_dir.c_str());
-            ImGui::TextDisabled("Folder for new worktrees (empty: %%USERPROFILE%%\\.agentdesk\\worktrees)");
-            ImGui::SetNextItemWidth(-1);
+            settings_row(s, "Worktrees folder", "Empty: %USERPROFILE%\\.agentdesk\\worktrees", px(260));
             if (ImGui::InputText("##wt", buf, sizeof buf)) {
                 s.settings.worktree_dir = buf;
                 changed = true;
             }
-            ImGui::EndTabItem();
+            settings_row_done(s);
         }
-        ImGui::EndTabBar();
-        s.settings_tab.clear();  // selected once
+    } else if (sec == "Machines") {
+        ImGui::TextWrapped("Other computers reachable over ssh. AgentDesk runs \"ssh <target> agentctl bridge\" and "
+                           "shows that machine's spaces and agents here; they keep running there while this PC "
+                           "sleeps. The other computer needs AgentDesk and key-based ssh login.");
+        settings_section(s, "Machines");
+        int remove = -1;
+        for (int i = 0; i < static_cast<int>(s.settings.machines.size()); ++i) {
+            const auto& m = s.settings.machines[static_cast<std::size_t>(i)];
+            ImGui::PushID(i);
+            const bool on = s.machine_connected(m.name);
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, px(40)));
+            ImDrawList* d = ImGui::GetWindowDrawList();
+            draw_icon(s, d, ui::icon::kServer, fpx(14), ImVec2(a.x + px(10), a.y + px(20)), g_pal->dim);
+            d->AddText(s.fonts.ui_medium, fpx(13), ImVec2(a.x + px(28), a.y + px(6)), g_pal->text, m.name.c_str());
+            d->AddText(s.fonts.ui, fpx(11.5f), ImVec2(a.x + px(28), a.y + px(23)), g_pal->faint, m.target.c_str());
+            d->AddCircleFilled(ImVec2(a.x + ImGui::GetContentRegionAvail().x - px(90), a.y + px(20)), px(3),
+                               on ? g_pal->done : g_pal->faint);
+            ImGui::SetCursorScreenPos(ImVec2(a.x + ImGui::GetContentRegionAvail().x - px(76), a.y + px(8)));
+            if (ImGui::SmallButton("Remove"))
+                remove = i;
+            ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + px(40)));
+            if (!on)
+                for (const auto& r : s.remotes)
+                    if (r.cfg.name == m.name && !r.host->last_error().empty())
+                        ImGui::TextColored(v4(g_pal->needs_you), "  %s", r.host->last_error().c_str());
+            ImGui::PopID();
+        }
+        if (s.settings.machines.empty())
+            ImGui::TextDisabled("No machines yet.");
+        if (remove >= 0) {
+            s.settings.machines.erase(s.settings.machines.begin() + remove);
+            changed = true;
+            start_remotes(s);
+        }
+        ImGui::Dummy(ImVec2(0, px(8)));
+        primary_button_style(true);
+        if (ImGui::Button("Add a machine\xE2\x80\xA6"))
+            s.show_machine_add = true;
+        primary_button_style(false);
+    } else if (sec == "Alerts") {
+        settings_section(s, "Sounds");
+        settings_row(s, "Play sounds",
+                     "When an agent needs you, and when one finishes while you're not looking. A note shows in the "
+                     "corner either way.",
+                     px(40));
+        changed |= ImGui::Checkbox("##snd", &s.settings.sounds);
+        settings_row_done(s);
+        auto sound_row = [&](const char* label, const std::string& file, bool blocked) {
+            settings_row(s, label, file.empty() ? "AgentDesk's sound" : file.c_str(), px(70));
+            if (ImGui::Button(blocked ? "Play##b" : "Play##d", ImVec2(px(70), 0)))
+                play_alert(s, blocked);
+            settings_row_done(s);
+        };
+        sound_row("An agent needs you", s.settings.sound_blocked, true);
+        sound_row("An agent finished", s.settings.sound_done, false);
+        ImGui::TextDisabled("Use your own: set sound_done / sound_blocked in ui.json to an MP3 file.");
+        settings_section(s, "Notes");
+        settings_row(s, "Show a note in the corner", "For agents in your spaces; click it to go there.", px(40));
+        changed |= ImGui::Checkbox("##toasts", &s.settings.toasts);
+        settings_row_done(s);
+    } else if (sec == "Mods") {
+        ImGui::TextWrapped("Mods are small Lua programs in the mods folder (one folder per mod, main.lua). They can "
+                           "react to agents, add commands, panels and tab text. They run in a sandbox without file "
+                           "access; agentdesk.exec can start programs.");
+        settings_section(s, "Installed");
+        for (const auto& m : s.mods->mods()) {
+            ImGui::PushID(m.name.c_str());
+            bool on = s.settings.mods_enabled.contains(m.name);
+            settings_row(s, m.name.c_str(), m.description.c_str(), px(40));
+            if (ImGui::Checkbox("##on", &on)) {
+                if (on)
+                    s.settings.mods_enabled.insert(m.name);
+                else
+                    s.settings.mods_enabled.erase(m.name);
+                changed = true;
+                s.mods->load(s.settings.mods_enabled);
+            }
+            settings_row_done(s);
+            if (!m.error.empty())
+                ImGui::TextColored(v4(g_pal->needs_you), "  %s", m.error.c_str());
+            ImGui::PopID();
+        }
+        if (s.mods->mods().empty())
+            ImGui::TextDisabled("No mods yet.");
+        ImGui::Dummy(ImVec2(0, px(6)));
+        if (ImGui::Button("Reload"))
+            run_command(s, "mods.reload");
+        ImGui::SameLine();
+        if (ImGui::Button("Open mods folder"))
+            run_command(s, "mods.folder");
+    } else if (sec == "Updates") {
+        settings_section(s, "Versions");
+        ImGui::Text("AgentDesk %s", AGENTDESK_VERSION_STRING);
+        ImGui::TextDisabled("agent-host: protocol v1 over a named pipe");
+        ImGui::Dummy(ImVec2(0, px(6)));
+        ImGui::TextWrapped("AgentDesk ships as a portable zip. To update, close it (agents keep running in "
+                           "agent-host), unpack the new zip over the old one and start it again.");
+    } else if (sec == "Privacy") {
+        settings_section(s, "Usage data");
+        ImGui::TextWrapped("AgentDesk sends nothing anywhere: no usage reports, no crash uploads. Crashes leave "
+                           "ui-crash.txt in the data folder for you to look at.");
+    }
+    ImGui::EndChild();
+    if (changed)
+        save_settings(s.settings);
+    if (close || ImGui::IsKeyPressed(ImGuiKey_Escape))
+        ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+// ------------------------------------------------------------------ sounds (herdr sound.rs)
+// Bundled done.mp3 / request.mp3 (or the person's own MP3), played through MCI on a thread with a
+// unique alias so sounds can overlap.
+void play_alert(App::State& s, bool blocked) {
+    std::filesystem::path file;
+    const std::string custom = blocked ? s.settings.sound_blocked : s.settings.sound_done;
+    std::error_code ec;
+    if (!custom.empty() && std::filesystem::is_regular_file(win::to_wide(custom), ec))
+        file = win::to_wide(custom);
+    if (file.empty()) {
+        wchar_t buf[MAX_PATH]{};
+        const DWORD n = ::GetModuleFileNameW(nullptr, buf, MAX_PATH);
+        file = std::filesystem::path(std::wstring(buf, n)).parent_path() / L"sounds" /
+               (blocked ? L"request.mp3" : L"done.mp3");
+    }
+    if (!std::filesystem::is_regular_file(file, ec)) {
+        ::PlaySoundW(blocked ? L"SystemExclamation" : L"SystemAsterisk", nullptr, SND_ALIAS | SND_ASYNC | SND_NODEFAULT);
+        return;
+    }
+    static std::atomic<int> counter{0};
+    std::thread([file, id = ++counter] {
+        const std::wstring alias = L"agentdesk" + std::to_wstring(id);
+        const std::wstring open = L"open \"" + file.native() + L"\" type mpegvideo alias " + alias;
+        if (::mciSendStringW(open.c_str(), nullptr, 0, nullptr) == 0) {
+            ::mciSendStringW((L"play " + alias + L" wait").c_str(), nullptr, 0, nullptr);
+            ::mciSendStringW((L"close " + alias).c_str(), nullptr, 0, nullptr);
+        }
+    }).detach();
+}
+
+// ------------------------------------------------------------------ welcome (herdr welcome.js)
+// First run: 4 pages, dots, Back / Next; Esc skips, Enter/Right next, Left back.
+void draw_welcome(App::State& s) {
+    if (s.show_welcome) {
+        ImGui::OpenPopup("##welcome");
+        s.show_welcome = false;
+        s.welcome_page = 0;
+    }
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float w = std::min(px(660), vp->WorkSize.x - px(16));
+    const float h = std::min(px(600), vp->WorkSize.y - px(16));
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + (vp->WorkSize.y - h) * 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(w, h));
+    push_overlay_style();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(32), px(28)));
+    const bool open = ImGui::BeginPopupModal("##welcome", nullptr,
+                                             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                                 ImGuiWindowFlags_NoScrollbar);
+    ImGui::PopStyleVar();
+    pop_overlay_style();
+    if (!open)
+        return;
+    int& page = s.welcome_page;
+    auto title = [&](const char* t, const char* sub) {
+        ImGui::PushFont(s.fonts.ui_bold, fpx(20));
+        ImGui::TextWrapped("%s", t);
+        ImGui::PopFont();
+        ImGui::Dummy(ImVec2(0, px(4)));
+        ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
+        ImGui::TextWrapped("%s", sub);
+        ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0, px(14)));
+    };
+    auto feature = [&](const char* glyph, const char* head, const char* text) {
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        draw_icon(s, ImGui::GetWindowDrawList(), glyph, fpx(16), ImVec2(a.x + px(10), a.y + px(10)), g_pal->focus);
+        ImGui::SetCursorScreenPos(ImVec2(a.x + px(32), a.y));
+        ImGui::BeginGroup();
+        ImGui::PushFont(s.fonts.ui_medium, fpx(13.5f));
+        ImGui::TextUnformatted(head);
+        ImGui::PopFont();
+        ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + w - px(120));
+        ImGui::TextWrapped("%s", text);
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
+        ImGui::EndGroup();
+        ImGui::Dummy(ImVec2(0, px(10)));
+    };
+    bool changed = false;
+    if (page == 0) {
+        title("AgentDesk runs your terminals in the background",
+              "Close the window and your agents keep working; open it again and everything is where you left it.");
+        feature(ui::icon::kLayers, "Spaces, tabs and panes", "A space per project; split it into the terminals you need.");
+        feature(ui::icon::kTerminal, "Agents report what they're doing",
+                "Claude Code and Codex tell AgentDesk when they work, finish or need you.");
+        feature(ui::icon::kChanges, "Files and Changes", "Look at what your agents changed, and commit it.");
+        ImGui::Dummy(ImVec2(0, px(6)));
+        ImGui::TextDisabled("Size");
+        ImGui::SameLine(px(120));
+        if (stepper(s, "wzoom", s.settings.zoom, 0.1f, 0.5f, 3.0f, "%.0f%%", 100.0f)) {
+            g_scale = s.dpi * ui_scale(s.settings);
+            apply_style(s.dpi, ui_scale(s.settings));
+            changed = true;
+        }
+        ImGui::TextDisabled("Theme");
+        ImGui::SameLine(px(120));
+        for (const auto& p : kPalettes) {
+            if (ImGui::RadioButton(p.label, g_pal == &p)) {
+                g_pal = &p;
+                s.settings.theme = p.id;
+                apply_style(s.dpi, ui_scale(s.settings));
+                changed = true;
+            }
+            ImGui::SameLine();
+        }
+        ImGui::NewLine();
+    } else if (page == 1) {
+        title("Add your other machines",
+              "A desktop at home, a server: AgentDesk reaches them over ssh, and agents there keep running while "
+              "this PC sleeps.");
+        for (const auto& m : s.settings.machines)
+            ImGui::BulletText("%s  (%s)", m.name.c_str(), m.target.c_str());
+        primary_button_style(true);
+        if (ImGui::Button("Add a machine\xE2\x80\xA6"))
+            s.show_machine_add = true;
+        primary_button_style(false);
+    } else if (page == 2) {
+        title("Choose your panels", "Buttons at the right of the tab bar open them beside your terminals.");
+        auto toggle = [&](const char* id, const char* label, const char* text) {
+            bool on = std::find(s.settings.panels.begin(), s.settings.panels.end(), id) != s.settings.panels.end();
+            if (ImGui::Checkbox(label, &on)) {
+                if (on)
+                    s.settings.panels.push_back(id);
+                else
+                    s.settings.panels.erase(std::remove(s.settings.panels.begin(), s.settings.panels.end(), id),
+                                            s.settings.panels.end());
+                changed = true;
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", text);
+        };
+        toggle("files", "Files", "Browse the focused terminal's folder.");
+        toggle("changes", "Changes", "What your agents changed: every file with its diff, and a commit box.");
+    } else {
+        title("Make it yours", "Everything AgentDesk does is a command.");
+        ImGui::Text("Press %s for the command palette, %s to jump to a space or agent.",
+                    s.keymap.chord_for("app.palette").c_str(), s.keymap.chord_for("app.picker").c_str());
+        ImGui::Dummy(ImVec2(0, px(6)));
+        ImGui::TextWrapped("Change any shortcut in keys.json, the look in Settings (%s), and add Lua mods in the mods "
+                           "folder. agentctl drives AgentDesk from a terminal or from your agents.",
+                           s.keymap.chord_for("app.settings").c_str());
+    }
+    // Footer: dots, Back / Next.
+    const float fy = ImGui::GetWindowPos().y + h - px(56);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    for (int i = 0; i < 4; ++i)
+        dl->AddCircleFilled(ImVec2(ImGui::GetWindowPos().x + px(36) + static_cast<float>(i) * px(14), fy + px(15)), px(3.5f),
+                            i == page ? g_pal->focus : g_pal->border);
+    const char* next = page < 3 ? (page == 1 && s.settings.machines.empty() ? "Not now" : "Next")
+                                : (s.ws.spaces.empty() ? "Open a space" : "Done");
+    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + w - px(32) - px(220), fy));
+    bool back = false, fwd = false;
+    if (page > 0) {
+        ImGui::PushStyleColor(ImGuiCol_Button, v4(raised_color()));
+        back = ImGui::Button("Back", ImVec2(px(100), px(30)));
+        ImGui::PopStyleColor();
+        ImGui::SameLine(0, px(12));
+    } else {
+        ImGui::Dummy(ImVec2(px(100), px(30)));
+        ImGui::SameLine(0, px(12));
+    }
+    primary_button_style(true);
+    fwd = ImGui::Button(next, ImVec2(px(108), px(30)));
+    primary_button_style(false);
+    const bool typing = ImGui::GetIO().WantTextInput;
+    if (!typing && (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)))
+        fwd = true;
+    if (!typing && ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && page > 0)
+        back = true;
+    if (back)
+        --page;
+    if (fwd) {
+        if (page < 3) {
+            ++page;
+        } else {
+            s.settings.welcomed = "finished";
+            changed = true;
+            ImGui::CloseCurrentPopup();
+            if (s.ws.spaces.empty())
+                run_command(s, "space.new");
+        }
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        s.settings.welcomed = "skipped";
+        changed = true;
+        ImGui::CloseCurrentPopup();
     }
     if (changed)
         save_settings(s.settings);
-    ImGui::Separator();
-    if (ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+    ImGui::EndPopup();
+}
+
+// ------------------------------------------------------------------ add a machine (herdr machine-add)
+// Hosts from ~/.ssh/config (Include followed), or typed "user@host"; adding connects at once.
+std::vector<std::pair<std::string, std::string>> ssh_config_hosts() {
+    std::vector<std::pair<std::string, std::string>> out;  // alias, user@hostname
+    wchar_t home[MAX_PATH]{};
+    if (::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH) == 0)
+        return out;
+    const std::filesystem::path ssh = std::filesystem::path(home) / L".ssh";
+    std::set<std::string> seen;
+    std::function<void(const std::filesystem::path&, int)> read = [&](const std::filesystem::path& file, int depth) {
+        if (depth > 16)
+            return;
+        std::ifstream in(file);
+        std::vector<std::string> current;
+        std::string user, hostname;
+        auto flush = [&] {
+            for (const auto& alias : current) {
+                if (alias.find_first_of("*?!") != std::string::npos || seen.contains(alias))
+                    continue;
+                seen.insert(alias);
+                out.emplace_back(alias, (user.empty() ? "" : user + "@") + (hostname.empty() ? alias : hostname));
+            }
+            current.clear();
+            user.clear();
+            hostname.clear();
+        };
+        for (std::string line; std::getline(in, line);) {
+            std::stringstream ss(line);
+            std::string key;
+            ss >> key;
+            for (auto& c : key)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (key == "host") {
+                flush();
+                for (std::string a; ss >> a;)
+                    current.push_back(a);
+            } else if (key == "hostname") {
+                ss >> hostname;
+            } else if (key == "user") {
+                ss >> user;
+            } else if (key == "include") {
+                for (std::string inc; ss >> inc;) {
+                    std::filesystem::path p(win::to_wide(inc));
+                    if (p.is_relative())
+                        p = ssh / p;
+                    std::error_code ec;
+                    if (std::filesystem::is_regular_file(p, ec))
+                        read(p, depth + 1);
+                }
+            }
+        }
+        flush();
+    };
+    read(ssh / L"config", 0);
+    return out;
+}
+
+void draw_machine_add(App::State& s) {
+    if (s.show_machine_add) {
+        ImGui::OpenPopup("##machineadd");
+        s.show_machine_add = false;
+        s.ssh_hosts = ssh_config_hosts();
+        s.machine_buf[0] = 0;
+    }
+    center_next(px(560), 0.12f);
+    push_overlay_style();
+    const bool open = ImGui::BeginPopupModal("##machineadd", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
+    pop_overlay_style();
+    if (!open)
+        return;
+    bool close = overlay_title(s, "Add a machine");
+    ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
+    ImGui::TextWrapped("A server, a desktop at home: AgentDesk reaches it over ssh, and agents there keep running while "
+                       "this PC sleeps. It needs AgentDesk there and key-based ssh login.");
+    ImGui::PopStyleColor();
+    ImGui::Dummy(ImVec2(0, px(6)));
+    auto added = [&](const std::string& target) {
+        for (const auto& m : s.settings.machines)
+            if (m.target == target || m.name == target)
+                return true;
+        return false;
+    };
+    auto add = [&](const std::string& name, const std::string& target) {
+        s.settings.machines.push_back({name, target, ""});
+        save_settings(s.settings);
+        start_remotes(s);
+    };
+    settings_section(s, s.ssh_hosts.empty() ? "Your ssh config lists no hosts" : "From your ssh config");
+    for (const auto& [alias, where] : s.ssh_hosts) {
+        if (added(alias))
+            continue;
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        ImGui::PushID(alias.c_str());
+        const float rw = ImGui::GetContentRegionAvail().x;
+        const bool clicked = ImGui::InvisibleButton("##h", ImVec2(rw, px(40)));
+        const bool hov = ImGui::IsItemHovered();
+        ImDrawList* d = ImGui::GetWindowDrawList();
+        if (hov)
+            d->AddRectFilled(a, ImVec2(a.x + rw, a.y + px(40)), g_pal->hover, px(7));
+        draw_icon(s, d, ui::icon::kServer, fpx(14), ImVec2(a.x + px(14), a.y + px(20)), g_pal->dim);
+        d->AddText(s.fonts.ui_medium, fpx(13), ImVec2(a.x + px(32), a.y + px(20) - fpx(13) * 0.6f), g_pal->text, alias.c_str());
+        const float aw = s.fonts.ui_medium->CalcTextSizeA(fpx(13), FLT_MAX, 0, alias.c_str()).x;
+        d->AddText(s.fonts.ui, fpx(12), ImVec2(a.x + px(40) + aw, a.y + px(20) - fpx(12) * 0.6f), g_pal->faint, where.c_str());
+        d->AddText(s.fonts.ui_medium, fpx(12), ImVec2(a.x + rw - px(40), a.y + px(20) - fpx(12) * 0.6f), g_pal->focus, "Add");
+        if (clicked)
+            add(alias, alias);
+        ImGui::PopID();
+    }
+    for (const auto& m : s.settings.machines) {
+        ImGui::TextDisabled("%s", m.name.c_str());
+        ImGui::SameLine();
+        ImGui::TextColored(v4(g_pal->done), "\xE2\x9C\x93 Added");
+    }
+    settings_section(s, "Or type how ssh reaches it");
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - px(90));
+    const bool enter = ImGui::InputTextWithHint("##target", "user@host", s.machine_buf, sizeof s.machine_buf,
+                                                ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine(0, px(8));
+    ImGui::BeginDisabled(s.machine_buf[0] == 0);
+    primary_button_style(true);
+    const bool go = ImGui::Button("Add", ImVec2(px(80), 0)) || enter;
+    primary_button_style(false);
+    ImGui::EndDisabled();
+    if (go && s.machine_buf[0] != 0) {
+        std::string t = s.machine_buf;
+        const auto at = t.find('@');
+        add(at == std::string::npos ? t : t.substr(at + 1), t);
+        s.machine_buf[0] = 0;
+    }
+    if (close || ImGui::IsKeyPressed(ImGuiKey_Escape))
         ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
 }
@@ -6579,6 +7140,8 @@ void App::frame() {
     draw_worktree(s);
     draw_settings(s);
     draw_exit(s);
+    draw_welcome(s);
+    draw_machine_add(s);
     draw_confirm(s);
     draw_worktree_open(s);
     draw_close_notice(s);

@@ -7,4 +7,6 @@ add_custom_command(TARGET agent-ui POST_BUILD
 agentdesk_bundle_conpty(agent-ui)
 # Bundled fonts (OFL / MIT, third_party/fonts/README.agentdesk.md): fonts\ next to agent-ui.exe.
 add_custom_command(TARGET agent-ui POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/fonts" "$<TARGET_FILE_DIR:agent-ui>/fonts")
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/fonts" "$<TARGET_FILE_DIR:agent-ui>/fonts"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/sounds" "$<TARGET_FILE_DIR:agent-ui>/sounds")
+target_compile_definitions(agent-ui PRIVATE AGENTDESK_VERSION_STRING="${PROJECT_VERSION}")

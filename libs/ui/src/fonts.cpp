@@ -77,6 +77,15 @@ ImFont* add(const std::string& path, float size, bool pixel_snap, const std::str
 
 }  // namespace
 
+ImFont* load_terminal_font(const std::wstring& file, float size_px) {
+    std::string path = file.empty() ? find_font({L"JetBrainsMono-Medium.ttf"}, {L"CascadiaMono.ttf", L"consola.ttf"})
+                                    : utf8(std::filesystem::path(file));
+    const std::string nerd = find_font({L"SymbolsNerdFont-Regular.ttf"}, {});
+    const std::string cjk = find_font({}, {L"msjh.ttc", L"mingliu.ttc"});
+    ImFont* f = add(path, size_px, true, cjk, nerd);
+    return f != nullptr ? f : ImGui::GetIO().Fonts->Fonts.front();
+}
+
 FontSet load_fonts(float mono_size_px, float ui_size_px) {
     FontSet set;
     set.mono_size = mono_size_px;
