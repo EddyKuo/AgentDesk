@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <functional>
 
@@ -543,10 +544,15 @@ Json Workspace::to_json() const {
         sp.push_back({{"id", s.id},
                       {"name", s.name},
                       {"machine", s.machine},
+                      {"color", s.color},
+                      {"panel", s.panel},
                       {"active_tab", s.active_tab},
                       {"tabs", std::move(tabs)}});
     }
-    return {{"version", 1}, {"active_space", active_space}, {"spaces", std::move(sp)}};
+    return {{"version", 1},
+            {"active_space", active_space},
+            {"spaces", std::move(sp)},
+            {"pinned", std::vector<std::string>(pinned.begin(), pinned.end())}};
 }
 
 Workspace Workspace::from_json(const Json& j) {
@@ -558,6 +564,8 @@ Workspace Workspace::from_json(const Json& j) {
         sp.id = s.value("id", "");
         sp.name = s.value("name", "");
         sp.machine = s.value("machine", "");
+        sp.color = s.value("color", "");
+        sp.panel = s.value("panel", "");
         sp.active_tab = s.value("active_tab", 0);
         for (const auto& t : s.value("tabs", Json::array())) {
             Tab tab;
@@ -574,9 +582,50 @@ Workspace Workspace::from_json(const Json& j) {
         if (!sp.tabs.empty())
             w.spaces.push_back(std::move(sp));
     }
+    for (const auto& p : j.value("pinned", Json::array()))
+        if (p.is_string())
+            w.pinned.insert(p.get<std::string>());
     w.active_space =
         std::clamp(j.value("active_space", 0), 0, std::max(0, static_cast<int>(w.spaces.size()) - 1));
     return w;
+}
+
+bool Workspace::move_space(int from, int to) {
+    const int n = static_cast<int>(spaces.size());
+    if (from < 0 || from >= n || to < 0 || to >= n || from == to)
+        return false;
+    if (spaces[static_cast<std::size_t>(from)].machine != spaces[static_cast<std::size_t>(to)].machine)
+        return false;  // herdr: a space moves only inside its machine's block
+    const std::string active_id = spaces[static_cast<std::size_t>(active_space)].id;
+    Space moved = std::move(spaces[static_cast<std::size_t>(from)]);
+    spaces.erase(spaces.begin() + from);
+    spaces.insert(spaces.begin() + to, std::move(moved));
+    for (int i = 0; i < n; ++i)
+        if (spaces[static_cast<std::size_t>(i)].id == active_id)
+            active_space = i;
+    return true;
+}
+
+void Workspace::assign_colors() {
+    static const char* const kOrder[] = {"ansi6", "ansi3", "ansi4", "ansi5", "ansi2", "ansi1"};
+    for (auto& sp : spaces) {
+        if (!sp.color.empty())
+            continue;
+        std::map<std::string, int> used;
+        for (const auto& o : spaces)
+            if (!o.color.empty())
+                ++used[o.color];
+        const char* best = kOrder[0];
+        int best_n = INT_MAX;
+        for (const char* c : kOrder) {
+            const int u = used.count(c) ? used[c] : 0;
+            if (u < best_n) {
+                best_n = u;
+                best = c;
+            }
+        }
+        sp.color = best;
+    }
 }
 
 // ------------------------------------------------------------------ geometry

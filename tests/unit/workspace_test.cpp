@@ -183,3 +183,27 @@ TEST(Keymap, ParsesChordsAndAppliesOverrides) {
     EXPECT_FALSE(k.global(*Keymap::parse("ctrl-shift-t")).has_value());
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-alt-n")), "space.new");
 }
+
+// herdr spaces: colours go to the least-used name, spaces move only within their machine.
+TEST(Workspace, SpaceColorsAndMoves) {
+    Workspace w;
+    w.add_space("a");
+    w.add_space("b");
+    w.add_space("c");
+    w.spaces[2].machine = "box";
+    w.assign_colors();
+    EXPECT_EQ(w.spaces[0].color, "ansi6");
+    EXPECT_EQ(w.spaces[1].color, "ansi3");
+    EXPECT_EQ(w.spaces[2].color, "ansi4");
+    w.select_space(0);
+    EXPECT_TRUE(w.move_space(0, 1));
+    EXPECT_EQ(w.spaces[1].tabs[0].focused, "a");
+    EXPECT_EQ(w.active_space, 1);
+    EXPECT_FALSE(w.move_space(1, 2));  // other machine
+    w.pinned.insert("b");
+    w.spaces[0].panel = "changes";
+    const auto back = Workspace::from_json(w.to_json());
+    EXPECT_EQ(back.spaces[0].panel, "changes");
+    EXPECT_EQ(back.spaces[0].color, "ansi3");
+    EXPECT_TRUE(back.pinned.contains("b"));
+}

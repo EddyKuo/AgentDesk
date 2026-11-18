@@ -45,6 +45,8 @@ struct Space {
     std::vector<Tab> tabs;
     int active_tab = 0;
     std::string machine;  // empty: this computer
+    std::string color;    // avatar colour name (herdr: ansi6, ansi3, ansi4, ansi5, ansi2, ansi1)
+    std::string panel;    // right panel shown for this space: "", "files" or "changes"
 };
 
 struct PaneLoc {
@@ -56,6 +58,7 @@ class Workspace {
 public:
     std::vector<Space> spaces;
     int active_space = 0;
+    std::set<std::string> pinned;  // agents pinned to the top of the agents list
 
     // ---- queries
     [[nodiscard]] PaneLoc find(const std::string& session) const;
@@ -81,6 +84,10 @@ public:
     void close_tab(int space, int tab);
     void close_space(int space);
     bool move_tab(int space, int from, int to);
+    // Moves a space within its machine's block (herdr space.move); keeps the active one active.
+    bool move_space(int from, int to);
+    // Gives spaces without a colour the least-used avatar colour (ties: earlier in the order).
+    void assign_colors();
 
     // ---- focus and selection
     void focus(const std::string& session);  // selects its space and tab too

@@ -1,4 +1,4 @@
-# Builds the portable zip (design doc 5.1 M4): dist\AgentDesk-<version>-win-x64.zip
+﻿# Builds the portable zip (design doc 5.1 M4): dist\AgentDesk-<version>-win-x64.zip
 #   agent-ui.exe, agent-host.exe, agentctl.exe, conpty\ (bundled ConPTY, ADR-08),
 #   LICENSE, THIRD_PARTY_NOTICES.md, hooks\, docs\
 # Symbols go to a separate ...-symbols.zip. Run after: scripts\build.cmd msvc-x64-release all
@@ -20,6 +20,7 @@ if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force $stage, (Join-Path $stage 'conpty\x64'), (Join-Path $stage 'hooks'), (Join-Path $stage 'docs') | Out-Null
 
 foreach ($f in @('agent-ui.exe', 'agent-host.exe', 'agentctl.exe')) { Copy-Item (Join-Path $bin $f) $stage }
+Copy-Item -Recurse (Join-Path $bin 'fonts') (Join-Path $stage 'fonts')
 Copy-Item (Join-Path $bin 'conpty\conpty.dll') (Join-Path $stage 'conpty')
 Copy-Item (Join-Path $bin 'conpty\x64\OpenConsole.exe') (Join-Path $stage 'conpty\x64')
 Copy-Item (Join-Path $root 'third_party\conpty\LICENSE') (Join-Path $stage 'conpty\LICENSE')
@@ -41,7 +42,11 @@ $components = @(
     @{ Name = 'Dear ImGui 1.93.0 (docking)'; Url = 'https://github.com/ocornut/imgui'; File = (Join-Path $share 'imgui\copyright') },
     @{ Name = 'nlohmann/json 3.12.0'; Url = 'https://github.com/nlohmann/json'; File = (Join-Path $share 'nlohmann-json\copyright') },
     @{ Name = 'Lua 5.5.1'; Url = 'https://www.lua.org/'; File = (Join-Path $share 'lua\copyright') },
-    @{ Name = 'Microsoft.Windows.Console.ConPTY 1.24.260710001'; Url = 'https://github.com/microsoft/terminal'; File = (Join-Path $root 'third_party\conpty\LICENSE') }
+    @{ Name = 'Microsoft.Windows.Console.ConPTY 1.24.260710001'; Url = 'https://github.com/microsoft/terminal'; File = (Join-Path $root 'third_party\conpty\LICENSE') },
+    @{ Name = 'herdr-app (behaviour and parts ported to C++, modified)'; Url = 'https://github.com/herdrdev/herdr-app'; File = (Join-Path $root 'third_party\herdr\LICENSE') },
+    @{ Name = 'Geist font'; Url = 'https://github.com/vercel/geist-font'; File = (Join-Path $root 'third_party\fonts\OFL-Geist.txt') },
+    @{ Name = 'JetBrains Mono font'; Url = 'https://github.com/JetBrains/JetBrainsMono'; File = (Join-Path $root 'third_party\fonts\OFL-JetBrainsMono.txt') },
+    @{ Name = 'Symbols Nerd Font'; Url = 'https://github.com/ryanoasis/nerd-fonts'; File = (Join-Path $root 'third_party\fonts\LICENSE-SymbolsNerdFont.txt') }
 )
 foreach ($c in $components) {
     [void]$notices.AppendLine()
