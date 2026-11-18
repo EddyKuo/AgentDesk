@@ -407,6 +407,8 @@ void TerminalView::draw_context_menu(TerminalSource& source, const terminal::Scr
         commands_.emplace_back("pane.zoom");
     if (ImGui::MenuItem("Rename pane..."))
         commands_.emplace_back("pane.rename");
+    if (!parent_name.empty() && ImGui::MenuItem(("Send back to " + parent_name).c_str()))
+        commands_.emplace_back("pane.park");
     ImGui::Separator();
     if (ImGui::MenuItem("Close pane", chord("pane.close")))
         commands_.emplace_back("pane.close");

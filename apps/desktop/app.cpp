@@ -2470,6 +2470,14 @@ void run_command(App::State& s, const std::string& cmd) {
                 s.focus_view(s.ws.focused_session());
             }
         }
+    } else if (name == "pane.park") {
+        // herdr terminal.park: a sub-agent's pane goes away; it keeps running under its parent
+        // (agents list, peek).
+        if (!focused.empty()) {
+            s.hidden.insert(focused);
+            s.ws.remove(focused);
+            s.focus_view(s.ws.focused_session());
+        }
     } else if (name == "pane.zoom") {
         s.ws.toggle_zoom();
     } else if (name == "pane.go") {
@@ -4496,6 +4504,7 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
         vs.view.copy_on_select = s.settings.copy_on_select;
         vs.view.scroll_speed = s.settings.scroll_speed;
         vs.view.line_height = s.settings.line_height;
+        vs.view.parent_name = !v.parent.empty() && s.views_by_id.count(v.parent) ? s.pane_title(v.parent) : std::string();
         vs.view.cell_width = s.settings.cell_width;
         vs.view.theme.default_bg = g_pal->term_bg;
         vs.view.theme.default_fg = g_pal->term_fg;
