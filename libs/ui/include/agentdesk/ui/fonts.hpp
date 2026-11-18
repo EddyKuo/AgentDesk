@@ -84,6 +84,8 @@ inline constexpr const char* kComment = "\xEE\xA9\xAB";  // U+EA6B codicon comme
 inline constexpr const char* kExtensions = "\xEE\xAB\xA6";  // U+EAE6 codicon extensions
 inline constexpr const char* kPalette = "\xEE\xAD\x9C";  // U+EB5C codicon symbol-color
 inline constexpr const char* kWarning = "\xEE\xA9\xAC";  // U+EA6C codicon warning
+inline constexpr const char* kRefresh = "\xEE\xAC\xB7";  // U+EB37 codicon refresh
+inline constexpr const char* kShield = "\xEE\xAD\x93";   // U+EB53 codicon shield
 }  // namespace icon
 
 }  // namespace agentdesk::ui

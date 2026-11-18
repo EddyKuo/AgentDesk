@@ -29,6 +29,8 @@
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/ui/host_client.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
+#include "agentdesk/ui/telemetry.hpp"
+#include "agentdesk/ui/updates.hpp"
 #include "app.hpp"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam,
@@ -306,7 +308,37 @@ DevOptions parse_dev_options() {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+    // herdr update.rs 392-400 asks a downloaded copy `herdr-app --version` ("herdr-app 0.2.0");
+    // ours answers "agent-ui <version>" on the stdout it was given, before any window.
+    {
+        int argc = 0;
+        LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
+        const bool version = argv != nullptr && argc == 2 && std::wstring(argv[1]) == L"--version";
+        ::LocalFree(argv);
+        if (version) {
+            const std::string line = std::string("agent-ui ") + AGENTDESK_VERSION_STRING + "\n";
+            DWORD written = 0;
+            ::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE), line.data(), static_cast<DWORD>(line.size()), &written,
+                        nullptr);
+            return 0;
+        }
+    }
     ::SetUnhandledExceptionFilter(write_crash_report);
+    {
+        wchar_t exe[MAX_PATH]{};
+        const DWORD n = ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        ui::updates::configure({AGENTDESK_VERSION_STRING, std::filesystem::path(std::wstring(exe, n)),
+                                agentdesk::desktop::data_folder(), [] {
+                                    if (g_wake != nullptr)
+                                        ::SetEvent(g_wake);
+                                }});
+    }
+    // herdr main.rs 127-132: leave the install folder, put a waiting update in place (that
+    // starts the new copy and this one ends), then start the clock for telemetry.
+    ui::updates::leave_install_folder();
+    if (ui::updates::apply_on_startup())
+        return 0;
+    ui::telemetry::clock();
     const DevOptions dev = parse_dev_options();
     g_wake = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, wnd_proc,       0,      0, instance, nullptr, nullptr,
@@ -433,6 +465,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         --frames_to_draw;
     }
 
+    app.on_quit();
     if (!dev.report.empty())
         std::ofstream(dev.report, std::ios::binary) << app.report().dump(2) << '\n';
     ImGui_ImplDX11_Shutdown();

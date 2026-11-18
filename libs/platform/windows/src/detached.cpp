@@ -24,7 +24,17 @@ DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vecto
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
     constexpr DWORD kBase = DETACHED_PROCESS | CREATE_UNICODE_ENVIRONMENT;
-    const auto cwd = exe.parent_path();
+    // Not in the program's own folder: Windows can't rename a folder that is a process's working
+    // directory, so an update could never be put in place (herdr update.rs 443-457 leaves the
+    // install folder for the home folder). The home folder, else the program's folder.
+    std::filesystem::path cwd = exe.parent_path();
+    {
+        wchar_t home[MAX_PATH]{};
+        const DWORD n = ::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
+        std::error_code ec;
+        if (n > 0 && n < MAX_PATH && std::filesystem::is_directory(std::wstring(home, n), ec))
+            cwd = std::wstring(home, n);
+    }
     DetachedResult result;
     auto start = [&](DWORD flags) {
         return ::CreateProcessW(exe.c_str(), cmdline.data(), nullptr, nullptr, FALSE, flags, nullptr,

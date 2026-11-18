@@ -15,6 +15,7 @@ struct HostConnection {
     std::shared_ptr<void> transport;  // keeps a stream transport (ssh process) alive
     std::string error;                // why the connection failed, for the person
     std::string host_instance_id;
+    std::string host_version;  // "" from a host older than the field
     bool started_host = false;
     bool host_dies_with_launcher = false;  // breakaway denied inside a kill-on-close job
 };

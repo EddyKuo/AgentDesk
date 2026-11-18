@@ -751,6 +751,7 @@ Response SessionManager::do_hello(const Request& req) {
     return protocol::ok(
         req.id, {{"version", protocol::kProtocolVersion},
                  {"host_instance_id", config_.host_instance_id},
+                 {"host_version", config_.host_version},
                  {"host_pid", ::GetCurrentProcessId()},
                  {"capabilities",
                   {{"osc7501", config_.conpty.bundled}, {"bundled_conpty", config_.conpty.bundled}}}});
