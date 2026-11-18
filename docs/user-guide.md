@@ -15,7 +15,7 @@ AgentDesk 是 Windows 11 x64 的 AI coding agent 工作台：在可分割的終�
 - **側欄**：預設寬 268 px，拖曳右緣可在 44～480 px 之間調整。窄於 160 px 時改成只顯示編號與狀態的窄欄；品牌列的收合鈕在兩者之間切換，Ctrl+Shift+B 整個隱藏。
 - **Spaces**：一個工作地點，通常是一個 repo。每列是彩色字母頭像、名稱，靠右是 `repo · 分支`，再加上領先／落後遠端的 ↑N／↓N（名稱已經說明的部分、main／master 會省略）。沒取名的 space 以第一個終端機所在的 repo 頂層資料夾命名，家目錄顯示 `~`；在 shell 裡 `cd` 之後會跟著變。linked worktree 的 space 以 `├─`／`└─` 掛在主 repo 的 space 下面。拖曳可調整順序；右鍵選單有改名、新增／開啟／移除 worktree、關閉。
 - **Agents**：有回報狀態的 Agent。預設依「Needs you／Done／Working／Idle」分段，同段內最近變動的在前；排序鈕可改成依 space 分組。每列是程式圖示、space 名稱與工作名稱、距離上次變動多久、狀態標記；滑鼠移上去可以釘選到最上面。子 Agent 以樹狀線列在父 Agent 下面。
-- **分頁列**：膠囊狀的分頁，關閉鈕只在目前分頁。雙擊改名，拖到別的分頁上放開可調整順序，在分頁列上滾動滾輪切換分頁。沒取名的 Agent 分頁跟著 Agent 的即時標題。「+」開啟新增選單；右側是 Files、Changes 兩個面板按鈕。
+- **分頁列**：膠囊狀的分頁，關閉鈕只在目前分頁。雙擊改名，拖到別的分頁上放開可調整順序，在分頁列上滾動滾輪切換分頁。沒取名的 Agent 分頁跟著 Agent 的即時標題。「+」開啟新增選單；右側是 Files、Changes 兩個面板按鈕。命令面板的「Settle tab」可以把分頁收起來：收起的分頁不顯示在分頁列，程式照常執行；用 Ctrl+Shift+K 選它，或它需要你時，會回到分頁列。
 - **面板**：分頁裡的終端機，圓角外框，目前面板有強調色邊框。標題列顯示程式、名稱、資料夾與分支、狀態；分割、放大、關閉按鈕在滑鼠移上去時出現。拖曳標題列中間的把手，可以把面板放到另一個面板的邊緣（移到那一側），或放在中間（互換位置）。
 - **Files／Changes**：右側面板，跟著目前面板 shell 所在的資料夾。Files 是可展開的檔案樹，檔名旁有 git 狀態字母，點檔案可唯讀預覽。Changes 列出所有未提交的檔案與 +／− 行數，點檔案看差異，下方可輸入訊息 commit（會先 `git add -A`）。開關狀態依 space 記住。
 - **狀態列**：機器、目前分支、Agent 數量與需要你的數量，右側點一下開命令面板。
@@ -78,6 +78,9 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 - 輸入：一般按鍵、方向鍵、F1～F12、注音等輸入法組字後的文字。
 - Ctrl+C：有選取時複製，沒有選取時送中斷。Ctrl+Shift+C 固定複製，Ctrl+Shift+V 貼上。
 - 滑鼠：拖曳選取、雙擊選字、三擊選整行，放開就複製（可在設定關閉）；右鍵選單有複製、貼上、全選、搜尋、分割、放大、改名、關閉。
+- 會讀滑鼠的程式（例如 vim、less、htop）：點擊、拖曳和滾輪直接交給程式；按住 Shift 可以照常選取文字。
+- 右鍵預設開選單。在右鍵選單選「Send right-clicks to pane」後，這個面板的右鍵改交給程式；Shift＋右鍵一定開選單。
+- 全螢幕程式沒有開啟滑鼠功能時，滾輪會改送上下方向鍵。
 - 捲動：滑鼠滾輪或 Shift+PgUp/PgDn 捲進歷史（最多 5000 行），右側有捲軸可以拖曳。一開始打字就回到即時畫面。
 - 搜尋：Ctrl+Shift+F，搜尋畫面與歷史，Enter 往前找，Shift+Enter 往後找，Esc 關閉。
 - 貼上多行文字前會先顯示預覽，確認後才送出；含 NUL 或超過 1 MiB 的內容會被拒絕。
@@ -145,6 +148,8 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 { "name": "wall", "main": "grid", "sidebar": false, "tab_bar": false, "status_bar": true, "theme": "ember" }
 ```
 
+命令面板的「Duplicate layout」把目前的版面複製成 `<名稱>-copy.json` 並切換過去，之後直接改這個檔案。「Reset layout」把版面還原成隨附的樣子，並重設側欄與右側面板的寬度；你改過的檔案會改名成 `.json.aside` 保留。
+
 ## 設定
 
 Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy。每次修改都立即生效並儲存，沒有儲存鈕。
@@ -153,12 +158,15 @@ Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy
 - **Machines**：遠端機器清單與「Add a machine…」。
 - **Alerts**：提示音開關與試聽、右下角通知開關。
 - **Mods**：啟用或停用 mod、看錯誤、重新載入。
+- **Updates**：版本與「What's new」。更新後第一次啟動會自動顯示一次。
+
+左下的「Send feedback」開一個草稿視窗，草稿最後會附上 AgentDesk 與 Windows 的版本。AgentDesk 不會自己送出任何東西：按「Copy」複製，或按「Save to file」存到 `%LOCALAPPDATA%\AgentDesk\feedback\`，再用你習慣的方式寄出。
 
 介面字型是隨附的 Geist，終端機預設是隨附的 JetBrains Mono Medium；中文字以微軟正黑體補上。
 
 ## Mod
 
-Mod 是放在 `%LOCALAPPDATA%\AgentDesk\mods\<名稱>\main.lua` 的 Lua 小程式，可以對 Agent 狀態做出反應、加命令面板項目、在側欄或 Details 加面板、在分頁和 Agent 列加文字。在「設定 > Mods」啟用或停用、看錯誤、重新載入。第一次啟動會寫入三個範例，預設都不啟用：
+Mod 是放在 `%LOCALAPPDATA%\AgentDesk\mods\<名稱>\main.lua` 的 Lua 小程式，可以對 Agent 狀態做出反應、加命令面板項目、在側欄或 Details 加面板、在分頁和 Agent 列加文字。在「設定 > Mods」啟用或停用、看錯誤、重新載入。命令面板的「Duplicate mod」把一個 mod 的資料夾複製成 `<名稱>-copy`，預設不啟用。第一次啟動會寫入三個範例，預設都不啟用：
 
 - `tab-timer`：在分頁顯示 Agent 已工作多久。
 - `ntfy-notify`：Agent 需要你時推播到手機。在它的 `settings.json` 填入 ntfy.sh 的 topic 後啟用。
@@ -240,5 +248,5 @@ agentctl shutdown --stop-sessions
 - 已結束的工作超過 8 個時，較舊的只保留清單紀錄，最後畫面與歷史不再保留。
 - 遠端機器需要遠端也是 Windows 並安裝 AgentDesk；Linux／macOS 的 host 尚未提供。
 - 介面沒有螢幕閱讀器支援（Dear ImGui 的限制）。
-- Files／Changes 面板只支援這台電腦上的資料夾；遠端機器的面板顯示「No folder」。
+- 遠端機器的 Files／Changes 面板不會即時更新，每 10 秒更新一次。
 - shell 所在資料夾的追蹤支援 PowerShell、cmd、WSL 的 bash，以及會送 OSC 7 的 shell；其他 shell 只顯示啟動時的資料夾。

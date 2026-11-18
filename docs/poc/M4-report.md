@@ -29,10 +29,11 @@ MVP 可發布。`scripts/package.ps1` 產生的 `AgentDesk-0.1.0-win-x64.zip`（
 | 4 個 session 重新 attach 到畫面完整（Release） | p95 44 ms | < 2 秒 |
 | 輸入回顯延遲（M0 量測） | p95 16.1 ms | 設計文件 1.5 |
 | 30 分鐘 soak 私有記憶體 | 中段 170 MB、末段 150 MB | 無持續成長 |
+| 8 小時 soak 私有記憶體 | 中段 153.8 MB、末段 154.0 MB | 無持續成長（`m4-soak-8h.json`） |
 
 ## 待人工驗收
 
-繁中注音與候選視窗、100%／150%／200% DPI、Claude Code 實際回報 working／blocked／done（需要送 prompt）、Codex hook 實機、8 小時 soak、另一個 Windows 帳號連線被拒。
+繁中注音與候選視窗、100%／150%／200% DPI、Claude Code 實際回報 working／blocked／done（需要送 prompt）、Codex hook 實機、另一個 Windows 帳號連線被拒。
 
 ## 注意事項
 
