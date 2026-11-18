@@ -14,6 +14,7 @@
 #include <ctime>
 #include <deque>
 #include <filesystem>
+#include <future>
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -1018,9 +1019,16 @@ public:
     SidePanels(const SidePanels&) = delete;
     SidePanels& operator=(const SidePanels&) = delete;
 
+    // Folders on another machine go through its agent-host (fs.list, fs.read, git.run). Runs on
+    // the panel worker; returns the result, or nullopt when the machine did not answer.
+    using RemoteCall = std::function<std::optional<Json>(const std::string& machine, const std::string& method,
+                                                          const Json& params)>;
+    RemoteCall remote;
+
     std::mutex mutex;  // guards everything below
     // Files
     std::string files_root;
+    std::string files_machine;  // "" = this computer
     std::set<std::string> expanded;                  // relative folder paths ("" = root)
     std::map<std::string, std::vector<FileEntry>> listing;
     std::map<std::string, char> marks;               // relative file path (lower case) -> A/M/D/U
@@ -1032,6 +1040,7 @@ public:
     std::string preview_message;
     // Changes
     std::string changes_cwd;
+    std::string changes_machine;
     std::string repo_top;
     bool not_repo = false;
     std::vector<Change> changes;
@@ -1047,13 +1056,14 @@ public:
     char commit_msg[512] = {};
 
     // Called every frame with the current folder; refreshes when it changed or every 10 s.
-    void track_files(const std::string& root) {
+    void track_files(const std::string& root, const std::string& machine = {}) {
         std::lock_guard lock(mutex);
         const auto now = Clock::now();
-        if (root != files_root) {
-            files_contexts_[files_root] = {expanded, preview_path};
+        if (root != files_root || machine != files_machine) {
+            files_contexts_[files_machine + "|" + files_root] = {expanded, preview_path};
             files_root = root;
-            const auto it = files_contexts_.find(root);
+            files_machine = machine;
+            const auto it = files_contexts_.find(machine + "|" + root);
             expanded = it != files_contexts_.end() ? it->second.first : std::set<std::string>{""};
             expanded.insert("");
             preview_path = it != files_contexts_.end() ? it->second.second : std::string();
@@ -1061,20 +1071,23 @@ public:
             marks.clear();
             files_error.clear();
             files_at_ = {};
-            watch(root);
+            watch(machine.empty() ? root : std::string());  // remote folders refresh every 10 s
         }
         if (!files_loading && (files_at_ == Clock::time_point{} || now - files_at_ > std::chrono::seconds(10) ||
                                files_changed_.exchange(false))) {
             files_loading = true;
             files_at_ = now;
-            post([this, root, folders = expanded, preview = preview_path] { load_files(root, folders, preview); });
+            post([this, mc = machine, root, folders = expanded, preview = preview_path] {
+                load_files(mc, root, folders, preview);
+            });
         }
     }
-    void track_changes(const std::string& cwd) {
+    void track_changes(const std::string& cwd, const std::string& machine = {}) {
         std::lock_guard lock(mutex);
         const auto now = Clock::now();
-        if (cwd != changes_cwd) {
+        if (cwd != changes_cwd || machine != changes_machine) {
             changes_cwd = cwd;
+            changes_machine = machine;
             repo_top.clear();
             not_repo = false;
             changes.clear();
@@ -1085,14 +1098,14 @@ public:
             commit_note.clear();
             commit_msg[0] = 0;
             changes_at_ = {};
-            watch(cwd);
+            watch(machine.empty() ? cwd : std::string());
         }
         if (!changes_loading && !committing &&
             (changes_at_ == Clock::time_point{} || now - changes_at_ > std::chrono::seconds(10) ||
              changes_changed_.exchange(false))) {
             changes_loading = true;
             changes_at_ = now;
-            post([this, cwd, open = open_diff, closed = user_closed] { load_changes(cwd, open, closed); });
+            post([this, mc = machine, cwd, open = open_diff, closed = user_closed] { load_changes(mc, cwd, open, closed); });
         }
     }
     void toggle_folder(const std::string& rel) {
@@ -1110,10 +1123,10 @@ public:
             return;
         }
         expanded.insert(rel);
-        post([this, root = files_root, rel] {
-            auto entries = list_folder(root, rel);
+        post([this, mc = files_machine, root = files_root, rel] {
+            auto entries = list_folder(mc, root, rel);
             std::lock_guard l(mutex);
-            if (root == files_root)
+            if (root == files_root && mc == files_machine)
                 listing[rel] = std::move(entries.first);
         });
     }
@@ -1122,7 +1135,7 @@ public:
         preview_path = rel;
         preview_text.clear();
         preview_message = "Loading file\xE2\x80\xA6";
-        post([this, root = files_root, rel] { load_preview(root, rel); });
+        post([this, mc = files_machine, root = files_root, rel] { load_preview(mc, root, rel); });
     }
     void close_preview() {
         std::lock_guard lock(mutex);
@@ -1145,7 +1158,7 @@ public:
         for (const auto& x : changes)
             if (x.path == path)
                 c = x;
-        post([this, top = repo_top, c] { load_diff(top, c); });
+        post([this, mc = changes_machine, top = repo_top, c] { load_diff(mc, top, c); });
     }
     void commit() {
         std::lock_guard lock(mutex);
@@ -1156,12 +1169,10 @@ public:
             return;
         committing = true;
         commit_note.clear();
-        post([this, top = repo_top, msg] {
-            const std::filesystem::path cwd(win::to_wide(top));
-            auto r = host::run_tool({L"git", L"-C", cwd.native(), L"add", L"-A"}, cwd, std::chrono::seconds(30));
+        post([this, mc = changes_machine, top = repo_top, msg] {
+            auto r = git_run(mc, top, {L"add", L"-A"});
             if (r.started && r.exit_code == 0)
-                r = host::run_tool({L"git", L"-C", cwd.native(), L"commit", L"-m", win::to_wide(msg)}, cwd,
-                                   std::chrono::seconds(60));
+                r = git_run(mc, top, {L"commit", L"-m", win::to_wide(msg)});
             std::lock_guard l(mutex);
             committing = false;
             if (r.started && r.exit_code == 0) {
@@ -1196,9 +1207,28 @@ private:
     static constexpr std::size_t kTotal = 5000;
 
     // Hidden and system files included, only .git skipped, folders first then by name.
-    static std::pair<std::vector<FileEntry>, bool> list_folder(const std::string& root, const std::string& rel) {
+    std::pair<std::vector<FileEntry>, bool> list_folder(const std::string& mc, const std::string& root,
+                                                        const std::string& rel, bool* failed = nullptr) {
         std::vector<FileEntry> out;
         bool more = false;
+        if (!mc.empty()) {
+            const auto r = remote ? remote(mc, "fs.list", Json{{"path", join(root, rel)}, {"max", kPerFolder}})
+                                  : std::nullopt;
+            if (!r) {
+                if (failed != nullptr)
+                    *failed = true;
+                return {out, false};
+            }
+            for (const auto& e : r->value("entries", Json::array()))
+                out.push_back({e.value("name", ""), e.value("dir", false)});
+            more = r->value("more", false);
+            std::sort(out.begin(), out.end(), [](const FileEntry& a, const FileEntry& b) {
+                if (a.dir != b.dir)
+                    return a.dir;
+                return _stricmp(a.name.c_str(), b.name.c_str()) < 0;
+            });
+            return {out, more};
+        }
         std::error_code ec;
         std::filesystem::directory_iterator it(win::to_wide(join(root, rel)),
                                                std::filesystem::directory_options::skip_permission_denied, ec);
@@ -1221,18 +1251,36 @@ private:
         return {out, more};
     }
 
-    static std::string git_out(const std::string& cwd, std::vector<std::wstring> args, bool* ok = nullptr) {
+    // git in `cwd`, here or on machine `mc` (its agent-host runs it with the same switches).
+    host::ToolResult git_run(const std::string& mc, const std::string& cwd, std::vector<std::wstring> args) {
+        if (!mc.empty()) {
+            host::ToolResult r;
+            Json a = Json::array();
+            for (const auto& x : args)
+                a.push_back(win::to_utf8(x));
+            const auto res = remote ? remote(mc, "git.run", Json{{"cwd", cwd}, {"args", a}}) : std::nullopt;
+            if (res) {
+                r.started = true;
+                r.exit_code = res->value("exit_code", 1ul);
+                r.output = res->value("output", "");
+            }
+            return r;
+        }
         const std::filesystem::path p(win::to_wide(cwd));
         args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-c", L"core.fsmonitor=false", L"-c",
                                    L"diff.autoRefreshIndex=false", L"-C", p.native()});
-        const auto r = host::run_tool(args, p, std::chrono::seconds(30));
+        return host::run_tool(args, p, std::chrono::seconds(60));
+    }
+    std::string git_out(const std::string& mc, const std::string& cwd, std::vector<std::wstring> args,
+                        bool* ok = nullptr) {
+        const auto r = git_run(mc, cwd, std::move(args));
         if (ok != nullptr)
             *ok = r.started && r.exit_code == 0;
         return r.output;
     }
-    static std::string top_of(const std::string& cwd) {
+    std::string top_of(const std::string& mc, const std::string& cwd) {
         bool ok = false;
-        std::string out = git_out(cwd, {L"rev-parse", L"--show-toplevel"}, &ok);
+        std::string out = git_out(mc, cwd, {L"rev-parse", L"--show-toplevel"}, &ok);
         if (!ok)
             return {};
         while (!out.empty() && (out.back() == '\n' || out.back() == '\r'))
@@ -1243,8 +1291,8 @@ private:
         return out;
     }
     // porcelain v1 -z: "XY path\0"
-    static std::vector<std::pair<std::string, std::string>> status(const std::string& top, bool* ok) {
-        const std::string out = git_out(top, {L"status", L"--porcelain=v1", L"-z", L"--no-renames",
+    std::vector<std::pair<std::string, std::string>> status(const std::string& mc, const std::string& top, bool* ok) {
+        const std::string out = git_out(mc, top, {L"status", L"--porcelain=v1", L"-z", L"--no-renames",
                                               L"--untracked-files=all"},
                                         ok);
         std::vector<std::pair<std::string, std::string>> r;
@@ -1268,17 +1316,19 @@ private:
         return 'M';
     }
 
-    void load_files(const std::string& root, std::set<std::string> folders, const std::string& preview) {
+    void load_files(const std::string& mc, const std::string& root, std::set<std::string> folders,
+                    const std::string& preview) {
         std::map<std::string, std::vector<FileEntry>> got;
         std::string error;
         bool limited = false;
         std::size_t total = 0;
         for (const auto& rel : folders) {
-            auto [entries, more] = list_folder(root, rel);
+            bool failed = false;
+            auto [entries, more] = list_folder(mc, root, rel, &failed);
             if (rel.empty() && entries.empty()) {
                 std::error_code ec;
-                if (!std::filesystem::is_directory(win::to_wide(root), ec))
-                    error = "Cannot list this folder";
+                if (failed || (mc.empty() && !std::filesystem::is_directory(win::to_wide(root), ec)))
+                    error = mc.empty() ? "Cannot list this folder" : "Cannot list this folder on " + mc;
             }
             limited = limited || more || total + entries.size() > kTotal;
             if (total + entries.size() > kTotal)
@@ -1288,10 +1338,10 @@ private:
         }
         // Git marks: keyed by path relative to `root` (normalised; herdr's string join misses on Windows).
         std::map<std::string, char> m;
-        const std::string top = top_of(root);
+        const std::string top = top_of(mc, root);
         if (!top.empty()) {
             bool ok = false;
-            const auto st = status(top, &ok);
+            const auto st = status(mc, top, &ok);
             std::string prefix = lower(root.size() > top.size() ? root.substr(top.size() + 1) : std::string());
             for (auto& c : prefix)
                 if (c == '\\')
@@ -1310,7 +1360,7 @@ private:
             }
         }
         std::lock_guard lock(mutex);
-        if (root != files_root) {
+        if (root != files_root || mc != files_machine) {
             files_loading = false;
             return;
         }
@@ -1322,10 +1372,27 @@ private:
         files_limited = limited;
         files_loading = false;
         if (!preview.empty() && preview == preview_path && preview_text.empty())
-            post([this, root, preview] { load_preview(root, preview); });
+            post([this, mc, root, preview] { load_preview(mc, root, preview); });
     }
 
-    static bool read_text(const std::string& path, std::string& out, std::string& message) {
+    bool read_text(const std::string& mc, const std::string& path, std::string& out, std::string& message) {
+        if (!mc.empty()) {
+            const auto r = remote ? remote(mc, "fs.read", Json{{"path", path}}) : std::nullopt;
+            if (!r || r->value("missing", false)) {
+                message = r ? "This file is no longer available" : "No answer from " + mc;
+                return false;
+            }
+            if (r->value("too_large", false)) {
+                message = "Cannot preview this file (binary, too large, or unreadable)";
+                return false;
+            }
+            if (r->value("binary", false)) {
+                message = "Binary file \xC2\xB7 no text preview";
+                return false;
+            }
+            out = r->value("text", "");
+            return true;
+        }
         std::error_code ec;
         const auto size = std::filesystem::file_size(win::to_wide(path), ec);
         if (ec) {
@@ -1345,24 +1412,24 @@ private:
         return true;
     }
 
-    void load_preview(const std::string& root, const std::string& rel) {
+    void load_preview(const std::string& mc, const std::string& root, const std::string& rel) {
         std::string text, message;
-        if (read_text(join(root, rel), text, message) && text.size() > 400000) {
+        if (read_text(mc, join(root, rel), text, message) && text.size() > 400000) {
             text.resize(400000);
             text += "\n\xE2\x80\xA6 (file truncated)";
         }
         std::lock_guard lock(mutex);
-        if (root == files_root && rel == preview_path) {
+        if (root == files_root && mc == files_machine && rel == preview_path) {
             preview_text = std::move(text);
             preview_message = std::move(message);
         }
     }
 
-    void load_changes(const std::string& cwd, std::string open, bool closed) {
-        const std::string top = top_of(cwd);
+    void load_changes(const std::string& mc, const std::string& cwd, std::string open, bool closed) {
+        const std::string top = top_of(mc, cwd);
         if (top.empty()) {
             std::lock_guard lock(mutex);
-            if (cwd == changes_cwd) {
+            if (cwd == changes_cwd && mc == changes_machine) {
                 not_repo = true;
                 repo_top.clear();
                 changes.clear();
@@ -1371,14 +1438,14 @@ private:
             return;
         }
         bool ok = false;
-        const auto st = status(top, &ok);
+        const auto st = status(mc, top, &ok);
         std::string error = ok ? std::string() : std::string("git status failed");
         bool has_head = false;
-        git_out(top, {L"rev-parse", L"--verify", L"HEAD"}, &has_head);
+        git_out(mc, top, {L"rev-parse", L"--verify", L"HEAD"}, &has_head);
         std::map<std::string, std::pair<int, int>> counts;
         std::set<std::string> binary;
         auto numstat = [&](std::vector<std::wstring> args) {
-            const std::string out = git_out(top, std::move(args));
+            const std::string out = git_out(mc, top, std::move(args));
             std::size_t i = 0;
             while (i < out.size()) {
                 const std::size_t z = out.find('\0', i);
@@ -1419,7 +1486,7 @@ private:
             c.untracked = xy == "??" || (!has_head && xy.find('A') != std::string::npos);
             if (c.untracked) {
                 std::string text, msg;
-                if (read_text(join(top, path), text, msg))
+                if (read_text(mc, join(top, path), text, msg))
                     c.add = static_cast<int>(std::count(text.begin(), text.end(), '\n') +
                                              (!text.empty() && text.back() != '\n' ? 1 : 0));
             } else if (const auto it = counts.find(path); it != counts.end()) {
@@ -1443,7 +1510,7 @@ private:
         }
         {
             std::lock_guard lock(mutex);
-            if (cwd != changes_cwd) {
+            if (cwd != changes_cwd || mc != changes_machine) {
                 changes_loading = false;
                 return;
             }
@@ -1463,7 +1530,7 @@ private:
             }
             open_diff = to_open.path;
         }
-        load_diff(top, to_open);
+        load_diff(mc, top, to_open);
     }
 
     static std::string untab(const std::string& s) {
@@ -1491,14 +1558,14 @@ private:
         return s;
     }
 
-    void load_diff(const std::string& top, const Change& c) {
+    void load_diff(const std::string& mc, const std::string& top, const Change& c) {
         std::vector<DiffRow> rows;
         std::string message;
         if (c.binary) {
             message = "Binary file changed";
         } else if (c.untracked) {
             std::string text, msg;
-            if (!read_text(join(top, c.path), text, msg)) {
+            if (!read_text(mc, join(top, c.path), text, msg)) {
                 message = msg.find("Binary") != std::string::npos ? "Binary file \xC2\xB7 no text diff" : msg;
             } else {
                 if (text.size() > 400000)
@@ -1518,14 +1585,14 @@ private:
         } else {
             bool ok = false;
             bool has_head = false;
-            git_out(top, {L"rev-parse", L"--verify", L"HEAD"}, &has_head);
+            git_out(mc, top, {L"rev-parse", L"--verify", L"HEAD"}, &has_head);
             std::vector<std::wstring> args = {L"diff"};
             if (has_head)
                 args.push_back(L"HEAD");
             for (const wchar_t* a : {L"--no-ext-diff", L"--no-textconv", L"--no-color", L"--"})
                 args.push_back(a);
             args.push_back(win::to_wide(c.path));
-            const std::string out = git_out(top, args, &ok);
+            const std::string out = git_out(mc, top, args, &ok);
             if (!ok) {
                 message = "Cannot preview this diff (too large or unreadable)";
             } else {
@@ -1665,13 +1732,14 @@ struct WorktreeEntry {
 
 struct Remote {
     MachineConfig cfg;
-    std::unique_ptr<ui::HostClient> host;
+    std::shared_ptr<ui::HostClient> host;  // shared: the panel worker may hold it during a request
 };
 
 struct App::State {
     AppConfig config;
     std::unique_ptr<ui::HostClient> host;           // this PC
     std::vector<Remote> remotes;                    // other machines over ssh
+    std::mutex remotes_mutex;                       // remotes is replaced on the UI thread, read by the panel worker
     std::map<std::string, std::string> machine_of;  // session id -> machine name ("" here)
     std::string launch_machine;
     Settings settings;
@@ -1941,6 +2009,30 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     start_remotes(*s_);
     write_example_mods();
     s_->layouts = load_layouts();
+    // Files / Changes for a pane on another machine: ask that machine's agent-host.
+    s_->panels->remote = [st = s_.get()](const std::string& machine, const std::string& method,
+                                        const Json& params) -> std::optional<Json> {
+        std::shared_ptr<ui::HostClient> h;
+        {
+            std::lock_guard lock(st->remotes_mutex);
+            for (const auto& r : st->remotes)
+                if (r.cfg.name == machine)
+                    h = r.host;
+        }
+        if (!h || !h->connected())
+            return std::nullopt;
+        auto done = std::make_shared<std::promise<std::optional<Json>>>();
+        auto result = done->get_future();
+        h->call(
+            method, params,
+            [done](Json r, std::string error) {
+                done->set_value(error.empty() ? std::optional<Json>(std::move(r)) : std::nullopt);
+            },
+            std::chrono::seconds(60));
+        if (result.wait_for(std::chrono::seconds(65)) != std::future_status::ready)
+            return std::nullopt;
+        return result.get();
+    };
     s_->mods = std::make_unique<ui::ModHost>(data_dir() / L"mods");
     s_->mods->load(s_->settings.mods_enabled);
     // herdr: the welcome opens on the first run (until it is finished or skipped).
@@ -1983,7 +2075,12 @@ void start_remotes(App::State& s) {
         };
         keep.push_back({cfg, std::make_unique<ui::HostClient>(o)});
     }
-    s.remotes = std::move(keep);  // removed machines disconnect here
+    std::vector<Remote> old;
+    {
+        std::lock_guard lock(s.remotes_mutex);
+        old = std::exchange(s.remotes, std::move(keep));
+    }
+    old.clear();  // removed machines disconnect here, outside the lock
 }
 }  // namespace
 
@@ -4986,11 +5083,15 @@ void draw_grid(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
     }
 }
 
-// Folder the panels follow: the focused pane's live folder (herdr files.js 6-12).
-std::string panel_folder(App::State& s) {
+// Folder the panels follow: the focused pane's live folder (herdr files.js 6-12), on the machine
+// that pane runs on ("" = this computer).
+std::string panel_folder(App::State& s, std::string* machine = nullptr) {
     const auto id = s.ws.focused_session();
-    if (const auto it = s.views_by_id.find(id); it != s.views_by_id.end() && s.machine_of[id].empty())
+    if (const auto it = s.views_by_id.find(id); it != s.views_by_id.end()) {
+        if (machine != nullptr)
+            *machine = s.machine_of[id];
         return it->second.cwd;
+    }
     return {};
 }
 
@@ -5022,8 +5123,9 @@ void panel_header(App::State& s, ImDrawList* dl, ImVec2 a, float w, const char* 
 
 void draw_files_panel(App::State& s, ImVec2 pos, ImVec2 size) {
     auto& p = *s.panels;
-    const std::string root = panel_folder(s);
-    p.track_files(root);
+    std::string machine;
+    const std::string root = panel_folder(s, &machine);
+    p.track_files(root, machine);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     std::unique_lock lock(p.mutex);
     bool back = false;
@@ -5158,8 +5260,9 @@ void draw_files_panel(App::State& s, ImVec2 pos, ImVec2 size) {
 
 void draw_changes_panel(App::State& s, ImVec2 pos, ImVec2 size) {
     auto& p = *s.panels;
-    const std::string cwd = panel_folder(s);
-    p.track_changes(cwd);
+    std::string machine;
+    const std::string cwd = panel_folder(s, &machine);
+    p.track_changes(cwd, machine);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     std::unique_lock lock(p.mutex);
     // Header: "Changes", "<n> files", +add −del.

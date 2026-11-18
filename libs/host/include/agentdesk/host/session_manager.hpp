@@ -90,6 +90,9 @@ private:
     protocol::Response do_ui_state_get(const ipc::ConnectionPtr& conn, const protocol::Request& req);
     protocol::Response do_ui_state_set(const ipc::ConnectionPtr& conn, const protocol::Request& req);
     protocol::Response do_worktree_add(const protocol::Request& req);
+    protocol::Response do_fs_list(const protocol::Request& req);
+    protocol::Response do_fs_read(const protocol::Request& req);
+    protocol::Response do_git_run(const protocol::Request& req);
     protocol::Response do_wait(const protocol::Request& req);
     protocol::Response do_label(const protocol::Request& req);
     protocol::Response do_report(const protocol::Request& req);
