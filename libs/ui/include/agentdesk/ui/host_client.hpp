@@ -104,6 +104,7 @@ public:
     [[nodiscard]] bool connected() const noexcept { return connected_; }
     [[nodiscard]] bool host_dies_with_launcher() const noexcept { return host_dies_with_launcher_; }
     [[nodiscard]] std::string host_instance_id() const;
+    [[nodiscard]] std::string host_version() const;  // agent-host's own version, "" if it does not say
     [[nodiscard]] std::string last_error() const;
     [[nodiscard]] std::vector<std::shared_ptr<RemoteSession>> sessions() const;
     [[nodiscard]] std::vector<std::pair<std::string, std::string>> profiles() const;  // id, name
@@ -143,6 +144,7 @@ private:
     std::vector<std::pair<std::string, std::string>> profiles_;
     std::optional<protocol::Json> pending_ui_state_;
     std::string instance_id_;
+    std::string host_version_;
     std::string last_error_;
     std::unique_ptr<ipc::PipeClient> client_;  // worker thread owns connect/close
     std::shared_ptr<void> transport_;          // ssh process of a remote machine

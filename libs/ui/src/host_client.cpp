@@ -305,6 +305,11 @@ std::string HostClient::host_instance_id() const {
     return instance_id_;
 }
 
+std::string HostClient::host_version() const {
+    std::lock_guard lock(mutex_);
+    return host_version_;
+}
+
 std::string HostClient::last_error() const {
     std::lock_guard lock(mutex_);
     return last_error_;
@@ -443,6 +448,7 @@ bool HostClient::try_connect(bool allow_start) {
             s->screen_.mark_needs_snapshot();
         }
         instance_id_ = hc.host_instance_id;
+        host_version_ = hc.host_version;
         last_error_.clear();
     }
     client_ = std::move(hc.client);

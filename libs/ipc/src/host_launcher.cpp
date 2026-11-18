@@ -39,6 +39,7 @@ HostConnection connect_or_start_host(const std::filesystem::path& host_exe, cons
         return out;
     }
     out.host_instance_id = hello->result->value("host_instance_id", "");
+    out.host_version = hello->result->value("host_version", "");
     return out;
 }
 
@@ -163,6 +164,7 @@ HostConnection connect_over_command(const std::vector<std::wstring>& argv,
         return out;
     }
     out.host_instance_id = hello->result->value("host_instance_id", "");
+    out.host_version = hello->result->value("host_version", "");
     out.transport = t;
     return out;
 }

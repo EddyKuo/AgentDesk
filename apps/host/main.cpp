@@ -76,6 +76,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     cfg.ctl_path = ipc::sibling_executable(L"agentctl.exe");
     cfg.pipe_name = pipe_name;
     cfg.host_instance_id = host::new_uuid();
+    cfg.host_version = AGENTDESK_VERSION_STRING;
     cfg.on_shutdown = [ev = shutdown.get()] { ::SetEvent(ev); };
 
     try {
