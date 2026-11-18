@@ -2,6 +2,12 @@
 // prints mixed Chinese/ASCII text. Used to check rendering (fonts, CJK widths) without a human.
 //   screenshot_ui --out <png> [--build-dir <dir>] [--profile chinese|claude] [--wait-seconds 6]
 //                 [--run <command>] [--child profile:name] [--remote <machine>] [--mods a,b]
+//                 [--input "<step>;<step>..."]
+// --input is passed to agent-ui, which feeds the steps to ImGui as a person's mouse and keys
+// (nothing outside its window is touched): click:x,y rclick:x,y mclick:x,y dblclick:x,y
+// move:x,y key:<enter|esc|tab|up|down|left|right|home|end|pgup|pgdn|back|del|space|f2|a-z|0-9>
+// type:<text> wait:<ms> shot:<png> (a capture, relative to --out's folder). The final capture
+// to --out is taken after the last step.
 // --child starts profile:name as a sub-agent of the first session; --remote adds a second host
 // shown as that machine (pipe: target); --mods enables mods (example mods are copied on first run).
 // The PowerShell spellings (-Out, -WaitSeconds ...) are accepted too. agent-ui writes its
@@ -181,6 +187,7 @@ int wmain(int argc, wchar_t** argv) {
         const std::wstring child = args.get_or(L"child", L"");
         const std::wstring remote = args.get_or(L"remote", L"");
         const std::wstring mods = args.get_or(L"mods", L"");
+        const std::wstring input = args.get_or(L"input", L"");
 
         ::SetProcessDPIAware();
         check(::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED), "CoInitializeEx");
@@ -222,12 +229,12 @@ int wmain(int argc, wchar_t** argv) {
         // "state-blocked", "state-idle", "state-done" (sidebar agents list checks).
         for (const char* st : {"working", "blocked", "idle", "done"}) {
             profiles.push_back(
-                    {{"id", std::string("state-") + st},
-                     {"name", std::string("state ") + st},
-                     {"executable", ps},
-                     {"args",
-                      {"-NoLogo", "-NoProfile", "-NoExit", "-Command",
-                       std::string("[Console]::Write([char]27 + ']7501;state=") + st + "' + [char]7)"}}});
+                {{"id", std::string("state-") + st},
+                 {"name", std::string("state ") + st},
+                 {"executable", ps},
+                 {"args",
+                  {"-NoLogo", "-NoProfile", "-NoExit", "-Command",
+                   std::string("[Console]::Write([char]27 + ']7501;state=") + st + "' + [char]7)"}}});
         }
         dk::write_file(data / L"profiles.json", dk::profiles_json(profiles));
         ::SetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", data.c_str());
@@ -289,6 +296,13 @@ int wmain(int argc, wchar_t** argv) {
                 ui_args.push_back(L"--run");
                 ui_args.push_back(run_cmd);
             }
+            if (!input.empty()) {
+                // Steps time themselves; agent-ui stays open long enough (60 s at most) and the
+                // last step is the final capture.
+                ui_args[5] = std::to_wstring((wait_seconds + 60) * 1000);
+                ui_args.push_back(L"--input");
+                ui_args.push_back(input + L";wait:300;shot:" + out.native() + L";wait:200");
+            }
             p = dk::start(ui, ui_args, dk::exe_dir());
             if (!child.empty()) {
                 dk::sleep_ms(4000);
@@ -308,7 +322,32 @@ int wmain(int argc, wchar_t** argv) {
                 throw std::runtime_error("agent-ui has no window");
             ::SetForegroundWindow(h);
             dk::sleep_ms(500);
-            capture_png(h, out, width, height);
+            if (input.empty()) {
+                capture_png(h, out, width, height);
+            } else {
+                // Capture whenever agent-ui asks (it writes the target path to <report>.shot and
+                // waits for the file to go away); done after the final capture to --out.
+                fs::path signal = report;
+                signal += L".shot";
+                const auto deadline =
+                    std::chrono::steady_clock::now() + std::chrono::seconds(wait_seconds + 60);
+                bool final_done = false;
+                while (!final_done && std::chrono::steady_clock::now() < deadline) {
+                    std::error_code ec;
+                    if (fs::exists(signal, ec)) {
+                        dk::sleep_ms(150);  // the frame after the step has been presented
+                        fs::path target = dk::wide(dk::read_file(signal));
+                        if (target.is_relative())
+                            target = out.parent_path() / target;
+                        capture_png(h, target, width, height);
+                        final_done = fs::equivalent(target, out, ec) || target == out;
+                        fs::remove(signal, ec);
+                    }
+                    dk::sleep_ms(50);
+                }
+                if (!final_done)
+                    throw std::runtime_error("agent-ui did not finish the --input steps");
+            }
             dk::wait_exit(*p, std::chrono::milliseconds(15000));
             if (env(L"SHOT_DEBUG")) {
                 const Json list = Json::parse(dk::run(ctl, {L"--pipe", pipe, L"list", L"--json"}).out);

@@ -2043,6 +2043,13 @@ struct App::State {
     bool started_dev = false;
     std::size_t next_dev_command = 0;
     Clock::time_point next_dev_at{};
+    std::size_t next_input = 0;  // --input step
+    Clock::time_point input_at{};
+    bool input_shot_wait = false;
+    std::optional<ImVec2> input_mouse;  // last scripted mouse position, re-applied every frame
+    int input_up = -1;                  // button to release on a later frame (a real click spans frames)
+    int input_clicks_left = 0;          // dblclick: the second press
+    Clock::time_point input_shot_since{};
 
     // overlays
     bool show_palette = false;
@@ -5359,7 +5366,8 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
             s.tab_scroll = active_end - visible;
         if (active_start < s.tab_scroll)
             s.tab_scroll = active_start;
-        dl->PushClipRect(ImVec2(x, pos.y), ImVec2(tabs_right, pos.y + height), true);
+        // ImGui::PushClipRect clips hit-testing too: a tab running under "+" must not take its clicks.
+        ImGui::PushClipRect(ImVec2(x, pos.y), ImVec2(tabs_right, pos.y + height), true);
         float tx = x - s.tab_scroll;
         const ImVec2 mouse = ImGui::GetIO().MousePos;
         int drop = -1;
@@ -5438,7 +5446,7 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
             }
             ImGui::PopID();
         }
-        dl->PopClipRect();
+        ImGui::PopClipRect();
         if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
             if (s.drag_tab >= 0 && drop >= 0)
                 s.ws.move_tab(s.ws.active_space, s.drag_tab, drop);
@@ -6743,12 +6751,15 @@ void draw_files_panel(App::State& s, ImVec2 pos, ImVec2 size) {
         // Read-only editor in the terminal font at 12 (herdr files/main.js:141-144).
         const ImVec2 area(size.x - 2, pos.y + size.y - top - px(4));
         if (!p.preview_message.empty() && p.preview_text.empty()) {
+            // files/main.js:177: a padded (12) div in the dim UI text, wrapping.
             ImGui::BeginChild("##preview", area, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
-            ImGui::PushFont(s.fonts.mono, 12);
-            ImGui::Dummy(ImVec2(0, px(4)));
-            ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
-            ImGui::SetCursorPosX(px(10));
+            ImGui::PushFont(s.fonts.ui, 12);
+            ImGui::Dummy(ImVec2(0, px(8)));
+            ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
+            ImGui::SetCursorPosX(px(12));
+            ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x - px(12));
             ImGui::TextUnformatted(p.preview_message.c_str());
+            ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();
             ImGui::PopFont();
             ImGui::EndChild();
@@ -9801,6 +9812,8 @@ void draw_machine_add(App::State& s) {
             row(m.target, m.name, m.target);
     settings_section(s, "Or type how ssh reaches it");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - px(90));
+    if (ImGui::IsWindowAppearing())
+        ImGui::SetKeyboardFocusHere();  // herdr machine-add/main.js 73: the field has focus on open
     const bool enter = ImGui::InputTextWithHint("##target", "user@host", s.machine_buf, sizeof s.machine_buf,
                                                 ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::SameLine(0, px(8));
@@ -10057,6 +10070,111 @@ void draw_close_notice(App::State& s) {
 }  // namespace
 
 // ------------------------------------------------------------------ frame
+namespace {
+
+ImGuiKey input_key(const std::string& n) {
+    static const std::pair<const char*, ImGuiKey> kKeys[] = {
+        {"enter", ImGuiKey_Enter}, {"esc", ImGuiKey_Escape},  {"tab", ImGuiKey_Tab},          {"up", ImGuiKey_UpArrow},
+        {"down", ImGuiKey_DownArrow}, {"left", ImGuiKey_LeftArrow}, {"right", ImGuiKey_RightArrow},
+        {"home", ImGuiKey_Home},   {"end", ImGuiKey_End},     {"pgup", ImGuiKey_PageUp},     {"pgdn", ImGuiKey_PageDown},
+        {"back", ImGuiKey_Backspace}, {"del", ImGuiKey_Delete}, {"space", ImGuiKey_Space},    {"f2", ImGuiKey_F2}};
+    for (const auto& [name, key] : kKeys)
+        if (n == name)
+            return key;
+    if (n.size() == 1 && n[0] >= 'a' && n[0] <= 'z')
+        return static_cast<ImGuiKey>(ImGuiKey_A + (n[0] - 'a'));
+    if (n.size() == 1 && n[0] >= '0' && n[0] <= '9')
+        return static_cast<ImGuiKey>(ImGuiKey_0 + (n[0] - '0'));
+    return ImGuiKey_None;
+}
+
+// --input: one step per turn, after the --run commands, once sessions exist.
+void run_input_script(App::State& s) {
+    if (s.config.input_script.empty() || s.next_dev_command < s.config.run_commands.size() || s.sessions.empty() ||
+        !s.doc_loaded)
+        return;
+    std::vector<std::string> steps;
+    for (std::size_t p = 0; p <= s.config.input_script.size();) {
+        const auto q = s.config.input_script.find(';', p);
+        steps.push_back(s.config.input_script.substr(p, q == std::string::npos ? std::string::npos : q - p));
+        if (q == std::string::npos)
+            break;
+        p = q + 1;
+    }
+    const auto now = Clock::now();
+    if (s.config.wake)
+        s.config.wake();
+    if (s.input_shot_wait) {
+        std::error_code ec;
+        if (std::filesystem::exists(s.config.shot_signal, ec) && now - s.input_shot_since < std::chrono::seconds(10))
+            return;
+        s.input_shot_wait = false;
+        s.input_at = now + std::chrono::milliseconds(100);
+    }
+    if (s.input_at == Clock::time_point{})
+        s.input_at = now + std::chrono::milliseconds(1500);  // first frames settle
+    if (s.input_up >= 0 && now >= s.input_at) {
+        ImGui::GetIO().AddMouseButtonEvent(s.input_up, false);
+        const int b = s.input_up;
+        s.input_up = -1;
+        s.input_at = now + std::chrono::milliseconds(80);
+        if (s.input_clicks_left > 0) {
+            --s.input_clicks_left;
+            ImGui::GetIO().AddMouseButtonEvent(b, true);
+            s.input_up = b;
+        }
+        return;
+    }
+    if (now < s.input_at || s.next_input >= steps.size())
+        return;
+    const std::string step = steps[s.next_input++];
+    const auto colon = step.find(':');
+    const std::string op = step.substr(0, colon);
+    const std::string arg = colon == std::string::npos ? std::string() : step.substr(colon + 1);
+    ImGuiIO& io = ImGui::GetIO();
+    s.input_at = now + std::chrono::milliseconds(300);
+    auto xy = [&] {
+        const auto c = arg.find(',');
+        return ImVec2(static_cast<float>(std::atof(arg.substr(0, c).c_str())),
+                      static_cast<float>(std::atof(arg.substr(c + 1).c_str())));
+    };
+    if (op == "wait") {
+        s.input_at = now + std::chrono::milliseconds(std::atoi(arg.c_str()));
+    } else if (op == "move" || op == "click" || op == "rclick" || op == "mclick" || op == "dblclick") {
+        const ImVec2 p = xy();
+        s.input_mouse = p;
+        io.AddMousePosEvent(p.x, p.y);
+        const int button = op == "rclick" ? 1 : op == "mclick" ? 2 : 0;
+        if (op != "move") {
+            // Press now, release a few frames later (and press again for a double click).
+            s.input_at = now + std::chrono::milliseconds(120);
+            io.AddMouseButtonEvent(button, true);
+            s.input_up = button;
+            s.input_clicks_left = op == "dblclick" ? 1 : 0;
+        }
+    } else if (op == "key") {
+        if (const ImGuiKey k = input_key(arg); k != ImGuiKey_None) {
+            io.AddKeyEvent(k, true);
+            io.AddKeyEvent(k, false);
+        }
+    } else if (op == "type") {
+        io.AddInputCharactersUTF8(arg.c_str());
+    } else if (op == "shot" && !s.config.shot_signal.empty()) {
+        std::ofstream(s.config.shot_signal, std::ios::binary) << arg;
+        s.input_shot_wait = true;
+        s.input_shot_since = now;
+    }
+}
+
+}  // namespace
+
+void App::before_new_frame() {
+    // The Win32 backend reads the real cursor while the window has focus; a running --input
+    // script wins over it.
+    if (s_->input_mouse && !s_->config.input_script.empty())
+        ImGui::GetIO().AddMousePosEvent(s_->input_mouse->x, s_->input_mouse->y);
+}
+
 void App::frame() {
     State& s = *s_;
     g_scale = s.dpi * ui_scale(s.settings);
@@ -10119,6 +10237,7 @@ void App::frame() {
     run_mods(s);
     for (const auto& c : std::exchange(s.pending_mod_commands, {}))
         run_command(s, c);
+    run_input_script(s);
     if (s.started_dev || s.config.start_profile.empty()) {
         if (s.next_dev_command < s.config.run_commands.size() && s.doc_loaded && !s.launch_busy &&
             Clock::now() >= s.next_dev_at && !s.sessions.empty()) {

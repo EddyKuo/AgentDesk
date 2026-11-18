@@ -56,7 +56,7 @@ HANDLE g_wake = nullptr;  // set by IPC threads; the UI loop wakes and redraws
 float g_pending_dpi = 0.0f;
 std::atomic<bool> g_close_requested{false};
 std::atomic<int> g_focus_change{-1};  // -1 none, 0 lost, 1 gained
-std::vector<std::string> g_dropped;    // files dropped on the window (UTF-8), for the app
+std::vector<std::string> g_dropped;   // files dropped on the window (UTF-8), for the app
 
 void create_rtv() {
     ID3D11Texture2D* back = nullptr;
@@ -267,6 +267,7 @@ struct DevOptions {
     std::filesystem::path report;
     std::wstring pipe;
     std::vector<std::string> run;
+    std::string input;
 };
 
 DevOptions parse_dev_options() {
@@ -283,6 +284,8 @@ DevOptions parse_dev_options() {
             o.report = argv[++i];
         else if (a == L"--pipe" && i + 1 < argc)
             o.pipe = argv[++i];
+        else if (a == L"--input" && i + 1 < argc)
+            o.input = win::to_utf8(argv[++i]);
         else if (a == L"--run" && i + 1 < argc) {
             std::string all = win::to_utf8(argv[++i]);
             for (std::size_t p = 0; p <= all.size();) {
@@ -346,6 +349,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     cfg.wake = [] { ::SetEvent(g_wake); };
     cfg.start_profile = dev.start_profile;
     cfg.run_commands = dev.run;
+    cfg.input_script = dev.input;
+    if (!dev.report.empty())
+        cfg.shot_signal = std::filesystem::path(dev.report).concat(L".shot");
     cfg.automated = dev.exit_after_ms > 0;
     agentdesk::desktop::App app(std::move(cfg), std::make_unique<ui::HostClient>(hopts));
     app.load_fonts();
@@ -406,6 +412,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
+        app.before_new_frame();  // --input keeps its mouse position over the backend's
         ImGui::NewFrame();
         app.frame();
         ImGui::Render();

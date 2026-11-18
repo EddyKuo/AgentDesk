@@ -3,6 +3,7 @@
 // the event loop; everything drawn and every command lives here.
 #include <windows.h>
 
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -21,6 +22,11 @@ struct AppConfig {
     std::string start_profile;              // developer option --start
     std::vector<std::string> run_commands;  // developer option --run "cmd;cmd" (after start)
     bool automated = false;                 // --exit-after-ms: no first-run notice, no sounds
+    // Developer option --input "<step>;...": mouse and key events fed to ImGui as a person would
+    // make them (QA screenshots; nothing outside the window is touched). "shot:<png>" writes the
+    // path to `shot_signal` and waits until the screenshot tool has captured and removed it.
+    std::string input_script;
+    std::filesystem::path shot_signal;
 };
 
 class App {
@@ -33,6 +39,7 @@ public:
     void load_fonts();  // after the ImGui context exists, before the first frame
     void apply_scale(float dpi);
     void frame();               // between ImGui::NewFrame() and ImGui::Render()
+    void before_new_frame();    // after the platform backend's NewFrame, before ImGui::NewFrame
     void on_close_requested();  // window X
     void on_focus_changed(bool focused);
     // Files dropped on the window: their paths go to the terminal under the pointer (else the
