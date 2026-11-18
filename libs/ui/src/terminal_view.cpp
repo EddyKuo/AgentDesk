@@ -315,11 +315,14 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
                 !adapter::key_pressed_owned(key, str_id))
                 continue;
             const auto chord = static_cast<ImGuiKeyChord>(held | key);
-            if (const auto g = keymap->global(chord)) {
+            // herdr: terminal section > layout section > global.
+            if (const auto t = keymap->terminal(chord)) {
+                if (*t != "terminal") {  // "terminal": the program gets the key
+                    run_command(*t, source, snap);
+                    consumed.insert(k);
+                }
+            } else if (const auto g = keymap->global(chord)) {
                 commands_.push_back(*g);
-                consumed.insert(k);
-            } else if (const auto t = keymap->terminal(chord)) {
-                run_command(*t, source, snap);
                 consumed.insert(k);
             }
         }
@@ -382,6 +385,20 @@ void TerminalView::draw_context_menu(TerminalSource& source, const terminal::Scr
     if (open_context_menu_) {
         ImGui::OpenPopup("##terminal-menu");
         open_context_menu_ = false;
+    }
+    if (menu_rows) {  // herdr menu: rows drawn by the app, 220 px wide
+        const float k = ImGui::GetFontSize() / 13.0f;
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5 * k, 5 * k));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+        ImGui::SetNextWindowSizeConstraints(ImVec2(220 * k, 0), ImVec2(FLT_MAX, FLT_MAX));
+        const bool open = ImGui::BeginPopup("##terminal-menu");
+        ImGui::PopStyleVar(2);
+        if (!open)
+            return;
+        if (menu_rows())
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return;
     }
     if (!ImGui::BeginPopup("##terminal-menu"))
         return;
@@ -585,6 +602,8 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
 
     const GridSize grid{snap.rows, snap.cols};
     ImGuiIO& io = ImGui::GetIO();
+    for (auto& c : std::exchange(requested_, {}))
+        run_command(c, source, snap);
 
     // ---- mouse to the program (it turned reporting on; Shift keeps the mouse for AgentDesk)
     const bool report_mouse = snap.mouse != terminal::MouseMode::kNone && !io.KeyShift && scroll_offset_ == 0;

@@ -121,7 +121,6 @@ Keymap Keymap::defaults() {
     const std::pair<const char*, const char*> global[] = {
         {"ctrl-shift-t", "tab.new"},
         {"ctrl-shift-n", "space.new"},
-        {"ctrl-shift-r", "agent.new"},
         {"ctrl-shift-k", "app.picker"},
         {"ctrl-alt-shift-escape", "app.reset"},
         {"alt-[", "tab.prev"},
@@ -132,10 +131,8 @@ Keymap Keymap::defaults() {
         {"ctrl-shift-e", "pane.split:down"},
         {"ctrl-shift-z", "pane.zoom"},
         {"ctrl-shift-p", "app.palette"},
-        {"ctrl-shift-/", "app.help"},
+        {"ctrl-shift-/", "app.help"},  // = ctrl-? and ctrl-shift-? (same key)
         {"ctrl-shift-b", "sidebar.toggle"},
-        {"ctrl-shift-d", "details.toggle"},
-        {"ctrl-shift-g", "worktree.new"},
         {"ctrl-shift-l", "layout.switch"},
         {"ctrl-,", "app.settings"},
         {"ctrl-tab", "tab.next"},
@@ -156,10 +153,6 @@ Keymap Keymap::defaults() {
         {"alt-shift-j", "pane.swap:down"},
         {"alt-shift-k", "pane.swap:up"},
         {"alt-shift-l", "pane.swap:right"},
-        {"ctrl-alt-left", "pane.resize:left"},
-        {"ctrl-alt-right", "pane.resize:right"},
-        {"ctrl-alt-up", "pane.resize:up"},
-        {"ctrl-alt-down", "pane.resize:down"},
         {"ctrl-=", "app.zoom_in"},
         {"ctrl-shift-=", "app.zoom_in"},
         {"ctrl--", "app.zoom_out"},
@@ -179,9 +172,8 @@ Keymap Keymap::defaults() {
         {"ctrl-shift-v", "terminal.paste"},
         {"shift-insert", "terminal.paste"},
         {"ctrl-shift-f", "terminal.search"},
-        {"ctrl-shift-a", "terminal.select_all"},
-        {"shift-pageup", "terminal.scroll:-page"},
-        {"shift-pagedown", "terminal.scroll:page"},
+        // herdr terminal.paste_image: on Windows it pastes the clipboard text.
+        {"ctrl-v", "terminal.paste"},
         {"ctrl-backspace", "send:\x17"},
         {"ctrl-left",
          "send:\x1b"
@@ -195,33 +187,91 @@ Keymap Keymap::defaults() {
     return k;
 }
 
-std::vector<std::string> Keymap::apply(const nlohmann::json& overrides) {
+namespace {
+
+// herdr keys.rs 132-149: names from older releases.
+std::string migrate(std::string a) {
+    if (a.rfind("project.", 0) == 0)
+        a = "space." + a.substr(8);
+    else if (a.rfind("context.", 0) == 0)
+        a = "tab." + a.substr(8);
+    if (a == "mod.open:start")
+        a = "tab.new";
+    return a;
+}
+
+}  // namespace
+
+std::vector<std::string> Keymap::apply(const nlohmann::json& overrides,
+                                       const std::function<bool(std::string_view)>& known) {
     std::vector<std::string> bad;
-    if (!overrides.is_object())
+    if (!overrides.is_object()) {
+        bad.emplace_back("keys.json must be an object of sections");
         return bad;
-    for (const char* section : {"global", "terminal"}) {
-        const auto it = overrides.find(section);
-        if (it == overrides.end() || !it->is_object())
+    }
+    Keymap next = *this;
+    for (const auto& [section, entries] : overrides.items()) {
+        std::map<ImGuiKeyChord, std::string>* target = nullptr;
+        if (section == "global")
+            target = &next.global_;
+        else if (section == "terminal")
+            target = &next.terminal_;
+        else if (section.rfind("layout:", 0) == 0 || section.rfind("mod:", 0) == 0)
+            target = &next.sections_[section];
+        if (target == nullptr || !entries.is_object()) {
+            bad.push_back("unknown section \"" + section + "\"");
             continue;
-        auto& target = std::string_view(section) == "global" ? global_ : terminal_;
-        for (const auto& [chord_text, cmd] : it->items()) {
+        }
+        for (const auto& [chord_text, value] : entries.items()) {
             const auto chord = parse(chord_text);
             if (!chord) {
-                bad.push_back(chord_text);
+                bad.push_back(section + ": cannot read the key \"" + chord_text + "\"");
                 continue;
             }
-            if (cmd.is_null() || (cmd.is_string() && cmd.get<std::string>().empty()))
-                target.erase(*chord);
-            else if (cmd.is_string())
-                target[*chord] = cmd.get<std::string>();
-            else
-                bad.push_back(chord_text);
+            std::string action;
+            if (value.is_null() || (value.is_string() && value.get<std::string>().empty())) {
+                target->erase(*chord);
+                continue;
+            }
+            if (value.is_string()) {
+                action = value.get<std::string>();
+            } else if (value.is_object() && value.contains("command") && value["command"].is_string()) {
+                action = value["command"].get<std::string>();
+                const auto args = value.value("args", nlohmann::json::object());
+                if (!args.is_object() || args.size() > 1) {
+                    bad.push_back(section + ": " + chord_text + ": only one argument is supported");
+                    continue;
+                }
+                for (const auto& [k, v] : args.items())
+                    action += ":" + (v.is_string() ? v.get<std::string>() : v.dump());
+            } else {
+                bad.push_back(section + ": " + chord_text + ": the action must be text or {\"command\", \"args\"}");
+                continue;
+            }
+            action = migrate(action);
+            if (action == "terminal") {
+                if (section == "global")
+                    continue;  // herdr: skipped in global
+            } else if (action.rfind("send:", 0) != 0 && known) {
+                const std::string name = action.substr(0, action.find(':'));
+                if (!known(name)) {
+                    bad.push_back(section + ": " + chord_text + ": unknown action \"" + name + "\"");
+                    continue;
+                }
+            }
+            (*target)[*chord] = action;
         }
     }
+    if (bad.empty())
+        *this = std::move(next);
     return bad;
 }
 
 std::optional<std::string> Keymap::global(ImGuiKeyChord chord) const {
+    if (const auto s = sections_.find("layout:" + layout_); s != sections_.end()) {
+        if (const auto it = s->second.find(chord); it != s->second.end())
+            return it->second == "terminal" ? std::nullopt : std::optional(it->second);
+    }
     const auto it = global_.find(chord);
     return it == global_.end() ? std::nullopt : std::optional(it->second);
 }

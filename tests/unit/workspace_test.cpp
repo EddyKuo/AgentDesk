@@ -178,11 +178,40 @@ TEST(Keymap, ParsesChordsAndAppliesOverrides) {
     auto k = Keymap::defaults();
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-t")), "tab.new");
     EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-shift-f")), "terminal.search");
-    const auto bad =
-        k.apply({{"global", {{"ctrl-shift-t", nullptr}, {"ctrl-alt-n", "space.new"}, {"??x", "a"}}}});
-    EXPECT_EQ(bad, std::vector<std::string>{"??x"});
+    // A file with a problem installs nothing (herdr keys.rs): the defaults stay.
+    auto bad = k.apply({{"global", {{"ctrl-shift-t", nullptr}, {"??x", "a"}}}});
+    ASSERT_EQ(bad.size(), 1u);
+    EXPECT_NE(bad[0].find("??x"), std::string::npos);
+    EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-t")), "tab.new");
+    bad = k.apply({{"global", {{"ctrl-shift-t", nullptr}, {"ctrl-alt-n", "space.new"}}}});
+    EXPECT_TRUE(bad.empty());
     EXPECT_FALSE(k.global(*Keymap::parse("ctrl-shift-t")).has_value());
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-alt-n")), "space.new");
+}
+
+// herdr keys.json forms: layout sections win over global, "terminal" gives the key to the
+// program, {"command","args"} objects, old names migrated, unknown sections/actions reported.
+TEST(Keymap, HerdrSectionsObjectsAndValidation) {
+    auto k = Keymap::defaults();
+    const auto known = [](std::string_view n) { return n != "no.such"; };
+    const auto bad = k.apply(
+        {{"global", {{"ctrl-shift-y", {{"command", "layout.switch"}, {"args", {{"name", "grid"}}}}},
+                     {"ctrl-shift-u", "project.new"}}},
+         {"layout:grid", {{"ctrl-shift-t", "terminal"}, {"ctrl-shift-j", "tab.next"}}},
+         {"terminal", {{"ctrl-shift-f", "terminal"}}}},
+        known);
+    EXPECT_TRUE(bad.empty()) << bad.front();
+    EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-y")), "layout.switch:grid");
+    EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-u")), "space.new");
+    EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-t")), "tab.new");  // other layouts
+    k.set_layout("grid");
+    EXPECT_FALSE(k.global(*Keymap::parse("ctrl-shift-t")).has_value());  // to the program
+    EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-j")), "tab.next");
+    EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-shift-f")), "terminal");
+    EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-v")), "terminal.paste");
+
+    const auto errs = k.apply({{"windows", {{"f5", "tab.new"}}}, {"global", {{"f6", "no.such"}}}}, known);
+    EXPECT_EQ(errs.size(), 2u);
 }
 
 // herdr spaces: colours go to the least-used name, spaces move only within their machine.

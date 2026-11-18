@@ -14,6 +14,7 @@
 #include <ctime>
 #include <deque>
 #include <filesystem>
+#include <array>
 #include <future>
 #include <fstream>
 #include <iomanip>
@@ -273,6 +274,7 @@ struct Settings {
     std::string sound_blocked;
     std::string welcomed;        // "", "finished" or "skipped"
     std::string seen_version;    // What's new was shown for this version (herdr: once after an update)
+    std::vector<std::string> folded_machines;  // machine headers folded in the sidebar
     std::vector<std::string> panels = {"files", "changes"};  // panel buttons in the tab bar
 };
 
@@ -342,6 +344,9 @@ Settings load_settings() {
     s.sound_blocked = j.value("sound_blocked", "");
     s.welcomed = j.value("welcomed", "");
     s.seen_version = j.value("seen_version", "");
+    for (const auto& m : j.value("folded_machines", Json::array()))
+        if (m.is_string())
+            s.folded_machines.push_back(m.get<std::string>());
     if (const auto it = j.find("panels"); it != j.end() && it->is_array()) {
         s.panels.clear();
         for (const auto& p : *it)
@@ -407,6 +412,7 @@ void save_settings(const Settings& s) {
             {"sound_blocked", s.sound_blocked},
             {"welcomed", s.welcomed},
             {"seen_version", s.seen_version},
+            {"folded_machines", s.folded_machines},
             {"panels", s.panels},
             {"mods_enabled", std::vector<std::string>(s.mods_enabled.begin(), s.mods_enabled.end())},
             {"layout", s.layout},
@@ -798,6 +804,31 @@ constexpr CommandInfo kCommands[] = {
     {"mods.folder", "Open the mods folder"},
     {"app.exit_all", "Exit and stop all sessions"},
 };
+
+// Command names keys.json may bind (herdr validates actions and reports unknown ones). A
+// "<mod>.<command>" action is accepted when that mod folder exists.
+bool known_command(std::string_view name) {
+    static const std::set<std::string, std::less<>> kNames = {
+        "agent.focus", "agent.keep", "agent.new", "agent.next", "agent.peek", "agent.prev", "app.exit_all",
+        "app.feedback", "app.help", "app.keys", "app.palette", "app.picker", "app.reset", "app.settings",
+        "app.welcome", "app.whats_new", "app.zoom_in", "app.zoom_out", "app.zoom_reset", "details.toggle",
+        "launch", "layout", "layout.clone", "layout.reset", "layout.switch", "layout.toggle", "machine.add",
+        "mod", "mod.clone", "mod.open", "mods.folder", "mods.reload", "pane.close", "pane.go", "pane.park",
+        "pane.rename", "pane.resize", "pane.split", "pane.swap", "pane.zoom", "panel", "session.focus",
+        "session.force_stop", "session.interrupt", "session.restart", "session.stop", "sidebar.rail",
+        "sidebar.toggle", "space.close", "space.move", "space.new", "space.next", "space.prev", "space.rename",
+        "space.select", "tab.close", "tab.move", "tab.new", "tab.next", "tab.prev", "tab.rename", "tab.select",
+        "tab.settle", "tab.unsettle", "terminal.copy", "terminal.kill", "terminal.open", "terminal.park",
+        "terminal.paste", "terminal.paste_image", "terminal.peek", "terminal.pin", "terminal.right_click",
+        "terminal.scroll", "terminal.search", "terminal.select_all", "theme", "window.close", "window.maximize",
+        "window.minimize", "worktree.new", "worktree.open", "worktree.remove", "app.quit", "overlay.close"};
+    if (kNames.contains(name))
+        return true;
+    const auto dot = name.find('.');
+    std::error_code ec;
+    return dot != std::string_view::npos &&
+           std::filesystem::is_directory(data_dir() / L"mods" / win::to_wide(std::string(name.substr(0, dot))), ec);
+}
 
 const char* command_label(const std::string& id) {
     for (const auto& c : kCommands)
@@ -1777,6 +1808,11 @@ struct App::State {
     GitCache git;
     std::unique_ptr<SidePanels> panels = std::make_unique<SidePanels>();
     std::set<std::string> folded_machines;
+    struct TabWheel {
+        float acc = 0;
+        int steps = 0;
+        Clock::time_point last{}, switched{};
+    } tab_wheel;
     std::set<std::string> folded_groups;
     std::set<std::string> folded_agents;
     std::map<std::string, Attention> last_att;
@@ -1937,6 +1973,7 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     s_->host = std::move(host);
     s_->settings = load_settings();
     g_pal = palette_by_id(s_->settings.theme);
+    s_->folded_machines.insert(s_->settings.folded_machines.begin(), s_->settings.folded_machines.end());
     s_->keymap = ui::Keymap::defaults();
     {
         std::ifstream in(data_dir() / L"keys.json", std::ios::binary);
@@ -1947,7 +1984,7 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
             if (j.is_discarded())
                 s_->keymap_errors.emplace_back("keys.json is not valid JSON");
             else
-                s_->keymap_errors = s_->keymap.apply(j);
+                s_->keymap_errors = s_->keymap.apply(j, known_command);
         }
     }
     std::string cwd = s_->settings.last_cwd;
@@ -2407,7 +2444,7 @@ void update_attention(App::State& s) {
                             (t.name.empty() ? std::to_string(loc.tab + 1) : t.name);
                 }
                 s.toast(blocked ? title + " needs you" : title + " finished",
-                        v.agent_message.empty() ? where : v.agent_message, id, blocked ? g_pal->needs_you : g_pal->focus);
+                        where, id, blocked ? g_pal->needs_you : g_pal->focus);  // herdr: "<space> / <tab>"
             }
         }
         // A program that ends with an error right after it was started here: say why.
@@ -2501,7 +2538,12 @@ void run_command(App::State& s, const std::string& cmd) {
     };
     // herdr command names (keys.json written for herdr keeps working).
     static const std::map<std::string, std::string> kHerdrNames = {
-        {"terminal.park", "pane.park"}, {"terminal.peek", "agent.peek"}, {"terminal.open", "tab.new"}};
+        {"terminal.park", "pane.park"}, {"terminal.peek", "agent.peek"}, {"terminal.open", "tab.new"},
+        {"app.quit", "window.close"}};  // herdr Quit: the window closes, agents keep running
+    if (name == "layout.toggle" && arg == "sidebar") {  // herdr ctrl-shift-b
+        run_command(s, "sidebar.toggle");
+        return;
+    }
     if (const auto al = kHerdrNames.find(name); al != kHerdrNames.end()) {
         run_command(s, arg.empty() ? al->second : al->second + ":" + arg);
         return;
@@ -2895,6 +2937,11 @@ void run_command(App::State& s, const std::string& cmd) {
     } else if (name == "terminal.search") {
         if (!focused.empty())
             s.views[focused].view.open_search();
+    } else if (name == "terminal.copy" || name == "terminal.paste" || name == "terminal.paste_image" ||
+               name == "terminal.select_all" || name == "terminal.scroll") {
+        // Run by the focused terminal on its next frame (palette, keys.json in global).
+        if (!focused.empty())
+            s.views[focused].view.request(name == "terminal.paste_image" ? std::string("terminal.paste") : cmd);
     } else if (name == "worktree.new") {
         s.show_worktree = true;
         s.wt_error.clear();
@@ -3182,6 +3229,9 @@ void draw_mod_panels(App::State& s, const std::string& where) {
         ImGui::Dummy(ImVec2(0, px(4)));
     }
 }
+
+// herdr tabs.js 25-29: a tab is shown by its lead pane: the first agent, else the first pane.
+std::string lead_pane(App::State& s, const std::vector<std::string>& ids);
 
 // ------------------------------------------------------------------ herdr window chrome
 // Layout, sizes and behaviour follow herdr-app's default layout and mods (layouts/main.json,
@@ -3579,6 +3629,8 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
                     s.folded_machines.erase(row.machine);
                 else
                     s.folded_machines.insert(row.machine);
+                s.settings.folded_machines.assign(s.folded_machines.begin(), s.folded_machines.end());
+                save_settings(s.settings);
             }
             const bool hov = ImGui::IsItemHovered();
             if (hov)
@@ -3776,6 +3828,13 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
 // for them now or had one before.
 bool is_agent(const ui::SessionView& v) {
     return !v.agent_source.empty() || v.agent_state != "Unknown" || v.last_agent_state != "Unknown";
+}
+
+std::string lead_pane(App::State& s, const std::vector<std::string>& ids) {
+    for (const auto& id : ids)
+        if (const auto it = s.views_by_id.find(id); it != s.views_by_id.end() && is_agent(it->second))
+            return id;
+    return ids.empty() ? std::string() : ids.front();
 }
 
 int urgency(Attention a) {
@@ -4094,16 +4153,6 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         }
         if (hov && !v.agent_message.empty())
             ImGui::SetTooltip("%s", v.agent_message.c_str());
-        if (begin_menu("##agentctx")) {
-            if (menu_row(s, ui::icon::kZoom, "Peek"))
-                run_command(s, "agent.peek:" + id);
-            if (s.ws.find(id).space < 0 && menu_row(s, ui::icon::kSplitRight, "Open as pane"))
-                run_command(s, "agent.keep:" + id);
-            menu_separator();
-            if (menu_row(s, ui::icon::kClose, "End", {}, v.process_state == "Running"))
-                run_command(s, "terminal.kill:" + id);
-            ImGui::EndPopup();
-        }
         ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + rh));
         ImGui::PopID();
     };
@@ -4349,9 +4398,8 @@ void draw_window_buttons(App::State& s, float right, float top, float h) {
     const bool hov = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     if (hov)
-        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + b, y + b), IM_COL32(0xe8, 0x11, 0x23, 255), px(6));
-    draw_icon(s, dl, ui::icon::kWinClose, fpx(16), ImVec2(x + b * 0.5f, y + b * 0.5f),
-              hov ? IM_COL32(255, 255, 255, 255) : g_pal->dim);
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + b, y + b), g_pal->hover, px(6));
+    draw_icon(s, dl, ui::icon::kWinClose, fpx(16), ImVec2(x + b * 0.5f, y + b * 0.5f), hov ? g_pal->text : g_pal->dim);
     if (close)
         ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
 }
@@ -4419,7 +4467,7 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
             // herdr: an unnamed tab follows its agent's live title; a shell shows its program.
             std::string label = tab.name;
             if (label.empty() && !ids.empty()) {
-                const std::string shown_id = tab.focused.empty() ? ids.front() : tab.focused;
+                const std::string shown_id = lead_pane(s, ids);
                 if (const auto vi = s.views_by_id.find(shown_id); vi != s.views_by_id.end() && is_agent(vi->second))
                     label = agent_detail(s, shown_id, vi->second);
                 if (label.empty())
@@ -4487,8 +4535,6 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
             }
             if (hov && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                 open_rename(s, "tab", tab.id, tab.name);
-            if (hov && ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
-                close_tab = it.i;
             if (begin_menu("##tabctx")) {
                 if (menu_row(s, ui::icon::kCommand, "Rename", s.keymap.chord_for("tab.rename"))) {
                     s.ws.select_tab(it.i);
@@ -4510,7 +4556,7 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
             const float cy = a.y + th * 0.5f;
             float cx = a.x + px(10);
             const auto ids = s.ws.sessions_in(tab);
-            const std::string shown = tab.focused.empty() && !ids.empty() ? ids.front() : tab.focused;
+            const std::string shown = ids.empty() ? std::string() : lead_pane(s, ids);
             if (s.views_by_id.count(shown)) {
                 const auto& v = s.views_by_id[shown];
                 program_badge(dl, s.fonts.ui_bold, fpx(10.5f), ImVec2(cx, cy - px(7)), px(14),
@@ -4548,11 +4594,34 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
                 s.ws.move_tab(s.ws.active_space, s.drag_tab, drop);
             s.drag_tab = -1;
         }
-        // The wheel over the bar switches tabs, one per notch.
-        if (ImGui::IsMouseHoveringRect(ImVec2(x, pos.y), ImVec2(tabs_right, pos.y + height)) &&
-            ImGui::GetIO().MouseWheel != 0 && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) {
-            s.ws.cycle_tab(ImGui::GetIO().MouseWheel < 0 ? 1 : -1);
-            s.focus_view(s.ws.focused_session());
+        // The wheel over the bar switches tabs (herdr tabs.js wheel handling).
+        const float wheel = ImGui::GetIO().MouseWheel;
+        if (ImGui::IsMouseHoveringRect(ImVec2(x, pos.y), ImVec2(tabs_right, pos.y + height)) && wheel != 0 &&
+            !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) {
+            const auto now = Clock::now();
+            auto& w = s.tab_wheel;
+            int step = 0;
+            if (std::abs(wheel) >= 1.0f) {  // a mouse notch: one tab
+                step = wheel < 0 ? 1 : -1;
+                w = {};
+            } else {
+                const float px_delta = -wheel * 120.0f;
+                if (now - w.last > std::chrono::milliseconds(250) || (w.acc != 0 && (w.acc > 0) != (px_delta > 0)))
+                    w = {};
+                w.acc += px_delta;
+                w.last = now;
+                const float need = w.steps == 0 ? 20.0f : 60.0f;
+                if (std::abs(w.acc) >= need && now - w.switched >= std::chrono::milliseconds(100)) {
+                    step = w.acc > 0 ? 1 : -1;
+                    w.acc -= static_cast<float>(step) * need;
+                    ++w.steps;
+                    w.switched = now;
+                }
+            }
+            if (step != 0) {
+                s.ws.cycle_tab(step);
+                s.focus_view(s.ws.focused_session());
+            }
         }
         x = std::min(tx, tabs_right) + px(3);
     }
@@ -4656,7 +4725,8 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
     const float fs = ImGui::GetFontSize();
     const float header_h = px(30);
     const float cy = pos.y + header_h * 0.5f;
-    const bool pane_hovered = ImGui::IsMouseHoveringRect(pos, max, false) && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
+    const bool pane_hovered = ImGui::IsMouseHoveringRect(pos, ImVec2(max.x, pos.y + header_h), false) &&
+                              ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
     float hx = pos.x + px(10);
     program_badge(dl, s.fonts.ui_bold, fpx(10.5f), ImVec2(hx, cy - px(7)), px(14), program_info(v.program, v.profile_id));
     hx += px(14) + px(8);
@@ -4669,7 +4739,7 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
     float rx = max.x - px(8);
     if (pane_hovered) {
         auto hbtn = [&](const char* bid, const char* glyph, const char* cmd, const char* tip) {
-            const float b = px(22);
+            const float b = px(20);  // 14 px icon, 3 px padding
             rx -= b;
             const std::string t = std::string(tip) + "  " + s.keymap.chord_for(cmd);
             if (icon_button(s, bid, glyph, ImVec2(rx, cy - b * 0.5f), b, fpx(14), t.c_str(), g_pal->dim)) {
@@ -4694,19 +4764,8 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
             rx -= mw + px(8);
         }
     }
-    // Folder (~ for home) and branch, dim.
-    const std::string where = display_path(v.cwd);
-    const float ww = text_clipped(dl, s.fonts.ui, fpx(11.5f), ImVec2(hx, cy - fpx(11.5f) * 0.6f), g_pal->faint, where,
-                                  rx - hx);
-    if (s.machine_of[id].empty()) {
-        const auto g = s.git.get(v.cwd);
-        const float bx = hx + ww + px(10);
-        if (g.repo && !g.branch.empty() && bx + px(40) < rx) {
-            draw_icon(s, dl, ui::icon::kBranch, fpx(12), ImVec2(bx + px(6), cy), g_pal->faint);
-            text_clipped(dl, s.fonts.ui, fpx(11.5f), ImVec2(bx + px(16), cy - fpx(11.5f) * 0.6f), g_pal->faint,
-                         g.branch == "HEAD" ? std::string("(detached)") : g.branch, rx - bx - px(16));
-        }
-    }
+    // Folder (~ for home), dim, the rest of the width.
+    text_clipped(dl, s.fonts.ui, fpx(11.5f), ImVec2(hx, cy - fpx(11.5f) * 0.6f), g_pal->faint, display_path(v.cwd), rx - hx);
     // Grip (herdr pane_drag.rs): 28x18 in the middle of the header, two rows of three dots;
     // only with two or more panes and not zoomed. Dragging it moves the pane.
     {
@@ -4791,6 +4850,51 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
         vs.view.scroll_speed = s.settings.scroll_speed;
         vs.view.line_height = s.settings.line_height;
         vs.view.right_click_to_program = s.ws.right_click_program.contains(id);
+        // herdr pane menu (menu/main.js 24-81): Split right, Split down, Zoom, Rename, where
+        // right-clicks go, Send back to <parent>, Close pane.
+        vs.view.menu_rows = [&s, id, parent = v.parent] {
+            auto pick = [&](const char* glyph, const char* label, const char* cmd) {
+                if (!menu_row(s, glyph, label, cmd != nullptr ? s.keymap.chord_for(cmd) : std::string()))
+                    return false;
+                s.ws.focus(id);
+                return true;
+            };
+            if (pick(ui::icon::kSplitRight, "Split right", "pane.split:right")) {
+                run_command(s, "pane.split:right");
+                return true;
+            }
+            if (pick(ui::icon::kSplitDown, "Split down", "pane.split:down")) {
+                run_command(s, "pane.split:down");
+                return true;
+            }
+            if (pick(ui::icon::kZoom, "Zoom", "pane.zoom")) {
+                run_command(s, "pane.zoom");
+                return true;
+            }
+            if (pick(ui::icon::kCommand, "Rename", "pane.rename")) {
+                run_command(s, "pane.rename");
+                return true;
+            }
+            const bool to_program = s.ws.right_click_program.contains(id);
+            if (pick(ui::icon::kTerminal, to_program ? "Use AgentDesk right-click menu" : "Send right-clicks to pane",
+                     nullptr)) {
+                run_command(s, to_program ? "terminal.right_click:menu" : "terminal.right_click:program");
+                return true;
+            }
+            if (!parent.empty() && s.views_by_id.count(parent)) {
+                const std::string label = "Send back to " + s.pane_title(parent);
+                if (pick(ui::icon::kArrowLeft, label.c_str(), nullptr)) {
+                    run_command(s, "pane.park");
+                    return true;
+                }
+            }
+            menu_separator();
+            if (pick(ui::icon::kClose, "Close pane", "pane.close")) {
+                run_command(s, "pane.close");
+                return true;
+            }
+            return false;
+        };
         vs.view.parent_name = !v.parent.empty() && s.views_by_id.count(v.parent) ? s.pane_title(v.parent) : std::string();
         vs.view.cell_width = s.settings.cell_width;
         vs.view.theme.default_bg = g_pal->term_bg;
@@ -5673,7 +5777,7 @@ const char* command_group(const std::string& id) {
         return "Space";
     if (starts("layout") || starts("sidebar.") || starts("details.") || starts("panel"))
         return "Layout";
-    if (starts("terminal.") || starts("session.") || id == "agent.new")
+    if (starts("terminal.") || starts("session."))
         return "Terminal";
     if (starts("agent."))
         return "Agent";
@@ -5694,17 +5798,69 @@ void draw_palette(App::State& s) {
     auto add = [&](std::string title, std::string cmd, std::string group) {
         all.push_back({std::move(title), cmd, std::move(group), s.keymap.chord_for(cmd)});
     };
-    add("Go to space or tab\xE2\x80\xA6", "app.picker", "Tab");
-    for (const auto& c : kCommands)
-        if (std::string(c.id) != "app.picker")
-            add(c.label, c.id, command_group(c.id));
-    add("Minimize window", "window.minimize", "Window");
-    add("Maximize window", "window.maximize", "Window");
-    add("Close window", "window.close", "Window");
-    for (const auto& p : kPalettes)
-        add(std::string("Theme: ") + p.label, std::string("theme:") + p.id, "App");
+    // herdr palette.js 22-97: the named entries, titles and order first.
+    static constexpr std::array<std::array<const char*, 3>, 45> kNamed = {{
+        {"tab.new", "New tab", "Tab"},
+        {"app.picker", "Go to space or tab\xE2\x80\xA6", "Tab"},
+        {"tab.rename", "Rename tab", "Tab"},
+        {"tab.close", "Close tab", "Tab"},
+        {"tab.next", "Next tab", "Tab"},
+        {"tab.prev", "Previous tab", "Tab"},
+        {"pane.split:right", "Split right", "Pane"},
+        {"pane.split:down", "Split down", "Pane"},
+        {"pane.close", "Close pane", "Pane"},
+        {"pane.zoom", "Zoom pane", "Pane"},
+        {"pane.go:left", "Focus pane left", "Pane"},
+        {"pane.go:right", "Focus pane right", "Pane"},
+        {"pane.go:up", "Focus pane up", "Pane"},
+        {"pane.go:down", "Focus pane down", "Pane"},
+        {"pane.swap:left", "Swap pane left", "Pane"},
+        {"pane.swap:right", "Swap pane right", "Pane"},
+        {"pane.swap:up", "Swap pane up", "Pane"},
+        {"pane.swap:down", "Swap pane down", "Pane"},
+        {"space.new", "New space", "Space"},
+        {"space.rename", "Rename space", "Space"},
+        {"space.close", "Close space", "Space"},
+        {"space.next", "Next space", "Space"},
+        {"space.prev", "Previous space", "Space"},
+        {"layout.switch", "Next layout", "Layout"},
+        {"layout.reset", "Reset layout", "Layout"},
+        {"layout.clone", "Duplicate layout", "Layout"},
+        {"mod.clone", "Duplicate mod", "Layout"},
+        {"terminal.open", "New terminal", "Terminal"},
+        {"terminal.copy", "Copy", "Terminal"},
+        {"terminal.paste", "Paste", "Terminal"},
+        {"agent.next", "Next agent", "Agent"},
+        {"agent.prev", "Previous agent", "Agent"},
+        {"window.minimize", "Minimize window", "Window"},
+        {"window.maximize", "Maximize window", "Window"},
+        {"window.close", "Close window", "Window"},
+        {"app.settings", "Settings", "App"},
+        {"app.help", "Keys", "App"},
+        {"app.welcome", "Welcome", "App"},
+        {"app.whats_new", "What's new", "App"},
+        {"app.reset", "Reset to the default screen", "App"},
+        {"app.zoom_in", "Zoom in", "App"},
+        {"app.zoom_out", "Zoom out", "App"},
+        {"app.zoom_reset", "Reset zoom", "App"},
+        {"app.quit", "Quit AgentDesk", "App"},
+        {"app.palette", "", ""},  // not listed (the palette itself)
+    }};
+    std::set<std::string> named;
+    for (const auto& [cmd, title, group] : kNamed) {
+        named.insert(cmd);
+        if (*title != '\0')
+            add(title, cmd, group);
+        if (std::string_view(cmd) == "app.quit")
+            for (const auto& p : kPalettes)
+                add(std::string("Theme: ") + p.label, std::string("theme:") + p.id, "App");
+    }
     for (const auto& l : s.layouts)
         add("Layout: " + l.name, "layout:" + l.name, "Layout");
+    // Then every other command, in its group (herdr adds the app's other commands the same way).
+    for (const auto& c : kCommands)
+        if (!named.contains(c.id))
+            add(c.label, c.id, command_group(c.id));
     for (const auto& c : s.mods->commands())
         add(c.mod + ": " + c.label, "mod:" + c.mod + ":" + c.id, "Mods");
     std::string q;
@@ -6147,12 +6303,12 @@ void draw_toasts(App::State& s) {
     while (!s.toasts.empty() && s.toasts.front().until < now)
         s.toasts.pop_front();
     const ImGuiViewport* vp = ImGui::GetMainViewport();
-    float y = vp->WorkPos.y + vp->WorkSize.y - px(16) - px(28);
+    float y = vp->WorkPos.y + vp->WorkSize.y - px(16);
     const float w = px(340);
     int n = 0;
     for (auto it = s.toasts.rbegin(); it != s.toasts.rend(); ++it, ++n) {
         const auto& t = *it;
-        const float h = t.body.empty() ? px(44) : px(62);
+        const float h = px(72);
         y -= h;
         ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - w - px(16), y));
         ImGui::SetNextWindowSize(ImVec2(w, h));
@@ -6164,7 +6320,7 @@ void draw_toasts(App::State& s) {
                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const ImVec2 wp = ImGui::GetWindowPos();
-        const float ty = wp.y + (t.body.empty() ? h * 0.5f - fpx(13) * 0.6f : px(14));
+        const float ty = wp.y + (t.body.empty() ? h * 0.5f - fpx(13) * 0.6f : h * 0.5f - px(17));
         dl->AddCircleFilled(ImVec2(wp.x + px(18), ty + fpx(13) * 0.55f), px(4), t.color);
         text_clipped(dl, s.fonts.ui_bold, fpx(13), ImVec2(wp.x + px(32), ty), g_pal->text, t.title, w - px(46));
         if (!t.body.empty()) {
@@ -6510,7 +6666,7 @@ void draw_rename(App::State& s) {
     ImGui::TextDisabled("%s", mod_clone                  ? "its folder name in the mods folder"
                               : s.rename_kind == "space" ? "empty: named after its folder"
                               : s.rename_kind == "tab" ? "empty: its number"
-                                                       : "empty: its program");
+                                                       : "empty: unnamed");
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, px(6)));
     const float bw = px(80);
@@ -7750,6 +7906,7 @@ void App::frame() {
     State& s = *s_;
     g_scale = s.dpi * ui_scale(s.settings);
     s.fonts.mono_size = s.settings.font_size / ui_text_factor(s.settings);
+    s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
     const bool connected = s.host->connected();
 
     if (auto doc = s.host->take_ui_state()) {
