@@ -304,3 +304,15 @@ TEST(Workspace, SettledTabsAreSkippedUntilShown) {
     EXPECT_TRUE(back.spaces[0].tabs[0].settled);
     EXPECT_FALSE(back.spaces[0].tabs[1].settled);
 }
+
+// herdr writes its defaults as keys.json when the file is missing: that file must apply cleanly
+// and change nothing.
+TEST(Keymap, DefaultFileAppliesCleanly) {
+    auto k = Keymap::defaults();
+    const auto file = Keymap::default_file();
+    EXPECT_TRUE(k.apply(file, [](std::string_view) { return true; }).empty());
+    EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-t")), "tab.new");
+    EXPECT_EQ(*k.global(*Keymap::parse("ctrl-3")), "tab.select:3");
+    EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-v")), "terminal.paste");
+    EXPECT_EQ(Keymap::defaults().global_map(), k.global_map());
+}
