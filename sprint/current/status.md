@@ -25,3 +25,34 @@ plan: docs/design/AgentDesk_Design.md 5.6
 | 2026-11-19 | Herdr 98 版面、線上更新檢查、使用統計 | 使用者決定三項都要做（原本列為刻意保留的差異） | defaults/mods/win98、frame/settings Updates／Privacy、src/telemetry.rs；使用者 2026-11-19 | — |
 | 2026-11-19 | 移除 Board、Grid、Focus | 完成：內建版面只剩 workspace（herdr 的 main）與 terminals；版面檔不再有 `main` 鍵 | src/window.rs LAYOUTS | 69519d6 |
 | 2026-11-19 | 設定 › Look 的版面卡片 | 照 herdr 改：卡片寬 124、62 px 預覽圖、名稱在下方、選中的加打勾與強調色外框 | frame/settings/main.js 242-320 | 69519d6 |
+| 2026-11-19 | Herdr 98 版面（win98） | 完成：第三個內建版面，自己畫桌面、工作列、Start 選單、窗格標題列、對話框、Mines、Solitaire、Clippy，程式碼在 `apps/desktop/win98_*.inl`、純邏輯在 `libs/ui/src/win98.cpp` | layouts/win98.json；mods/win98 全部 JS | 585481d |
+| 2026-11-19 | Herdr 98 的尺寸 | 桌面欄 84、工作列 28、窗格標題列 18、邊框 3 用 Win98 像素；窗格外距 10、間距 8、終端機內距 [4, 2] 用版面 px（`px()`） | win98.json 18-96；kit.js 441-479 | 585481d |
+| 2026-11-19 | Win98 像素怎麼換算 | 一個 Win98 像素＝scale（Small Fonts 1、Large Fonts 2）×螢幕 DPI，不乘 zoom；herdr 先除以 zoom 再由 zoom 乘回，結果相同 | kit.js 4-6、40-51 | 585481d |
+| 2026-11-19 | Herdr 98 的字型 | 從 `win98\fonts` 用 ImGui 1.92 動態字型載入：介面 Pixelated MS Sans Serif（Regular／Bold），終端機 PxPlus IBM VGA 8x16；切進版面時換上、離開時還原；終端機 16 px，Large Fonts 為 32 px（32／zoom） | win98.json 92-94；README.md 8-10；kit.js 451-452 | 585481d |
+| 2026-11-19 | 圖片成為 DX11 貼圖 | SVG 用 lunasvg 3.5.0（MIT，vcpkg，加 plutovg 1.3.3）依畫出的像素大小點陣化，PNG 用 WIC 解碼；以 ImGui 1.92 user texture 交給 DX11 後端建立，裝置遺失時由後端重建（`RegisterUserTexture` 只在 imgui_adapter 呼叫）。nanosvg 不支援 `<text>`、`<pattern>`，撲克牌用得到 | kit.js 202-225；sol.js 341-344；img/sol-*.svg | 2ad55b9 |
+| 2026-11-19 | 單色 SVG（`svg().text_color()`） | 以 SVG 的形狀當遮罩填白，再用指定顏色著色，與 GPUI 的 svg 元素相同 | kit.js 222、233、302、351、384 | 2ad55b9 |
+| 2026-11-19 | 撲克牌上的 DejaVu Serif | Windows 沒有這個字型，改用 Windows 內建的 Times New Roman（times.ttf、timesbd.ttf）給 lunasvg | img/sol-0-1.svg | 585481d |
+| 2026-11-19 | herdr 的 overlay | popup（選單）、window（對話框、遊戲）、dialog（開機畫面、Solitaire 選項）都改成 ImGui 視窗：選單在旁邊按下就關，開啟它的那次按下不算；視窗依最後按下的順序疊放，按在控制項以外就拖曳；有 key 的遊戲視窗記住放下的位置；modal 畫 0.35 黑色遮罩並擋下旁邊的點擊 | herdr.d.ts 395-425；kit.js 356-386；window.rs 4767 | 585481d |
+| 2026-11-19 | herdr 的 `shared()` | 持久化到 `<data>\win98.json`（scale、mute、desktop、clippy、welcome、boot、init、run、apps、mines、sol.draw／scoring／deck、float.clippy、start、menu.owner） | herdr.d.ts 451-454 | 585481d |
+| 2026-11-19 | win98 主題 | `themes/win98.json` 做成 Palette「win98」，標為版面專用，不列在設定與命令面板的主題清單；終端機底色用窗格的 #000000（terminal_opacity 0）。選取色 #000080 改用 alpha 0x80，因為 AgentDesk 把選取畫在文字上面 | themes/win98.json；AGENTS.md 338-339；win98.json 46、97 | 585481d |
+| 2026-11-19 | 終端機 ANSI 16 色 | 未做：AgentDesk 的 TerminalView 不依主題換 ANSI 色表（每個主題都一樣），win98 的 ansi 表沒有用上。待決定是否要讓 TerminalView 支援主題色表 | themes/win98.json `ansi` | — |
+| 2026-11-19 | `layout:win98` 預設按鍵 | 預設 keys.json 加 `ctrl-escape`→`win98.start`、`ctrl-shift-escape`→`win98.taskman`。herdr 的 defaults/keys.json 沒有這段，依 README 加入。Windows 會先攔下 Ctrl+Esc（開始功能表）和 Ctrl+Shift+Esc（工作管理員），這兩個鍵在 Windows 上可能收不到 | mods/win98/README.md 12-17 | 585481d |
+| 2026-11-19 | 版面段在沒有終端機聚焦時 | 視窗層級的快捷鍵也先查 `layout:<name>` 段，再查 global（原本只查 global） | src/keys.rs 115-127 | 585481d |
+| 2026-11-19 | `win98.<command>` | 由 exec_command 轉給 Herdr 98 的工作列處理，只在 win98 版面顯示時生效；keys.json 驗證認得 README 列的命令與 close_tab、close_space | taskbar.js 126-176；README.md 12-17 | 585481d |
+| 2026-11-19 | 縮到工作列（tab.settle） | herdr 讓最後一個顯示中的分頁也能 settle（仍顯示、標為 settled）；`Workspace::settle_tab` 加 `keep_shown`，只有 Herdr 98 使用，其他版面行為不變 | src/model.rs 470-484、857-862 | 585481d |
+| 2026-11-19 | Run 對話框執行命令 | herdr 用 `sh -c "<cmd>\nexec $SHELL"`；Windows 改用 shell profile 執行後留著：PowerShell `-NoExit -Command <cmd>`、cmd `/K <cmd>`，其他 shell `-c`；session.create 加上 `args`。分頁名稱取第一個字並以 `/`、`\` 分段 | dialog.js 221-229 | 585481d |
+| 2026-11-19 | `tab.new {name}` | Placement 加 `tab_name`，Herdr 98 開的分頁帶名字；沒有名字的分頁顯示序號（herdr 相同） | src/model.rs 283-288 | 585481d |
+| 2026-11-19 | Start › Programs › Agents | herdr 用 `command -v` 找安裝的 agent；AgentDesk 改看 agent-host 有沒有同名 profile（claude、codex……）。圖示用 herdr defaults/icons 的 SVG（LobeHub，MIT） | taskbar.js 15-27、82-88 | 585481d |
+| 2026-11-19 | 程式圖示 | 只移植 Start 選單那 11 個 agent 的圖示（含 tint、tile）；shell 和其他程式一律 MS-DOS 圖示。herdr programs.json 其他程式的圖示未移植，待補 | kit.js 210-225；defaults/programs.json | 585481d |
+| 2026-11-19 | DOS 路徑 | herdr 的路徑以 `/` 開頭；Windows 路徑已有磁碟代號時保留，不再加 `C:`；家目錄比對不分大小寫 | kit.js 431-437 | 2ad55b9 |
+| 2026-11-19 | 開機畫面的判斷 | herdr 用 `ps` 查 app 執行多久（45 秒內強制開機畫面）；AgentDesk 用 GetProcessTimes 查 agent-ui 自己 | taskbar.js 48-59、101-120 | 585481d |
+| 2026-11-19 | About 的版本 | Version 用 AgentDesk 的版本；「herdr-core:」字樣保留、值是「?」（AgentDesk 沒有 herdr-core） | dialog.js 477、488 | 585481d |
+| 2026-11-19 | Close Program 的位址 | herdr 顯示 `t3` 這類位址，AgentDesk 顯示 session id | dialog.js 247-251、521 | 585481d |
+| 2026-11-19 | 設定 › Look 的 Herdr 98 卡片 | 顯示版面的 preview 圖 `win98.svg`，等比縮放置中，圓角 6、1 px 邊框，名稱「Herdr 98」；命令面板顯示「Layout: Herdr 98」 | settings/main.js 18、86-99、302-309；palette/main.js 87 | 585481d |
+| 2026-11-19 | 歡迎頁提到 Herdr 98 | 最後一頁加上 herdr 的「More examples in Settings」段落 | welcome/main.js 451-459 | e309fb4 |
+| 2026-11-19 | Clippy 浮動區塊 | 預設在畫面列左邊、靠下、離邊 12 px；拖曳時跟著游標（4 px 起算），放下後吸到最近的邊與三等分位置，存在 `win98.float.clippy`；對話框依邊靠齊。herdr 的彈簧動畫未做 | win98.json 70-80；layout.rs 732-751；floats.rs 14、78-96、253-300；clippy.js 469 | e309fb4 |
+| 2026-11-19 | 鍵盤焦點 | 選單、對話框開啟時拿走鍵盤；關閉後交給最上面的對話框，沒有就回到終端機 | menu.js 229-230；dialog.js 50-51 | fd3740e |
+| 2026-11-19 | ImGui 的 hover 判斷 | 終端機聚焦時 ImGui 一直有 active item，`IsAnyItemHovered()` 永遠為真；拖曳與桌面右鍵改用自己記錄的「游標下有控制項」 | kit.js 139-142 own() | fd3740e |
+| 2026-11-19 | 疊放順序 | Herdr 98 的視窗、選單、Clippy 每個 frame 依順序提到最上層，但 AgentDesk 自己的設定、命令面板（ImGui popup）開著時不提 | herdr.d.ts 405 | fd3740e |
+| 2026-11-19 | 細節對應 | 提示框用 AgentDesk 的 ImGui tooltip；選單超出視窗時夾回視窗內；`toLocaleTimeString` 的 AM／PM 前用一般空白（像素字型沒有 U+202F）；Mines 數字的 Arial Bold 用 Windows 內建的 Arial | taskbar.js 322；dialog.js 687；mines.js 157 | 585481d |
+| 2026-11-19 | 開發用 `--input` 拖曳 | 加 `press:x,y`、`release:x,y`，用來驗證 Clippy 與視窗拖曳；不出貨 | 驗證工具，herdr 沒有對應 | e309fb4 |
