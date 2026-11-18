@@ -1,7 +1,7 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.1  
-日期：2026-11-17｜狀態：MVP 已實作（M0～M4），並補齊 herdr 的主要功能（5.5）；待人工驗收項目見 5.4  
+產品需求與系統設計文件 v2.2  
+日期：2026-11-18｜狀態：MVP 已實作（M0～M4），補齊 herdr 的主要功能（5.5），介面與行為依 herdr-app 原始碼移植（5.6、ADR-15）；待人工驗收項目見 5.4  
 技術基線：C++20、Windows 11 x64、Dear ImGui、Win32、DirectX 11、ConPTY
 
 > 產品名稱定為 AgentDesk，本身以 MIT License 釋出。本文件定義類似 Herdr 使用體驗的獨立實作，不宣稱與 Herdr 協定、程式碼或所有功能相容。內容為建議設計；尚未完成 Windows 實機驗證，不將候選套件或時程視為已驗證成果。
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.2 | 2026-11-18 | 使用者要求完整複刻 herdr、可直接參考並轉寫其程式碼、介面字太小：新增 ADR-15（取代 ADR-13 的「外觀自訂、不複製程式碼」與 ADR-10 的對應句、ADR-12 的版面細節）；新增 5.6；新分頁、新 space、分割一律先開 shell；關閉面板與分頁會結束其中的程式（與 herdr 相同） |
 | 2.1 | 2026-11-17 | 使用者要求功能與 herdr 一樣好用、外觀不同：新增 ADR-13（對齊範圍，手機版不做）、ADR-14（Lua mod）；4.1 改為 space／分頁／分割樹；3.7.2 新增協定方法；3.8 新增 CLI 指令；新增 5.5 |
 | 2.0 | 2026-11-17 | MVP 完成：4.1 主畫面改為實作的版面（側欄 Spaces／Agents、分頁加分割面板、Details 卡片），新增 ADR-12；新增 5.4 MVP 完成狀態與限制；已結束 session 只保留最新 8 個的完整畫面（3.4 補充） |
 | 1.9 | 2026-11-17 | M1 實作補充（3.7.1）：attach 的控制權參數、事件格式、輸入種類、`profile.list`、`history.read` 的 `tail`、錯誤碼 `AMBIGUOUS`、request id 必須跨 client 唯一、`AGENTDESK_DATA_DIR`；3.8 補 `--key`、`shutdown`、`--pipe`、`--no-start`、`--timeout-ms` |
@@ -516,6 +517,25 @@ M0～M4 已實作，驗收矩陣結果見 `contracts/inbox/TestReport_sprint5.md
 | 版面與 mod | ADR-14 | ✅ |
 | 手機 app | 不做 | — |
 
+### 5.6 herdr-app 移植（Sprint 10，2026-11-18，ADR-15）
+
+| 項目 | 依據（herdr-app） | 狀態 |
+|---|---|---|
+| 自繪標題列、視窗按鈕在分頁列、拖曳與貼齊 | layouts/main.json、mods/tabs | ✅ |
+| 側欄 268 px 可拖曳、窄欄模式、品牌列、Settings／Add machine | mods/workspace-chrome | ✅ |
+| Spaces：字母頭像、`repo · branch`、↑↓、worktree 樹狀、拖曳排序、右鍵選單 | mods/spaces | ✅ |
+| Agents：優先度分段或依 space 分組、釘選、時間、狀態標記、子 Agent 樹 | mods/agents | ✅ |
+| 分頁膠囊、拖曳、滾輪、Files／Changes 按鈕、新增選單 | mods/tabs、mods/new-menu | ✅ |
+| 面板外框、滑鼠移上才出現按鈕、拖曳把手移動或互換 | mods/pane、window/pane_drag.rs | ✅ |
+| Files、Changes 面板（檔案樹、git 標記、預覽、差異、commit） | mods/files、mods/changes | ✅（僅本機） |
+| shell 所在資料夾追蹤（PEB＋PowerShell 提示字元 hook） | herdr-core foreground | ✅ |
+| picker、命令面板、Keybinds、peek、toast、confirm、prompt | mods/picker、frame/palette、mods/help 等 | ✅ |
+| 設定視窗、歡迎頁、提示音、首次啟動縮放 | frame/settings、frame/welcome、sound.rs | ✅ |
+| New／Open／Remove worktree 對話框 | mods/worktree | ✅ |
+| Add machine（讀 ~/.ssh/config） | mods/machine-add | ✅ |
+| 提醒規則：needs you 一定響、沒在看才跳通知、error 視同 needs you | model.rs | ✅ |
+| Terminals 版面 | layouts/terminals.json | ✅ |
+
 ## 6. 測試計畫與驗收（QA）
 
 ### 6.1 測試分層
@@ -583,6 +603,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-13 | 功能對齊 herdr，外觀自訂 | 使用者要求「一樣好用，但不能讓人覺得一樣，配色可以不同，功能要一樣」。功能依 herdr-app 公開指南（defaults/AGENTS.md、keys.json）整理：space／分頁／分割、注意力與通知、命令面板、worktree、子 Agent 協作、遠端機器、版面與 mod。手機 app 不做（使用者決定）。配色、圖示、字體與命名都是我們自己的；herdr 為 Apache-2.0，只參考行為，不複製程式碼 |
 | ADR-14 | mod 用 Lua 5.5（vcpkg lua[cpp]，MIT） | 每個 mod 一個沙盒 Lua state：沒有 io、os.execute、require、程式載入，有指令數上限，連續出錯就停用。要啟動程式只能用 `agentdesk.exec`（不經 shell）。UI 以資料（widget 清單）回傳，mod 主機不碰 ImGui，可以單元測試。代價是新增一個依賴，mod 能力受限於我們提供的 API |
 | ADR-12 | 主畫面改用固定版面（側欄＋分頁＋分割面板），不用 ImGui DockSpace | 使用者要求介面接近 herdr（https://herdr.dev/gallery/ 觀察到的預設視窗：Spaces 與 Agents 側欄、分頁、卡片面板、細狀態列）。固定版面每次由 host 的 session 清單重建，不需要 imgui.ini。代價是不能任意拖曳停靠，分割只有左右、每分頁最多 3 個 |
+| ADR-15 | 依 herdr-app 原始碼完整複刻介面與行為（2026-11-18） | 使用者要求「一定要完整複刻，有問題就去查 herdr 的 source code」，並同意直接轉寫其程式碼。依據是 herdr-app commit 321c9a8 的版面檔與 mod（審閱與逐項規格見 docs/research/herdr-app-review.md 與 docs/research/herdr-app/）。版面尺寸、互動、狀態與提醒規則、Files／Changes、picker、命令面板、設定、歡迎頁、worktree 對話框都照 herdr；介面用 C++／ImGui 重寫，不搬 JS 執行環境。herdr 是 Apache-2.0：發布包的 THIRD_PARTY_NOTICES 列出 herdr-app 並附授權，隨附它的兩段提示音；隨附 Geist、JetBrains Mono（OFL）與 Symbols Nerd Font（MIT）。配色保留我們自己的四個主題（使用者同意配色可以不同）。介面文字預設 15 px（herdr 為 13），可在設定調整。代價是 NOTICE 義務，以及部分 herdr 功能限於本機（遠端的 Files／Changes） |
 | ADR-11 | 只用已安裝的 VS 2022 C++ 工具鏈，不另外安裝工具 | 使用者要求；開發環境可重現、無額外依賴。代價是排除需要 Zig 的 libghostty-vt |
 
 ### 7.2 主要風險

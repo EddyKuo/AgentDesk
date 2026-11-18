@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案現況
 
-AgentDesk 是 Windows 11 x64 的原生 AI Agent 工作台：在可分割的終端機面板裡跑多個 coding agent CLI（首發 Claude Code 與 Codex CLI），關掉視窗後工作繼續跑，重開時接回原畫面。設計參考 herdr（https://github.com/herdrdev），但是獨立實作，不追求相容。
+AgentDesk 是 Windows 11 x64 的原生 AI Agent 工作台：在可分割的終端機面板裡跑多個 coding agent CLI（首發 Claude Code 與 Codex CLI），關掉視窗後工作繼續跑，重開時接回原畫面。介面與行為依 herdr 桌面版（https://github.com/herdrdev/herdr-app）的原始碼複刻（ADR-15），用 C++ 重寫，不追求協定相容。
 
-MVP（M0～M4，Sprint 1～5）已完成：結論在 `docs/poc/M0-report.md`、`docs/poc/M4-report.md`，最終驗收矩陣在 `contracts/inbox/TestReport_sprint5.md`。Sprint 6～9 依使用者要求補齊 herdr 的主要功能，外觀自訂（設計文件 5.5、ADR-13、ADR-14）：space／分頁／分割、注意力與通知、命令面板與 keys.json、子 Agent 協作、遠端機器（ssh＋`agentctl bridge`）、版面與 Lua mod。剩下的是人工驗收項目（設計文件 5.4、5.5）。之後的工作依 `sprint/current/plan.md` 的任務順序進行，每完成一項就在 `sprint/current/status.md` 追加一列（只追加不改寫）。需求不清楚時列進設計文件 7.4，不要自己補。
+MVP（M0～M4，Sprint 1～5）已完成：結論在 `docs/poc/M0-report.md`、`docs/poc/M4-report.md`，最終驗收矩陣在 `contracts/inbox/TestReport_sprint5.md`。Sprint 6～9 依使用者要求補齊 herdr 的主要功能，外觀自訂（設計文件 5.5、ADR-13、ADR-14）：space／分頁／分割、注意力與通知、命令面板與 keys.json、子 Agent 協作、遠端機器（ssh＋`agentctl bridge`）、版面與 Lua mod。Sprint 10 依使用者要求依 herdr-app 原始碼完整複刻介面與行為（設計文件 5.6、ADR-15）：有疑問就查 herdr 原始碼，逐項規格在 `docs/research/herdr-app/`。剩下的是人工驗收項目（設計文件 5.4、5.5）。之後的工作依 `sprint/current/plan.md` 的任務順序進行，每完成一項就在 `sprint/current/status.md` 追加一列（只追加不改寫）。需求不清楚時列進設計文件 7.4，不要自己補。
 
 ## 常用指令
 
@@ -49,7 +49,8 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 | `docs/poc/M0-report.md`、`docs/poc/evidence/` | M0 結論與實測 JSON |
 | `sprint/current/`、`sprint/archive/` | Sprint 計畫與狀態 |
 | `.decisions/` | 治理與流程 ADR（`ADR_NNN`）。產品與技術決策是設計文件 7.1 的 `ADR-NN`，兩者不要混用 |
-| `docs/research/herdr-reference.md` | herdr 研究筆記 |
+| `docs/research/herdr-reference.md` | herdr 研究筆記（core 與主產品） |
+| `docs/research/herdr-app-review.md`、`docs/research/herdr-app/` | herdr-app 原始碼審閱與移植規格（版面、側欄、分頁、面板、選單、Files／Changes、設定、字型） |
 | `third_party/*/README.agentdesk.md` | 每個收錄依賴的來源、版本、雜湊與授權 |
 
 設計文件裡的數字（佇列 8 MiB／4 MiB、frame 上限 4 MiB、歷史 10,000 行／16 MiB、停止等待 5 秒、RPC 逾時 5 秒、request_id 保留 10 分鐘）是驗收依據，引用時照抄。
@@ -63,7 +64,8 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 | `libs/protocol` | IPC 分幀（4-byte LE＋UTF-8 JSON）、訊息封包、錯誤碼、畫面編碼 |
 | `libs/host` | `Session` actor（程序＋引擎＋狀態），M1 的 host 由它組成 |
 | `libs/ui` | `TerminalView`（字元格、輸入、IME、選取、搜尋、捲動）、`Workspace`（space／分頁／分割樹、注意力）、`Keymap`、`ModHost`（Lua mod，ImGui 無關）、`git_info`、`HostClient`、唯一碰 `imgui_internal.h` 的 `imgui_adapter.cpp` |
-| `apps/desktop` | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼與崩潰記錄，`app.cpp` 是整個介面（主題、側欄、分頁、面板、版面、命令、對話框、mod 整合、遠端機器） |
+| `apps/desktop` | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列：`WM_NCCALCSIZE`／`WM_NCHITTEST`）與崩潰記錄，`app.cpp` 是整個介面（herdr 版面、側欄、分頁、面板、Files／Changes、picker、命令面板、設定、歡迎頁、worktree、mod 整合、遠端機器） |
+| `third_party/fonts`、`third_party/herdr` | 隨附字型（Geist、JetBrains Mono、Symbols Nerd Font）與 herdr 的授權、提示音；建置時複製到執行檔旁的 `fonts\`、`sounds\` |
 | `tools/` | 開發與量測工具（不出貨） |
 | `tests/unit`、`tests/integration/windows`、`tests/fixtures` | GoogleTest；fixture 是原始位元組檔，由 `tests/fixtures/make_fixtures.py` 產生 |
 | `third_party/libvterm`、`third_party/conpty` | 收錄的 libvterm 0.3.3；隨附 ConPTY 的授權與 NOTICE（二進位由腳本下載到 `bin/`，不進版控） |
@@ -95,7 +97,7 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 
 ## 開發環境（不可另外安裝工具）
 
-使用者要求只用開發機上已安裝的工具（ADR-11），不要安裝 Zig、其他編譯器或建置工具；需要新工具時先問使用者。可用：VS 2022 Build Tools 17.14（MSVC 14.44.35207、Windows SDK 10.0.26100.0）、CMake 4.3.1、Ninja 1.13.2、vcpkg（`C:\vcpkg`，manifest 模式，baseline `afa249f`，triplet `x64-windows-static-md`）、Git for Windows（含 perl）。函式庫走 vcpkg 或收錄原始碼；新依賴要先確認授權與 MIT 相容，herdr（Apache-2.0）只參考設計，不複製程式碼。
+使用者要求只用開發機上已安裝的工具（ADR-11），不要安裝 Zig、其他編譯器或建置工具；需要新工具時先問使用者。可用：VS 2022 Build Tools 17.14（MSVC 14.44.35207、Windows SDK 10.0.26100.0）、CMake 4.3.1、Ninja 1.13.2、vcpkg（`C:\vcpkg`，manifest 模式，baseline `afa249f`，triplet `x64-windows-static-md`）、Git for Windows（含 perl）。函式庫走 vcpkg 或收錄原始碼；新依賴要先確認授權與 MIT 相容。herdr（Apache-2.0）的程式碼使用者同意可以轉寫成 C++（2026-11-18，ADR-15）：轉寫時保留出處註明，發布包的 THIRD_PARTY_NOTICES 已列出 herdr-app 與其授權（`third_party/herdr/LICENSE`）。
 
 ## 對應的 Skill
 
