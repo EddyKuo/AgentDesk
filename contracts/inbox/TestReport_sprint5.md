@@ -74,7 +74,7 @@ change_summary: |
 **嚴重程度**: P1
 **原因**: 格寬取自 `CalcTextSize("M")`，它會無條件進位（12.09 px 算成 13 px），游標和選取越往右越偏；中文字形靠左畫在兩格寬的位置裡，看起來字字分開；⚠、✓、emoji 等符號沒有字型，顯示成「?」
 **處理**: 改用字型的真實寬度並對齊整數像素；每格各自定位；寬字元放大到填滿並置中；加上 Segoe UI Symbol／Emoji 當備援字型，ImGui 改用 32 位元 `ImWchar`
-**證據**: 截圖工具 `tools/qa/screenshot_ui.ps1`；中文、方框字元、BMP 外的 emoji 皆正確
+**證據**: 截圖工具 `build\<preset>\tools\qa\screenshot_ui.exe`；中文、方框字元、BMP 外的 emoji 皆正確
 
 ### 觀察：一次性的 Big5 亂碼
 有一次截圖看到 cmd 的中文變成 Big5 位元組，之後連續 6 次重現不出來。新增 `HostFixture.LocalizedOutputSurvivesResize`（縮放後中文仍是合法 UTF-8），目前通過。列為 P3 觀察項。

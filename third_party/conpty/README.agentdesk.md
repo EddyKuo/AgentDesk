@@ -3,7 +3,7 @@
 | 項目 | 值 |
 |---|---|
 | 版本 | 1.24.260710001（microsoft/terminal v1.24.11911.0） |
-| 取得方式 | `scripts/fetch-conpty.ps1`，釘選版本並驗證 nupkg、`conpty.dll`、`OpenConsole.exe` 三個 SHA-256 |
+| 取得方式 | `fetch_conpty.exe`（`tools/fetch_conpty`），釘選版本並驗證 nupkg、`conpty.dll`、`OpenConsole.exe` 三個 SHA-256 |
 | 放置位置 | `bin/conpty/conpty.dll`、`bin/conpty/x64/OpenConsole.exe`（不進版控，`.gitignore`） |
 | 授權 | MIT（`LICENSE`），第三方聲明見 `NOTICE.md`，兩者皆取自 microsoft/terminal 主分支，2026-11-17 |
 | 決策 | 設計文件 ADR-08（M0 S1-5 實測後定案） |

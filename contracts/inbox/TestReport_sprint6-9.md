@@ -41,7 +41,7 @@ change_summary: |
 | FR-26 遠端 | `HostFixture.ProtocolOverBridgeCommand`（完整協定走 agentctl bridge 的 stdin/stdout）、`RemoteTransport.FailingCommandExplainsWhy` |
 | FR-27 mod | `ModsTest.*`（6 項：只執行啟用的 mod、沙盒、事件與效果、面板與點擊、裝飾、失控迴圈與錯誤） |
 
-## 截圖驗證（tools/qa/screenshot_ui.ps1）
+## 截圖驗證（`build\<preset>\tools\qa\screenshot_ui.exe`）
 
 分割面板（往右、往下）、命令面板、快捷鍵說明、啟動選單、Ember 主題、子 Agent 縮排與 Details、遠端機器分組（`pipe:` 目標）、board 版面、grid 版面。截圖過程中發現並修正：
 
