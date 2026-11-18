@@ -16,6 +16,8 @@ struct HostConnection {
     std::string error;                // why the connection failed, for the person
     std::string host_instance_id;
     std::string host_version;  // "" from a host older than the field
+    // Instance ids whose sessions this host took over in a self-update (design doc 7.4 OQ-09).
+    std::vector<std::string> host_succeeds;
     bool started_host = false;
     bool host_dies_with_launcher = false;  // breakaway denied inside a kill-on-close job
 };

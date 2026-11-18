@@ -29,7 +29,22 @@ struct HostConfig {
     std::string host_version;           // agent-host's version, said in hello (Settings > Updates)
     std::function<void()> on_shutdown;  // host.shutdown accepted
     std::chrono::milliseconds request_dedupe_window{std::chrono::minutes(10)};  // design doc 3.7
+    // ---- self-update (design doc 7.4 OQ-09; herdr src/update.rs 236-262, `hc update`)
+    // Instance ids whose sessions this host took over, newest last (said in hello as
+    // "succeeds", so a client keeps those sessions instead of calling them Lost).
+    std::vector<std::string> succeeds;
+    // host.update went through: the new host holds every session. main stops serving, waits for
+    // the reply to leave, then calls finish_handover() and exits without stopping anything.
+    std::function<void()> on_handed_over;
 };
+
+// The new host's side of a handover (main, `agent-host --takeover`). Reads what the old host
+// sent on `from_old`, adopts every session (nothing runs yet) and answers "ready" on `to_old`,
+// or answers "error <why>" and throws.
+std::shared_ptr<class SessionManager> receive_handover(HostConfig config, HANDLE from_old, HANDLE to_old);
+// After "ready": true once the old host said "go" or has exited (it let go of everything);
+// false when it went away without letting go (then call abandon_adopted()).
+bool await_handover_go(HANDLE from_old, HANDLE old_process);
 
 // Owns all sessions of one host and implements IPC protocol v1 (design doc 3.7).
 //
@@ -52,7 +67,21 @@ public:
     // Releases Session objects of all but the newest exited sessions (not on actor threads).
     void prune_exited();
 
+    // ---- self-update (design doc 7.4 OQ-09)
+    // The new host: the takeover is final; sessions start reading, writing and watching.
+    void start_adopted();
+    // The new host: the takeover did not go through; let go of every adopted session without
+    // ending it (the old host still owns them).
+    void abandon_adopted();
+    // The old host, after on_handed_over: let go of every session without ending it, then tell
+    // the new host to go.
+    void finish_handover();
+    [[nodiscard]] bool handed_over() const noexcept { return handed_over_; }
+
 private:
+    friend std::shared_ptr<SessionManager> receive_handover(HostConfig, HANDLE, HANDLE);
+    struct Adopting {};
+    SessionManager(HostConfig config, Adopting);
     struct Subscriber {
         std::weak_ptr<ipc::Connection> conn;
         std::shared_ptr<const terminal::ScreenSnapshot> last;
@@ -97,6 +126,9 @@ private:
     protocol::Response do_wait(const protocol::Request& req);
     protocol::Response do_label(const protocol::Request& req);
     protocol::Response do_report(const protocol::Request& req);
+    // host.update {exe}: hands every session to a new agent-host (handover.cpp).
+    protocol::Response do_update(const protocol::Request& req);
+    void start_maintenance();
     // Delivers due tasks and reports (maintenance thread, every 200 ms).
     void deliver_pending();
 
@@ -130,6 +162,19 @@ private:
     std::map<std::uint64_t, std::weak_ptr<ipc::Connection>> ui_watchers_;
     std::atomic<bool> stopping_{false};
     std::thread maintenance_;
+
+    // ---- self-update (design doc 7.4 OQ-09)
+    // An update is under way: requests that change anything wait it out (kOverloaded,
+    // retryable), nothing is delivered, nothing pruned.
+    std::atomic<bool> updating_{false};
+    std::atomic<bool> handed_over_{false};
+    std::mutex update_mutex_;  // one host.update at a time
+    struct Successor {
+        platform::win::UniqueHandle process;
+        platform::win::UniqueHandle to_new;
+        std::vector<ManagedPtr> sessions;  // frozen, handed over
+    };
+    std::optional<Successor> successor_;
 };
 
 }  // namespace agentdesk::host

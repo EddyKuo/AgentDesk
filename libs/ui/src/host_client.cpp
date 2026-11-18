@@ -446,8 +446,12 @@ bool HostClient::try_connect(bool allow_start) {
     {
         std::lock_guard lock(mutex_);
         // New host instance: sessions we knew were owned by the old one and are Lost now.
-        // Never re-run anything automatically (design doc 4.3).
-        if (!instance_id_.empty() && instance_id_ != hc.host_instance_id) {
+        // Never re-run anything automatically (design doc 4.3). Unless the new host took them
+        // over in a self-update (design doc 7.4 OQ-09; herdr hc.rs 26-28: "cores restart and
+        // their programs survive, so reattach later"): then they are the same, still running.
+        const bool took_over = std::find(hc.host_succeeds.begin(), hc.host_succeeds.end(), instance_id_) !=
+                               hc.host_succeeds.end();
+        if (!instance_id_.empty() && instance_id_ != hc.host_instance_id && !took_over) {
             for (auto& [id, s] : sessions_) {
                 std::lock_guard sl(s->mutex_);
                 s->view_.lost = true;

@@ -7,6 +7,7 @@
 #include <set>
 
 #include "agentdesk/host/git_tools.hpp"
+#include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/platform/win/error.hpp"
 
 namespace agentdesk::host {
@@ -191,6 +192,10 @@ SessionManager::SessionManager(HostConfig config) : config_(std::move(config)) {
         std::lock_guard lock(mutex_);
         persist_locked();
     }
+    start_maintenance();
+}
+
+void SessionManager::start_maintenance() {
     maintenance_ = std::thread([this] {
         while (!stopping_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -242,6 +247,8 @@ void SessionManager::save_profiles(const std::filesystem::path& file) {
 }
 
 void SessionManager::persist_locked() {
+    if (handed_over_)
+        return;  // sessions.json is the new host's now
     std::vector<SessionRecord> records;
     for (const auto& [id, m] : sessions_)
         records.push_back(m->record);
@@ -299,6 +306,16 @@ void SessionManager::on_message(const ipc::ConnectionPtr& conn, std::string payl
 
 Response SessionManager::dispatch(const ipc::ConnectionPtr& conn, const Request& req) {
     const auto& m = req.method;
+    // An update is moving every session to a new host (design doc 7.4 OQ-09): nothing may change
+    // under it. Reads still answer; the client retries the rest against the new host.
+    if (updating_ || handed_over_) {
+        static const std::set<std::string> kReadOnly = {"hello", "profile.list", "session.list", "session.get",
+                                                        "history.read", "ui.state.get", "fs.list", "fs.read"};
+        if (!kReadOnly.contains(m))
+            return protocol::fail(req.id, ErrorCode::kOverloaded, "agent-host is updating", true);
+    }
+    if (m == "host.update")
+        return do_update(req);
     if (m == "hello")
         return do_hello(req);
     if (m == "profile.list")
@@ -587,6 +604,8 @@ void SessionManager::deliver_pending() {
         std::string text;
     };
     std::vector<Delivery> out;
+    if (updating_ || handed_over_)
+        return;  // the sessions are frozen for a handover; the new host delivers
     {
         std::lock_guard lock(mutex_);
         const auto now = std::chrono::steady_clock::now();
@@ -708,6 +727,8 @@ Response SessionManager::do_report(const Request& req) {
 }
 
 void SessionManager::prune_exited() {
+    if (updating_ || handed_over_)
+        return;  // frozen sessions are being handed over
     std::vector<std::unique_ptr<Session>> doomed;
     {
         std::lock_guard lock(mutex_);
@@ -753,6 +774,10 @@ Response SessionManager::do_hello(const Request& req) {
                  {"host_instance_id", config_.host_instance_id},
                  {"host_version", config_.host_version},
                  {"host_pid", ::GetCurrentProcessId()},
+                 // Self-update (design doc 7.4 OQ-09): the hosts whose sessions this one took
+                 // over (a client keeps those sessions), and where it runs from (agentctl update).
+                 {"succeeds", config_.succeeds},
+                 {"host_exe", win::to_utf8(ipc::sibling_executable(L"agent-host.exe").native())},
                  {"capabilities",
                   {{"osc7501", config_.conpty.bundled}, {"bundled_conpty", config_.conpty.bundled}}}});
 }

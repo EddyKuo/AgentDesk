@@ -2,20 +2,31 @@
 // running"): the pieces that move a live terminal to another owner.
 #include <windows.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <thread>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include "agentdesk/host/session.hpp"
+#include "agentdesk/ipc/pipe.hpp"
+#include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/conpty_api.hpp"
+#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/win/job.hpp"
 #include "agentdesk/platform/win/pty_process.hpp"
+#include "agentdesk/ui/host_client.hpp"
 
 using namespace std::chrono_literals;
 namespace win = agentdesk::platform::win;
+namespace ipc = agentdesk::ipc;
+namespace ui = agentdesk::ui;
 
 namespace {
 
@@ -228,6 +239,214 @@ TEST(Handover, ResumeAfterFreezeCarriesOn) {
     EXPECT_TRUE(wait_until([&] { return last_count(*a) >= at + 4; }, 10s));
     a->force_stop();
     EXPECT_TRUE(a->wait_exit(10s).has_value());
+}
+
+// ---------------------------------------------------------------- whole hosts
+
+namespace {
+
+using Json = nlohmann::json;
+
+// An isolated agent-host (own pipe and data folder) with a counting vt_probe profile.
+class HostUpdate : public ::testing::Test {
+protected:
+    void SetUp() override {
+        static std::atomic<int> counter{0};
+        const auto tag = std::to_wstring(::GetCurrentProcessId()) + L"-" + std::to_wstring(++counter);
+        pipe_ = L"\\\\.\\pipe\\AgentDeskUpdateTest-" + tag;
+        data_dir_ = std::filesystem::temp_directory_path() / (L"agentdesk-updatetest-" + tag);
+        std::filesystem::remove_all(data_dir_);
+        std::filesystem::create_directories(data_dir_);
+        const Json profiles = Json::array({{{"id", "counter"},
+                                            {"name", "probe counter"},
+                                            {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
+                                            {"args", {"counter"}}}});
+        std::ofstream(data_dir_ / L"profiles.json") << Json{{"schema_version", 1}, {"profiles", profiles}}.dump(2);
+        ::SetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", data_dir_.c_str());
+        std::wstring cmd = win::build_command_line(AGENTDESK_HOST_EXE, {L"--pipe", pipe_});
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        ASSERT_TRUE(::CreateProcessW(AGENTDESK_HOST_EXE, cmd.data(), nullptr, nullptr, FALSE, DETACHED_PROCESS,
+                                     nullptr, nullptr, &si, &pi));
+        first_host_.reset(pi.hProcess);
+        ::CloseHandle(pi.hThread);
+        // Every host of this test (the new one inherits the job: the job allows no breakaway)
+        // and so every terminal ends if the test process dies.
+        job_.assign(pi.hProcess);
+        ASSERT_NE(connect(), nullptr) << "host did not come up";
+    }
+    void TearDown() override {
+        if (auto c = connect())
+            c->call("host.shutdown", {{"stop_sessions", true}}, 5s);
+        ::Sleep(500);
+        ::SetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", nullptr);
+        std::error_code ec;
+        std::filesystem::remove_all(data_dir_, ec);
+    }
+    std::unique_ptr<ipc::PipeClient> connect(std::chrono::milliseconds t = 10s) {
+        auto c = ipc::PipeClient::connect(pipe_, t);
+        if (c && !c->call("hello", {{"version", 1}}, 5s))
+            return nullptr;
+        return c;
+    }
+    Json call(ipc::PipeClient& c, const std::string& method, Json params,
+              std::chrono::milliseconds t = 10s) {
+        const auto r = c.call(method, std::move(params), t);
+        if (!r)
+            return {{"error", "no response"}};
+        if (r->error)
+            return {{"error", r->error_message}};
+        return r->result.value_or(Json::object());
+    }
+    std::vector<std::pair<std::uint64_t, std::string>> history(ipc::PipeClient& c, const std::string& id) {
+        std::vector<std::pair<std::uint64_t, std::string>> out;
+        const auto h = call(c, "history.read", {{"session", id}, {"from_line_id", 0}, {"max_lines", 200}});
+        for (const auto& l : h.value("lines", Json::array()))
+            out.emplace_back(l.value("line_id", std::uint64_t{0}), l.value("text", ""));
+        return out;
+    }
+
+    std::wstring pipe_;
+    std::filesystem::path data_dir_;
+    win::UniqueHandle first_host_;
+    win::KillOnCloseJob job_;
+};
+
+int count_in(const std::string& line) {
+    return line.rfind("COUNT ", 0) == 0 ? std::atoi(line.c_str() + 6) : 0;
+}
+
+int last_count(const ui::RemoteSession& s) {
+    const auto snap = s.snapshot();
+    int best = 0;
+    for (int r = 0; snap && r < snap->rows; ++r)
+        best = std::max(best, count_in(snap->row_text(r)));
+    return best;
+}
+
+}  // namespace
+
+// Done-criterion of design doc 7.4 OQ-09: a terminal keeps running through agent-host's update,
+// with its screen and history, and the UI's client reconnects to the same session.
+TEST_F(HostUpdate, TerminalsKeepRunningThroughAnUpdate) {
+    auto c = connect();
+    ASSERT_TRUE(c);
+    const Json hello = call(*c, "hello", {{"version", 1}});
+    const std::string first_instance = hello.value("host_instance_id", "");
+    const Json created = call(*c, "session.create",
+                              {{"profile_id", "counter"},
+                               {"cwd", win::to_utf8(std::filesystem::temp_directory_path().native())},
+                               {"rows", 8},
+                               {"cols", 60}});
+    const std::string id = created.value("session_id", "");
+    ASSERT_FALSE(id.empty()) << created.dump();
+
+    // The UI's own client, as agent-ui uses it.
+    ui::HostClientOptions o;
+    o.host_exe = AGENTDESK_HOST_EXE;
+    o.pipe_name = pipe_;
+    ui::HostClient ui_client(o);
+    std::shared_ptr<ui::RemoteSession> view;
+    ASSERT_TRUE(wait_until(
+        [&] {
+            for (const auto& s : ui_client.sessions())
+                if (s->id() == id && last_count(*s) >= 1)
+                    view = s;
+            return view != nullptr;
+        },
+        15s));
+    ASSERT_TRUE(wait_until([&] { return history(*c, id).size() >= 5; }, 20s)) << "history fills";
+    const auto pid = call(*c, "session.get", {{"session", id}}).value("pid", 0u);
+    ASSERT_NE(pid, 0u);
+    win::UniqueHandle program(::OpenProcess(SYNCHRONIZE, FALSE, pid));
+    ASSERT_TRUE(program);
+
+    const auto history_before = history(*c, id);
+    const Json updated = call(*c, "host.update", {{"exe", win::to_utf8(AGENTDESK_HOST_EXE)}}, 60s);
+    ASSERT_FALSE(updated.contains("error")) << updated.dump();
+    EXPECT_EQ(updated.value("now", "").rfind("agent-host ", 0), 0u) << updated.dump();
+    const std::string second_instance = updated.value("host_instance_id", "");
+    EXPECT_NE(second_instance, first_instance);
+
+    // The old host is gone, the program is not.
+    EXPECT_EQ(::WaitForSingleObject(first_host_.get(), 15000), WAIT_OBJECT_0);
+    EXPECT_EQ(::WaitForSingleObject(program.get(), 0), static_cast<DWORD>(WAIT_TIMEOUT));
+
+    std::unique_ptr<ipc::PipeClient> c2;
+    ASSERT_TRUE(wait_until([&] { return (c2 = connect(1s)) != nullptr; }, 15s));
+    const Json hello2 = call(*c2, "hello", {{"version", 1}});
+    EXPECT_EQ(hello2.value("host_instance_id", ""), second_instance);
+    const auto succeeds = hello2.value("succeeds", Json::array());
+    EXPECT_NE(std::find(succeeds.begin(), succeeds.end(), first_instance), succeeds.end());
+    const Json got = call(*c2, "session.get", {{"session", id}});
+    EXPECT_EQ(got.value("process_state", ""), "Running") << got.dump();
+    EXPECT_EQ(got.value("pid", 0u), pid);
+
+    // History came along, line ids and all, and keeps growing.
+    const auto history_after = history(*c2, id);
+    ASSERT_GE(history_after.size(), history_before.size());
+    for (std::size_t i = 0; i < history_before.size(); ++i)
+        EXPECT_EQ(history_after[i], history_before[i]) << i;
+
+    // The UI's client reconnected to the same session (not Lost) and sees it counting on.
+    const int before = last_count(*view);
+    EXPECT_TRUE(wait_until(
+        [&] { return ui_client.connected() && ui_client.host_instance_id() == second_instance; }, 15s));
+    EXPECT_TRUE(wait_until([&] { return last_count(*view) >= before + 5; }, 15s))
+        << "screen after: " << view->snapshot()->row_text(0);
+    EXPECT_FALSE(view->view().lost);
+    EXPECT_EQ(view->view().process_state, "Running");
+
+    // Every number, in order, across the seam: history then screen.
+    std::string all;
+    for (const auto& [line_id, text] : history(*c2, id))
+        all += text + "\n";
+    for (int n = 1; n < before + 3 && n < 150; ++n)
+        if (all.find("COUNT " + std::to_string(n) + "\n") == std::string::npos) {
+            const auto snap = view->snapshot();
+            std::string screen;
+            for (int r = 0; r < snap->rows; ++r)
+                screen += snap->row_text(r) + "\n";
+            EXPECT_NE(screen.find("COUNT " + std::to_string(n) + "\n"), std::string::npos) << "missing " << n;
+        }
+
+    // sessions.json says Running (never Lost) for the session the new host owns.
+    std::ifstream in(data_dir_ / L"sessions.json");
+    const Json saved = Json::parse(in, nullptr, false);
+    ASSERT_TRUE(saved.is_object());
+    EXPECT_EQ(saved["sessions"][0].value("process_state", ""), "Running");
+
+    // The job still kills on close: ending the new host ends the program.
+    const auto new_pid = hello2.value("host_pid", 0u);
+    win::UniqueHandle second_host(::OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, new_pid));
+    ASSERT_TRUE(second_host);
+    ::TerminateProcess(second_host.get(), 1);
+    EXPECT_EQ(::WaitForSingleObject(program.get(), 10000), WAIT_OBJECT_0);
+}
+
+// A new host that cannot take over (here: not agent-host at all) leaves everything with the old
+// one, running as before.
+TEST_F(HostUpdate, FailedTakeoverKeepsEverything) {
+    auto c = connect();
+    ASSERT_TRUE(c);
+    const std::string first_instance = call(*c, "hello", {{"version", 1}}).value("host_instance_id", "");
+    const Json created = call(*c, "session.create",
+                              {{"profile_id", "counter"},
+                               {"cwd", win::to_utf8(std::filesystem::temp_directory_path().native())},
+                               {"rows", 8},
+                               {"cols", 60}});
+    const std::string id = created.value("session_id", "");
+    ASSERT_FALSE(id.empty());
+    ASSERT_TRUE(wait_until([&] { return history(*c, id).size() >= 2; }, 20s));
+    const Json updated = call(*c, "host.update", {{"exe", win::to_utf8(AGENTDESK_VT_PROBE)}}, 60s);
+    ASSERT_TRUE(updated.contains("error")) << updated.dump();
+    EXPECT_EQ(call(*c, "hello", {{"version", 1}}).value("host_instance_id", ""), first_instance);
+    const auto n = history(*c, id).size();
+    EXPECT_TRUE(wait_until([&] { return history(*c, id).size() >= n + 3; }, 10s)) << "still counting";
+    EXPECT_EQ(call(*c, "session.get", {{"session", id}}).value("process_state", ""), "Running");
+    // And it takes input and requests again (not stuck in "updating").
+    EXPECT_FALSE(call(*c, "session.resize", {{"session", id}, {"rows", 9}, {"cols", 61}}).contains("error"));
 }
 
 // The system's ConPTY has no ConptyPackPseudoConsole: it cannot hand over, and says so.
