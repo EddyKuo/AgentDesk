@@ -17,6 +17,11 @@ call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 if not defined VCPKG_ROOT set "VCPKG_ROOT=C:\vcpkg"
 rem English compiler diagnostics regardless of the OS UI language.
 set VSLANG=1033
+rem VSLANG only works when VS has the English language pack; otherwise cl prints its
+rem "Note: including file:" prefix localized, in the console code page. Ninja matches it byte for
+rem byte against the prefix CMake recorded at configure time, so a different code page (PowerShell
+rem often runs in 65001) silently drops every header dependency. Always use the system OEM page.
+for /f "tokens=3" %%c in ('reg query HKLM\SYSTEM\CurrentControlSet\Control\Nls\CodePage /v OEMCP 2^>nul ^| findstr OEMCP') do chcp %%c >nul
 
 pushd "%~dp0.."
 if /i "%STEP%"=="configure" goto configure
