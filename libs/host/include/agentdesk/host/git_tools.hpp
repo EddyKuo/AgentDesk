@@ -19,6 +19,9 @@ struct ToolResult {
 ToolResult run_tool(const std::vector<std::wstring>& argv, const std::filesystem::path& cwd,
                     std::chrono::milliseconds timeout);
 
+// True for a folder inside a WSL distribution (\\wsl.localhost\... or \\wsl$\...).
+bool is_wsl_path(const std::wstring& path);
+
 // Default checkout location for a new worktree: <base>/<repo folder>/<branch with / -> ->.
 std::filesystem::path default_worktree_path(const std::filesystem::path& base,
                                             const std::filesystem::path& repo, const std::string& branch);

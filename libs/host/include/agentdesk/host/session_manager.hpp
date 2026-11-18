@@ -106,6 +106,7 @@ private:
                        const terminal::ScreenSnapshot& snap, bool droppable, std::string& snapshot_id);
     void persist_locked();
     void load_profiles();
+    void save_profiles(const std::filesystem::path& file);
 
     HostConfig config_;
     mutable std::mutex mutex_;

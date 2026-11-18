@@ -115,6 +115,39 @@ std::vector<Profile> detect_default_profiles() {
     add("pwsh", "PowerShell 7", L"pwsh.exe", {L"-NoLogo"});
     add("powershell", "Windows PowerShell", L"powershell.exe", {L"-NoLogo"});
     add("cmd", "Command Prompt", L"cmd.exe");
+    for (auto& p : detect_wsl_profiles())
+        out.push_back(std::move(p));
+    return out;
+}
+
+// Installed distributions are the subkeys of HKCU\...\Lxss (DistributionName value); wsl.exe
+// alone exists even without WSL. Docker Desktop's internal distributions are not shells.
+std::vector<Profile> detect_wsl_profiles() {
+    std::vector<Profile> out;
+    wchar_t exe[MAX_PATH]{};
+    if (::SearchPathW(nullptr, L"wsl.exe", nullptr, MAX_PATH, exe, nullptr) == 0)
+        return out;
+    HKEY root = nullptr;
+    if (::RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Lxss", 0, KEY_READ,
+                        &root) != ERROR_SUCCESS)
+        return out;
+    for (DWORD i = 0;; ++i) {
+        wchar_t sub[256]{};
+        DWORD sub_len = 256;
+        if (::RegEnumKeyExW(root, i, sub, &sub_len, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS)
+            break;
+        wchar_t name[256]{};
+        DWORD bytes = sizeof(name) - sizeof(wchar_t);
+        if (::RegGetValueW(root, sub, L"DistributionName", RRF_RT_REG_SZ, nullptr, name, &bytes) != ERROR_SUCCESS)
+            continue;
+        const std::wstring distro(name);
+        if (distro.empty() || distro.starts_with(L"docker-desktop"))
+            continue;
+        const std::string u = win::to_utf8(distro);
+        out.push_back({"wsl-" + u, u + " (WSL)", exe, {L"-d", distro}});
+    }
+    ::RegCloseKey(root);
+    std::sort(out.begin(), out.end(), [](const Profile& a, const Profile& b) { return a.id < b.id; });
     return out;
 }
 

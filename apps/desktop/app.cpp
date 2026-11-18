@@ -575,7 +575,9 @@ ProgramInfo program_info(const std::string& program, const std::string& profile_
         return {"Windows PowerShell", IM_COL32(60, 120, 200, 255), "PS"};
     if (starts("cmd"))
         return {"Command Prompt", IM_COL32(150, 156, 168, 255), ">_"};
-    if (starts("bash") || starts("wsl"))
+    if (starts("wsl"))
+        return {"WSL", IM_COL32(233, 130, 70, 255), "$"};
+    if (starts("bash"))
         return {"Bash", IM_COL32(120, 190, 120, 255), "$"};
     if (starts("node"))
         return {"Node.js", IM_COL32(110, 180, 90, 255), "N"};
@@ -599,6 +601,11 @@ ProgramInfo program_info(const std::string& program, const std::string& profile_
 bool is_shell(const std::string& program) {
     return program == "cmd" || program == "pwsh" || program == "powershell" || program == "bash" ||
            program == "wsl" || program == "nu";
+}
+
+// Profile ids that open a shell rather than an agent (WSL profiles are "wsl-<distribution>").
+bool is_shell_profile(const std::string& id) {
+    return is_shell(id) || id.starts_with("wsl-");
 }
 
 // ------------------------------------------------------------------ small helpers
@@ -4044,12 +4051,16 @@ void draw_new_menu(App::State& s) {
         }
     };
     row(ui::icon::kTerminal, "Terminal", s.keymap.chord_for("tab.new"), "tab.new");
-    // Installed agents: every profile that is not a shell, numbered 1-9.
     const auto profiles = s.host->profiles();
+    // Other shells (WSL distributions): a tab in the focused folder, like Terminal.
+    for (const auto& [id, name] : profiles)
+        if (id.starts_with("wsl-") && id != pick_shell(s.settings.shell_profile, profiles))
+            row(ui::icon::kTerminal, name, "", "launch:tab:" + id);
+    // Installed agents: every profile that is not a shell, numbered 1-9.
     int n = 0;
     bool header = false;
     for (const auto& [id, name] : profiles) {
-        if (is_shell(id) || id == "cmd" || id == "pwsh" || id == "powershell")
+        if (is_shell_profile(id))
             continue;
         if (!header) {
             ImGui::Dummy(ImVec2(0, px(2)));

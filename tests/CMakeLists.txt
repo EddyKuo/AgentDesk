@@ -7,6 +7,7 @@ set(AGENTDESK_FIXTURE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 agentdesk_executable(unit_tests
     unit/toolchain_smoke_test.cpp
     unit/program_status_test.cpp
+    unit/cwd_uri_test.cpp
     unit/vt_engine_test.cpp
     unit/command_line_test.cpp
     unit/input_mapping_test.cpp

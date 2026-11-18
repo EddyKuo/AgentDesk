@@ -28,6 +28,30 @@ Response bad(const Request& r, std::string msg) {
     return protocol::fail(r.id, ErrorCode::kBadRequest, std::move(msg));
 }
 
+// WSL: a Linux cd never reaches wsl.exe's Windows current folder. bash runs PROMPT_COMMAND
+// before each prompt; set it (passed into Linux through WSLENV) to send OSC 7 with the distro
+// as the host, which the session maps to \\wsl.localhost\<distro>\... or C:\... for /mnt/c.
+// Only for an interactive shell: a profile that runs a command (-e, --exec, --) is left alone.
+// A ~/.bashrc that assigns PROMPT_COMMAND, or zsh/fish, replaces it; then the folder is unknown.
+void add_wsl_folder_hook(platform::win::PtySpawnSpec& spec) {
+    for (const auto& a : spec.args)
+        if (a == L"-e" || a == L"--exec" || a == L"--")
+            return;
+    spec.env_overrides[L"PROMPT_COMMAND"] = L"printf '\\033]7;file://%s%s\\007' \"$WSL_DISTRO_NAME\" \"$PWD\"";
+    std::wstring wslenv;
+    if (const auto it = spec.env_overrides.find(L"WSLENV"); it != spec.env_overrides.end()) {
+        wslenv = it->second;
+    } else {
+        wchar_t buf[4096]{};
+        const DWORD n = ::GetEnvironmentVariableW(L"WSLENV", buf, 4096);
+        if (n > 0 && n < 4096)
+            wslenv.assign(buf, n);
+    }
+    if (wslenv.find(L"PROMPT_COMMAND") == std::wstring::npos)
+        wslenv += (wslenv.empty() ? L"" : L":") + std::wstring(L"PROMPT_COMMAND/u");
+    spec.env_overrides[L"WSLENV"] = wslenv;
+}
+
 // PowerShell's cd (Set-Location) does not change the process's Windows current folder, which is
 // what the host reads to follow the shell. Like herdr, wrap the prompt: after the person's own
 // prompt runs, copy the location into [Environment]::CurrentDirectory. Only for an interactive
@@ -36,6 +60,10 @@ void add_folder_hook(platform::win::PtySpawnSpec& spec) {
     std::wstring exe = spec.executable.filename().native();
     for (auto& c : exe)
         c = static_cast<wchar_t>(std::towlower(c));
+    if (exe == L"wsl.exe") {
+        add_wsl_folder_hook(spec);
+        return;
+    }
     if (exe != L"pwsh.exe" && exe != L"powershell.exe")
         return;
     for (const auto& a : spec.args) {
@@ -184,13 +212,25 @@ void SessionManager::load_profiles() {
     if (const auto doc = read_json_with_backup(file)) {
         for (const auto& j : doc->value("profiles", Json::array()))
             profiles_.push_back(profile_from_json(j));
+        // Files written before WSL profiles existed get them once; a profile the person removes
+        // afterwards stays removed ("wsl_detected").
+        if (doc->value("wsl_detected", false))
+            return;
+        for (auto& p : detect_wsl_profiles())
+            if (std::none_of(profiles_.begin(), profiles_.end(), [&](const Profile& q) { return q.id == p.id; }))
+                profiles_.push_back(std::move(p));
+        save_profiles(file);
         return;
     }
     profiles_ = detect_default_profiles();
+    save_profiles(file);
+}
+
+void SessionManager::save_profiles(const std::filesystem::path& file) {
     Json list = Json::array();
     for (const auto& p : profiles_)
         list.push_back(to_json(p));
-    write_json_atomic(file, {{"schema_version", kSchemaVersion}, {"profiles", list}});
+    write_json_atomic(file, {{"schema_version", kSchemaVersion}, {"wsl_detected", true}, {"profiles", list}});
 }
 
 void SessionManager::persist_locked() {
