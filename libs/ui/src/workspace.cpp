@@ -8,6 +8,7 @@
 #include <climits>
 #include <cmath>
 #include <functional>
+#include <set>
 
 namespace agentdesk::ui {
 
@@ -254,14 +255,20 @@ Node node_from_json(const Json& j, int depth = 0) {
     return n;
 }
 
+// herdr model.rs 635-647 (folder_name): the last folder; nothing or the home folder reads "~".
 std::string folder_of(const std::string& cwd) {
-    std::string s = cwd;
+    auto trimmed = [](std::string x) {
+        while (!x.empty() && (x.back() == '\\' || x.back() == '/'))
+            x.pop_back();
+        return x;
+    };
+    const std::string s = trimmed(cwd);
     char home[MAX_PATH]{};
     const DWORD n = ::GetEnvironmentVariableA("USERPROFILE", home, MAX_PATH);
-    if (n > 0 && n < MAX_PATH && _stricmp(home, s.c_str()) == 0)
+    if (cwd.empty() || (n > 0 && n < MAX_PATH && _stricmp(trimmed(home).c_str(), s.c_str()) == 0))
         return "~";
-    while (!s.empty() && (s.back() == '\\' || s.back() == '/'))
-        s.pop_back();
+    if (s.empty())
+        return cwd.substr(0, 1);
     const auto p = s.find_last_of("\\/");
     return p == std::string::npos ? s : s.substr(p + 1);
 }
@@ -691,23 +698,25 @@ void Workspace::toggle_zoom(const std::string& pane) {
 }
 
 // ------------------------------------------------------------------ naming
-std::string Workspace::space_title(int index, const std::map<std::string, std::string>& session_cwd) const {
+std::string Workspace::space_title(int index, const std::map<std::string, std::string>& session_top) const {
     if (index < 0 || index >= static_cast<int>(spaces.size()))
         return {};
     const Space& sp = spaces[static_cast<std::size_t>(index)];
     if (!sp.name.empty())
         return sp.name;
-    // Unnamed: after the folder of its first terminal (herdr behaves the same way).
+    // herdr model.rs 271-279: the first terminal's checkout top (or its folder outside git),
+    // else the folder the space was made in.
     for (const auto& t : sp.tabs) {
         std::vector<std::string> ids;
         collect(t.root, ids);
-        for (const auto& id : ids) {
-            const auto it = session_cwd.find(id);
-            if (it != session_cwd.end() && !it->second.empty())
-                return folder_of(it->second);
-        }
+        if (ids.empty())
+            continue;
+        const auto it = session_top.find(ids.front());
+        if (it != session_top.end() && !it->second.empty())
+            return folder_of(it->second);
+        break;
     }
-    return "space " + std::to_string(index + 1);
+    return folder_of(sp.folder);
 }
 
 std::string Workspace::tab_title(const Tab& tab, int index) {
@@ -733,6 +742,7 @@ Json Workspace::to_json() const {
                       {"machine", s.machine},
                       {"color", s.color},
                       {"panel", s.panel},
+                      {"folder", s.folder},
                       {"active_tab", s.active_tab},
                       {"tabs", std::move(tabs)}});
     }
@@ -754,6 +764,7 @@ Workspace Workspace::from_json(const Json& j) {
         sp.machine = s.value("machine", "");
         sp.color = s.value("color", "");
         sp.panel = s.value("panel", "");
+        sp.folder = s.value("folder", "");
         sp.active_tab = s.value("active_tab", 0);
         for (const auto& t : s.value("tabs", Json::array())) {
             Tab tab;
@@ -824,10 +835,14 @@ bool Workspace::move_space(int from, int to) {
     return true;
 }
 
-void Workspace::assign_colors() {
+void Workspace::assign_colors(const std::map<std::string, std::string>* session_top) {
     static const char* const kOrder[] = {"ansi6", "ansi3", "ansi4", "ansi5", "ansi2", "ansi1"};
-    for (auto& sp : spaces) {
+    for (std::size_t i = 0; i < spaces.size(); ++i) {
+        auto& sp = spaces[i];
         if (!sp.color.empty())
+            continue;
+        // herdr spaces.js 526: the home space ("~") waits for a real name.
+        if (session_top != nullptr && space_title(static_cast<int>(i), *session_top) == "~")
             continue;
         std::map<std::string, int> used;
         for (const auto& o : spaces)
@@ -843,6 +858,47 @@ void Workspace::assign_colors() {
             }
         }
         sp.color = best;
+    }
+}
+
+bool Workspace::reorder_spaces(const std::vector<int>& order) {
+    const int n = static_cast<int>(spaces.size());
+    if (static_cast<int>(order.size()) != n)
+        return false;
+    std::vector<bool> used(spaces.size(), false);
+    bool moved = false;
+    for (int i = 0; i < n; ++i) {
+        const int o = order[static_cast<std::size_t>(i)];
+        if (o < 0 || o >= n || used[static_cast<std::size_t>(o)])
+            return false;
+        used[static_cast<std::size_t>(o)] = true;
+        moved = moved || o != i;
+    }
+    if (!moved)
+        return false;
+    const std::string active_id =
+        spaces.empty() ? std::string() : spaces[static_cast<std::size_t>(std::clamp(active_space, 0, n - 1))].id;
+    std::vector<Space> next;
+    next.reserve(spaces.size());
+    for (const int o : order)
+        next.push_back(std::move(spaces[static_cast<std::size_t>(o)]));
+    spaces = std::move(next);
+    for (int i = 0; i < n; ++i)
+        if (spaces[static_cast<std::size_t>(i)].id == active_id)
+            active_space = i;
+    return true;
+}
+
+void Workspace::remember_folders(const std::map<std::string, std::string>& session_start) {
+    for (auto& sp : spaces) {
+        if (!sp.folder.empty() || sp.tabs.empty())
+            continue;
+        std::vector<std::string> ids;
+        collect(sp.tabs.front().root, ids);
+        if (ids.empty())
+            continue;
+        if (const auto it = session_start.find(ids.front()); it != session_start.end())
+            sp.folder = it->second;
     }
 }
 
@@ -984,6 +1040,199 @@ const char* attention_label(Attention a) {
             return "";
     }
     return "";
+}
+
+// ------------------------------------------------------------------ spaces list (herdr spaces.js)
+std::vector<int> nest_worktrees(const std::vector<SpaceRepo>& info, std::vector<bool>* tree) {
+    // spaces.js 298-315: mains are repos with a main checkout; a worktree of one goes under the
+    // first main-checkout space of its repo.
+    std::set<std::string> mains;
+    for (const auto& r : info)
+        if (r.repo && !r.linked)
+            mains.insert(r.key);
+    auto nested = [&](const SpaceRepo& r) { return r.repo && r.linked && mains.contains(r.key); };
+    std::vector<int> out;
+    std::vector<bool> marks;
+    std::set<std::string> placed;
+    for (int i = 0; i < static_cast<int>(info.size()); ++i) {
+        const auto& r = info[static_cast<std::size_t>(i)];
+        if (nested(r))
+            continue;
+        out.push_back(i);
+        marks.push_back(false);
+        if (!r.repo || r.linked || placed.contains(r.key))
+            continue;
+        placed.insert(r.key);
+        for (int k = 0; k < static_cast<int>(info.size()); ++k) {
+            const auto& w = info[static_cast<std::size_t>(k)];
+            if (nested(w) && w.key == r.key) {
+                out.push_back(k);
+                marks.push_back(true);
+            }
+        }
+    }
+    if (tree != nullptr)
+        *tree = std::move(marks);
+    return out;
+}
+
+// ------------------------------------------------------------------ agents list (herdr agents.js)
+namespace {
+
+// Decodes one UTF-8 code point at s[i]; returns its length (1 for a broken byte).
+std::size_t decode_utf8(const std::string& s, std::size_t i, char32_t& cp) {
+    const auto c = static_cast<unsigned char>(s[i]);
+    std::size_t len = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 1;
+    if (i + len > s.size())
+        len = 1;
+    if (len == 1) {
+        cp = c;
+        return 1;
+    }
+    cp = c & (len == 2 ? 0x1F : len == 3 ? 0x0F : 0x07);
+    for (std::size_t k = 1; k < len; ++k)
+        cp = (cp << 6) | (static_cast<unsigned char>(s[i + k]) & 0x3F);
+    return len;
+}
+
+// \p{L}, \p{N}, \p{Ps} or \p{Pi}: what a title may start with (agents.js 31). An approximation by
+// block: letters and digits of every script, opening brackets and opening quotes.
+bool title_start(char32_t c) {
+    if (c < 0x80)
+        return std::isalnum(static_cast<int>(c)) != 0 || c == '(' || c == '[' || c == '{';
+    if (c < 0xC0)
+        return c == 0xAA || c == 0xAB || c == 0xB5 || c == 0xBA || c == 0xB2 || c == 0xB3 || c == 0xB9 ||
+               (c >= 0xBC && c <= 0xBE);
+    if (c < 0x2000)
+        return c != 0xD7 && c != 0xF7 && !(c >= 0x300 && c < 0x370);  // not x, / or combining marks
+    if (c < 0x2C00)  // punctuation, symbols, arrows, braille spinners, dingbats
+        return c == 0x2018 || c == 0x201A || c == 0x201B || c == 0x201C || c == 0x201E || c == 0x201F ||
+               c == 0x2039 || c == 0x2045 || (c >= 0x2070 && c < 0x20A0) || (c >= 0x2150 && c < 0x2190) ||
+               (c >= 0x2460 && c < 0x2500) || (c >= 0x2776 && c < 0x2794);
+    if (c < 0x2E00)
+        return true;
+    if (c < 0x2E80)
+        return false;
+    if (c >= 0x3000 && c <= 0x3004)
+        return false;
+    if (c >= 0xD800 && c < 0xF900)  // surrogates, private use (Nerd Font glyphs)
+        return false;
+    if (c >= 0xFE00 && c < 0xFE10)  // variation selectors
+        return false;
+    if (c >= 0xFFF0 && c < 0x10000)
+        return false;
+    if (c >= 0x1F000 && c < 0x1FB00)  // emoji and pictographs
+        return false;
+    return c < 0xF0000;
+}
+
+std::string lower(std::string s) {
+    for (auto& c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+}  // namespace
+
+std::string clean_agent_title(const std::string& title) {
+    std::size_t i = 0;
+    while (i < title.size()) {
+        char32_t cp = 0;
+        const std::size_t len = decode_utf8(title, i, cp);
+        if (title_start(cp))
+            break;
+        i += len;
+    }
+    std::string out = title.substr(i);
+    for (const char* mark : {"[ ! ] ", "[ . ] "})
+        if (out.rfind(mark, 0) == 0)
+            out = out.substr(6);
+    auto space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+    while (!out.empty() && space(out.back()))
+        out.pop_back();
+    std::size_t b = 0;
+    while (b < out.size() && space(out[b]))
+        ++b;
+    return out.substr(b);
+}
+
+std::string agent_tab_label(const TabLabel& in) {
+    const std::string live = clean_agent_title(in.title);
+    // clean() would strip a path's leading ~ or /: test the title with only its status glyph gone.
+    std::size_t i = 0;
+    while (i < in.title.size()) {
+        char32_t cp = 0;
+        const std::size_t len = decode_utf8(in.title, i, cp);
+        if (cp == '~' || cp == '/' || (title_start(cp) && cp != '(' && cp != '[' && cp != '{' && cp != 0xAB &&
+                                       !(cp >= 0x2018 && cp <= 0x201F) && cp != 0x2039 && cp != 0x2045))
+            break;
+        i += len;
+    }
+    const std::string bare = in.title.substr(i);
+    const bool path = (!bare.empty() && (bare[0] == '~' || bare[0] == '/')) ||
+                      (bare.size() >= 3 && std::isalpha(static_cast<unsigned char>(bare[0])) != 0 && bare[1] == ':' &&
+                       bare[2] == '\\');
+    const bool telling = !live.empty() && live != in.address && live != in.program_name && !path &&
+                         live.find('@') == std::string::npos && lower(live) != lower(in.program_key);
+    return (in.tab_name == in.program_name || !in.tab_named) && telling ? live : in.tab_name;
+}
+
+std::vector<std::string> agent_details(const std::vector<std::pair<std::string, std::string>>& rows) {
+    auto number = [](const std::string& s) {
+        return !s.empty() && std::all_of(s.begin(), s.end(), [](char c) { return c >= '0' && c <= '9'; });
+    };
+    std::vector<std::string> detail;
+    std::vector<bool> none;
+    std::map<std::pair<std::string, std::string>, int> seen;
+    for (const auto& [space, label] : rows) {
+        const bool n = number(label);
+        none.push_back(n);
+        detail.push_back(n ? std::string() : label);
+        ++seen[{space, detail.back()}];
+    }
+    for (std::size_t i = 0; i < rows.size(); ++i)
+        if (none[i] && seen[{rows[i].first, std::string()}] > 1)
+            detail[i] = rows[i].second;
+    return detail;
+}
+
+Attention kid_status(Attention a) {
+    return a == Attention::kDone ? Attention::kIdle : a;
+}
+
+std::vector<TreeRow> agent_tree(const std::map<std::string, std::vector<std::string>>& kids, const std::string& root) {
+    std::vector<TreeRow> out;
+    std::set<std::string> visited{root};
+    std::function<void(const std::string&, const std::vector<TreeLine>&)> walk =
+            [&](const std::string& addr, const std::vector<TreeLine>& lead) {
+                const auto it = kids.find(addr);
+                if (it == kids.end())
+                    return;
+                std::vector<std::string> list;
+                for (const auto& k : it->second)
+                    if (!visited.contains(k))
+                        list.push_back(k);
+                for (std::size_t i = 0; i < list.size(); ++i) {
+                    const bool last = i + 1 == list.size();
+                    visited.insert(list[i]);
+                    TreeRow row{list[i], lead};
+                    row.lines.push_back(last ? TreeLine::kElbow : TreeLine::kTee);
+                    out.push_back(std::move(row));
+                    auto next = lead;
+                    next.push_back(last ? TreeLine::kNone : TreeLine::kBar);
+                    walk(list[i], next);
+                }
+            };
+    walk(root, {});
+    return out;
+}
+
+bool priority_before(const AgentSortKey& a, const AgentSortKey& b) {
+    if (a.rank != b.rank)
+        return a.rank > b.rank;
+    if (a.since != b.since)
+        return a.since > b.since;
+    return a.seq > b.seq;
 }
 
 }  // namespace agentdesk::ui
