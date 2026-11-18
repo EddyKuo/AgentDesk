@@ -207,3 +207,24 @@ TEST(Workspace, SpaceColorsAndMoves) {
     EXPECT_EQ(back.spaces[0].color, "ansi3");
     EXPECT_TRUE(back.pinned.contains("b"));
 }
+
+// herdr pane drag: drop on an edge moves the pane there; in the middle the two swap.
+TEST(Workspace, MovePaneToEdgeOrSwap) {
+    Workspace w;
+    w.add_space("a");
+    ASSERT_TRUE(w.split("a", "b", Dir::kRight));
+    ASSERT_TRUE(w.split("b", "c", Dir::kDown));
+    const Rect area{0, 0, 300, 200};
+    // c (bottom right) onto the left edge of a: c | a | b-ish layout, c leftmost.
+    ASSERT_TRUE(w.move_pane("c", "a", Dir::kLeft));
+    auto r = layout_tree(w.active_tab()->root, area, 0);
+    EXPECT_LT(r["c"].x, r["a"].x);
+    EXPECT_EQ(w.focused_session(), "c");
+    // swap a and b
+    const float ax = r["a"].x, bx = r["b"].x;
+    ASSERT_TRUE(w.move_pane("a", "b", std::nullopt));
+    r = layout_tree(w.active_tab()->root, area, 0);
+    EXPECT_EQ(r["a"].x, bx);
+    EXPECT_EQ(r["b"].x, ax);
+    EXPECT_FALSE(w.move_pane("a", "a", std::nullopt));
+}

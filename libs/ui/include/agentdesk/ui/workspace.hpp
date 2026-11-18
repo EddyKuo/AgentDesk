@@ -84,6 +84,9 @@ public:
     void close_tab(int space, int tab);
     void close_space(int space);
     bool move_tab(int space, int from, int to);
+    // Drag a pane onto another of the same tab (herdr pane drag): onto an edge it moves there
+    // (the target splits on that side); with no edge the two swap. The moved pane gets focus.
+    bool move_pane(const std::string& moving, const std::string& target, std::optional<Dir> edge);
     // Moves a space within its machine's block (herdr space.move); keeps the active one active.
     bool move_space(int from, int to);
     // Gives spaces without a colour the least-used avatar colour (ties: earlier in the order).

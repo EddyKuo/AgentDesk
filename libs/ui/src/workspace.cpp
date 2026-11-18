@@ -590,6 +590,29 @@ Workspace Workspace::from_json(const Json& j) {
     return w;
 }
 
+bool Workspace::move_pane(const std::string& moving, const std::string& target, std::optional<Dir> edge) {
+    if (moving == target)
+        return false;
+    const auto a = find(moving);
+    const auto b = find(target);
+    if (a.space < 0 || a.space != b.space || a.tab != b.tab)
+        return false;
+    Tab& tab = spaces[static_cast<std::size_t>(a.space)].tabs[static_cast<std::size_t>(a.tab)];
+    if (!edge) {
+        Node* x = find_leaf(tab.root, moving);
+        Node* y = find_leaf(tab.root, target);
+        if (x == nullptr || y == nullptr)
+            return false;
+        std::swap(x->session, y->session);
+        tab.focused = moving;
+        return true;
+    }
+    if (tab.root.leaf() || !remove_leaf(tab.root, moving))
+        return false;
+    tab.zoomed.clear();
+    return split(target, moving, *edge);
+}
+
 bool Workspace::move_space(int from, int to) {
     const int n = static_cast<int>(spaces.size());
     if (from < 0 || from >= n || to < 0 || to >= n || from == to)

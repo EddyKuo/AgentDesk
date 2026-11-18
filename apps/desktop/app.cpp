@@ -1714,6 +1714,9 @@ struct App::State {
     std::map<std::string, Clock::time_point> changed_at;
     int drag_space = -1;
     int drag_tab = -1;
+    std::string drag_pane;          // pane being dragged by its grip (herdr pane drag)
+    ImVec2 drag_pane_from{};
+    std::map<std::string, ui::Rect> pane_rects;  // panes of the shown tab, this frame
     float tab_scroll = 0;
     bool show_confirm = false;
     bool show_picker = false;
@@ -4281,6 +4284,30 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
                          g.branch == "HEAD" ? std::string("(detached)") : g.branch, rx - bx - px(16));
         }
     }
+    // Grip (herdr pane_drag.rs): 28x18 in the middle of the header, two rows of three dots;
+    // only with two or more panes and not zoomed. Dragging it moves the pane.
+    {
+        const auto* tab = s.ws.active_tab();
+        const bool can_drag = tab != nullptr && tab->zoomed.empty() && s.ws.sessions_in(*tab).size() >= 2;
+        const bool header_hov = ImGui::IsMouseHoveringRect(pos, ImVec2(max.x, pos.y + header_h), false);
+        if (can_drag && (header_hov || s.drag_pane == id)) {
+            const ImVec2 g(pos.x + r.w * 0.5f - px(14), cy - px(9));
+            ImGui::SetCursorScreenPos(g);
+            ImGui::InvisibleButton("##grip", ImVec2(px(28), px(18)));
+            const bool gh = ImGui::IsItemHovered() || s.drag_pane == id;
+            if (ImGui::IsItemActivated()) {
+                s.drag_pane = id;
+                s.drag_pane_from = ImGui::GetIO().MousePos;
+            }
+            if (gh)
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            dl->AddRectFilled(g, ImVec2(g.x + px(28), g.y + px(18)), alpha(g_pal->term_bg, 217), px(4));
+            for (int row = 0; row < 2; ++row)
+                for (int col = 0; col < 3; ++col)
+                    dl->AddCircleFilled(ImVec2(g.x + px(9) + static_cast<float>(col) * px(5), g.y + px(6.5f) + static_cast<float>(row) * px(5)),
+                                        px(1), gh ? g_pal->text : g_pal->faint);
+        }
+    }
     if (ImGui::IsMouseHoveringRect(pos, ImVec2(max.x, pos.y + header_h)) && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
         !ImGui::IsAnyItemHovered() && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) {
         s.ws.focus(id);
@@ -4400,8 +4427,58 @@ void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
         draw_pane(s, tab->zoomed, area, connected);
         return;
     }
-    for (const auto& [id, r] : ui::layout_tree(tab->root, area, gap))
+    s.pane_rects = ui::layout_tree(tab->root, area, gap);
+    for (const auto& [id, r] : s.pane_rects)
         draw_pane(s, id, r, connected);
+    // Pane drag: after 4 px, the pane under the pointer is the target; its outer 25 % picks the
+    // nearest edge, the middle swaps. Accent preview; release drops, Esc cancels.
+    if (!s.drag_pane.empty()) {
+        const ImVec2 m = ImGui::GetIO().MousePos;
+        const float dx = m.x - s.drag_pane_from.x, dy = m.y - s.drag_pane_from.y;
+        const bool moved = dx * dx + dy * dy >= px(4) * px(4);
+        std::string target;
+        std::optional<Dir> edge;
+        ui::Rect pr{};
+        for (const auto& [pid, r] : s.pane_rects) {
+            if (pid == s.drag_pane || m.x < r.x || m.x >= r.x + r.w || m.y < r.y || m.y >= r.y + r.h)
+                continue;
+            target = pid;
+            const float fx = (m.x - r.x) / r.w, fy = (m.y - r.y) / r.h;
+            const float d = std::min({fx, 1 - fx, fy, 1 - fy});
+            pr = r;
+            if (d < 0.25f) {
+                if (d == fx) {
+                    edge = Dir::kLeft;
+                    pr.w *= 0.5f;
+                } else if (d == 1 - fx) {
+                    edge = Dir::kRight;
+                    pr.x += r.w * 0.5f;
+                    pr.w *= 0.5f;
+                } else if (d == fy) {
+                    edge = Dir::kUp;
+                    pr.h *= 0.5f;
+                } else {
+                    edge = Dir::kDown;
+                    pr.y += r.h * 0.5f;
+                    pr.h *= 0.5f;
+                }
+            }
+        }
+        if (moved && !target.empty()) {
+            ImDrawList* fg = ImGui::GetForegroundDrawList(ImGui::GetMainViewport());
+            fg->AddRectFilled(ImVec2(pr.x, pr.y), ImVec2(pr.x + pr.w, pr.y + pr.h), alpha(g_pal->focus, 46), px(10));
+            fg->AddRect(ImVec2(pr.x, pr.y), ImVec2(pr.x + pr.w, pr.y + pr.h), g_pal->focus, px(10), 0, 2.0f);
+        }
+        if (moved)
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            s.drag_pane.clear();
+        } else if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            if (moved && !target.empty() && s.ws.move_pane(s.drag_pane, target, edge))
+                s.focus_view(s.drag_pane);
+            s.drag_pane.clear();
+        }
+    }
     // Draggable borders between panes.
     int n = 0;
     for (const auto& d : ui::dividers(tab->root, area, gap)) {
