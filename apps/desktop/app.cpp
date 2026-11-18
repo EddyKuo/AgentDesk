@@ -176,6 +176,32 @@ const Palette* palette_by_id(const std::string& id) {
     return &kPalettes[0];
 }
 
+// Windows' app mode (Settings > Personalization > Colors), checked at most every 2 s.
+bool system_light() {
+    static auto checked = std::chrono::steady_clock::time_point{};
+    static bool light = false;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - checked > std::chrono::seconds(2)) {
+        checked = now;
+        DWORD v = 0;
+        DWORD size = sizeof v;
+        light = ::RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                               L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &v, &size) == ERROR_SUCCESS &&
+                v != 0;
+    }
+    return light;
+}
+
+// herdr Appearance: System follows Windows; Light and Dark use the chosen theme of that kind. A
+// layout file with a "theme" overrides it.
+const Palette* effective_palette(const std::string& appearance, const std::string& dark, const std::string& light,
+                                 const std::string& layout_theme) {
+    if (!layout_theme.empty())
+        return palette_by_id(layout_theme);
+    const bool use_light = appearance == "light" || (appearance == "system" && system_light());
+    return palette_by_id(use_light ? light : dark);
+}
+
 void apply_style(float dpi, float zoom) {
     ImGuiStyle& s = ImGui::GetStyle();
     s = ImGuiStyle();
@@ -267,7 +293,12 @@ struct Settings {
     float panel_width = 368;     // right panel (Files / Changes), 280..900
     std::string agents_sort = "priority";  // or "space"
     std::vector<std::string> palette_recent;  // last 20 palette commands, newest first
-    std::string terminal_font;   // "" = JetBrains Mono (bundled)
+    std::string terminal_font;   // font family; "" = JetBrains Mono (bundled)
+    int terminal_weight = 500;   // herdr terminal font weight (JetBrains Mono Medium)
+    std::string ui_font;         // interface font family; "" = Geist (bundled)
+    std::string appearance = "system";  // "system", "light" or "dark" (herdr Appearance)
+    std::string theme_dark = "midnight";
+    std::string theme_light = "paper";
     float line_height = 1.0f;    // terminal cell height multiplier
     float cell_width = 1.0f;     // terminal cell width multiplier
     std::string sound_done;      // MP3 replacing the bundled sounds
@@ -321,6 +352,15 @@ Settings load_settings() {
     s.close_notice_shown = j.value("close_notice_shown", false);
     s.last_cwd = j.value("last_cwd", "");
     s.theme = j.value("theme", s.theme);
+    s.terminal_weight = std::clamp(j.value("terminal_weight", s.terminal_weight), 100, 900);
+    s.ui_font = j.value("ui_font", "");
+    // Appearance: files from before it existed keep their one theme as the fixed choice.
+    {
+        const bool light = std::string(palette_by_id(s.theme)->id) == s.theme && palette_by_id(s.theme)->light;
+        s.appearance = j.value("appearance", j.contains("theme") ? (light ? "light" : "dark") : "system");
+        s.theme_dark = j.value("theme_dark", light ? std::string("midnight") : s.theme);
+        s.theme_light = j.value("theme_light", light ? s.theme : std::string("paper"));
+    }
     s.zoom = std::clamp(j.value("zoom", 1.0f), 0.6f, 2.5f);
     s.font_size = std::clamp(j.value("font_size", 14.0f), 9.0f, 28.0f);
     s.sounds = j.value("sounds", true);
@@ -388,6 +428,11 @@ void save_settings(const Settings& s) {
             {"close_notice_shown", s.close_notice_shown},
             {"last_cwd", s.last_cwd},
             {"theme", s.theme},
+            {"terminal_weight", s.terminal_weight},
+            {"ui_font", s.ui_font},
+            {"appearance", s.appearance},
+            {"theme_dark", s.theme_dark},
+            {"theme_light", s.theme_light},
             {"zoom", s.zoom},
             {"font_size", s.font_size},
             {"sounds", s.sounds},
@@ -864,16 +909,21 @@ public:
     GitCache(const GitCache&) = delete;
     GitCache& operator=(const GitCache&) = delete;
 
-    // Cached facts for `dir` (empty until the first answer); schedules a refresh when stale.
-    GitInfo get(const std::string& dir) {
+    // Another machine's folders: git through its agent-host (git.run), set by the app.
+    std::function<std::optional<Json>(const std::string& machine, const std::string& method, const Json& params)> remote;
+
+    // Cached facts for `dir` on `machine` ("" = here; empty until the first answer); schedules a
+    // refresh when stale.
+    GitInfo get(const std::string& dir, const std::string& machine = {}) {
         if (dir.empty())
             return {};
+        const std::string key = machine.empty() ? dir : machine + "|" + dir;
         std::lock_guard lock(mutex_);
-        auto& e = entries_[dir];
+        auto& e = entries_[key];
         const auto now = Clock::now();
         if (!e.queued && (e.at == Clock::time_point{} || now - e.at > std::chrono::seconds(60))) {
             e.queued = true;
-            queue_.push_back(dir);
+            queue_.push_back(key);
             cv_.notify_one();
         }
         return e.info;
@@ -906,13 +956,28 @@ private:
         return p;
     }
 
-    static GitInfo query(const std::string& dir) {
+    GitInfo query(const std::string& key) {
         GitInfo g;
+        const auto bar = key.find('|');
+        const std::string machine = bar == std::string::npos ? std::string() : key.substr(0, bar);
+        const std::string dir = bar == std::string::npos ? key : key.substr(bar + 1);
         const std::filesystem::path cwd(win::to_wide(dir));
         std::error_code ec;
-        if (!std::filesystem::is_directory(cwd, ec))
+        if (machine.empty() && !std::filesystem::is_directory(cwd, ec))
             return g;
         auto git = [&](std::vector<std::wstring> args) {
+            if (!machine.empty()) {  // the remote host adds its own safety switches and -C
+                host::ToolResult r;
+                Json a = Json::array();
+                for (const auto& x : args)
+                    a.push_back(win::to_utf8(x));
+                if (const auto res = remote ? remote(machine, "git.run", Json{{"cwd", dir}, {"args", a}}) : std::nullopt) {
+                    r.started = true;
+                    r.exit_code = res->value("exit_code", 1ul);
+                    r.output = res->value("output", "");
+                }
+                return r;
+            }
             args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-C", cwd.native()});
             return host::run_tool(args, cwd, std::chrono::seconds(10));
         };
@@ -930,7 +995,7 @@ private:
         std::filesystem::path common(win::to_wide(lines[1]));
         if (common.is_relative())
             common = cwd / common;
-        common = std::filesystem::weakly_canonical(common, ec);
+        common = machine.empty() ? std::filesystem::weakly_canonical(common, ec) : common.lexically_normal();
         g.common_top = norm(win::to_utf8(common.parent_path().native()));
         g.worktree = _stricmp(g.common_top.c_str(), g.top.c_str()) != 0;
         g.branch = lines[2];
@@ -1808,6 +1873,9 @@ struct App::State {
     GitCache git;
     std::unique_ptr<SidePanels> panels = std::make_unique<SidePanels>();
     std::set<std::string> folded_machines;
+    ImFont* base_ui = nullptr;  // the bundled interface fonts (Geist), restored when ui_font is cleared
+    ImFont* base_ui_medium = nullptr;
+    ImFont* base_ui_bold = nullptr;
     struct TabWheel {
         float acc = 0;
         int steps = 0;
@@ -1833,6 +1901,8 @@ struct App::State {
     std::string settings_section;
     float settings_row_end = 0;
     bool show_welcome = false;
+    bool welcome_panels_seen = false;
+    bool welcome_copied = false;
     bool show_notes = false;  // What's new / Send feedback dialog
     std::string notes_kind;   // "whats_new" or "feedback"
     char feedback_buf[4096] = {};
@@ -1965,7 +2035,8 @@ struct App::State {
 // ------------------------------------------------------------------ construction
 namespace {
 void start_remotes(App::State& s);
-std::vector<std::pair<std::string, std::wstring>> terminal_fonts();
+void apply_terminal_font(App::State& s);
+void apply_ui_font(App::State& s);
 }  // namespace
 
 App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_unique<State>()) {
@@ -2020,6 +2091,7 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
             return std::nullopt;
         return result.get();
     };
+    s_->git.remote = s_->panels->remote;
     s_->mods = std::make_unique<ui::ModHost>(data_dir() / L"mods");
     s_->mods->load(s_->settings.mods_enabled);
     // herdr: the welcome opens on the first run (until it is finished or skipped).
@@ -2080,10 +2152,8 @@ ui::HostClient& App::host() {
 void App::load_fonts() {
     s_->fonts = ui::load_fonts(s_->settings.font_size, 13.0f);  // herdr UI base 13, scaled by ui_scale()
     ImGui::GetIO().FontDefault = s_->fonts.ui;
-    if (!s_->settings.terminal_font.empty())
-        for (const auto& [name, file] : terminal_fonts())
-            if (name == s_->settings.terminal_font)
-                s_->fonts.mono = ui::load_terminal_font(file, s_->settings.font_size);
+    apply_terminal_font(*s_);
+    apply_ui_font(*s_);
 }
 
 void App::apply_scale(float dpi) {
@@ -2499,6 +2569,58 @@ std::string pick_shell(const std::string& wanted, const std::vector<std::pair<st
 }
 
 void open_confirm(App::State& s, std::string title, std::string detail, std::string ok, std::string command);
+
+// What removing a linked worktree would lose (herdr worktree.js): uncommitted changes, and
+// submodules with commits their upstream does not have. Plain git, no shell.
+struct WorktreeRisk {
+    bool dirty = false;
+    bool submodules = false;
+    std::vector<std::string> unpushed;  // submodule paths
+    [[nodiscard]] std::string signature() const {
+        std::string sig = std::string(dirty ? "d" : "-") + (submodules ? "s" : "-");
+        for (const auto& u : unpushed)
+            sig += "," + u;
+        return sig;
+    }
+};
+
+WorktreeRisk worktree_risk(const std::string& top) {
+    WorktreeRisk r;
+    const std::filesystem::path p(win::to_wide(top));
+    const auto st = host::run_tool({L"git", L"-C", p.native(), L"status", L"--porcelain"}, p, std::chrono::seconds(10));
+    r.dirty = st.started && st.exit_code == 0 && !st.output.empty();
+    const auto subs = host::run_tool({L"git", L"-C", p.native(), L"submodule", L"status", L"--recursive"}, p,
+                                     std::chrono::seconds(10));
+    std::stringstream ss(subs.started && subs.exit_code == 0 ? subs.output : std::string());
+    for (std::string line; std::getline(ss, line);) {
+        // " <sha> <path> (<describe>)"
+        std::stringstream ls(line.size() > 1 ? line.substr(1) : std::string());
+        std::string sha, path;
+        ls >> sha >> path;
+        if (path.empty())
+            continue;
+        r.submodules = true;
+        const auto sp = p / win::to_wide(path);
+        const auto ahead = host::run_tool({L"git", L"-C", sp.native(), L"rev-list", L"--count", L"@{u}..HEAD"}, sp,
+                                          std::chrono::seconds(10));
+        if (ahead.started && (ahead.exit_code != 0 || std::atoi(ahead.output.c_str()) > 0))
+            r.unpushed.push_back(path);  // no upstream counts as unpushed
+    }
+    return r;
+}
+
+std::string worktree_remove_text(const std::string& top, const WorktreeRisk& r) {
+    std::string t = "Closes the space and deletes " + display_path(top) + ". The branch stays.";
+    if (r.dirty)
+        t += "\n\nIt has uncommitted changes: they will be lost.";
+    if (!r.unpushed.empty()) {
+        t += "\n\nSubmodules with commits that are not pushed: ";
+        for (std::size_t i = 0; i < r.unpushed.size(); ++i)
+            t += (i ? ", " : "") + r.unpushed[i];
+        t += ". They will be lost.";
+    }
+    return t;
+}
 void confirm_close_space(App::State& s, int index);
 
 void open_launcher(App::State& s, LaunchTarget target) {
@@ -2841,15 +2963,26 @@ void run_command(App::State& s, const std::string& cmd) {
         if (g.repo && !g.worktree) {
             s.toast("Not a worktree", "This is the repository's main checkout, not a worktree.", "", g_pal->working);
         } else if (g.repo) {
-            const std::filesystem::path p(win::to_wide(g.top));
-            const auto st = host::run_tool({L"git", L"-C", p.native(), L"status", L"--porcelain"}, p, std::chrono::seconds(10));
-            const bool dirty = st.started && !st.output.empty();
-            std::string detail = "Closes the space and deletes " + display_path(g.top) + ". The branch stays.";
-            if (dirty)
-                detail += "\n\nIt has uncommitted changes: they will be lost.";
+            const auto risk = worktree_risk(g.top);
             const auto loc = s.ws.find(s.ws.focused_session());
             open_confirm(s, "Remove worktree " + (loc.space >= 0 ? s.ws.space_title(loc.space, s.session_cwds()) : g.top) + "?",
-                         detail, "Remove", std::string(dirty ? "worktree.remove_force:" : "worktree.remove_now:") + g.top);
+                         worktree_remove_text(g.top, risk), "Remove",
+                         "worktree.remove_checked:" + risk.signature() + "|" + g.top);
+        }
+    } else if (name == "worktree.remove_checked") {
+        // herdr worktree.js 228-245: Enter re-checks; a risk that appeared since the dialog
+        // opened asks once more ("Enter again removes it anyway").
+        const auto bar = arg.find('|');
+        const std::string seen = arg.substr(0, bar);
+        const std::string top = bar == std::string::npos ? std::string() : arg.substr(bar + 1);
+        const auto risk = worktree_risk(top);
+        const std::string force = risk.dirty || risk.submodules ? "worktree.remove_force:" : "worktree.remove_now:";
+        if (risk.signature() != seen) {
+            open_confirm(s, "Remove worktree?",
+                         worktree_remove_text(top, risk) + "\n\nIt changed since this opened. Enter again removes it anyway.",
+                         "Remove", force + top);
+        } else {
+            run_command(s, force + top);
         }
     } else if (name == "worktree.remove_now" || name == "worktree.remove_force") {
         const auto g = s.git.get(arg);
@@ -3001,10 +3134,12 @@ void run_command(App::State& s, const std::string& cmd) {
         s.show_exit = true;
         s.exit_error.clear();
     } else if (name == "theme") {
-        g_pal = palette_by_id(arg);
-        s.settings.theme = g_pal->id;
+        const Palette* p = palette_by_id(arg);
+        (p->light ? s.settings.theme_light : s.settings.theme_dark) = p->id;
+        if (s.settings.appearance != "system")
+            s.settings.appearance = p->light ? "light" : "dark";
+        s.settings.theme = p->id;
         save_settings(s.settings);
-        apply_style(s.dpi, ui_scale(s.settings));
     } else if (name == "layout.switch" || name == "layout") {
         std::string next = arg;
         if (next.empty()) {  // cycle
@@ -3015,10 +3150,6 @@ void run_command(App::State& s, const std::string& cmd) {
         if (next.empty() && !s.layouts.empty())
             next = s.layouts.front().name;
         s.settings.layout = next;
-        if (const auto& l = s.layout(); !l.theme.empty()) {
-            g_pal = palette_by_id(l.theme);
-            apply_style(s.dpi, ui_scale(s.settings));
-        }
         save_settings(s.settings);
         s.toast("Layout: " + next, "", "", g_pal->info, 2);
         s.focus_view(s.ws.focused_session());
@@ -3498,14 +3629,12 @@ std::vector<SpaceRow> space_rows(App::State& s, const std::map<std::string, std:
     std::vector<GitInfo> info(s.ws.spaces.size());
     for (std::size_t i = 0; i < s.ws.spaces.size(); ++i) {
         const auto& sp = s.ws.spaces[i];
-        if (!sp.machine.empty())
-            continue;
         for (const auto& t : sp.tabs) {
             const auto ids = s.ws.sessions_in(t);
             if (!ids.empty()) {
                 const auto it = s.views_by_id.find(ids.front());
                 if (it != s.views_by_id.end())
-                    info[i] = s.git.get(it->second.cwd);
+                    info[i] = s.git.get(it->second.cwd, sp.machine);
                 break;
             }
         }
@@ -3560,7 +3689,7 @@ void space_menu(App::State& s, int i) {
     for (const auto& t : sp.tabs) {
         const auto ids = s.ws.sessions_in(t);
         if (!ids.empty() && s.views_by_id.count(ids.front())) {
-            g = s.git.get(s.views_by_id[ids.front()].cwd);
+            g = s.git.get(s.views_by_id[ids.front()].cwd, sp.machine);
             break;
         }
     }
@@ -3623,8 +3752,15 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             // Machine header (26 px): icon, name, state, "+", dot, chevron; click folds.
             ImGui::PushID(("m:" + row.machine).c_str());
             const float hh = px(26);
+            const bool on = s.machine_connected(row.machine);
+            // herdr: a small "+" link (space.new {machine}) when connected, left of the dot.
+            const float plus_x = a.x + rw - px(8) - px(11) - px(7) - px(6) - px(7) - px(16);
+            const bool over_plus = on && !rail && ImGui::IsMouseHoveringRect(ImVec2(plus_x, a.y), ImVec2(plus_x + px(16), a.y + hh));
             ImGui::SetCursorScreenPos(a);
-            if (ImGui::InvisibleButton("##mh", ImVec2(rw, hh))) {
+            const bool header_clicked = ImGui::InvisibleButton("##mh", ImVec2(rw, hh));
+            if (header_clicked && over_plus) {
+                run_command(s, "space.new_on:" + row.machine);
+            } else if (header_clicked) {
                 if (s.folded_machines.contains(row.machine))
                     s.folded_machines.erase(row.machine);
                 else
@@ -3635,7 +3771,6 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             const bool hov = ImGui::IsItemHovered();
             if (hov)
                 d->AddRectFilled(a, ImVec2(a.x + rw, a.y + hh), g_pal->hover, px(6));
-            const bool on = s.machine_connected(row.machine);
             const float cy = a.y + hh * 0.5f;
             if (rail) {
                 draw_icon(s, d, row.machine.empty() ? ui::icon::kMonitor : ui::icon::kServer, fpx(13),
@@ -3649,12 +3784,16 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
                           ImVec2(x + px(6.5f), cy), g_pal->faint);
                 x += px(13) + px(7);
                 const std::string label = row.machine.empty() ? std::string("This computer") : row.machine;
-                const float right = a.x + rw - px(8) - px(11) - px(7) - px(6) - px(7);
+                const float right = a.x + rw - px(8) - px(11) - px(7) - px(6) - px(7) - (on ? px(18) : 0.0f);
                 float nw = text_clipped(d, s.fonts.ui, fpx(11), ImVec2(x, cy - fpx(11) * 0.6f), g_pal->faint, label,
                                         right - x);
                 if (!on && !row.machine.empty())
                     text_clipped(d, s.fonts.ui, fpx(11), ImVec2(x + nw + px(7), cy - fpx(11) * 0.6f), g_pal->faint,
                                  "unreachable", right - x - nw - px(7));
+                if (on)
+                    draw_icon(s, d, ui::icon::kPlus, fpx(12), ImVec2(plus_x + px(8), cy), over_plus ? g_pal->text : g_pal->faint);
+                if (over_plus)
+                    ImGui::SetTooltip("New space on %s", s.machine_label(row.machine).c_str());
                 d->AddCircleFilled(ImVec2(a.x + rw - px(8) - px(11) - px(7) - px(3), cy), px(3),
                                    on ? g_pal->done : g_pal->faint);
                 draw_icon(s, d,
@@ -3668,6 +3807,24 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             }
             ImGui::PopID();
             ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + hh));
+            // herdr: an empty, unfolded machine shows "+ New space there" (or "Loading..." while
+            // it connects).
+            const bool empty = ri + 1 >= rows.size() || rows[ri + 1].index < 0;
+            if (empty && !rail && !s.folded_machines.contains(row.machine)) {
+                const ImVec2 e(a0.x + pad, a.y + hh);
+                ImGui::SetCursorScreenPos(e);
+                ImGui::PushID(("e:" + row.machine).c_str());
+                const bool clicked = ImGui::InvisibleButton("##empty", ImVec2(rw, px(28)));
+                const bool eh = on && ImGui::IsItemHovered();
+                ImGui::PopID();
+                if (eh)
+                    d->AddRectFilled(e, ImVec2(e.x + rw, e.y + px(28)), g_pal->hover, px(6));
+                const std::string text = on ? std::string("+ New space there") : std::string("Loading\xE2\x80\xA6");
+                d->AddText(s.fonts.ui, fpx(12), ImVec2(e.x + px(28), e.y + px(14) - fpx(12) * 0.6f), g_pal->dim, text.c_str());
+                if (clicked && on)
+                    run_command(s, "space.new_on:" + row.machine);
+                ImGui::SetCursorScreenPos(ImVec2(a0.x, e.y + px(28)));
+            }
             continue;
         }
         const int i = row.index;
@@ -3765,8 +3922,7 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         for (const auto& t2 : sp.tabs) {
             const auto ids = s.ws.sessions_in(t2);
             if (!ids.empty() && s.views_by_id.count(ids.front())) {
-                if (sp.machine.empty())
-                    g = s.git.get(s.views_by_id[ids.front()].cwd);
+                g = s.git.get(s.views_by_id[ids.front()].cwd, sp.machine);
                 break;
             }
         }
@@ -4346,30 +4502,50 @@ void draw_new_menu(App::State& s) {
         }
     };
     row(ui::icon::kTerminal, "Terminal", s.keymap.chord_for("tab.new"), "tab.new");
-    const auto profiles = s.host->profiles();
+    // The agents of the active space's machine (herdr knownAgents({on: machine})).
+    const std::string machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
+    ui::HostClient* mh = s.host_for(machine);
+    const auto profiles = mh->profiles();
     // Other shells (WSL distributions): a tab in the focused folder, like Terminal.
     for (const auto& [id, name] : profiles)
         if (id.starts_with("wsl-") && id != pick_shell(s.settings.shell_profile, profiles))
             row(ui::icon::kTerminal, name, "", "launch:tab:" + id);
-    // Installed agents: every profile that is not a shell, numbered 1-9.
+    ImGui::Dummy(ImVec2(0, px(2)));
+    ImGui::PushFont(s.fonts.ui_medium, fpx(11));
+    ImGui::TextDisabled("Start an agent");
+    ImGui::PopFont();
+    // Installed agents (profiles that are not shells), numbered 1-9; then up to two known
+    // agents that are not installed, disabled.
     int n = 0;
-    bool header = false;
+    std::string have;
     for (const auto& [id, name] : profiles) {
         if (is_shell_profile(id))
             continue;
-        if (!header) {
-            ImGui::Dummy(ImVec2(0, px(2)));
-            ImGui::PushFont(s.fonts.ui_medium, fpx(11));
-            ImGui::TextDisabled("Start an agent");
-            ImGui::PopFont();
-            header = true;
-        }
+        for (const char ch : id + " " + name + " ")
+            have += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
         ++n;
         const std::string key = n <= 9 ? std::to_string(n) : std::string();
         row(nullptr, name, key, "launch:tab:" + id);
         if (n <= 9 && ImGui::IsKeyPressed(static_cast<ImGuiKey>(ImGuiKey_1 + n - 1), false)) {
             ImGui::CloseCurrentPopup();
             run_command(s, "launch:tab:" + id);
+        }
+    }
+    if (profiles.empty()) {
+        ImGui::PushFont(s.fonts.ui, fpx(12));
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(9));
+        ImGui::TextDisabled("%s", mh->connected() ? "Checking installed agents\xE2\x80\xA6"
+                                                  : "Could not check installed agents");
+        ImGui::PopFont();
+    } else {
+        static constexpr std::array<std::pair<const char*, const char*>, 4> kKnown = {
+            {{"claude", "Claude Code"}, {"codex", "Codex"}, {"gemini", "Gemini CLI"}, {"opencode", "OpenCode"}}};
+        int missing = 0;
+        for (const auto& [key, label] : kKnown) {
+            if (missing >= 2 || have.find(key) != std::string::npos)
+                continue;
+            ++missing;
+            menu_row(s, nullptr, label, "not installed", false);
         }
     }
     ImGui::Separator();
@@ -4667,7 +4843,7 @@ void draw_status_bar(App::State& s, ImVec2 pos, float width, float height) {
     x += px(16);
     const std::string fid = s.ws.focused_session();
     if (s.views_by_id.count(fid)) {
-        const auto g = machine.empty() ? s.git.get(s.views_by_id[fid].cwd) : GitInfo{};
+        const auto g = s.git.get(s.views_by_id[fid].cwd, machine);
         if (g.repo && !g.branch.empty()) {
             draw_icon(s, dl, ui::icon::kBranch, fpx(13), ImVec2(x + px(6.5f), cy), g_pal->dim);
             x += px(13) + px(6);
@@ -7012,21 +7188,126 @@ bool stepper(App::State& s, const char* id, float& v, float step, float lo, floa
 }
 
 // Terminal fonts offered in Settings: the bundled default, then monospace faces Windows ships.
-std::vector<std::pair<std::string, std::wstring>> terminal_fonts() {
-    std::vector<std::pair<std::string, std::wstring>> out = {{"Default (JetBrains Mono)", L""}};
-    wchar_t buf[MAX_PATH]{};
-    const UINT n = ::GetWindowsDirectoryW(buf, MAX_PATH);
-    const std::filesystem::path dir = std::filesystem::path(std::wstring(buf, n)) / L"Fonts";
-    std::error_code ec;
-    for (const auto& [name, file] : std::vector<std::pair<std::string, std::wstring>>{
-             {"Cascadia Mono", L"CascadiaMono.ttf"}, {"Cascadia Code", L"CascadiaCode.ttf"},
-             {"Consolas", L"consola.ttf"}, {"Lucida Console", L"lucon.ttf"}, {"Courier New", L"cour.ttf"}})
-        if (std::filesystem::is_regular_file(dir / file, ec))
-            out.emplace_back(name, (dir / file).native());
-    return out;
+// ---- fonts (herdr: every installed family, filterable; weight; interface font)
+const std::vector<ui::FontFamily>& font_families() {
+    static const std::vector<ui::FontFamily> families = ui::installed_font_families();
+    return families;
+}
+
+const ui::FontFamily* find_family(const std::string& name) {
+    for (const auto& f : font_families())
+        if (_stricmp(f.name.c_str(), name.c_str()) == 0)
+            return &f;
+    return nullptr;
+}
+
+// Terminal font: family (empty: bundled JetBrains Mono) at the chosen weight, bold from the
+// family's 700 face.
+void apply_terminal_font(App::State& s) {
+    const auto* f = find_family(s.settings.terminal_font.empty() ? std::string("JetBrains Mono") : s.settings.terminal_font);
+    ImFont* mono = f != nullptr ? ui::load_font_file(f->file_for(s.settings.terminal_weight), s.settings.font_size, true) : nullptr;
+    s.fonts.mono = mono != nullptr ? mono : ui::load_terminal_font(L"", s.settings.font_size);
+    ImFont* bold = f != nullptr ? ui::load_font_file(f->file_for(700), s.settings.font_size, true) : nullptr;
+    s.fonts.mono_bold = bold != nullptr ? bold : s.fonts.mono;
+}
+
+// Interface font: family (empty: bundled Geist, kept from startup) at 400 / 500 / 600.
+void apply_ui_font(App::State& s) {
+    if (s.base_ui == nullptr) {  // the bundled set, loaded once at startup
+        s.base_ui = s.fonts.ui;
+        s.base_ui_medium = s.fonts.ui_medium;
+        s.base_ui_bold = s.fonts.ui_bold;
+    }
+    const auto* f = s.settings.ui_font.empty() ? nullptr : find_family(s.settings.ui_font);
+    ImFont* r = f != nullptr ? ui::load_font_file(f->file_for(400), 13.0f, false) : nullptr;
+    if (r == nullptr) {
+        s.fonts.ui = s.base_ui;
+        s.fonts.ui_medium = s.base_ui_medium;
+        s.fonts.ui_bold = s.base_ui_bold;
+    } else {
+        ImFont* m = ui::load_font_file(f->file_for(500), 13.0f, false);
+        ImFont* b = ui::load_font_file(f->file_for(600), 13.0f, false);
+        s.fonts.ui = r;
+        s.fonts.ui_medium = m != nullptr ? m : r;
+        s.fonts.ui_bold = b != nullptr ? b : s.fonts.ui_medium;
+    }
+    ImGui::GetIO().FontDefault = s.fonts.ui;
+}
+
+// herdr font list: a filter box and up to 200 matching families.
+bool font_picker(App::State& /*s*/, const char* id, std::string& family, const char* default_label, float width) {
+    bool changed = false;
+    ImGui::SetNextItemWidth(width);
+    const std::string current = family.empty() ? std::string(default_label) : family;
+    if (ImGui::BeginCombo(id, current.c_str(), ImGuiComboFlags_HeightLarge)) {
+        static char filter[64] = {};
+        if (ImGui::IsWindowAppearing()) {
+            filter[0] = '\0';
+            ImGui::SetKeyboardFocusHere();
+        }
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##filter", "Search fonts", filter, sizeof filter);
+        if (ImGui::Selectable(default_label, family.empty())) {
+            family.clear();
+            changed = true;
+        }
+        int shown = 0;
+        for (const auto& f : font_families()) {
+            if (filter[0] != '\0') {
+                std::string a = f.name, q = filter;
+                for (auto& c : a)
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (auto& c : q)
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (a.find(q) == std::string::npos)
+                    continue;
+            }
+            if (++shown > 200) {
+                ImGui::TextDisabled("Showing 200: type to narrow the list");
+                break;
+            }
+            if (ImGui::Selectable(f.name.c_str(), _stricmp(f.name.c_str(), family.c_str()) == 0)) {
+                family = f.name;
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
 }
 
 void play_alert(App::State& s, bool blocked);
+
+// A row of choices, one selected (herdr's segment control).
+bool segmented(App::State& s, const char* id, std::string& value,
+               std::initializer_list<std::pair<const char*, const char*>> options) {
+    bool changed = false;
+    ImGui::PushID(id);
+    const float bw = px(78), bh = px(28);
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(a, ImVec2(a.x + bw * static_cast<float>(options.size()) + px(4), a.y + bh + px(4)), raised_color(), px(7));
+    float x = a.x + px(2);
+    for (const auto& [key, label] : options) {
+        ImGui::SetCursorScreenPos(ImVec2(x, a.y + px(2)));
+        if (ImGui::InvisibleButton(key, ImVec2(bw, bh)) && value != key) {
+            value = key;
+            changed = true;
+        }
+        const bool on = value == key;
+        const bool hov = ImGui::IsItemHovered();
+        if (on || hov)
+            dl->AddRectFilled(ImVec2(x, a.y + px(2)), ImVec2(x + bw, a.y + px(2) + bh), on ? g_pal->selected : g_pal->hover, px(6));
+        const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(12), FLT_MAX, 0, label);
+        dl->AddText(s.fonts.ui, fpx(12), ImVec2(x + (bw - t.x) * 0.5f, a.y + px(2) + (bh - t.y) * 0.5f),
+                    on ? g_pal->text : g_pal->dim, label);
+        x += bw;
+    }
+    ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + bh + px(6)));
+    ImGui::Dummy(ImVec2(0, 0));
+    ImGui::PopID();
+    return changed;
+}
 
 void draw_settings(App::State& s) {
     if (s.show_settings) {
@@ -7126,15 +7407,29 @@ void draw_settings(App::State& s) {
         }
         ImGui::NewLine();
         settings_section(s, "Theme");
+        settings_row(s, "Appearance", "Light or dark, or as your system is now.", px(240));
+        if (segmented(s, "##appearance", s.settings.appearance, {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}}))
+            changed = true;
+        settings_row_done(s);
+        ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
+        ImGui::PushFont(s.fonts.ui, fpx(11.5f));
+        ImGui::TextWrapped("A layout file with its own \"theme\" uses that one instead.");
+        ImGui::PopFont();
+        ImGui::PopStyleColor();
+        for (const bool light_cards : {false, true}) {
+        ImGui::Dummy(ImVec2(0, px(4)));
+        ImGui::PushFont(s.fonts.ui_medium, fpx(12));
+        ImGui::TextDisabled("%s", light_cards ? "Light" : "Dark");
+        ImGui::PopFont();
         for (const auto& p : kPalettes) {
-            const bool on = g_pal == &p;
+            if (p.light != light_cards)
+                continue;
+            const bool on = (light_cards ? s.settings.theme_light : s.settings.theme_dark) == p.id;
             const ImVec2 a = ImGui::GetCursorScreenPos();
             const float cw = px(120), ch = px(64);
             ImGui::PushID(p.id);
             if (ImGui::InvisibleButton("##theme", ImVec2(cw, ch))) {
-                g_pal = &p;
-                s.settings.theme = p.id;
-                apply_style(s.dpi, ui_scale(s.settings));
+                run_command(s, std::string("theme:") + p.id);
                 changed = true;
             }
             ImGui::PopID();
@@ -7151,6 +7446,7 @@ void draw_settings(App::State& s) {
                 ImGui::NewLine();
         }
         ImGui::NewLine();
+        }
         settings_section(s, "Size and fonts");
         settings_row(s, "Zoom", "Everything: terminals, panels, text.", px(180));
         if (stepper(s, "zoom", s.settings.zoom, 0.1f, 0.5f, 3.0f, "%.0f%%", 100.0f)) {
@@ -7167,26 +7463,39 @@ void draw_settings(App::State& s) {
         }
         settings_row_done(s);
         {
-            const auto fonts = terminal_fonts();
-            std::string current = fonts.front().first;
-            for (const auto& [name, file] : fonts)
-                if (name == s.settings.terminal_font)
-                    current = name;
             settings_row(s, "Terminal font", nullptr, px(200) + px(10) + px(120));
-            ImGui::SetNextItemWidth(px(200));
-            if (ImGui::BeginCombo("##tfont", current.c_str())) {
-                for (const auto& [name, file] : fonts) {
-                    if (ImGui::Selectable(name.c_str(), name == current)) {
-                        s.settings.terminal_font = file.empty() ? std::string() : name;
-                        s.fonts.mono = ui::load_terminal_font(file, s.settings.font_size);
-                        changed = true;
-                    }
-                }
-                ImGui::EndCombo();
+            if (font_picker(s, "##tfont", s.settings.terminal_font, "JetBrains Mono (default)", px(200))) {
+                apply_terminal_font(s);
+                changed = true;
             }
             ImGui::SameLine(0, px(10));
             if (stepper(s, "tsize", s.settings.font_size, 1.0f, 8.0f, 32.0f, "%.0f px"))
                 changed = true;
+            settings_row_done(s);
+            // Terminal font weight: the weights the family has.
+            settings_row(s, "Terminal font weight", nullptr, px(200));
+            const auto* fam =
+                find_family(s.settings.terminal_font.empty() ? std::string("JetBrains Mono") : s.settings.terminal_font);
+            static constexpr std::pair<int, const char*> kWeightNames[] = {
+                {100, "Thin"}, {200, "Extra light"}, {300, "Light"}, {400, "Regular"}, {500, "Medium"},
+                {600, "Semibold"}, {700, "Bold"}, {800, "Extra bold"}, {900, "Black"}};
+            auto weight_label = [&](int w) {
+                for (const auto& [v, n] : kWeightNames)
+                    if (v == w)
+                        return std::string(n) + " " + std::to_string(w);
+                return std::to_string(w);
+            };
+            ImGui::SetNextItemWidth(px(200));
+            if (ImGui::BeginCombo("##tweight", weight_label(s.settings.terminal_weight).c_str())) {
+                if (fam != nullptr)
+                    for (const auto& [fw, file] : fam->weights)
+                        if (ImGui::Selectable(weight_label(fw).c_str(), fw == s.settings.terminal_weight)) {
+                            s.settings.terminal_weight = fw;
+                            apply_terminal_font(s);
+                            changed = true;
+                        }
+                ImGui::EndCombo();
+            }
             settings_row_done(s);
         }
         settings_row(s, "Terminal line height", nullptr, px(180));
@@ -7197,6 +7506,12 @@ void draw_settings(App::State& s) {
         settings_row_done(s);
         settings_row(s, "Terminal scroll speed", nullptr, px(180));
         changed |= stepper(s, "ss", s.settings.scroll_speed, 0.1f, 0.1f, 5.0f, "%.0f%%", 100.0f);
+        settings_row_done(s);
+        settings_row(s, "Interface font", nullptr, px(200));
+        if (font_picker(s, "##uifont", s.settings.ui_font, "Geist (default)", px(200))) {
+            apply_ui_font(s);
+            changed = true;
+        }
         settings_row_done(s);
         settings_section(s, "Terminals");
         {
@@ -7447,18 +7762,12 @@ void draw_welcome(App::State& s) {
             apply_style(s.dpi, ui_scale(s.settings));
             changed = true;
         }
-        ImGui::TextDisabled("Theme");
+        // herdr welcome page 1: Appearance System / Light / Dark.
+        ImGui::TextDisabled("Appearance");
         ImGui::SameLine(px(120));
-        for (const auto& p : kPalettes) {
-            if (ImGui::RadioButton(p.label, g_pal == &p)) {
-                g_pal = &p;
-                s.settings.theme = p.id;
-                apply_style(s.dpi, ui_scale(s.settings));
-                changed = true;
-            }
-            ImGui::SameLine();
-        }
-        ImGui::NewLine();
+        if (segmented(s, "##wappearance", s.settings.appearance,
+                      {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}}))
+            changed = true;
     } else if (page == 1) {
         title("Add your other machines",
               "A desktop at home, a server: AgentDesk reaches them over ssh, and agents there keep running while "
@@ -7471,6 +7780,13 @@ void draw_welcome(App::State& s) {
         primary_button_style(false);
     } else if (page == 2) {
         title("Choose your panels", "Buttons at the right of the tab bar open them beside your terminals.");
+        // herdr welcome.js 396-413: the first visit to this page starts with both off; skipping
+        // the welcome leaves both on.
+        if (!s.welcome_panels_seen) {
+            s.welcome_panels_seen = true;
+            s.settings.panels.clear();
+            changed = true;
+        }
         auto toggle = [&](const char* id, const char* label, const char* text) {
             bool on = std::find(s.settings.panels.begin(), s.settings.panels.end(), id) != s.settings.panels.end();
             if (ImGui::Checkbox(label, &on)) {
@@ -7494,6 +7810,24 @@ void draw_welcome(App::State& s) {
         ImGui::TextWrapped("Change any shortcut in keys.json, the look in Settings (%s), and add C++ mods in the mods "
                            "folder. agentctl drives AgentDesk from a terminal or from your agents.",
                            s.keymap.chord_for("app.settings").c_str());
+        // herdr page 4: a line to give your agent so it learns to drive the app.
+        ImGui::Dummy(ImVec2(0, px(8)));
+        ImGui::TextDisabled("Tell your agent:");
+        static constexpr const char* kAsk =
+            "Run `agentctl --skill` and read it, then use agentctl to start, watch and report to other agents here.";
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, v4(raised_color()));
+        ImGui::BeginChild("##ask", ImVec2(-1, px(52)), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+        ImGui::SetCursorPos(ImVec2(px(10), px(8)));
+        ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x - px(80));
+        ImGui::TextUnformatted(kAsk);
+        ImGui::PopTextWrapPos();
+        ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - px(72), px(12)));
+        if (ImGui::Button(s.welcome_copied ? "Copied" : "Copy", ImVec2(px(62), px(26)))) {
+            ImGui::SetClipboardText(kAsk);
+            s.welcome_copied = true;
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
     }
     // Footer: dots, Back / Next.
     const float fy = ImGui::GetWindowPos().y + h - px(56);
@@ -7907,6 +8241,12 @@ void App::frame() {
     g_scale = s.dpi * ui_scale(s.settings);
     s.fonts.mono_size = s.settings.font_size / ui_text_factor(s.settings);
     s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
+    if (const Palette* want = effective_palette(s.settings.appearance, s.settings.theme_dark, s.settings.theme_light,
+                                                s.layout().theme);
+        want != g_pal) {
+        g_pal = want;
+        apply_style(s.dpi, ui_scale(s.settings));
+    }
     const bool connected = s.host->connected();
 
     if (auto doc = s.host->take_ui_state()) {

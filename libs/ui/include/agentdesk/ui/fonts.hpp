@@ -1,6 +1,8 @@
 #pragma once
 
+#include <map>
 #include <string>
+#include <vector>
 
 struct ImFont;
 
@@ -29,6 +31,19 @@ FontSet load_fonts(float mono_size_px, float ui_size_px);
 // A terminal font from a file (empty: the bundled JetBrains Mono), merged like load_fonts does.
 // Fonts can be added while running (ImGui 1.92 dynamic atlas).
 ImFont* load_terminal_font(const std::wstring& file, float size_px);
+// Any font file with the same fallbacks; pixel_snap for terminal cells. nullptr if unreadable.
+ImFont* load_font_file(const std::wstring& file, float size_px, bool pixel_snap);
+
+// Installed font families (herdr lists every family in its font pickers): the per-user and
+// system font registrations plus the bundled fonts\ folder. Italic faces are left out.
+struct FontFamily {
+    std::string name;
+    std::map<int, std::wstring> weights;  // 100..900 -> file
+    bool bundled = false;
+    // The file for `weight`, or the nearest weight the family has.
+    [[nodiscard]] std::wstring file_for(int weight) const;
+};
+std::vector<FontFamily> installed_font_families();
 
 // Icon glyphs of the bundled Symbols Nerd Font (VS Code codicons at their own code points; each
 // verified present in the font's cmap). Draw them with FontSet::icons.
