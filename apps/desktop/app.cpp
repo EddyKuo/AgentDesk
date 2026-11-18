@@ -436,6 +436,8 @@ std::vector<LayoutSpec> load_layouts() {
         {"workspace", "panes", true, std::nullopt, true, true, ""},
         {"board", "board", true, false, false, true, ""},
         {"grid", "grid", false, false, true, true, ""},
+        // herdr's second shipped layout (layouts/terminals.json): no sidebar, the terminal tabs.
+        {"terminals", "panes", false, false, true, false, ""},
         {"focus", "panes", false, false, false, false, ""},
     };
     std::error_code ec;
