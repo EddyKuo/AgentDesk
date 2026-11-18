@@ -381,3 +381,13 @@ TEST(Win98Float, SnapsToTheNearestEdgeAndThird) {
     EXPECT_STREQ(edge_name(parse_place("bottom", "").edge), "bottom");
     EXPECT_STREQ(align_name(parse_place("x", "start").align), "start");
 }
+
+// herdr floats.rs 410-415.
+TEST(Win98Float, TheSpringOvershootsThenSettles) {
+    EXPECT_EQ(agentdesk::ui::win98::spring(0.0f), 0.0f);
+    EXPECT_NEAR(agentdesk::ui::win98::spring(1.0f), 1.0f, 1e-6f);
+    bool over = false;
+    for (int i = 1; i < 100; ++i)
+        over |= agentdesk::ui::win98::spring(static_cast<float>(i) / 100.0f) > 1.0f;
+    EXPECT_TRUE(over);
+}

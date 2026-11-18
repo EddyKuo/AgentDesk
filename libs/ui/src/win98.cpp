@@ -129,6 +129,12 @@ MenuSize menu_size(const std::vector<MenuRowText>& items, bool start) {
 }
 
 // herdr src/layout.rs 732-751.
+float spring(float t) {
+    const float c1 = 1.25f;
+    t = std::clamp(t, 0.0f, 1.0f) - 1.0f;
+    return 1.0f + (c1 + 1.0f) * t * t * t + c1 * t * t;
+}
+
 FloatPlace snap_float(float x, float y, float w, float h) {
     x = std::clamp(x, 0.0f, std::max(0.0f, w));
     y = std::clamp(y, 0.0f, std::max(0.0f, h));

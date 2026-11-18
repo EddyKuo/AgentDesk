@@ -84,3 +84,4 @@ plan: docs/design/AgentDesk_Design.md 5.6
 | 2026-11-19 | 面板標題的名稱順序 | 照 herdr：自訂名稱 → Agent 或 shell 用程式名稱 → 終端機標題 → 程式名稱 → "shell" | mods/pane/main.js 61 | — |
 | 2026-11-19 | Herdr 98 的程式圖示 | 照 herdr：改用同一張程式表（原本只有 11 個 Agent 圖示）；shell、通用 shell 項目與沒有圖示的都是 MS-DOS；tint 的放在 tile 色（沒有就 navy）上、小 4 px、用 color（沒有就白色） | mods/win98/kit.js 208-225；mods/win98/window.js 9-16 | — |
 | 2026-11-19 | 圖示授權 | 隨附：LobeHub（MIT）、Lucide（ISC）、oh-my-pi（MIT）、Simple Icons（CC0），列入 THIRD_PARTY_NOTICES | defaults/icons/LICENSES.md | — |
+| 2026-11-19 | Herdr 98 小幫手放開後的彈回 | 照 herdr：從放開的位置以 360 ms、略為超過再回來的曲線彈回新位置；拖曳門檻改為兩軸距離取大者 4 px；圖片本身按下不拖曳（own），只能從邊緣拖 | src/window/floats.rs 16-17、64-75、212-215、261-262、288-297；mods/win98/kit.js 140-142 | — |
