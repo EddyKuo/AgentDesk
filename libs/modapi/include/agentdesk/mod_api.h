@@ -30,7 +30,7 @@ typedef struct agentdesk_host {
     uint32_t api_version;
     void* ctx; /* pass back as the first argument */
 
-    /* Runs a window command ("tab.new", "agent.focus:<session>", "layout:grid", ...). */
+    /* Runs a window command ("tab.new", "agent.focus:<session>", "layout:terminals", ...). */
     void (*run)(void* ctx, const char* command);
     /* Types text into a session; enter != 0 presses Enter after it. */
     void (*send)(void* ctx, const char* session, const char* text, int enter);
