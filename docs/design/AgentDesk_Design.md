@@ -20,7 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
-| 2.8 | 2026-11-19 | ADR-18：版面只保留 herdr 有的（移除 Board、Grid、Focus），補做 Herdr 98、線上更新檢查、使用統計（Settings › Updates、Privacy，沒有內建伺服器）；修正點擊與選單問題（見 sprint/current/status.md）；新增待決事項 OQ-09（agent-host 單獨更新） |
+| 2.8 | 2026-11-19 | ADR-18：版面只保留 herdr 有的（移除 Board、Grid、Focus），補做 Herdr 98、線上更新檢查、使用統計（Settings › Updates、Privacy，沒有內建伺服器）；修正點擊與選單問題（見 sprint/current/status.md）；ADR-19：agent-host 單獨更新時接手終端機（OQ-09 已決定）；程式表與圖示改用 herdr 的 |
 | 2.7 | 2026-11-18 | 對照 herdr-app 原始碼（commit 321c9a8）逐行比對約 400 項，補齊約 58 項：分割樹改為多子節點與權重、分頁與焦點規則、側欄與 Agent 清單、選單與對話框、Terminals 版面、win32-input-mode、複製貼上與連結、Files／Changes、worktree、設定與歡迎頁 |
 | 2.6 | 2026-11-18 | 依 herdr 規格逐項比對（約 150 項）補齊缺漏與差異，見 5.6 最後一列與「刻意保留的差異」 |
 | 2.5 | 2026-11-18 | 使用者要求全部用 C++：新增 ADR-17（mod 改為 C++ DLL，取代 ADR-14）；Codex 狀態 hook 改為 `agentctl hook` |
@@ -225,7 +225,7 @@ ConPTY 來源：herdr-core 的實作註解指出，Windows 內建 ConPTY 會吞�
 
 必備功能：SGR 顏色與樣式、游標定位、erase、捲動區域、alternate screen、游標可見性、application cursor keys、bracketed paste、必要 DSR/DA 查詢回覆。宣告的終端機能力只涵蓋已驗證項目。
 
-libvterm 0.3.3 已知限制（M0 實測）：UTF-8 序列被切在兩次寫入之間且後接控制字元時會產生 U+FFFD，VtEngine 暫存尾端不完整序列繞過（只延後、不丟）；Ambiguous 寬度一律 1 欄；ZWJ emoji 序列不合併；不支援 kitty keyboard protocol；不對外通知 RIS，因此 OSC 7501「RIS 清除全部紀錄」目前無法實作。
+libvterm 0.3.3 已知限制（M0 實測）：UTF-8 序列被切在兩次寫入之間且後接控制字元時會產生 U+FFFD，VtEngine 暫存尾端不完整序列繞過（只延後、不丟）；Ambiguous 寬度一律 1 欄；ZWJ emoji 序列不合併；不支援 kitty keyboard protocol；不對外通知 RIS，因此 OSC 7501「RIS 清除全部紀錄」目前無法實作。為了換版時保存完整畫面（ADR-19），收錄的 libvterm 加了一段 AgentDesk 自己的存取程式（`agentdesk_handover.c`、`vterm_agentdesk.h`），其餘未改，見 third_party/libvterm/README.agentdesk.md。
 
 歷史預設每工作 10,000 行並限制 16 MiB，先達上限者截斷最舊資料，UI 顯示保留範圍。alternate screen 與主畫面分開。MVP resize 保留引擎行為，暫不承諾完美歷史 reflow。
 
@@ -547,6 +547,7 @@ M0～M4 已實作，驗收矩陣結果見 `contracts/inbox/TestReport_sprint5.md
 | 複製、重設版面（`layout.clone`／`layout.reset`），複製 mod（`mod.clone`） | frame/palette | ✅ |
 | What's new（更新後顯示一次）、Send feedback（複製或存檔，不自動送出） | frame/settings、window.rs | ✅ |
 | 逐項比對後補齊（2026-11-18）：keys.json 的 layout／mod 區段、物件動作、`terminal` 與錯誤檢查；預設按鍵；命令面板標題與順序；面板右鍵選單與標題列；Appearance 與深淺主題；所有已安裝字型、終端機字重、介面字型；歡迎頁；機器標頭與空機器列；新增選單的未安裝 Agent；移除 worktree 的子模組與重新檢查；遠端 space 的分支 | 四份規格（docs/research/herdr-app/） | ✅ |
+| Herdr 98 版面、程式表與圖示、Updates／Privacy、Look 的版面卡片 | mods/win98、src/programs.rs、src/update.rs、src/telemetry.rs、frame/settings | ✅ |
 
 刻意保留的差異：配色用我們自己的四個主題；介面文字預設 15 px；有選取時 Ctrl+C 複製（3.5，herdr 一律交給程式）；mod 是 C++ DLL（ADR-17）；線上更新與使用統計沒有預設伺服器（ADR-18）。
 
@@ -619,6 +620,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-12 | 主畫面改用固定版面（側欄＋分頁＋分割面板），不用 ImGui DockSpace | 使用者要求介面接近 herdr（https://herdr.dev/gallery/ 觀察到的預設視窗：Spaces 與 Agents 側欄、分頁、卡片面板、細狀態列）。固定版面每次由 host 的 session 清單重建，不需要 imgui.ini。代價是不能任意拖曳停靠，分割只有左右、每分頁最多 3 個 |
 | ADR-17 | mod 改為 C++ DLL，移除 Lua（2026-11-18，取代 ADR-14） | 使用者要求「所有的程式都想用 C++ 完成」，並在三個選項（移除 mod、C++ DLL、保留 Lua）中選了 C++ DLL。mod 是 `mods\<名稱>\mod.dll`，介面是純 C 的 `agentdesk/mod_api.h`（版本 1：host 提供 run、send、notify、exec、add_command、sessions、setting；mod 提供 on_event、panels、click、decorate、command、destroy；結構化資料用 JSON 字串），另有 header-only 的 `mod_sdk.hpp`。只載入已啟用的 mod，`LoadLibraryExW` 只搜尋 DLL 所在資料夾與 System32。每次呼叫 mod 都包在 SEH 裡：當掉就停用並保留 DLL 不卸載；C++ 例外由 SDK 攔下並以通知回報。範例 mod 改寫成 C++，隨 zip 附上 SDK 標頭與範例原始碼，Codex 狀態 hook 也改成 `agentctl hook`（不再附 PowerShell 腳本）。代價：mod 不再有沙盒，以使用者權限執行（Lua 版禁止檔案與 shell）；無窮迴圈無法中斷；寫 mod 要能編譯 C++ |
 | ADR-18 | 版面只保留 herdr 有的 | 使用者決定（2026-11-19）：移除自己加的 Board、Grid、Focus，只留 workspace（herdr 的 main）與 terminals，另外補上 Herdr 98。原本刻意不做的 Herdr 98、線上更新檢查、使用統計都要做；更新與統計沒有預設伺服器，比照 herdr 從原始碼建置的版本，設定 AGENTDESK_RELEASES_URL、AGENTDESK_TELEMETRY_URL 才會連線 |
+| ADR-19 | agent-host 換版時接手終端機 | 使用者決定照 herdr 移植（2026-11-19，OQ-09）：herdr-core 更新時終端機繼續跑。舊 host 啟動 `agent-host --takeover`，凍結每個 session（解析器回到 ground 才停、沒讀的位元組留在原管線），把 ConPTY、子程序與 Job 的 handle 複製給新 host，並送出完整的終端機狀態；新 host 逐一核對 handle（PID、Job 成員、KILL_ON_JOB_CLOSE、OpenConsole），用隨附 ConPTY 的 `ConptyPackPseudoConsole` 重建後回報 ready，舊 host 才放手。ready 之前任何失敗都由舊 host 接回。代價：只支援隨附 ConPTY（內建版拒絕更新）；換版時連線會斷，client 重新連上；升級 ConPTY 時要重新確認 HPCON 結構 |
 | ADR-16 | WSL 發行版作為本機 shell，不做 Linux 版 host（2026-11-18） | 使用者詢問能否接入 WSL，並選了兩項：列進新增選單、資料夾追蹤跟著 Linux 的 cd。host 從 HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss 列出發行版（略過 docker-desktop*），每個建一個 `wsl.exe -d <名稱>` profile；已有的 profiles.json 只補一次（`wsl_detected`）。資料夾追蹤用 OSC 7：host 透過 `WSLENV` 傳入 bash 的 `PROMPT_COMMAND`，在每次提示字元前送 `file://$WSL_DISTRO_NAME$PWD`，`/mnt/<碟>/…` 對應 `<碟>:\…`，其他對應 `\\wsl.localhost\<發行版>\…`；任何 shell 送的 OSC 7 都優先於讀 PEB。Windows 的 git 對 WSL 路徑加 `-c safe.directory=*`（否則因擁有者不同拒絕）。不改使用者 WSL 裡的檔案。不做 Linux 版 agent-host（讓 WSL 當遠端機器）：它要重寫 ConPTY、Job、Named Pipe、背景啟動、程序樹等平台層，還需要 Linux 工具鏈，多換到的只有「Windows 端 host 結束後，WSL 裡的工作仍在」。代價：只支援 bash，`~/.bashrc` 自設 PROMPT_COMMAND 或用 zsh／fish 時資料夾停在啟動位置；WSL 檔案走網路檔案系統，大 repo 的 Changes 較慢 |
 | ADR-15 | 依 herdr-app 原始碼完整複刻介面與行為（2026-11-18） | 使用者要求「一定要完整複刻，有問題就去查 herdr 的 source code」，並同意直接轉寫其程式碼。依據是 herdr-app commit 321c9a8 的版面檔與 mod（審閱與逐項規格見 docs/research/herdr-app-review.md 與 docs/research/herdr-app/）。版面尺寸、互動、狀態與提醒規則、Files／Changes、picker、命令面板、設定、歡迎頁、worktree 對話框都照 herdr；介面用 C++／ImGui 重寫，不搬 JS 執行環境。herdr 是 Apache-2.0：發布包的 THIRD_PARTY_NOTICES 列出 herdr-app 並附授權，隨附它的兩段提示音；隨附 Geist、JetBrains Mono（OFL）與 Symbols Nerd Font（MIT）。配色保留我們自己的四個主題（使用者同意配色可以不同）。介面文字預設 15 px（herdr 為 13），可在設定調整。代價是 NOTICE 義務；遠端機器的 Files／Changes 經該機器的 agent-host（fs.list、fs.read、git.run）取得，沒有資料夾監看，每 10 秒更新 |
 | ADR-11 | 只用已安裝的 VS 2022 C++ 工具鏈，不另外安裝工具 | 使用者要求；開發環境可重現、無額外依賴。代價是排除需要 Zig 的 libghostty-vt |
@@ -668,7 +670,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | OQ-06 | 輸出過載政策：**已決定** 背壓（M0） | M0 結果 |
 | OQ-07 | 第三方套件取得方式：**已決定** vcpkg manifest（baseline `afa249f`）；libvterm 原始碼收錄於 third_party | Sprint 1 的 S1-1 凍結 |
 | OQ-08 | 授權：**已決定** MIT License（2026-11-16，ADR-10） | 使用者 |
-| OQ-09 | agent-host 要不要能單獨更新（herdr 的 `app.update_core`／`hc update`，終端機不中斷）：agent-host 沒有自我更新、終端機會隨它結束，目前只隨 AgentDesk 的 zip 一起更新 | 使用者 |
+| OQ-09 | agent-host 單獨更新：**已決定** 照 herdr 移植，終端機不中斷（2026-11-19，ADR-19） | 使用者 |
 
 ## 8. 官方參考資料
 
