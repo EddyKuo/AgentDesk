@@ -181,10 +181,10 @@ void apply_style(float dpi, float zoom) {
         ImGui::StyleColorsLight(&s);
     else
         ImGui::StyleColorsDark(&s);
-    s.WindowRounding = 12;
+    s.WindowRounding = 8;  // herdr overlays: radius 8, popover background, 1 px border
     s.ChildRounding = 10;
     s.FrameRounding = 7;
-    s.PopupRounding = 10;
+    s.PopupRounding = 8;
     s.GrabRounding = 7;
     s.ScrollbarRounding = 7;
     s.WindowBorderSize = 1;
@@ -201,7 +201,13 @@ void apply_style(float dpi, float zoom) {
     c[ImGuiCol_TextDisabled] = v4(g_pal->dim);
     c[ImGuiCol_WindowBg] = v4(g_pal->bg);
     c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_PopupBg] = v4(g_pal->card);
+    {
+        const ImVec4 a = v4(g_pal->card);
+        const float t = g_pal->light ? -0.03f : 0.06f;  // popover = card mixed toward white (black on light)
+        const float target = g_pal->light ? 0.0f : 1.0f;
+        const float k = std::abs(t);
+        c[ImGuiCol_PopupBg] = ImVec4(a.x + (target - a.x) * k, a.y + (target - a.y) * k, a.z + (target - a.z) * k, 1.0f);
+    }
     c[ImGuiCol_Border] = v4(g_pal->border);
     c[ImGuiCol_FrameBg] = v4(g_pal->hover);
     c[ImGuiCol_FrameBgHovered] = v4(g_pal->selected);
@@ -1612,6 +1618,14 @@ struct Placement {
     std::string space_name;
 };
 
+struct WorktreeEntry {
+    std::string path;
+    std::string branch;  // empty: detached
+    bool main = false;
+    long long time = 0;  // last commit (unix seconds)
+    std::string age;     // "5m", "3h", "2d", "4mo"
+};
+
 struct Remote {
     MachineConfig cfg;
     std::unique_ptr<ui::HostClient> host;
@@ -1735,7 +1749,9 @@ struct App::State {
     std::string confirm_title, confirm_detail, confirm_ok, confirm_command;
     std::string settings_tab;  // tab to select when the settings window opens
     bool show_worktree_open = false;
-    std::vector<std::pair<std::string, std::string>> worktree_list;  // path, branch
+    std::vector<WorktreeEntry> worktree_list;
+    char wt_filter[128] = {};
+    int wt_sel = 0;
 
     // ---------------------------------------------------------------- helpers
     [[nodiscard]] std::string title_of(const ui::SessionView& v) const {
@@ -2539,40 +2555,81 @@ void run_command(App::State& s, const std::string& cmd) {
     } else if (name == "app.welcome") {
         s.show_welcome = true;
     } else if (name == "worktree.open") {
-        // Existing worktrees of the focused repo (git worktree list); picking one opens a space there.
+        // Existing worktrees of the focused repo (git worktree list --porcelain, bare and prunable
+        // skipped): main checkout first, then by the branch's last commit, newest first.
         s.worktree_list.clear();
         const std::string cwd = s.focused_cwd();
+        const auto g = s.git.get(cwd);
         if (!cwd.empty()) {
             const std::filesystem::path p(win::to_wide(cwd));
             const auto r = host::run_tool({L"git", L"-C", p.native(), L"worktree", L"list", L"--porcelain"}, p,
                                           std::chrono::seconds(10));
-            std::stringstream ss(r.output);
-            std::string path;
+            std::stringstream ss(r.output + "\n");
+            WorktreeEntry e;
+            bool skip = false;
             for (std::string l; std::getline(ss, l);) {
                 if (!l.empty() && l.back() == '\r')
                     l.pop_back();
                 if (l.rfind("worktree ", 0) == 0) {
-                    path = l.substr(9);
-                    for (auto& c : path)
+                    e = {};
+                    skip = false;
+                    e.path = l.substr(9);
+                    for (auto& c : e.path)
                         if (c == '/')
                             c = '\\';
-                } else if (l.rfind("branch ", 0) == 0 && !path.empty()) {
-                    std::string b = l.substr(7);
-                    if (b.rfind("refs/heads/", 0) == 0)
-                        b = b.substr(11);
-                    s.worktree_list.emplace_back(path, b);
-                    path.clear();
-                } else if (l == "detached" && !path.empty()) {
-                    s.worktree_list.emplace_back(path, "(detached)");
-                    path.clear();
+                } else if (l.rfind("branch ", 0) == 0) {
+                    e.branch = l.substr(7);
+                    if (e.branch.rfind("refs/heads/", 0) == 0)
+                        e.branch = e.branch.substr(11);
+                } else if (l == "bare" || l.rfind("prunable", 0) == 0) {
+                    skip = true;
+                } else if (l.empty() && !e.path.empty()) {
+                    if (!skip) {
+                        e.main = _stricmp(e.path.c_str(), g.common_top.c_str()) == 0;
+                        const std::filesystem::path wp(win::to_wide(e.path));
+                        const auto t = host::run_tool({L"git", L"-C", wp.native(), L"log", L"-1", L"--format=%ct"}, wp,
+                                                      std::chrono::seconds(5));
+                        e.time = std::atoll(t.output.c_str());
+                        const long long age = static_cast<long long>(std::time(nullptr)) - e.time;
+                        e.age = e.time == 0        ? std::string()
+                                : age < 3600       ? std::to_string(std::max(1LL, age / 60)) + "m"
+                                : age < 86400      ? std::to_string(age / 3600) + "h"
+                                : age < 86400 * 60 ? std::to_string(age / 86400) + "d"
+                                                   : std::to_string(age / (86400 * 30)) + "mo";
+                        s.worktree_list.push_back(e);
+                    }
+                    e = {};
                 }
             }
+            std::stable_sort(s.worktree_list.begin(), s.worktree_list.end(),
+                             [](const WorktreeEntry& a2, const WorktreeEntry& b2) {
+                                 if (a2.main != b2.main)
+                                     return a2.main;
+                                 return a2.time > b2.time;
+                             });
         }
         if (s.worktree_list.empty())
-            s.toast("No worktrees", "The focused folder is not a git checkout with worktrees.", "", g_pal->info);
+            s.toast("Not a git checkout", "Open worktree needs a terminal in a git repository.", "", g_pal->info);
         else
             s.show_worktree_open = true;
     } else if (name == "worktree.open_at") {
+        int best = -1;
+        for (int i = 0; i < static_cast<int>(s.ws.spaces.size()) && best < 0; ++i) {
+            const auto& sp = s.ws.spaces[static_cast<std::size_t>(i)];
+            if (!sp.machine.empty() || sp.tabs.empty())
+                continue;
+            const auto ids = s.ws.sessions_in(sp.tabs.front());
+            if (!ids.empty() && s.views_by_id.count(ids.front())) {
+                const auto top = s.git.get(s.views_by_id[ids.front()].cwd).top;
+                if (_stricmp(top.c_str(), arg.c_str()) == 0)
+                    best = i;
+            }
+        }
+        if (best >= 0) {
+            s.ws.select_space(best);
+            s.focus_view(s.ws.focused_session());
+            return;
+        }
         Placement p;
         p.target = LaunchTarget::kSpace;
         ui::HostClient* h = s.host_for("");
@@ -2581,11 +2638,20 @@ void run_command(App::State& s, const std::string& cmd) {
             create_session(s, shell, arg, "", p);
     } else if (name == "worktree.remove") {
         const auto g = s.git.get(s.focused_cwd());
-        if (g.repo && g.worktree)
-            open_confirm(s, "Remove worktree?",
-                         g.top + "\nThe checkout folder is deleted; the branch stays. Its terminals end.", "Remove",
-                         "worktree.remove_now:" + g.top);
-    } else if (name == "worktree.remove_now") {
+        if (g.repo && !g.worktree) {
+            s.toast("Not a worktree", "This is the repository's main checkout, not a worktree.", "", g_pal->working);
+        } else if (g.repo) {
+            const std::filesystem::path p(win::to_wide(g.top));
+            const auto st = host::run_tool({L"git", L"-C", p.native(), L"status", L"--porcelain"}, p, std::chrono::seconds(10));
+            const bool dirty = st.started && !st.output.empty();
+            std::string detail = "Closes the space and deletes " + display_path(g.top) + ". The branch stays.";
+            if (dirty)
+                detail += "\n\nIt has uncommitted changes: they will be lost.";
+            const auto loc = s.ws.find(s.ws.focused_session());
+            open_confirm(s, "Remove worktree " + (loc.space >= 0 ? s.ws.space_title(loc.space, s.session_cwds()) : g.top) + "?",
+                         detail, "Remove", std::string(dirty ? "worktree.remove_force:" : "worktree.remove_now:") + g.top);
+        }
+    } else if (name == "worktree.remove_now" || name == "worktree.remove_force") {
         const auto g = s.git.get(arg);
         const std::filesystem::path main(win::to_wide(g.common_top.empty() ? arg : g.common_top));
         // End the terminals of spaces in that checkout first (they hold the folder open).
@@ -2598,8 +2664,11 @@ void run_command(App::State& s, const std::string& cmd) {
             if (inside)
                 run_command(s, "space.close_now:" + s.ws.spaces[static_cast<std::size_t>(i)].id);
         }
-        const auto r = host::run_tool({L"git", L"-C", main.native(), L"worktree", L"remove", win::to_wide(arg)}, main,
-                                      std::chrono::seconds(30));
+        std::vector<std::wstring> argv = {L"git", L"-C", main.native(), L"worktree", L"remove"};
+        if (name == "worktree.remove_force")
+            argv.push_back(L"--force");
+        argv.push_back(win::to_wide(arg));
+        const auto r = host::run_tool(argv, main, std::chrono::seconds(30));
         if (!r.started || r.exit_code != 0)
             s.toast("Could not remove the worktree", r.output, "", g_pal->needs_you, 10);
         s.git.invalidate(arg);
@@ -2873,6 +2942,46 @@ bool icon_button(App::State& s, const char* id, const char* glyph, ImVec2 pos, f
     return clicked;
 }
 
+// herdr context menu (mods/menu): padding 5, rows 31 px with a 14 px muted icon, the label and
+// the bound key right-aligned in 11 px dim. Use between begin_menu / end_menu.
+bool begin_menu(const char* id) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(5), px(5)));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(px(200), 0), ImVec2(FLT_MAX, FLT_MAX));
+    const bool open = ImGui::BeginPopupContextItem(id);
+    ImGui::PopStyleVar(2);
+    return open;
+}
+bool menu_row(App::State& s, const char* glyph, const char* label, const std::string& chord = {}, bool enabled = true) {
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    const float w = std::max(ImGui::GetContentRegionAvail().x, px(190));
+    ImGui::BeginDisabled(!enabled);
+    const bool clicked = ImGui::InvisibleButton(label, ImVec2(w, px(31)));
+    ImGui::EndDisabled();
+    const bool hov = enabled && ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (hov)
+        dl->AddRectFilled(a, ImVec2(a.x + w, a.y + px(31)), g_pal->selected, px(7));
+    const float cy = a.y + px(15.5f);
+    const ImU32 col = enabled ? g_pal->text : g_pal->faint;
+    if (glyph != nullptr)
+        draw_icon(s, dl, glyph, fpx(14), ImVec2(a.x + px(15), cy), enabled ? g_pal->dim : g_pal->faint);
+    dl->AddText(s.fonts.ui, fpx(12.8f), ImVec2(a.x + px(31), cy - fpx(12.8f) * 0.6f), col, label);
+    if (!chord.empty()) {
+        const float cw = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, chord.c_str()).x;
+        dl->AddText(s.fonts.ui, fpx(11), ImVec2(a.x + w - px(8) - cw, cy - fpx(11) * 0.6f), g_pal->faint, chord.c_str());
+    }
+    if (clicked)
+        ImGui::CloseCurrentPopup();
+    return clicked;
+}
+void menu_separator() {
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, px(9)));
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(a.x, a.y + px(4)), ImVec2(a.x + ImGui::GetContentRegionAvail().x, a.y + px(4)),
+                                        g_pal->border);
+}
+
 // Agent status marks (agents.js 208-217): spinner, "Needs you" pill or "!", done dot, idle ring.
 // Draws with its left edge at `x`, vertically centred on `cy`; returns the width used.
 float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a, bool compact, bool measure = false) {
@@ -3106,26 +3215,26 @@ void space_menu(App::State& s, int i) {
             break;
         }
     }
-    if (ImGui::MenuItem("Rename", s.keymap.chord_for("space.rename").c_str())) {
+    if (menu_row(s, ui::icon::kCommand, "Rename", s.keymap.chord_for("space.rename"))) {
         s.ws.select_space(i);
         open_rename(s, "space", sp.id, sp.name);
     }
     if (g.repo) {
-        if (ImGui::MenuItem("New worktree")) {
+        if (menu_row(s, ui::icon::kWorktree, "New worktree", s.keymap.chord_for("worktree.new"))) {
             s.ws.select_space(i);
             run_command(s, "worktree.new");
         }
-        if (ImGui::MenuItem("Open worktree")) {
+        if (menu_row(s, ui::icon::kFolderOpen, "Open worktree")) {
             s.ws.select_space(i);
             run_command(s, "worktree.open");
         }
-        if (g.worktree && ImGui::MenuItem("Remove worktree")) {
+        if (g.worktree && menu_row(s, ui::icon::kClose, "Remove worktree")) {
             s.ws.select_space(i);
             run_command(s, "worktree.remove");
         }
     }
-    ImGui::Separator();
-    if (ImGui::MenuItem("Close"))
+    menu_separator();
+    if (menu_row(s, ui::icon::kClose, "Close", s.keymap.chord_for("space.close")))
         confirm_close_space(s, i);
 }
 
@@ -3263,7 +3372,7 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             s.ws.select_space(i);
             s.focus_view(s.ws.focused_session());
         }
-        if (ImGui::BeginPopupContextItem("##spacectx")) {
+        if (begin_menu("##spacectx")) {
             space_menu(s, i);
             ImGui::EndPopup();
         }
@@ -3686,10 +3795,10 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         }
         if (hov && !v.agent_message.empty())
             ImGui::SetTooltip("%s", v.agent_message.c_str());
-        if (ImGui::BeginPopupContextItem("##agentctx")) {
-            if (ImGui::MenuItem("Peek"))
+        if (begin_menu("##agentctx")) {
+            if (menu_row(s, ui::icon::kZoom, "Peek"))
                 run_command(s, "agent.peek:" + id);
-            if (s.ws.find(id).space < 0 && ImGui::MenuItem("Open as pane"))
+            if (s.ws.find(id).space < 0 && menu_row(s, ui::icon::kSplitRight, "Open as pane"))
                 run_command(s, "agent.keep:" + id);
             ImGui::EndPopup();
         }
@@ -4066,15 +4175,15 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
                 open_rename(s, "tab", tab.id, tab.name);
             if (hov && ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
                 close_tab = it.i;
-            if (ImGui::BeginPopupContextItem("##tabctx")) {
-                if (ImGui::MenuItem("Rename", s.keymap.chord_for("tab.rename").c_str())) {
+            if (begin_menu("##tabctx")) {
+                if (menu_row(s, ui::icon::kCommand, "Rename", s.keymap.chord_for("tab.rename"))) {
                     s.ws.select_tab(it.i);
                     open_rename(s, "tab", tab.id, tab.name);
                 }
-                if (ImGui::MenuItem("New tab", s.keymap.chord_for("tab.new").c_str()))
+                if (menu_row(s, ui::icon::kPlus, "New tab", s.keymap.chord_for("tab.new")))
                     run_command(s, "tab.new");
-                ImGui::Separator();
-                if (ImGui::MenuItem("Close", s.keymap.chord_for("tab.close").c_str()))
+                menu_separator();
+                if (menu_row(s, ui::icon::kClose, "Close", s.keymap.chord_for("tab.close")))
                     close_tab = it.i;
                 ImGui::EndPopup();
             }
@@ -6112,114 +6221,242 @@ void draw_rename(App::State& s) {
     ImGui::EndPopup();
 }
 
+// ------------------------------------------------------------------ worktrees (herdr mods/worktree)
+// herdr slug: runs of characters other than letters, digits and "._-" become "-", trimmed.
+std::string branch_slug(const std::string& b) {
+    std::string out;
+    bool dash = false;
+    for (const char ch : b) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        if (std::isalnum(c) || c == '.' || c == '_' || c == '-' || c >= 0x80) {
+            out += ch;
+            dash = false;
+        } else if (!dash) {
+            out += '-';
+            dash = true;
+        }
+    }
+    while (!out.empty() && out.front() == '-')
+        out.erase(out.begin());
+    while (!out.empty() && out.back() == '-')
+        out.pop_back();
+    if (out.empty()) {
+        std::uint32_t h = 2166136261u;
+        for (const unsigned char c : b)
+            h = (h ^ c) * 16777619u;
+        char buf[16];
+        std::snprintf(buf, sizeof buf, "branch-%08x", h);
+        out = buf;
+    }
+    return out;
+}
+
 void draw_worktree(App::State& s) {
     if (s.show_worktree) {
         ImGui::OpenPopup("##worktree");
         s.show_worktree = false;
     }
-    center_next(px(560), 0.16f);
-    if (!ImGui::BeginPopupModal("##worktree", nullptr,
-                                ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize))
+    center_next(px(460), 0.2f);
+    push_overlay_style();
+    const bool open = ImGui::BeginPopupModal("##worktree", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
+    pop_overlay_style();
+    if (!open)
         return;
-    heading(s, "New git worktree");
-    ImGui::TextDisabled("Creates a checkout of a branch in its own folder and opens it as a new space,");
-    ImGui::TextDisabled(
-        "so several agents can work on the same repository without touching each other's files.");
-    ImGui::Dummy(ImVec2(0, px(2)));
-    ImGui::TextDisabled("Repository folder");
-    ImGui::SetNextItemWidth(-1);
-    ImGui::InputText("##repo", s.wt_repo, sizeof s.wt_repo);
-    ImGui::TextDisabled("Branch (new or existing)");
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::IsWindowAppearing())
-        ImGui::SetKeyboardFocusHere();
-    ImGui::InputTextWithHint("##branch", "fix/login-timeout", s.wt_branch, sizeof s.wt_branch);
+    const GitInfo g = s.git.get(s.wt_repo);
+    const std::string repo = folder_name(g.common_top.empty() ? g.top : g.common_top);
+    std::string root = s.settings.worktree_dir;
+    if (root.empty()) {
+        wchar_t home[MAX_PATH]{};
+        ::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
+        root = win::to_utf8(home) + "\\.agentdesk\\worktrees";
+    }
+    bool cancel = overlay_title(s, g.repo ? ("New worktree of " + repo).c_str() : "New worktree");
+    ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
+    if (!g.repo)
+        ImGui::TextWrapped("%s is not in a git repository.", display_path(s.wt_repo).c_str());
+    else
+        ImGui::TextWrapped("A new space on a checkout in %s\\%s\\. A branch that exists is checked out; a new one "
+                           "starts from here.",
+                           display_path(root).c_str(), repo.c_str());
+    ImGui::PopStyleColor();
+    ImGui::Dummy(ImVec2(0, px(6)));
     const std::string wt_machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
     ui::HostClient* wthost = s.host_for(wt_machine);
-    const auto profiles = wthost->profiles();
-    s.wt_profile = std::clamp(s.wt_profile, 0, std::max(0, static_cast<int>(profiles.size()) - 1));
-    if (!wt_machine.empty())
-        ImGui::TextDisabled("On %s", wt_machine.c_str());
-    ImGui::TextDisabled("Start in it");
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::BeginCombo("##prof", profiles.empty()
-                                        ? "(none)"
-                                        : profiles[static_cast<std::size_t>(s.wt_profile)].second.c_str())) {
-        for (int i = 0; i < static_cast<int>(profiles.size()); ++i)
-            if (ImGui::Selectable(profiles[static_cast<std::size_t>(i)].second.c_str(), i == s.wt_profile))
-                s.wt_profile = i;
-        ImGui::EndCombo();
-    }
-    std::string base = s.settings.worktree_dir;
-    ImGui::TextDisabled("Checkouts go to %s\\<repo>\\<branch>",
-                        base.empty() ? "%USERPROFILE%\\.agentdesk\\worktrees" : base.c_str());
-    if (!s.wt_error.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->needs_you));
-        ImGui::TextWrapped("%s", s.wt_error.c_str());
+    bool create = false;
+    if (g.repo) {
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(-1);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(10), (px(36) - ImGui::GetFontSize()) * 0.5f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+        ImGui::PushStyleColor(ImGuiCol_Border, v4(g_pal->focus));
+        create = ImGui::InputTextWithHint("##branch", "branch name", s.wt_branch, sizeof s.wt_branch,
+                                          ImGuiInputTextFlags_EnterReturnsTrue);
         ImGui::PopStyleColor();
+        ImGui::PopStyleVar(2);
     }
-    if (s.wt_busy)
-        ImGui::TextDisabled("Creating...");
-    ImGui::BeginDisabled(s.wt_busy || s.wt_branch[0] == '\0' || profiles.empty() || !wthost->connected());
-    primary_button_style(true);
-    const bool create = ImGui::Button("Create");
-    primary_button_style(false);
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
-        ImGui::CloseCurrentPopup();
-    if (create) {
-        s.wt_busy = true;
-        s.wt_error.clear();
-        Json params{{"repo", std::string(s.wt_repo)}, {"branch", std::string(s.wt_branch)}};
-        if (!base.empty()) {
-            std::string safe = s.wt_branch;
-            for (char& c : safe)
-                if (c == '/' || c == '\\')
-                    c = '-';
-            params["path"] = base + "\\" + folder_name(s.wt_repo) + "\\" + safe;
+    {
+        std::lock_guard lock(s.placements_mutex);
+        if (!s.wt_error.empty() && s.wt_error != "done") {
+            ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->needs_you));
+            ImGui::TextWrapped("%s", s.wt_error.c_str());
+            ImGui::PopStyleColor();
         }
-        const std::string profile = profiles[static_cast<std::size_t>(s.wt_profile)].first;
-        const std::string branch = s.wt_branch;
-        wthost->call(
-            "worktree.add", params,
-            [st = &s, profile, branch, wthost, wt_machine](Json result, std::string error) {
-                if (!error.empty()) {
-                    std::lock_guard lock(st->placements_mutex);
-                    st->wt_error = error;
-                    st->wt_busy = false;
-                    return;
-                }
-                const std::string path = result.value("path", "");
-                Json p{{"profile_id", profile}, {"cwd", path}};
-                wthost->call(
-                    "session.create", p,
-                    [st, branch, wt_machine](Json r, std::string e) {
+    }
+    ImGui::Dummy(ImVec2(0, px(4)));
+    ImGui::TextDisabled("%s", s.wt_busy ? "working\xE2\x80\xA6" : "\xE2\x86\xB5 create \xC2\xB7 esc cancel");
+    cancel = cancel || ImGui::IsKeyPressed(ImGuiKey_Escape);
+    if (create && !s.wt_busy) {
+        std::string branch = s.wt_branch;
+        while (!branch.empty() && branch.back() == ' ')
+            branch.pop_back();
+        if (branch.empty()) {
+            std::lock_guard lock(s.placements_mutex);
+            s.wt_error = "Type a branch name.";
+        } else if (wthost->connected()) {
+            s.wt_busy = true;
+            s.wt_error.clear();
+            Json params{{"repo", g.top}, {"branch", branch}, {"path", root + "\\" + repo + "\\" + branch_slug(branch)}};
+            const std::string shell = pick_shell(s.settings.shell_profile, wthost->profiles());
+            wthost->call(
+                "worktree.add", params,
+                [st = &s, shell, wthost, wt_machine](Json result, std::string error) {
+                    if (!error.empty()) {
                         std::lock_guard lock(st->placements_mutex);
+                        st->wt_error = error;
                         st->wt_busy = false;
-                        if (!e.empty()) {
-                            st->wt_error = e;
-                            return;
-                        }
-                        Placement pl;
-                        pl.session = r.value("session_id", "");
-                        pl.target = LaunchTarget::kSpace;
-                        pl.space_name = branch;
-                        pl.machine = wt_machine;
-                        st->placements.push_back(pl);
-                        st->wt_error = "done";
-                    },
-                    std::chrono::seconds(15));
-            },
-            std::chrono::seconds(70));
+                        return;
+                    }
+                    Json p{{"profile_id", shell}, {"cwd", result.value("path", "")}};
+                    wthost->call(
+                        "session.create", p,
+                        [st, wt_machine](Json r, std::string e) {
+                            std::lock_guard lock(st->placements_mutex);
+                            st->wt_busy = false;
+                            if (!e.empty()) {
+                                st->wt_error = e;
+                                return;
+                            }
+                            Placement pl;  // the space stays unnamed: it follows the checkout
+                            pl.session = r.value("session_id", "");
+                            pl.target = LaunchTarget::kSpace;
+                            pl.machine = wt_machine;
+                            st->placements.push_back(pl);
+                            st->wt_error = "done";
+                        },
+                        std::chrono::seconds(15));
+                },
+                std::chrono::seconds(600));
+        }
     }
     {
         std::lock_guard lock(s.placements_mutex);
         if (s.wt_error == "done") {
             s.wt_error.clear();
-            ImGui::CloseCurrentPopup();
+            cancel = true;
         }
     }
+    if (cancel)
+        ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+// "Open worktree of <repo>": main checkout first, then by last commit; filter; Up/Down wrap.
+void draw_worktree_open(App::State& s) {
+    if (s.show_worktree_open) {
+        ImGui::OpenPopup("##wtopen");
+        s.show_worktree_open = false;
+        s.wt_filter[0] = 0;
+        s.wt_sel = 0;
+    }
+    center_next(px(560), 0.12f);
+    push_overlay_style();
+    const bool open = ImGui::BeginPopupModal("##wtopen", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
+    pop_overlay_style();
+    if (!open)
+        return;
+    const GitInfo g = s.git.get(s.focused_cwd());
+    const std::string repo = folder_name(g.common_top.empty() ? g.top : g.common_top);
+    std::string f = s.wt_filter;
+    for (auto& c : f)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::vector<const WorktreeEntry*> shown;
+    for (const auto& e : s.worktree_list) {
+        std::string hay = e.branch + " " + e.path;
+        for (auto& c : hay)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (f.empty() || hay.find(f) != std::string::npos)
+            shown.push_back(&e);
+    }
+    char count[64];
+    if (shown.size() == s.worktree_list.size())
+        std::snprintf(count, sizeof count, "%zu checkouts", s.worktree_list.size());
+    else
+        std::snprintf(count, sizeof count, "%zu/%zu checkouts", shown.size(), s.worktree_list.size());
+    bool close = overlay_title(s, ("Open worktree of " + repo).c_str());
+    ImGui::TextDisabled("%s", count);
+    if (ImGui::IsWindowAppearing())
+        ImGui::SetKeyboardFocusHere();
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::InputTextWithHint("##wf", "filter worktrees", s.wt_filter, sizeof s.wt_filter))
+        s.wt_sel = 0;
+    const int n = static_cast<int>(shown.size());
+    if (n > 0) {
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
+            s.wt_sel = (s.wt_sel + 1) % n;
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
+            s.wt_sel = (s.wt_sel + n - 1) % n;
+        s.wt_sel = std::clamp(s.wt_sel, 0, n - 1);
+    }
+    std::string go;
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    ImGui::BeginChild("##wtl", ImVec2(0, std::min(px(330), static_cast<float>(n) * px(44) + px(4))), ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NoBackground);
+    ImDrawList* d = ImGui::GetWindowDrawList();
+    const auto cwds = s.session_cwds();
+    for (int i = 0; i < n; ++i) {
+        const auto& e = *shown[static_cast<std::size_t>(i)];
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        const float w = ImGui::GetContentRegionAvail().x;
+        ImGui::PushID(i);
+        if (ImGui::InvisibleButton("##w", ImVec2(w, px(44))))
+            go = e.path;
+        if (ImGui::IsItemHovered() && (ImGui::GetIO().MouseDelta.x != 0 || ImGui::GetIO().MouseDelta.y != 0))
+            s.wt_sel = i;
+        ImGui::PopID();
+        if (i == s.wt_sel)
+            d->AddRectFilled(a, ImVec2(a.x + w, a.y + px(44)), g_pal->selected, px(7));
+        float x = a.x + px(12);
+        const std::string branch = e.branch.empty() ? std::string("detached") : e.branch;
+        d->AddText(s.fonts.ui_medium, fpx(13), ImVec2(x, a.y + px(6)), g_pal->text, branch.c_str());
+        x += s.fonts.ui_medium->CalcTextSizeA(fpx(13), FLT_MAX, 0, branch.c_str()).x + px(8);
+        if (e.main) {
+            d->AddText(s.fonts.ui, fpx(11), ImVec2(x, a.y + px(8)), g_pal->faint, "main checkout");
+        }
+        // "open" if a space shows it, else the age of its last commit.
+        bool shown_in_space = false;
+        for (const auto& [id, cwd] : cwds)
+            if (_strnicmp(cwd.c_str(), e.path.c_str(), e.path.size()) == 0)
+                shown_in_space = true;
+        const std::string right = shown_in_space ? std::string("open") : e.age;
+        const float rw = s.fonts.ui->CalcTextSizeA(fpx(11.5f), FLT_MAX, 0, right.c_str()).x;
+        d->AddText(s.fonts.ui, fpx(11.5f), ImVec2(a.x + w - px(12) - rw, a.y + px(8)),
+                   shown_in_space ? g_pal->focus : g_pal->faint, right.c_str());
+        text_clipped(d, s.fonts.ui, fpx(11.5f), ImVec2(a.x + px(12), a.y + px(25)), g_pal->faint, display_path(e.path),
+                     w - px(24));
+        if (i == s.wt_sel && ImGui::IsKeyPressed(ImGuiKey_Enter, false))
+            go = e.path;
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    ImGui::TextDisabled("\xE2\x86\x91\xE2\x86\x93 choose \xC2\xB7 \xE2\x86\xB5 open \xC2\xB7 esc close");
+    close = close || ImGui::IsKeyPressed(ImGuiKey_Escape);
+    if (!go.empty()) {
+        close = true;
+        run_command(s, "worktree.open_at:" + go);
+    }
+    if (close)
+        ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
 }
 
@@ -6972,30 +7209,6 @@ void draw_confirm(App::State& s) {
         ImGui::CloseCurrentPopup();
         run_command(s, s.confirm_command);
     }
-    ImGui::EndPopup();
-}
-
-// "Open worktree": the repo's existing worktrees; picking one opens a space there.
-void draw_worktree_open(App::State& s) {
-    if (s.show_worktree_open) {
-        ImGui::OpenPopup("##wtopen");
-        s.show_worktree_open = false;
-    }
-    center_next(px(460), 0.18f);
-    if (!ImGui::BeginPopupModal("##wtopen", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize))
-        return;
-    heading(s, "Open worktree");
-    for (const auto& [path, branch] : s.worktree_list) {
-        if (ImGui::Selectable((branch + "##" + path).c_str(), false, 0, ImVec2(0, px(26)))) {
-            ImGui::CloseCurrentPopup();
-            run_command(s, "worktree.open_at:" + path);
-        }
-        ImGui::SameLine(px(200));
-        ImGui::TextDisabled("%s", display_path(path).c_str());
-    }
-    ImGui::Dummy(ImVec2(0, px(4)));
-    if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
-        ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
 }
 
