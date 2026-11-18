@@ -92,6 +92,14 @@ void update_view_from_json(SessionView& v, const Json& j) {
     v.created_at = j.value("created_at", v.created_at);
     if (const auto p = j.find("program"); p != j.end() && p->is_string())
         v.program = p->get<std::string>();
+    if (const auto p = j.find("program_argv"); p != j.end() && p->is_array()) {
+        v.program_argv.clear();
+        for (const auto& w : *p)
+            if (w.is_string())
+                v.program_argv.push_back(w.get<std::string>());
+    }
+    if (const auto p = j.find("agent_app"); p != j.end() && p->is_string())
+        v.agent_app = p->get<std::string>();
     if (const auto p = j.find("parent"); p != j.end() && p->is_string())
         v.parent = p->get<std::string>();
     if (const auto l = j.find("labels"); l != j.end() && l->is_object()) {
@@ -328,6 +336,12 @@ std::vector<std::pair<std::string, std::string>> HostClient::profiles() const {
     return profiles_;
 }
 
+std::string HostClient::profile_executable(const std::string& id) const {
+    std::lock_guard lock(mutex_);
+    const auto it = profile_exes_.find(id);
+    return it == profile_exes_.end() ? std::string() : it->second;
+}
+
 void HostClient::notify() const {
     if (options_.wake)
         options_.wake();
@@ -455,10 +469,15 @@ bool HostClient::try_connect(bool allow_start) {
     connected_ = true;
     if (const auto r = client_->call("profile.list", Json::object()); r && r->result) {
         std::vector<std::pair<std::string, std::string>> list;
-        for (const auto& p : r->result->value("profiles", Json::array()))
+        std::map<std::string, std::string> exes;
+        for (const auto& p : r->result->value("profiles", Json::array())) {
             list.emplace_back(p.value("id", ""), p.value("name", ""));
+            if (const auto e = p.find("executable"); e != p.end() && e->is_string())
+                exes[p.value("id", "")] = e->get<std::string>();
+        }
         std::lock_guard lock(mutex_);
         profiles_ = std::move(list);
+        profile_exes_ = std::move(exes);
     }
     if (const auto r = client_->call("ui.state.get", {{"watch", true}}); r && r->result) {
         std::lock_guard lock(mutex_);

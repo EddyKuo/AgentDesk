@@ -76,3 +76,11 @@ plan: docs/design/AgentDesk_Design.md 5.6
 | 2026-11-19 | 疊放順序 | Herdr 98 的視窗、選單、Clippy 每個 frame 依順序提到最上層，但 AgentDesk 自己的設定、命令面板（ImGui popup）開著時不提 | herdr.d.ts 405 | fd3740e |
 | 2026-11-19 | 細節對應 | 提示框用 AgentDesk 的 ImGui tooltip；選單超出視窗時夾回視窗內；`toLocaleTimeString` 的 AM／PM 前用一般空白（像素字型沒有 U+202F）；Mines 數字的 Arial Bold 用 Windows 內建的 Arial | taskbar.js 322；dialog.js 687；mines.js 157 | 585481d |
 | 2026-11-19 | 開發用 `--input` 拖曳 | 加 `press:x,y`、`release:x,y`，用來驗證 Clippy 與視窗拖曳；不出貨 | 驗證工具，herdr 沒有對應 | e309fb4 |
+| 2026-11-19 | Herdr 98 終端機的 16 色表 | 照 herdr：格子記住它用的是 16 個 ANSI 色中的哪一個（0-15，協定多帶兩欄，舊格式仍可讀），版面主題有自己的色表時就用它畫；Herdr 98 用 themes/win98.json 的 ansi | defaults/themes/win98.json ansi | — |
+| 2026-11-19 | 程式圖示與名稱 | 照 herdr：移植 programs.rs 的程式表（隨附 herdr 的 programs.json 與 125 個圖示，放在執行檔旁的 programs\），資料夾裡的 programs.json 逐項蓋上去、改了就重新讀、有錯寫 programs.error；取代我們自己的字母圓形徽章 | src/programs.rs 1-327；src/window.rs 982-991、909-912 | — |
+| 2026-11-19 | 圖示畫法 | 照 herdr：tint 的圖示是單色 SVG，用該處的文字色畫（面板標題 14 px dim、分頁 14 px muted、Agent 列 14／16 px 前景色、peek 14 px、新增選單 14 px）；其他直接畫圖；只有 Terminals 版面的方塊有底色（tile） | mods/pane/main.js 27-30、76；mods/tabs/main.js 120；mods/agents/main.js 78、185、299；mods/peek/main.js 14、49；mods/new-menu/main.js 65；mods/terminals-bar/main.js 31-53；mods/terminals-pane/main.js 53 | — |
+| 2026-11-19 | host 回報前景程式的命令列與 7501 的 app | 新增：agent-host 從 PEB 讀前景程序的命令列（CommandLineToArgvW 拆字），session 多帶 `program_argv` 與 `agent_app`；herdr 先看 7501 的 app，再看 argv（`node vite.js` 是 Vite、`pwsh -NoExit -Command "& 'codex'"` 是 Codex） | src/programs.rs 270-327 | — |
+| 2026-11-19 | session 的預設名稱 | 照 herdr：沒給名稱就是空的（原本預設用 profile 名稱），畫面上用程式名稱 | src/programs.rs 1-6；mods/pane/main.js 61 | — |
+| 2026-11-19 | 面板標題的名稱順序 | 照 herdr：自訂名稱 → Agent 或 shell 用程式名稱 → 終端機標題 → 程式名稱 → "shell" | mods/pane/main.js 61 | — |
+| 2026-11-19 | Herdr 98 的程式圖示 | 照 herdr：改用同一張程式表（原本只有 11 個 Agent 圖示）；shell、通用 shell 項目與沒有圖示的都是 MS-DOS；tint 的放在 tile 色（沒有就 navy）上、小 4 px、用 color（沒有就白色） | mods/win98/kit.js 208-225；mods/win98/window.js 9-16 | — |
+| 2026-11-19 | 圖示授權 | 隨附：LobeHub（MIT）、Lucide（ISC）、oh-my-pi（MIT）、Simple Icons（CC0），列入 THIRD_PARTY_NOTICES | defaults/icons/LICENSES.md | — |

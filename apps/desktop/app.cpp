@@ -40,7 +40,9 @@
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/ui/chrome_logic.hpp"
 #include "agentdesk/ui/git_info.hpp"
+#include "agentdesk/ui/image_cache.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
+#include "agentdesk/ui/programs.hpp"
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/mods.hpp"
 #include "agentdesk/ui/telemetry.hpp"
@@ -68,7 +70,17 @@ struct Palette {
     ImU32 needs_you, done, working, idle, info;
     ImU32 term_bg, term_fg, cursor, selection;
     bool layout_only = false;  // a layout's own theme (herdr: offered only there)
+    const std::array<ImU32, 16>* ansi = nullptr;  // the theme's "ansi" table (herdr themes/*.json)
 };
+
+// herdr themes/win98.json "ansi" (0-7, then the bright 8-15).
+constexpr std::array<ImU32, 16> kWin98Ansi = {
+    IM_COL32(0x55, 0x55, 0x55, 255), IM_COL32(0xaa, 0x00, 0x00, 255), IM_COL32(0x00, 0xaa, 0x00, 255),
+    IM_COL32(0xaa, 0x55, 0x00, 255), IM_COL32(0x00, 0x00, 0xbb, 255), IM_COL32(0xaa, 0x00, 0xaa, 255),
+    IM_COL32(0x00, 0xaa, 0xaa, 255), IM_COL32(0xaa, 0xaa, 0xaa, 255), IM_COL32(0x55, 0x55, 0x55, 255),
+    IM_COL32(0xff, 0x55, 0x55, 255), IM_COL32(0x55, 0xff, 0x55, 255), IM_COL32(0xff, 0xff, 0x55, 255),
+    IM_COL32(0x55, 0x55, 0xff, 255), IM_COL32(0xff, 0x55, 0xff, 255), IM_COL32(0x55, 0xff, 0xff, 255),
+    IM_COL32(0xff, 0xff, 0xff, 255)};
 
 constexpr Palette kPalettes[] = {
     {"midnight",
@@ -187,7 +199,8 @@ constexpr Palette kPalettes[] = {
      IM_COL32(0xc0, 0xc0, 0xc0, 255),
      IM_COL32(0xc0, 0xc0, 0xc0, 255),
      IM_COL32(0x00, 0x00, 0x80, 0x80),  // drawn over the text here, so not opaque
-     true},
+     true,
+     &kWin98Ansi},
 };
 
 const Palette* g_pal = &kPalettes[0];
@@ -653,54 +666,91 @@ void write_example_mods() {
 }
 
 // ------------------------------------------------------------------ programs
-struct ProgramInfo {
-    std::string name;
-    ImU32 color;
-    std::string glyph;  // one or two letters shown in the program badge
-};
+// herdr src/programs.rs: one table (defaults/programs.json, shipped in programs\ next to the exe)
+// with the person's programs.json in the data folder on top; read again when that file changes,
+// problems go to programs.error (herdr window.rs 982-991, 909-912).
+ui::Programs g_programs;
+std::filesystem::file_time_type g_programs_mtime{};
+bool g_programs_loaded = false;
 
-ProgramInfo program_info(const std::string& program, const std::string& profile_id) {
-    const std::string p = !program.empty() ? program : profile_id;
-    auto starts = [&](const char* x) { return p.rfind(x, 0) == 0; };
-    if (starts("claude"))
-        return {"Claude Code", IM_COL32(226, 125, 92, 255), "Cl"};
-    if (starts("codex"))
-        return {"Codex", IM_COL32(120, 140, 250, 255), "Cx"};
-    if (starts("gemini"))
-        return {"Gemini", IM_COL32(80, 160, 240, 255), "Ge"};
-    if (starts("opencode"))
-        return {"OpenCode", IM_COL32(200, 200, 210, 255), "Oc"};
-    if (starts("cursor") || p == "agent")
-        return {"Cursor", IM_COL32(170, 170, 180, 255), "Cu"};
-    if (starts("aider"))
-        return {"Aider", IM_COL32(110, 200, 120, 255), "Ai"};
-    if (starts("pwsh"))
-        return {"PowerShell", IM_COL32(86, 156, 230, 255), "PS"};
-    if (starts("powershell"))
-        return {"Windows PowerShell", IM_COL32(60, 120, 200, 255), "PS"};
-    if (starts("cmd"))
-        return {"Command Prompt", IM_COL32(150, 156, 168, 255), ">_"};
-    if (starts("wsl"))
-        return {"WSL", IM_COL32(233, 130, 70, 255), "$"};
-    if (starts("bash"))
-        return {"Bash", IM_COL32(120, 190, 120, 255), "$"};
-    if (starts("node"))
-        return {"Node.js", IM_COL32(110, 180, 90, 255), "N"};
-    if (starts("python") || starts("py"))
-        return {"Python", IM_COL32(230, 200, 80, 255), "Py"};
-    if (starts("git"))
-        return {"Git", IM_COL32(230, 100, 70, 255), "G"};
-    if (starts("nvim") || starts("vim"))
-        return {"Vim", IM_COL32(90, 170, 90, 255), "V"};
-    std::string name = p.empty() ? std::string("program") : p;
-    std::uint32_t h = 2166136261u;
-    for (const unsigned char ch : name)
-        h = (h ^ ch) * 16777619u;
-    static constexpr ImU32 kColors[] = {IM_COL32(94, 177, 140, 255),  IM_COL32(230, 140, 80, 255),
-                                        IM_COL32(150, 125, 235, 255), IM_COL32(236, 104, 146, 255),
-                                        IM_COL32(86, 164, 232, 255),  IM_COL32(214, 178, 72, 255)};
-    std::string glyph(1, static_cast<char>(std::toupper(static_cast<unsigned char>(name[0]))));
-    return {name, kColors[h % std::size(kColors)], glyph};
+std::filesystem::path programs_dir() {
+    wchar_t exe[MAX_PATH]{};
+    ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    return std::filesystem::path(exe).parent_path() / L"programs";
+}
+
+// Returns the problem with the person's file, if any (empty: applied or no file).
+std::string load_programs() {
+    std::error_code ec;
+    const auto mine = data_dir() / L"programs.json";
+    g_programs_mtime = std::filesystem::last_write_time(mine, ec);
+    std::string error;
+    g_programs = ui::Programs::load(programs_dir() / L"programs.json", mine, &error);
+    g_programs_loaded = true;
+    const auto err_path = data_dir() / L"programs.error";
+    if (error.empty())
+        std::filesystem::remove(err_path, ec);
+    else
+        std::ofstream(err_path, std::ios::binary) << "programs.json was not applied: " << error << "\n";
+    return error;
+}
+
+const ui::Programs& programs() {
+    if (!g_programs_loaded)
+        load_programs();
+    return g_programs;
+}
+
+// What runs in a terminal (herdr programs::of): the agent's 7501 `app` first, else the
+// foreground program's argv (its name alone from an older host).
+ui::Program program_of(const ui::SessionView& v) {
+    std::vector<std::string> argv = v.program_argv;
+    if (argv.empty() && !v.program.empty())
+        argv.push_back(v.program);
+    return programs().of(v.agent_app, argv);
+}
+
+// The program a profile starts.
+ui::Program program_of_profile(const std::string& executable, const std::string& id) {
+    return programs().of({}, {executable.empty() ? id : executable});
+}
+
+// A person's icon (in the data folder) before the shipped one (herdr: both live in its home).
+std::filesystem::path program_icon_file(const ui::Program& p) {
+    if (p.icon.empty())
+        return {};
+    const auto rel = win::to_wide(p.icon);
+    std::error_code ec;
+    if (const auto mine = data_dir() / rel; std::filesystem::is_regular_file(mine, ec))
+        return mine;
+    return programs_dir() / rel;
+}
+
+ImU32 hex_color(const std::string& hex, ImU32 fallback) {
+    if (hex.size() != 7 || hex[0] != '#')
+        return fallback;
+    const unsigned long v = std::strtoul(hex.c_str() + 1, nullptr, 16);
+    return IM_COL32((v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff, 255);
+}
+
+ui::ImageCache* g_program_images = nullptr;  // App::State's (set while the App lives)
+ui::ImageCache& program_images() {
+    static ui::ImageCache none;  // never used while an App lives
+    return g_program_images != nullptr ? *g_program_images : none;
+}
+
+// herdr's icon(p, size, color) (pane/main.js 27-30, agents/main.js 78, tabs/main.js 120): a
+// tinted entry is a one-color SVG in `color`, else the picture itself. `min` is its top left.
+void program_icon(ImDrawList* dl, const ui::Program& p, ImVec2 min, float size, ImU32 color) {
+    const auto file = program_icon_file(p);
+    if (file.empty())
+        return;
+    const int side = std::max(1, static_cast<int>(size + 0.5f));
+    const auto img = program_images().svg(file, side, side, p.tint);
+    if (!img.ok())
+        return;
+    dl->AddImage(img.tex, min, ImVec2(min.x + size, min.y + size), ImVec2(0, 0), ImVec2(1, 1),
+                 p.tint ? color : IM_COL32_WHITE);
 }
 
 bool is_shell(const std::string& program) {
@@ -821,14 +871,6 @@ void attention_mark(ImDrawList* dl, ImVec2 c, float r, Attention a) {
             (void)col;
             break;
     }
-}
-
-void program_badge(ImDrawList* dl, ImFont* bold, float size, ImVec2 min, float side, const ProgramInfo& p) {
-    dl->AddCircleFilled(ImVec2(min.x + side * 0.5f, min.y + side * 0.5f), side * 0.5f, p.color);
-    const float ls = size * (p.glyph.size() > 1 ? 0.62f : 0.75f);
-    const ImVec2 t = bold->CalcTextSizeA(ls, FLT_MAX, 0, p.glyph.c_str());
-    dl->AddText(bold, ls, ImVec2(min.x + (side - t.x) * 0.5f, min.y + (side - t.y) * 0.5f),
-                IM_COL32(255, 255, 255, 240), p.glyph.c_str());
 }
 
 void space_badge(ImDrawList* dl, ImFont* bold, float size, ImVec2 min, float side, const std::string& name,
@@ -2217,6 +2259,7 @@ struct App::State {
     std::string worktree_machine;  // machine the listed worktrees are on
     char wt_filter[128] = {};
     int wt_sel = 0;
+    ui::ImageCache program_images;  // herdr's program icons (programs\icons), as textures
     // Herdr 98 (win98_*.inl): its menus, dialogs, games and shared values.
     std::unique_ptr<w98state::W98> win98 = std::make_unique<w98state::W98>();
     bool fonts_win98 = false;  // Herdr 98's fonts are the ones in use
@@ -2225,7 +2268,7 @@ struct App::State {
     [[nodiscard]] std::string title_of(const ui::SessionView& v) const {
         if (!v.name.empty())
             return v.name;
-        return program_info(v.program, v.profile_id).name;
+        return program_of(v).name;
     }
     [[nodiscard]] std::string pane_title(const std::string& id) const {
         const auto loc = ws.find(id);
@@ -2478,6 +2521,7 @@ void reconcile_core_update_error(std::optional<std::string>& dismissed, const ui
 }  // namespace
 
 App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_unique<State>()) {
+    g_program_images = &s_->program_images;
     s_->config = std::move(config);
     s_->host = std::move(host);
     s_->settings = load_settings();
@@ -2579,7 +2623,9 @@ void start_remotes(App::State& s) {
 }
 }  // namespace
 
-App::~App() = default;
+App::~App() {
+    g_program_images = nullptr;
+}
 
 std::filesystem::path data_folder() {
     return data_dir();
@@ -4722,7 +4768,7 @@ std::string agent_detail(App::State& s, const std::string& id, const ui::Session
     for (const char* mark : {"[ ! ] ", "[ . ] "})
         if (title.rfind(mark, 0) == 0)
             title = title.substr(6);
-    const auto pi = program_info(v.program, v.profile_id);
+    const auto pi = program_of(v);
     if (title.empty() || title.find('@') != std::string::npos || title.find(":\\") != std::string::npos ||
         title.front() == '/' || title.front() == '~' || _stricmp(title.c_str(), pi.name.c_str()) == 0 ||
         _stricmp(title.c_str(), v.program.c_str()) == 0)
@@ -4896,12 +4942,12 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             const std::string lead = many ? a : lead_pane(s, s.ws.sessions_in(tab));
             const auto& lv = s.views_by_id[lead];
             label[a] = ui::agent_tab_label({ui::Workspace::tab_title(tab, loc.tab), !tab.name.empty() && !many,
-                                            live_title(lead), program_info(lv.program, lv.profile_id).name,
+                                            live_title(lead), program_of(lv).name,
                                             lv.program.empty() ? lv.profile_id : lv.program, lead});
             space_name[a] = s.ws.space_title(loc.space, cwds);
         } else {
             const std::string t = ui::clean_agent_title(live_title(a));
-            label[a] = !t.empty() ? t : program_info(v.program, v.profile_id).name;
+            label[a] = !t.empty() ? t : program_of(v).name;
         }
         detail_in.emplace_back(space_name[a], label[a]);
     }
@@ -5021,12 +5067,12 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             }
             x += px(9) + px(4);
         }
-        program_badge(d, s.fonts.ui_bold, fpx(11.0f), ImVec2(x, cy - px(7)), px(14), program_info(v.program, v.profile_id));
+        program_icon(d, program_of(v), ImVec2(x, cy - px(7)), px(14), g_pal->text);  // agents/main.js 185
         x += px(14) + px(8);
         const Attention st = ui::kid_status(s.attention_of(k));
         const float mw = std::max(status_mark(s, d, 0, cy, st, compact, true), px(13));
         status_mark(s, d, b.x - px(8) - mw, cy, st, compact);
-        const std::string name = !v.name.empty() ? v.name : program_info(v.program, v.profile_id).name;
+        const std::string name = !v.name.empty() ? v.name : program_of(v).name;
         text_clipped(d, s.fonts.ui, fpx(12.5f), ImVec2(x, cy - fpx(12.5f) * 0.6f), on ? g_pal->text : g_pal->dim, name,
                      b.x - px(8) - mw - x);
         if (clicked) {
@@ -5084,7 +5130,7 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         const bool pinned = s.ws.pinned.contains(id);
         // Left: the program icon (16 px); with sub-agents, clicking it folds them (360-365).
         const float x0 = a.x + px(8);
-        program_badge(d, s.fonts.ui_bold, fpx(12.5f), ImVec2(x0, cy - px(8)), px(16), program_info(v.program, v.profile_id));
+        program_icon(d, program_of(v), ImVec2(x0, cy - px(8)), px(16), g_pal->text);  // agents/main.js 299
         const bool on_icon = !subs.empty() && inside(ImVec2(x0, cy - px(8)), ImVec2(x0 + px(16), cy + px(8)));
         float x = x0 + px(16) + px(9);
         // Right, from the edge leftwards: status, pin (hovered) or time, fold, machine (369-373).
@@ -5159,7 +5205,7 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         else if (!more.empty())
             name = more;
         else
-            name = number ? program_info(v.program, v.profile_id).name : lab;
+            name = number ? program_of(v).name : lab;
         const ImU32 name_col = att == Attention::kIdle && !focused ? g_pal->dim : g_pal->text;
         const float fs = fpx(13);
         const float nw = text_clipped(d, s.fonts.ui, fs, ImVec2(x, cy - fs * 0.6f), name_col, name,
@@ -5645,8 +5691,7 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
             const std::string shown = ids.empty() ? std::string() : lead_pane(s, ids);
             if (s.views_by_id.count(shown)) {
                 const auto& v = s.views_by_id[shown];
-                program_badge(dl, s.fonts.ui_bold, fpx(10.5f), ImVec2(cx, cy - px(7)), px(14),
-                              program_info(v.program, v.profile_id));
+                program_icon(dl, program_of(v), ImVec2(cx, cy - px(7)), px(14), g_pal->dim);  // tabs/main.js 120
             }
             cx += px(14) + px(7);
             const ImU32 col = active ? g_pal->text : g_pal->dim;
@@ -5763,17 +5808,15 @@ std::string terminals_lead(App::State& s, const ui::Tab& tab) {
 // program's glyph; a status other than idle puts an 11 px dot at the top right.
 void terminals_tile(App::State& s, ImDrawList* dl, ImVec2 a, const std::string& id, const TerminalsLook& l) {
     const float side = px(26);
-    ProgramInfo p{"", l.chip, ""};
+    // herdr: bg(g.tile ?? chip), border #ffffff14, the icon 15 px (tinted: g.color ?? text).
+    std::optional<ui::Program> g;
     if (const auto it = s.views_by_id.find(id); it != s.views_by_id.end())
-        p = program_info(it->second.program, it->second.profile_id);
-    dl->AddRectFilled(a, ImVec2(a.x + side, a.y + side), mix(l.chip, p.color, 0.28f), px(7));
+        g = program_of(it->second);
+    dl->AddRectFilled(a, ImVec2(a.x + side, a.y + side), g ? hex_color(g->tile, l.chip) : l.chip, px(7));
     dl->AddRect(a, ImVec2(a.x + side, a.y + side), IM_COL32(255, 255, 255, 0x14), px(7));
-    if (!p.glyph.empty()) {
-        const float fs = fpx(p.glyph.size() > 1 ? 10.5f : 12.0f);
-        const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fs, FLT_MAX, 0, p.glyph.c_str());
-        dl->AddText(s.fonts.ui_bold, fs, ImVec2(a.x + (side - t.x) * 0.5f, a.y + (side - t.y) * 0.5f), p.color,
-                    p.glyph.c_str());
-    }
+    if (g)
+        program_icon(dl, *g, ImVec2(a.x + (side - px(15)) * 0.5f, a.y + (side - px(15)) * 0.5f), px(15),
+                     hex_color(g->color, l.text));
     const Attention att = id.empty() ? Attention::kNone : s.attention_of(id);
     if (att != Attention::kNone && att != Attention::kIdle) {
         const ImVec2 c(a.x + side + px(4) - px(5.5f), a.y - px(4) + px(5.5f));
@@ -5928,7 +5971,7 @@ void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::
     const TerminalsLook l = terminals_look();
     const float cy = pos.y + h * 0.5f;
     float x = pos.x + px(12);
-    program_badge(dl, s.fonts.ui_bold, fpx(12), ImVec2(x, cy - px(8)), px(16), program_info(v.program, v.profile_id));
+    program_icon(dl, program_of(v), ImVec2(x, cy - px(8)), px(16), IM_COL32(0xd6, 0xd8, 0xdb, 255));  // terminals-pane/main.js 53
     x += px(16) + px(8);
     // const title = p.title || "shell"; dir unless the title holds it or starts with ~ or /.
     std::string title = s.pane_title(id);
@@ -6114,9 +6157,21 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
             ImGui::IsMouseHoveringRect(pos, ImVec2(max.x, pos.y + header_h), false) &&
             ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
         float hx = pos.x + px(10);
-        program_badge(dl, s.fonts.ui_bold, fpx(10.5f), ImVec2(hx, cy - px(7)), px(14), program_info(v.program, v.profile_id));
+        const ui::Program prog = program_of(v);
+        program_icon(dl, prog, ImVec2(hx, cy - px(7)), px(14), g_pal->dim);  // pane/main.js 76
         hx += px(14) + px(8);
-        const std::string title = s.pane_title(id);
+        // pane/main.js 61: name || ((agent || shell) && program.name) || title || program.name || "shell".
+        std::string title = s.pane_title(id);
+        if (v.name.empty() && !prog.agent && !prog.shell)
+            if (const auto si = s.by_id.find(id); si != s.by_id.end()) {
+                std::string t = si->second->snapshot()->title;
+                while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back())))
+                    t.pop_back();
+                if (!t.empty() && (title.empty() || title == prog.name))
+                    title = t;
+            }
+        if (title.empty())
+            title = "shell";
         const float tw = text_clipped(dl, s.fonts.ui_medium, fpx(12.5f), ImVec2(hx, cy - fpx(12.5f) * 0.6f), g_pal->text, title,
                                       std::min(px(260), r.w * 0.4f));
         hx += tw + px(8);
@@ -6291,6 +6346,7 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
         vs.view.theme.default_fg = g_pal->term_fg;
         vs.view.theme.cursor = g_pal->cursor;
         vs.view.theme.selection = g_pal->selection;
+        vs.view.theme.ansi = g_pal->ansi;
         vs.view.theme.scrollbar = alpha(g_pal->dim, 120);
         const bool active = vs.view.draw("grid", *sit->second, s.fonts, vs.focus_next);
         vs.focus_next = false;
@@ -7226,7 +7282,7 @@ void draw_details(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
         return;
     }
     const auto& v = it->second;
-    const auto pi = program_info(v.program, v.profile_id);
+    const auto pi = program_of(v);
     ImGui::PushFont(s.fonts.ui_bold, 16.0f);
     ImGui::TextUnformatted(s.pane_title(id).c_str());
     ImGui::PopFont();
@@ -7798,7 +7854,7 @@ void draw_picker(App::State& s) {
                 atts.push_back(s.attention_of(id));
                 if (s.views_by_id.count(id)) {
                     const auto& v = s.views_by_id[id];
-                    const auto pn = program_info(v.program, v.profile_id).name;
+                    const auto pn = program_of(v).name;
                     if (programs.find(pn) == std::string::npos)
                         programs += (programs.empty() ? "" : " \xC2\xB7 ") + pn;
                 }
@@ -8232,7 +8288,7 @@ void draw_peek(App::State& s) {
     else
         dl->AddCircleFilled(ImVec2(x + px(6), cy), px(1.2f), g_pal->dim);
     x += px(12) + px(8);
-    program_badge(dl, s.fonts.ui_bold, fpx(10.5f), ImVec2(x, cy - px(7)), px(14), program_info(v.program, v.profile_id));
+    program_icon(dl, program_of(v), ImVec2(x, cy - px(7)), px(14), g_pal->text);  // peek/main.js 49
     x += px(14) + px(8);
     x += text_clipped(dl, s.fonts.ui_bold, fpx(12), ImVec2(x, cy - fpx(12) * 0.6f), g_pal->text, s.pane_title(s.peek),
                       px(260)) + px(8);
@@ -8279,6 +8335,7 @@ void draw_peek(App::State& s) {
     vs.view.theme.default_fg = g_pal->term_fg;
     vs.view.theme.cursor = g_pal->cursor;
     vs.view.theme.selection = g_pal->selection;
+    vs.view.theme.ansi = g_pal->ansi;
     vs.view.draw("peek", *session, s.fonts, vs.focus_next || ImGui::IsWindowAppearing());
     vs.focus_next = false;
     std::vector<std::string> commands = vs.view.take_commands();
@@ -8469,8 +8526,9 @@ void draw_launcher(App::State& s) {
             start = i;
         if (ImGui::IsItemHovered())
             s.launcher_sel = i;
-        const auto pi = program_info("", profiles[static_cast<std::size_t>(i)].first);
-        program_badge(dl, s.fonts.ui_bold, fs, ImVec2(a.x + px(8), a.y + px(7)), px(20), pi);
+        const auto& pid = profiles[static_cast<std::size_t>(i)].first;
+        program_icon(dl, program_of_profile(s.host->profile_executable(pid), pid), ImVec2(a.x + px(11), a.y + px(10)),
+                     px(14), g_pal->text);  // new-menu/main.js 65
         dl->AddText(s.fonts.ui_bold, fs, ImVec2(a.x + px(38), a.y + (px(34) - fs) * 0.5f), g_pal->text,
                     profiles[static_cast<std::size_t>(i)].second.c_str());
         if (i < 9) {
@@ -10924,6 +10982,13 @@ void App::frame() {
             else
                 s.toast("keys.json not applied", s.keymap_errors.front(), "", g_pal->needs_you, 8);
         }
+        // herdr window.rs 982-991: programs.json is read again when it changes.
+        const auto pt = std::filesystem::last_write_time(data_dir() / L"programs.json", ec);
+        if (ec)
+            ec.clear();
+        if (pt != g_programs_mtime)
+            if (const std::string problem = load_programs(); !problem.empty())
+                s.toast("programs.json not applied", problem, "", g_pal->needs_you, 8);
     }
     if (!g_settings_problem.empty()) {
         s.toast(g_settings_problem, "", "", g_pal->needs_you, 8);

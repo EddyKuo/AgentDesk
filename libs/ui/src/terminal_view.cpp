@@ -39,8 +39,15 @@ struct CellColors {
 };
 
 CellColors colors_of(const terminal::Cell& cell, const TerminalTheme& theme) {
-    CellColors out{cell.default_fg ? theme.default_fg : to_color(cell.fg),
-                   cell.default_bg ? theme.default_bg : to_color(cell.bg)};
+    auto pick = [&](bool def, std::int8_t ansi, const terminal::Rgb& rgb, ImU32 fallback) {
+        if (def)
+            return fallback;
+        if (ansi >= 0 && theme.ansi != nullptr)
+            return (*theme.ansi)[static_cast<std::size_t>(ansi)];
+        return to_color(rgb);
+    };
+    CellColors out{pick(cell.default_fg, cell.fg_ansi, cell.fg, theme.default_fg),
+                   pick(cell.default_bg, cell.bg_ansi, cell.bg, theme.default_bg)};
     if (cell.attrs & terminal::kAttrReverse)
         std::swap(out.fg, out.bg);
     if (cell.attrs & terminal::kAttrConceal)

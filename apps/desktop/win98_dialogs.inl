@@ -15,7 +15,7 @@ std::string user_name_now();
 struct Task {
     std::string address;
     std::string name;
-    std::string program;
+    ui::Program program;
     std::string status;
 };
 std::vector<Task> tasks(App::State& s);

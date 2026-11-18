@@ -123,3 +123,20 @@ TEST(Messages, ScreenRowsCarryWrapAndLinks) {
     EXPECT_EQ(copy.wrapped, snap.wrapped);
     EXPECT_EQ(copy.links, snap.links);
 }
+
+TEST(Messages, CellsCarryTheirAnsiIndexOnlyWhenTheyHaveOne) {
+    agentdesk::terminal::Cell c;
+    c.chars[0] = U'a';
+    EXPECT_EQ(encode_cell(c).size(), 5u);  // the old compact form
+    c.default_fg = false;
+    c.fg = {170, 0, 0};
+    c.fg_ansi = 1;
+    const Json j = encode_cell(c);
+    EXPECT_EQ(j.size(), 7u);
+    const auto back = decode_cell(j);
+    EXPECT_EQ(back, c);
+    // An old 5-element cell still decodes, with no index.
+    Json old = j;
+    old.erase(old.begin() + 5, old.end());
+    EXPECT_EQ(decode_cell(old).fg_ansi, -1);
+}

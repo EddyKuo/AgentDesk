@@ -92,6 +92,8 @@ int wmain(int argc, wchar_t** argv) {
         dk::copy_tree(bin / L"sounds", stage / L"sounds");
         // Herdr 98 (herdr-app defaults/mods/win98): fonts, icons, images, sounds, the layout file.
         dk::copy_tree(bin / L"win98", stage / L"win98");
+        // herdr's program table and icons (defaults/programs.json, defaults/icons).
+        dk::copy_tree(bin / L"programs", stage / L"programs");
         // Example mods (C++ DLLs) and the SDK to build your own: headers and the examples' sources.
         for (const auto& m : fs::directory_iterator(bin / L"mods")) {
             if (!m.is_directory())
@@ -158,8 +160,14 @@ int wmain(int argc, wchar_t** argv) {
              "https://creativecommons.org/licenses/by-sa/3.0/", root / L"third_party/herdr/win98/fonts/CC-BY-SA-3.0.txt"},
             {"PxPlus IBM VGA 8x16 font (Herdr 98, win98\\fonts)", "https://int10h.org/oldschool-pc-fonts/",
              root / L"third_party/herdr/win98/fonts/LICENSE-PxPlus.txt"},
-            {"LobeHub icons (Herdr 98 program icons, win98\\programs)", "https://github.com/lobehub/lobe-icons",
-             root / L"third_party/herdr/win98/programs/LICENSE-LobeHub.txt"},
+            {"LobeHub icons (agent icons, programs\\icons)", "https://github.com/lobehub/lobe-icons",
+             root / L"third_party/herdr/programs/icons/LICENSE-LobeHub.txt"},
+            {"Lucide icons (glyphs, programs\\icons)", "https://lucide.dev",
+             root / L"third_party/herdr/programs/icons/LICENSE-Lucide.txt"},
+            {"oh-my-pi (the omp icon, programs\\icons)", "https://github.com/can1357/oh-my-pi",
+             root / L"third_party/herdr/programs/icons/LICENSE-oh-my-pi.txt"},
+            {"Simple Icons (brand icons, programs\\icons; CC0 1.0, brands are their owners' trademarks)",
+             "https://simpleicons.org", root / L"third_party/herdr/programs/icons/LICENSES.md"},
         };
         std::string notices;
         auto line = [&notices](const std::string& text = {}) { notices += text + "\r\n"; };

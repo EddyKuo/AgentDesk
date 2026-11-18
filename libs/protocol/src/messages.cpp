@@ -148,9 +148,15 @@ Json encode_cell(const terminal::Cell& c) {
             break;
         terminal::append_utf8(text, cp);
     }
-    // Compact array: [text, width, fg, bg, attrs]
-    return Json::array(
+    // Compact array: [text, width, fg, bg, attrs], plus [fg_ansi, bg_ansi] when either is one of
+    // the 16 ANSI colours (older readers ignore the extra two).
+    Json a = Json::array(
         {text, c.width, rgb_or_default(c.default_fg, c.fg), rgb_or_default(c.default_bg, c.bg), c.attrs});
+    if (c.fg_ansi >= 0 || c.bg_ansi >= 0) {
+        a.push_back(c.fg_ansi);
+        a.push_back(c.bg_ansi);
+    }
+    return a;
 }
 
 terminal::Cell decode_cell(const Json& j) {
@@ -179,6 +185,12 @@ terminal::Cell decode_cell(const Json& j) {
         c.bg = {static_cast<std::uint8_t>(bg >> 16), static_cast<std::uint8_t>(bg >> 8),
                 static_cast<std::uint8_t>(bg)};
     c.attrs = j.at(4).get<std::uint8_t>();
+    if (j.size() >= 7) {
+        const int fa = j.at(5).get<int>();
+        const int ba = j.at(6).get<int>();
+        c.fg_ansi = static_cast<std::int8_t>(fa >= 0 && fa < 16 && !c.default_fg ? fa : -1);
+        c.bg_ansi = static_cast<std::int8_t>(ba >= 0 && ba < 16 && !c.default_bg ? ba : -1);
+    }
     return c;
 }
 

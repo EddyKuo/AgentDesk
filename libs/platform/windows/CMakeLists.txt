@@ -12,4 +12,4 @@ target_include_directories(agentdesk_platform_win PUBLIC ${CMAKE_CURRENT_SOURCE_
 # Headers include <windows.h>; consumers need the same lean/unicode definitions.
 target_compile_definitions(agentdesk_platform_win PUBLIC
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
-target_link_libraries(agentdesk_platform_win PUBLIC advapi32)
+target_link_libraries(agentdesk_platform_win PUBLIC advapi32 shell32)

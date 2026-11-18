@@ -42,6 +42,10 @@ struct Cell {
     bool default_bg = true;
     Rgb fg;
     Rgb bg;
+    // One of the 16 ANSI colours (0-15), else -1: a theme's own table may draw it (herdr themes
+    // "ansi"); fg/bg still hold the standard RGB.
+    std::int8_t fg_ansi = -1;
+    std::int8_t bg_ansi = -1;
     friend bool operator==(const Cell&, const Cell&) = default;
 };
 
