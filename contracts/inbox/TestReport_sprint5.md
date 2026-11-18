@@ -27,7 +27,7 @@ change_summary: |
 |---|---|
 | 測試總數／通過／失敗／跳過 | 120／120／0／0（Debug 與 Release 各跑一次） |
 | UI 與發布腳本 | QA-05、QA-07、QA-10、zip 冒煙測試全部通過 |
-| 穩定性 | 30 分鐘 soak 通過（8 小時版待人工） |
+| 穩定性 | 30 分鐘與 8 小時 soak 都通過 |
 | Unit Test Coverage | 未量測（工具未選定，ADR_001） |
 | 編譯警告 | 0（`/W4 /WX`） |
 | **整體結論** | ✅ S5-M1 可發布；✅ S5-M2 驗收矩陣完成：20 項通過、2 項部分通過並列出待人工項目 |
@@ -46,7 +46,15 @@ change_summary: |
 
 1 分鐘的試跑發現 BUG-9：已結束的 session 一直保留執行緒、引擎和歷史，建立／停止越多，執行緒和記憶體就越多。修正後只保留最新 8 個已結束 session 的完整畫面，較舊的只留清單紀錄（`HostFixture.ExitedSessionsAreReleasedBeyondRetention`）。
 
-8 小時版的執行方式：`soak.exe --probe <vt_probe.exe> --host <agent-host.exe> --minutes 480`。
+8 小時版（2026-11-18 04:40～12:41，同樣的負載，`soak.exe --probe <vt_probe.exe> --host <agent-host.exe> --minutes 480 --sample-seconds 60`）：
+
+| 指標 | 中段平均 | 末段平均 |
+|---|---|---|
+| handle | 205.5 | 205.2 |
+| thread | 33.5 | 33.5 |
+| 私有記憶體 | 153.8 MB | 154.0 MB |
+
+8 小時內 attach 5,679 次、建立／停止 1,420 次、重開 flood 1,418 次，沒有持續成長。證據：`docs/poc/evidence/m4-soak-8h.json`。
 
 ## 發布包
 
@@ -112,5 +120,5 @@ change_summary: |
 2. 100%／150%／200% DPI（QA-15）
 3. 兩個實際 Agent 同時互動，Claude Code 回報 working、blocked、done（QA-21）
 4. Codex hook 實機狀態轉換
-5. 8 小時 soak
+5. 8 小時 soak：已於 2026-11-18 通過，見上面「穩定性」
 6. 以另一個 Windows 帳號連線被拒（QA-17）

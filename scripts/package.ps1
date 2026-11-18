@@ -1,6 +1,6 @@
 ﻿# Builds the portable zip (design doc 5.1 M4): dist\AgentDesk-<version>-win-x64.zip
 #   agent-ui.exe, agent-host.exe, agentctl.exe, conpty\ (bundled ConPTY, ADR-08),
-#   LICENSE, THIRD_PARTY_NOTICES.md, hooks\, docs\
+#   LICENSE, THIRD_PARTY_NOTICES.md, docs\
 # Symbols go to a separate ...-symbols.zip. Run after: scripts\build.cmd msvc-x64-release all
 param(
     [string]$BuildDir = (Join-Path $PSScriptRoot '..\build\msvc-x64-release'),
@@ -17,7 +17,7 @@ foreach ($f in @('agent-ui.exe', 'agent-host.exe', 'agentctl.exe', 'conpty\conpt
 $name = "AgentDesk-$Version-win-x64"
 $stage = Join-Path $OutDir $name
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
-New-Item -ItemType Directory -Force $stage, (Join-Path $stage 'conpty\x64'), (Join-Path $stage 'hooks'), (Join-Path $stage 'docs') | Out-Null
+New-Item -ItemType Directory -Force $stage, (Join-Path $stage 'conpty\x64'), (Join-Path $stage 'docs') | Out-Null
 
 foreach ($f in @('agent-ui.exe', 'agent-host.exe', 'agentctl.exe')) { Copy-Item (Join-Path $bin $f) $stage }
 Copy-Item -Recurse (Join-Path $bin 'fonts') (Join-Path $stage 'fonts')
@@ -27,7 +27,6 @@ Copy-Item (Join-Path $bin 'conpty\x64\OpenConsole.exe') (Join-Path $stage 'conpt
 Copy-Item (Join-Path $root 'third_party\conpty\LICENSE') (Join-Path $stage 'conpty\LICENSE')
 Copy-Item (Join-Path $root 'third_party\conpty\NOTICE.md') (Join-Path $stage 'conpty\NOTICE.md')
 Copy-Item (Join-Path $root 'LICENSE') $stage
-Copy-Item (Join-Path $root 'tools\hooks\agentdesk-report-state.ps1') (Join-Path $stage 'hooks')
 Copy-Item (Join-Path $root 'docs\user-guide.md') (Join-Path $stage 'docs')
 Copy-Item (Join-Path $root 'docs\integrations\agent-hooks.md') (Join-Path $stage 'docs')
 Copy-Item (Join-Path $root 'docs\compatibility.md') (Join-Path $stage 'docs')

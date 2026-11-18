@@ -456,6 +456,59 @@ int cmd_shutdown(Ctx& ctx) {
 // stdin/stdout <-> the local host pipe, byte for byte. Runs on a remote machine under ssh:
 // "ssh <machine> agentctl bridge" lets another PC's AgentDesk use this machine's agent-host.
 // stdout carries only protocol bytes; diagnostics go to stderr.
+// "agentctl hook": the status hook for agent CLIs (Codex CLI, Claude Code), in place of a script.
+// Reads the hook event JSON from stdin and reports it like `report-state` (design doc 3.6).
+// Contract with the CLI: print NOTHING and always exit 0. Printing would be parsed by the CLI
+// (Codex Stop/Interrupt accept only JSON) and a decision on PermissionRequest would bypass the
+// person's approval prompt, which AgentDesk must never do. Never starts a host; gives up fast.
+int run_hook() {
+    std::string input;
+    {
+        HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);
+        char buf[4096];
+        DWORD n = 0;
+        while (input.size() < 1024 * 1024 && in != nullptr && in != INVALID_HANDLE_VALUE &&
+               ::ReadFile(in, buf, sizeof buf, &n, nullptr) && n > 0)
+            input.append(buf, n);
+    }
+    wchar_t session[256]{};
+    wchar_t pipe[512]{};
+    if (::GetEnvironmentVariableW(L"AGENTDESK_SESSION_ID", session, 256) == 0 ||
+        ::GetEnvironmentVariableW(L"AGENTDESK_PIPE", pipe, 512) == 0)
+        return kOk;  // not inside an AgentDesk session
+    const auto evt = Json::parse(input, nullptr, false);
+    if (!evt.is_object())
+        return kOk;
+    const std::string name = evt.value("hook_event_name", "");
+    std::string state;
+    std::string kind;
+    if (name == "UserPromptSubmit" || name == "PostToolUse") {
+        state = "working";
+    } else if (name == "PermissionRequest") {
+        state = "blocked";
+        kind = "permission";
+    } else if (name == "Stop" || name == "Interrupt") {  // Interrupt: Codex, the person stopped the turn
+        state = "idle";
+    }
+    if (state.empty())
+        return kOk;
+    // seq must grow across restarts: milliseconds since the epoch (design doc 3.6).
+    const auto seq = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                    std::chrono::system_clock::now().time_since_epoch())
+                                                    .count());
+    Json params{{"session", win::to_utf8(session)}, {"source", "agentdesk-hook"}, {"state", state}, {"seq", seq}};
+    if (!kind.empty())
+        params["kind"] = kind;
+    try {
+        auto client = ipc::PipeClient::connect(pipe, 1500ms);
+        if (client)
+            client->call("state.report", params, 1500ms);
+    } catch (...) {
+        // the host may be restarting; the hook must not fail the agent
+    }
+    return kOk;
+}
+
 int run_bridge(const std::wstring& pipe, bool may_start) {
     auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);
     if (!host.client) {
@@ -512,6 +565,7 @@ const char* kUsage =
     "  send <session> (--text T | --file F | --key K) [--enter]\n"
     "  stop <session> (--interrupt | --force)\n"
     "  report-state <session> --source S --state STATE --seq N [--kind K] [--message M]\n"
+    "  hook      status hook for Codex CLI / Claude Code: reads the event on stdin, prints nothing\n"
     "  shutdown [--stop-sessions]\n"
     "  run ... [--task TEXT] [--parent ID | --no-parent] [--label k=v]...\n"
     "  wait <session> [--until idle|blocked|exited|change] [--timeout-ms N]\n"
@@ -544,6 +598,8 @@ int wmain(int argc, wchar_t** argv) {
     if (const auto t = ctx.args.opt("--timeout-ms"))
         ctx.timeout = std::chrono::milliseconds(std::stoll(*t));
 
+    if (ctx.args.command == "hook")
+        return run_hook();  // no output, always 0
     if (ctx.args.command == "bridge") {
         std::wstring pipe = ipc::default_pipe_name();
         if (const auto p = ctx.args.opt("--pipe"))

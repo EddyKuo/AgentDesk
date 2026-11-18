@@ -48,7 +48,8 @@ struct ProcResult {
 };
 
 // Runs a console program with captured stdout (stderr discarded) and returns its exit code.
-ProcResult run_capture(const fs::path& exe, const std::vector<std::wstring>& args, const fs::path& cwd = {}) {
+ProcResult run_capture(const fs::path& exe, const std::vector<std::wstring>& args, const fs::path& cwd = {},
+                       const std::string* stdin_text = nullptr) {
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
     HANDLE rd = nullptr;
     HANDLE wr = nullptr;
@@ -64,6 +65,16 @@ ProcResult run_capture(const fs::path& exe, const std::vector<std::wstring>& arg
     si.hStdOutput = wr;
     si.hStdError = nul;
     si.hStdInput = nullptr;
+    win::UniqueHandle in_read, in_write;
+    if (stdin_text != nullptr) {
+        HANDLE ir = nullptr;
+        HANDLE iw = nullptr;
+        ::CreatePipe(&ir, &iw, &sa, 0);
+        ::SetHandleInformation(iw, HANDLE_FLAG_INHERIT, 0);
+        in_read.reset(ir);
+        in_write.reset(iw);
+        si.hStdInput = ir;
+    }
     std::wstring cmd = win::build_command_line(exe.native(), args);
     PROCESS_INFORMATION pi{};
     if (!::CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr,
@@ -71,6 +82,12 @@ ProcResult run_capture(const fs::path& exe, const std::vector<std::wstring>& arg
         return {9999, {}};
     }
     write_end.reset();
+    if (stdin_text != nullptr) {
+        in_read.reset();
+        DWORD written = 0;
+        ::WriteFile(in_write.get(), stdin_text->data(), static_cast<DWORD>(stdin_text->size()), &written, nullptr);
+        in_write.reset();  // EOF
+    }
     win::UniqueHandle process(pi.hProcess);
     win::UniqueHandle thread(pi.hThread);
     ProcResult r;
@@ -952,4 +969,37 @@ TEST_F(HostFixture, FilesAndChangesRequestsForRemoteClients) {
     EXPECT_TRUE(c->call("git.run", {{"cwd", root}, {"args", {"config", "--list"}}})->error.has_value());
     EXPECT_TRUE(c->call("git.run", {{"cwd", root}, {"args", {"diff", "--ext-diff"}}})->error.has_value());
     EXPECT_TRUE(c->call("git.run", {{"cwd", root}, {"args", {"status", "-c", "x=y"}}})->error.has_value());
+}
+
+// "agentctl hook" (the agent CLI status hook, C++ instead of a script): maps the event on stdin to
+// a state report for the session in AGENTDESK_SESSION_ID, prints nothing, always exits 0.
+TEST_F(HostFixture, HookCommandReportsStateSilently) {
+    const auto id = create("echo", "hooked");
+    ::SetEnvironmentVariableW(L"AGENTDESK_SESSION_ID", w(id).c_str());
+    ::SetEnvironmentVariableW(L"AGENTDESK_PIPE", pipe_.c_str());
+    const std::string permission = R"({"hook_event_name":"PermissionRequest","tool_name":"Bash"})";
+    const auto r = run_capture(AGENTDESK_CTL_EXE, {L"hook"}, {}, &permission);
+    EXPECT_EQ(r.exit_code, 0u);
+    EXPECT_TRUE(r.out.empty()) << r.out;
+    auto state = [&] {
+        const auto doc = Json::parse(ctl({L"list", L"--json"}).out, nullptr, false);
+        for (const auto& sj : doc.value("sessions", Json::array()))
+            if (sj.value("id", "") == id)
+                return sj.value("agent_state", std::string());
+        return std::string();
+    };
+    EXPECT_TRUE(wait_until([&] { return state() == "Blocked"; }, 5s)) << state();
+
+    const std::string garbage = "not json";
+    const auto g = run_capture(AGENTDESK_CTL_EXE, {L"hook"}, {}, &garbage);
+    EXPECT_EQ(g.exit_code, 0u);
+    EXPECT_TRUE(g.out.empty());
+
+    const std::string stop = R"({"hook_event_name":"Stop"})";
+    EXPECT_EQ(run_capture(AGENTDESK_CTL_EXE, {L"hook"}, {}, &stop).exit_code, 0u);
+    EXPECT_TRUE(wait_until([&] { return state() == "Idle"; }, 5s)) << state();
+
+    ::SetEnvironmentVariableW(L"AGENTDESK_SESSION_ID", nullptr);  // outside a session: silent no-op
+    EXPECT_EQ(run_capture(AGENTDESK_CTL_EXE, {L"hook"}, {}, &stop).exit_code, 0u);
+    ::SetEnvironmentVariableW(L"AGENTDESK_PIPE", nullptr);
 }
