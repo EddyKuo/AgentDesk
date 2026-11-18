@@ -72,7 +72,7 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 值為空字串表示取消綁定。格式與 herdr 的 keys.json 相同：
 
 - 區段：`global`（整個視窗）、`terminal`（終端機有焦點時）、`layout:<版面名稱>`（顯示該版面時）。同一個鍵在多個區段都有設定時，依 terminal、layout、global 的順序取用。
-- 動作可以是命令名稱、`命令:值`、`{"command": "layout.switch", "args": {"name": "grid"}}`、`send:<文字>`（送進終端機），或 `terminal`（這個鍵交給程式）。
+- 動作可以是命令名稱、`命令:值`、`{"command": "layout.switch", "args": {"name": "terminals"}}`、`send:<文字>`（送進終端機），或 `terminal`（這個鍵交給程式）。
 - 檔案有錯（無法讀的按鍵、未知的區段或命令）時，整個檔案都不套用，按鍵維持預設，錯誤會顯示在設定頁。
 
 存檔後立刻生效，不必重新啟動。檔案不存在時，AgentDesk 會寫入預設的按鍵；檔案有錯時，原因會寫在同一個資料夾的 `keys.error`。
@@ -144,14 +144,11 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 
 - **workspace**（設定裡顯示為 AgentDesk）：預設，側欄＋分頁＋分割面板＋右側面板。
 - **terminals**：herdr 的第二個版面，沒有側欄與狀態列。上方的分頁列左邊是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是命令面板與新分頁按鈕。面板標題列的按鈕一直顯示。
-- **board**：Agent 依狀態排成四欄卡片（Needs you、Done、Working、Idle & shells），卡片顯示最後一行輸出。點卡片預覽，雙擊開到 workspace。
-- **grid**：目前 space 的所有工作平鋪成即時終端機。
-- **focus**：只有終端機，沒有側欄、分頁列和狀態列。
 
 自訂版面放在 `%LOCALAPPDATA%\AgentDesk\layouts\<名稱>.json`：
 
 ```json
-{ "name": "wall", "main": "grid", "sidebar": false, "tab_bar": false, "status_bar": true, "theme": "ember" }
+{ "name": "wall", "sidebar": false, "tab_bar": false, "status_bar": true, "theme": "ember" }
 ```
 
 命令面板的「Duplicate layout」把目前的版面複製成 `<名稱>-copy.json` 並切換過去，之後直接改這個檔案。「Reset layout」把版面還原成隨附的樣子，並重設側欄與右側面板的寬度；你改過的檔案會改名成 `.json.aside` 保留。
