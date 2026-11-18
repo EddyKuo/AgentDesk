@@ -2796,29 +2796,30 @@ void update_attention(App::State& s) {
                         where, id, blocked ? g_pal->needs_you : g_pal->focus);  // herdr: "<space> / <tab>"
             }
         }
-        // A program that ends with an error right after it was started here: say why.
+        // herdr window.rs 142-157, 2463-2481: a terminal that exited by itself with an error
+        // within 2 s of starting here (any time for 127) -> "Terminal failed to start", the exit
+        // code and its last 5 lines. One the person closed (killed) says nothing.
         const auto prev = s.prev_process_state[id];
         if (prev != v.process_state) {
             s.prev_process_state[id] = v.process_state;
             const auto l = s.launched_here.find(id);
-            if (v.process_state == "Exited" && v.exit_code && *v.exit_code != 0 &&
-                l != s.launched_here.end() && Clock::now() - l->second < std::chrono::seconds(4)) {
-                std::string tail;
+            const bool closed = s.hidden.contains(id);
+            if (v.process_state == "Exited" && v.exit_code && *v.exit_code != 0 && !closed &&
+                l != s.launched_here.end() &&
+                (Clock::now() - l->second <= std::chrono::seconds(2) || *v.exit_code == 127)) {
+                std::string body = "Exit code " + std::to_string(*v.exit_code);
                 if (const auto it = s.by_id.find(id); it != s.by_id.end()) {
                     const auto snap = it->second->snapshot();
                     std::vector<std::string> lines;
                     for (int r = 0; r < snap->rows; ++r) {
                         auto t = snap->row_text(r);
-                        if (!t.empty())
+                        if (t.find_first_not_of(' ') != std::string::npos)
                             lines.push_back(t);
                     }
-                    for (std::size_t i = lines.size() > 3 ? lines.size() - 3 : 0; i < lines.size(); ++i)
-                        tail += (tail.empty() ? "" : "\n") + lines[i];
+                    for (std::size_t i = lines.size() > 5 ? lines.size() - 5 : 0; i < lines.size(); ++i)
+                        body += "\n" + lines[i];
                 }
-                char head[96];
-                std::snprintf(head, sizeof head, "%s exited with code %u (0x%08X)", s.pane_title(id).c_str(),
-                              *v.exit_code, *v.exit_code);
-                s.toast(head, tail, id, g_pal->needs_you, 10);
+                s.toast("Terminal failed to start", body, id, g_pal->needs_you, 10);
             }
         }
     }
@@ -5859,8 +5860,11 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
         draw_terminals_pane_header(s, id, v, pos, r.w, header_h, focused);
     } else {
         const float cy = pos.y + header_h * 0.5f;
-        const bool pane_hovered = ImGui::IsMouseHoveringRect(pos, ImVec2(max.x, pos.y + header_h), false) &&
-                                  ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
+        // herdr pane/main.js 86-90: the buttons show while the header is hovered. Pressing one
+        // makes it the active item, which must not hide it before the release lands.
+        const bool pane_hovered =
+            ImGui::IsMouseHoveringRect(pos, ImVec2(max.x, pos.y + header_h), false) &&
+            ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
         float hx = pos.x + px(10);
         program_badge(dl, s.fonts.ui_bold, fpx(10.5f), ImVec2(hx, cy - px(7)), px(14), program_info(v.program, v.profile_id));
         hx += px(14) + px(8);
