@@ -27,4 +27,12 @@ bool key_pressed_owned(ImGuiKey key, const char* str_id);
 // Turns off ImGui's Ctrl+Tab window switcher: AgentDesk uses Ctrl+Tab to switch tabs.
 void disable_nav_windowing();
 
+// ImGui 1.92 user textures (ImageCache): the renderer creates them from the pixels and recreates
+// them after a lost device.
+void register_texture(ImTextureData* tex);
+void unregister_texture(ImTextureData* tex);
+
+// Puts a window above the others in drawing order (Herdr 98: the window pressed last is on top).
+void bring_to_front(const char* window_name);
+
 }  // namespace agentdesk::ui::adapter

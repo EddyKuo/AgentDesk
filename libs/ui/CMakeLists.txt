@@ -1,4 +1,5 @@
 find_package(imgui CONFIG REQUIRED)
+find_package(lunasvg CONFIG REQUIRED)
 
 agentdesk_library(agentdesk_ui
     src/input_mapping.cpp
@@ -16,9 +17,11 @@ agentdesk_library(agentdesk_ui
     src/clipboard.cpp
     src/system_process.cpp
     src/telemetry.cpp
-    src/updates.cpp)
+    src/updates.cpp
+    src/win98.cpp
+    src/image_cache.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # host/input.hpp is part of the public interface (TerminalSource::send).
-target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt)
+target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt windowscodecs lunasvg::lunasvg)
 target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agentdesk::host agentdesk::ipc agentdesk::protocol)

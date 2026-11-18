@@ -40,6 +40,8 @@ public:
     // First chord bound to `command` (for menus and the help overlay), formatted.
     [[nodiscard]] std::string chord_for(std::string_view command) const;
     [[nodiscard]] const std::map<ImGuiKeyChord, std::string>& global_map() const { return global_; }
+    // The shown layout's section ("layout:<name>"); empty when it has none.
+    [[nodiscard]] const std::map<ImGuiKeyChord, std::string>& layout_map() const;
 
     static std::optional<ImGuiKeyChord> parse(std::string_view text);  // "ctrl-shift-t"
     static std::string format(ImGuiKeyChord chord);                    // "Ctrl+Shift+T"

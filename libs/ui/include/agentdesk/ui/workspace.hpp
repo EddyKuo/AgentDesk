@@ -111,8 +111,9 @@ public:
     // Ctrl+1..9: the n-th tab (1-based) not put away, in the active space.
     void select_shown_tab(int n);
     // herdr tab.settle: hides a tab from the bar until it is shown or needs you. The last tab
-    // still shown in its space cannot be put away (returns false).
-    bool settle_tab(int space, int tab);
+    // still shown in its space cannot be put away (returns false), unless keep_shown: then it is
+    // settled and stays shown (herdr model.rs 470-484; Herdr 98 minimizes the last window too).
+    bool settle_tab(int space, int tab, bool keep_shown = false);
     void unsettle_tab(int space, int tab);
     // Shows the tab holding `session` again; true if it was put away.
     bool unsettle_session(const std::string& session);

@@ -17,7 +17,8 @@ agentdesk_executable(unit_tests
     unit/chrome_logic_test.cpp
     unit/mods_test.cpp
     unit/updates_test.cpp
-    unit/telemetry_test.cpp)
+    unit/telemetry_test.cpp
+    unit/win98_test.cpp)
 target_link_libraries(unit_tests PRIVATE
     agentdesk::ui agentdesk::protocol agentdesk::terminal agentdesk::platform_win agentdesk::vterm
     nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock shell32)

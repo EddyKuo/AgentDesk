@@ -2,6 +2,7 @@
 // attention, notifications, command palette, worktrees; observed from its public guide
 // defaults/AGENTS.md and keys.json), with AgentDesk's own look, names and code (ADR-12/ADR-13).
 #include "app.hpp"
+#include "win98_state.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -39,6 +40,7 @@
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/ui/chrome_logic.hpp"
 #include "agentdesk/ui/git_info.hpp"
+#include "agentdesk/ui/imgui_adapter.hpp"
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/mods.hpp"
 #include "agentdesk/ui/telemetry.hpp"
@@ -65,6 +67,7 @@ struct Palette {
     ImU32 bg, sidebar, card, border, focus, hover, selected, text, dim, faint;
     ImU32 needs_you, done, working, idle, info;
     ImU32 term_bg, term_fg, cursor, selection;
+    bool layout_only = false;  // a layout's own theme (herdr: offered only there)
 };
 
 constexpr Palette kPalettes[] = {
@@ -156,6 +159,35 @@ constexpr Palette kPalettes[] = {
      IM_COL32(36, 38, 46, 255),
      IM_COL32(60, 60, 200, 255),
      IM_COL32(88, 92, 220, 70)},
+    // herdr themes/win98.json, Herdr 98's own (settings.rs 99): a theme named like a layout is that
+    // layout's own, so Settings and the palette do not offer it (AGENTS.md 338-339). Panel colors
+    // from its "colors": surface/popover #c0c0c0, raised/hover #dfdfdf, border #808080, foreground
+    // #000000, dim #808080, muted #404040, accent #000080; status blocked #ff0000, done #0000ff,
+    // working #808000, idle #808080. Terminals: the pane's black (terminal_opacity 0 over
+    // background #000000), foreground #c0c0c0, cursor #c0c0c0, selection #000080.
+    {"win98",
+     "Herdr 98",
+     true,
+     IM_COL32(0xc0, 0xc0, 0xc0, 255),
+     IM_COL32(0xc0, 0xc0, 0xc0, 255),
+     IM_COL32(0xc0, 0xc0, 0xc0, 255),
+     IM_COL32(0x80, 0x80, 0x80, 255),
+     IM_COL32(0x00, 0x00, 0x80, 255),
+     IM_COL32(0xdf, 0xdf, 0xdf, 255),
+     IM_COL32(0xdf, 0xdf, 0xdf, 255),
+     IM_COL32(0x00, 0x00, 0x00, 255),
+     IM_COL32(0x80, 0x80, 0x80, 255),
+     IM_COL32(0x40, 0x40, 0x40, 255),
+     IM_COL32(0xff, 0x00, 0x00, 255),
+     IM_COL32(0x00, 0x00, 0xff, 255),
+     IM_COL32(0x80, 0x80, 0x00, 255),
+     IM_COL32(0x80, 0x80, 0x80, 255),
+     IM_COL32(0x00, 0x00, 0x80, 255),
+     IM_COL32(0x00, 0x00, 0x00, 255),
+     IM_COL32(0xc0, 0xc0, 0xc0, 255),
+     IM_COL32(0xc0, 0xc0, 0xc0, 255),
+     IM_COL32(0x00, 0x00, 0x80, 0x80),  // drawn over the text here, so not opaque
+     true},
 };
 
 const Palette* g_pal = &kPalettes[0];
@@ -538,8 +570,9 @@ void save_settings(const Settings& s) {
 // below; <data>\layouts\<name>.json adds or overrides by name:
 //   {"name": "...", "sidebar": true, "details": false,
 //    "tab_bar": true, "status_bar": true, "theme": "ember", "style": "terminals", "font_size": 15}
-// "style": "terminals" draws herdr's Terminals chrome (terminals-bar, terminals-pane); "font_size"
-// sets the terminals' font size while the layout shows (herdr layout.rs 160-164).
+// "style": "terminals" draws herdr's Terminals chrome (terminals-bar, terminals-pane); "win98"
+// draws Herdr 98 (herdr mods/win98); "font_size" sets the terminals' font size while the layout
+// shows (herdr layout.rs 160-164).
 struct LayoutSpec {
     std::string name;
     bool sidebar = true;
@@ -547,7 +580,7 @@ struct LayoutSpec {
     bool tab_bar = true;
     bool status_bar = true;
     std::string theme;  // optional
-    std::string style;  // "" or "terminals"
+    std::string style;  // "", "terminals" or "win98"
     std::optional<float> font_size;
 };
 
@@ -558,6 +591,9 @@ std::vector<LayoutSpec> load_layouts() {
         {"workspace", true, std::nullopt, true, true, ""},
         // herdr's second shipped layout (layouts/terminals.json): no sidebar, the terminal tabs.
         {"terminals", false, false, true, false, "", "terminals", 15.0f},
+        // herdr's third (layouts/win98.json, "Herdr 98"): its own chrome in C++ (win98_*.inl), its
+        // theme (themes/win98.json), PxPlus IBM VGA 8x16 at 16 px for terminals.
+        {"win98", false, false, false, false, "win98", "win98", 16.0f},
     };
     std::error_code ec;
     for (const auto& e : std::filesystem::directory_iterator(data_dir() / L"layouts", ec)) {
@@ -941,6 +977,14 @@ bool builtin_command(std::string_view name) {
 // "<mod>.<command>" action is accepted when that mod folder exists.
 bool known_command(std::string_view name) {
     if (builtin_command(name))
+        return true;
+    // Herdr 98's commands (herdr-app defaults/mods/win98/README.md 12-17).
+    static const std::set<std::string, std::less<>> kWin98 = {
+        "win98.start",       "win98.taskman", "win98.new_tab", "win98.new_space", "win98.rename_tab", "win98.rename_space",
+        "win98.run",         "win98.shutdown", "win98.about",  "win98.display",   "win98.welcome",    "win98.boot",
+        "win98.mines",       "win98.sol",     "win98.mycomputer", "win98.network", "win98.bin",       "win98.datetime",
+        "win98.logoff",      "win98.small_fonts", "win98.large_fonts", "win98.close_tab", "win98.close_space"};
+    if (kWin98.contains(name))
         return true;
     const auto dot = name.find('.');
     std::error_code ec;
@@ -1983,6 +2027,7 @@ struct Placement {
     std::string split_of;
     std::string replace;  // restart in place
     std::string space_name;
+    std::string tab_name;  // herdr tab.new {name} (Herdr 98 names its tabs)
 };
 
 struct WorktreeEntry {
@@ -2172,6 +2217,9 @@ struct App::State {
     std::string worktree_machine;  // machine the listed worktrees are on
     char wt_filter[128] = {};
     int wt_sel = 0;
+    // Herdr 98 (win98_*.inl): its menus, dialogs, games and shared values.
+    std::unique_ptr<w98state::W98> win98 = std::make_unique<w98state::W98>();
+    bool fonts_win98 = false;  // Herdr 98's fonts are the ones in use
 
     // ---------------------------------------------------------------- helpers
     [[nodiscard]] std::string title_of(const ui::SessionView& v) const {
@@ -2609,6 +2657,8 @@ long long App::next_wakeup_ms() const {
         if (v.agent_state == "Working")
             ms = std::min<long long>(ms, 50);  // the working mark spins
     }
+    if (s_->layout().style == "win98")  // Herdr 98's clock, carets, badges, games and screens
+        ms = std::min<long long>(ms, s_->win98->wakeup_ms);
     return ms;
 }
 
@@ -2669,11 +2719,14 @@ void adopt_doc(App::State& s, const Json& doc) {
     s.last_sent_doc = s.last_doc;
 }
 
+// `args` go after the profile's own (session.create "args"; Herdr 98's Run line).
 void create_session(App::State& s, const std::string& profile, const std::string& cwd,
-                    const std::string& name, Placement placement) {
+                    const std::string& name, Placement placement, const std::vector<std::string>& args = {}) {
     Json params{{"profile_id", profile}, {"cwd", cwd}};
     if (!name.empty())
         params["name"] = name;
+    if (!args.empty())
+        params["args"] = args;
     s.launch_busy = true;
     s.host_for(placement.machine)
         ->call(
@@ -2719,7 +2772,7 @@ void place(App::State& s, const Placement& p) {
                         sp = i;
             }
             if (sp >= 0) {
-                s.ws.add_tab(p.session, sp);
+                s.ws.add_tab(p.session, sp, p.tab_name);
                 s.focus(p.session);
                 return;
             }
@@ -3123,6 +3176,9 @@ void open_rename(App::State& s, const std::string& kind, const std::string& targ
 
 // person: the person ran it (palette, keys, a click), not a mod or --run (window.rs 2995).
 void run_command(App::State& s, const std::string& cmd, bool person = true);
+namespace w98 {
+void command(App::State& s, const std::string& cmd);  // win98_chrome.inl
+}  // namespace w98
 
 // Runs a command and says why it failed ("" when it ran): herdr window.rs run_as() answers
 // {"error": ...} for an unknown command, a missing target, or a git step that failed.
@@ -3825,6 +3881,11 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         s.mods->run_command(arg.substr(0, c2), arg.substr(c2 + 1));
     } else if (name == "layout.toggle" && (arg == "panel" || arg.empty())) {
         return exec_command(s, "panel");
+    } else if (name.rfind("win98.", 0) == 0) {
+        // Herdr 98's key commands (README.md 12-17), delivered to its taskbar (taskbar.js 126-176)
+        // while the layout shows.
+        if (s.layout().style == "win98")
+            w98::command(s, name.substr(6));
     } else if (const auto dot = name.find('.');
                dot != std::string::npos && [&] {
                    std::error_code ec;  // "<mod>.<command>": keys.json accepts it when that mod folder exists
@@ -5996,6 +6057,12 @@ void draw_status_bar(App::State& s, ImVec2 pos, float width, float height) {
 }
 
 
+namespace w98 {
+float pane_border(App::State& s);
+float pane_header_h(App::State& s);
+void pane_header_at(App::State& s, const std::string& id, ImVec2 a, ImVec2 b, bool focused);
+}  // namespace w98
+
 void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected) {
     const auto vit = s.views_by_id.find(id);
     const auto sit = s.by_id.find(id);
@@ -6012,17 +6079,32 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
     // when focused; 30 px header: icon, name, folder (~), status; buttons only while hovered.
     // The Terminals layout (terminals.json 37-45): radius 12, a quiet border and focus edge, and
     // its own 38 px header (terminals-pane).
+    // Herdr 98 (win98.json 26-58, kit.js 464-473): radius 0, a 3 px #c0c0c0 border (the same
+    // focused), background #000000, its own 18 px title bar at the top (window.js).
     const bool tm = s.layout().style == "terminals";
+    const bool w98p = s.layout().style == "win98";
+    const float edge = w98p ? w98::pane_border(s) : 0.0f;
     const TerminalsLook tl = terminals_look();
-    const float radius = px(tm ? 12.0f : 10.0f);
-    dl->AddRectFilled(pos, max, g_pal->term_bg, radius);
-    dl->AddRect(pos, max, tm ? (focused ? tl.pane_focus : tl.pane_border) : (focused ? g_pal->focus : g_pal->border),
-                radius, 0, 1.0f);
+    const float radius = w98p ? 0.0f : px(tm ? 12.0f : 10.0f);
+    if (w98p) {
+        dl->AddRectFilled(pos, max, IM_COL32(0, 0, 0, 255));
+        const ImU32 face = IM_COL32(0xc0, 0xc0, 0xc0, 255);
+        dl->AddRectFilled(pos, ImVec2(max.x, pos.y + edge), face);
+        dl->AddRectFilled(ImVec2(pos.x, max.y - edge), max, face);
+        dl->AddRectFilled(pos, ImVec2(pos.x + edge, max.y), face);
+        dl->AddRectFilled(ImVec2(max.x - edge, pos.y), max, face);
+    } else {
+        dl->AddRectFilled(pos, max, g_pal->term_bg, radius);
+        dl->AddRect(pos, max, tm ? (focused ? tl.pane_focus : tl.pane_border) : (focused ? g_pal->focus : g_pal->border),
+                    radius, 0, 1.0f);
+    }
 
     const float fs = ImGui::GetFontSize();
-    const float header_h = px(tm ? 38.0f : 30.0f);
+    const float header_h = w98p ? w98::pane_header_h(s) : px(tm ? 38.0f : 30.0f);
     ImGui::PushID(id.c_str());
-    if (tm) {
+    if (w98p) {
+        w98::pane_header_at(s, id, ImVec2(pos.x + edge, pos.y + edge), ImVec2(max.x - edge, pos.y + edge + header_h), focused);
+    } else if (tm) {
         draw_terminals_pane_header(s, id, v, pos, r.w, header_h, focused);
     } else {
         const float cy = pos.y + header_h * 0.5f;
@@ -6100,7 +6182,7 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
         }
     }
 
-    float top = pos.y + header_h;
+    float top = pos.y + edge + header_h;
     std::string banner;
     ImU32 bc = g_pal->working;
     if (!connected) {
@@ -6142,9 +6224,11 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
     }
 
     // herdr main.json terminal_padding [14, 12]; the Terminals layout keeps the default [10, 6]
-    // (settings.rs 564).
-    const ImVec2 body_min(pos.x + px(tm ? 10.0f : 14.0f), top + px(tm ? 6.0f : 2.0f));
-    const ImVec2 body_size(r.w - px(tm ? 20.0f : 28.0f), max.y - top - (tm ? px(12) : px(2) + px(12)));
+    // (settings.rs 564); Herdr 98 [4, 2] inside its 3 px border (win98.json 93-96).
+    const ImVec2 body_min = w98p ? ImVec2(pos.x + edge + px(4), top + px(2))
+                                 : ImVec2(pos.x + px(tm ? 10.0f : 14.0f), top + px(tm ? 6.0f : 2.0f));
+    const ImVec2 body_size = w98p ? ImVec2(r.w - edge * 2 - px(8), max.y - edge - top - px(4))
+                                  : ImVec2(r.w - px(tm ? 20.0f : 28.0f), max.y - top - (tm ? px(12) : px(2) + px(12)));
     if (body_size.x > px(20) && body_size.y > px(10)) {
         ImGui::SetCursorScreenPos(body_min);
         ImGui::BeginChild(
@@ -7436,11 +7520,12 @@ void draw_palette(App::State& s) {
             add(n.title, n.cmd, n.group, n.words);
         if (std::string_view(n.cmd) == "app.quit")  // palette/main.js 62
             for (const auto& p : kPalettes)
-                add(std::string("Theme: ") + p.label, std::string("theme:") + p.id, "App", "colors look");
+                if (!p.layout_only)
+                    add(std::string("Theme: ") + p.label, std::string("theme:") + p.id, "App", "colors look");
     }
-    // palette/main.js 86-89: "Layout: <Name>", capitalised.
+    // palette/main.js 86-89: "Layout: <Name>", capitalised; win98 is "Herdr 98".
     for (const auto& l : s.layouts) {
-        std::string t = l.name;
+        std::string t = l.name == "win98" ? std::string("Herdr 98") : l.name;
         if (!t.empty())
             t[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(t[0])));
         add("Layout: " + t, "layout:" + l.name, "Layout", "look " + l.name);
@@ -8862,9 +8947,21 @@ const ui::FontFamily* find_family(const std::string& name) {
     return nullptr;
 }
 
+namespace w98 {
+void ensure_fonts(App::State& s);
+ImFont* layout_font(App::State& s, int which);  // 0 terminals, 1 interface, 2 interface bold
+float terminal_font_size(App::State& s);
+void preview(App::State& s, ImDrawList* dl, ImVec2 a, ImVec2 size, float rounding, ImU32 border);
+}  // namespace w98
+
 // Terminal font: family (empty: bundled JetBrains Mono) at the chosen weight, bold from the
-// family's 700 face.
+// family's 700 face. A layout with fonts of its own (Herdr 98: win98.json "font") uses those.
 void apply_terminal_font(App::State& s) {
+    if (s.layout().style == "win98") {
+        w98::ensure_fonts(s);
+        s.fonts.mono = s.fonts.mono_bold = w98::layout_font(s, 0);
+        return;
+    }
     const auto* f = find_family(s.settings.terminal_font.empty() ? std::string("JetBrains Mono") : s.settings.terminal_font);
     ImFont* mono = f != nullptr ? ui::load_font_file(f->file_for(s.settings.terminal_weight), s.settings.font_size, true) : nullptr;
     s.fonts.mono = mono != nullptr ? mono : ui::load_terminal_font(L"", s.settings.font_size);
@@ -8878,6 +8975,13 @@ void apply_ui_font(App::State& s) {
         s.base_ui = s.fonts.ui;
         s.base_ui_medium = s.fonts.ui_medium;
         s.base_ui_bold = s.fonts.ui_bold;
+    }
+    if (s.layout().style == "win98") {  // win98.json "ui_font": "Pixelated MS Sans Serif"
+        w98::ensure_fonts(s);
+        s.fonts.ui = s.fonts.ui_medium = w98::layout_font(s, 1);
+        s.fonts.ui_bold = w98::layout_font(s, 2);
+        ImGui::GetIO().FontDefault = s.fonts.ui;
+        return;
     }
     const auto* f = s.settings.ui_font.empty() ? nullptr : find_family(s.settings.ui_font);
     ImFont* r = f != nullptr ? ui::load_font_file(f->file_for(400), 13.0f, false) : nullptr;
@@ -9474,10 +9578,17 @@ void draw_settings(App::State& s) {
                 d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), raised_color(), px(10));
             if (on)
                 d->AddRect(a, ImVec2(a.x + cw, a.y + ch), g_pal->focus, px(10), 0, px(2));
-            layout_preview(d, l.name, ImVec2(a.x + pad, a.y + pad), ImVec2(cw - pad * 2, ph));
-            // herdr LOOKS: main -> "Herdr" (ours is AgentDesk), terminals -> "Terminals".
+            // herdr settings/main.js 86-99, 302-309: a layout with a "preview" picture shows it
+            // (win98.json "preview": layouts/win98.svg), rounded 6 with a 1 px border.
+            if (l.style == "win98")
+                w98::preview(s, d, ImVec2(a.x + pad, a.y + pad), ImVec2(cw - pad * 2, ph), px(6), g_pal->border);
+            else
+                layout_preview(d, l.name, ImVec2(a.x + pad, a.y + pad), ImVec2(cw - pad * 2, ph));
+            // herdr LOOKS: main -> "Herdr" (ours is AgentDesk), terminals -> "Terminals",
+            // win98 -> "Herdr 98" (settings/main.js 18).
             std::string label = l.name == "workspace" ? std::string("AgentDesk")
                                 : l.name == "terminals" ? std::string("Terminals")
+                                : l.name == "win98"     ? std::string("Herdr 98")
                                                         : l.name;
             const ImVec2 lp(a.x + pad, a.y + pad + ph + px(6));
             const float tw = text_clipped(d, s.fonts.ui, fpx(12.5f), lp, on ? g_pal->text : g_pal->dim, label,
@@ -9506,7 +9617,7 @@ void draw_settings(App::State& s) {
         ImGui::TextDisabled("%s", light_cards ? "Light" : "Dark");
         ImGui::PopFont();
         for (const auto& p : kPalettes) {
-            if (p.light != light_cards)
+            if (p.light != light_cards || p.layout_only)
                 continue;
             const bool on = (light_cards ? s.settings.theme_light : s.settings.theme_dark) == p.id;
             const ImVec2 a = ImGui::GetCursorScreenPos();
@@ -10037,6 +10148,23 @@ void draw_welcome(App::State& s) {
             s.welcome_copied = true;
         }
         ImGui::EndChild();
+        ImGui::PopStyleColor();
+        // herdr welcome/main.js 451-459: "More examples in Settings" (p 12, gap 10, rounded 10,
+        // raised), naming Herdr 98.
+        ImGui::Dummy(ImVec2(0, px(8)));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, v4(raised_color()));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, px(10));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(12), px(12)));
+        ImGui::BeginChild("##examples", ImVec2(-1, 0), ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding,
+                          ImGuiWindowFlags_NoScrollbar);
+        ImGui::PushFont(s.fonts.ui_bold, 13.5f);
+        ImGui::TextUnformatted("More examples in Settings");
+        ImGui::PopFont();
+        ImGui::Dummy(ImVec2(0, px(2)));
+        ImGui::TextWrapped("Settings \xE2\x80\xBA Look has more layouts to try or start from, Herdr 98 among them. Your agent can "
+                           "copy any of them and change anything.");
+        ImGui::EndChild();
+        ImGui::PopStyleVar(2);
         ImGui::PopStyleColor();
     }
     ImGui::Dummy(ImVec2(0, px(20)));
@@ -10652,6 +10780,11 @@ void draw_close_notice(App::State& s) {
     ImGui::EndPopup();
 }
 
+// ------------------------------------------------------------------ Herdr 98 (herdr-app win98)
+#include "win98_kit.inl"
+#include "win98_dialogs.inl"
+#include "win98_chrome.inl"
+
 }  // namespace
 
 // ------------------------------------------------------------------ frame
@@ -10737,6 +10870,12 @@ void run_input_script(App::State& s) {
             s.input_up = button;
             s.input_clicks_left = op == "dblclick" ? 1 : 0;
         }
+    } else if (op == "press" || op == "release") {
+        // A drag: "press:x,y", then "move:x,y" steps, then "release:x,y".
+        const ImVec2 p = xy();
+        s.input_mouse = p;
+        io.AddMousePosEvent(p.x, p.y);
+        io.AddMouseButtonEvent(0, op == "press");
     } else if (op == "key") {
         if (const ImGuiKey k = input_key(arg); k != ImGuiKey_None) {
             io.AddKeyEvent(k, true);
@@ -10764,6 +10903,16 @@ void App::frame() {
     State& s = *s_;
     g_scale = s.dpi * ui_scale(s.settings);
     s.fonts.mono_size = s.layout().font_size.value_or(s.settings.font_size) / ui_text_factor(s.settings);
+    const bool win98 = s.layout().style == "win98";
+    if (win98)  // kit.js 451-452: the MS-DOS font, 32 px with Large Fonts
+        s.fonts.mono_size = w98::terminal_font_size(s) / ui_text_factor(s.settings);
+    if (s.fonts_win98 != win98) {  // a layout with fonts of its own (Herdr 98), or back from it
+        s.fonts_win98 = win98;
+        apply_terminal_font(s);
+        apply_ui_font(s);
+    }
+    if (!win98)
+        w98::hidden(s);
     if (Clock::now() - s.keys_checked > std::chrono::milliseconds(400)) {
         s.keys_checked = Clock::now();
         std::error_code ec;
@@ -10861,9 +11010,16 @@ void App::frame() {
 
     // Global shortcuts while no terminal holds the keyboard (a focused terminal reports them).
     if (!ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) {
-        for (const auto& [chord, cmd] : s.keymap.global_map()) {
+        // The layout's section ("layout:<name>") first, then global (herdr keys.rs tab()).
+        std::set<ImGuiKeyChord> chords;
+        for (const auto& [chord, cmd] : s.keymap.global_map())
+            chords.insert(chord);
+        for (const auto& [chord, cmd] : s.keymap.layout_map())
+            chords.insert(chord);
+        for (const ImGuiKeyChord chord : chords) {
             if (ImGui::IsKeyChordPressed(chord))
-                run_command(s, cmd);
+                if (const auto cmd = s.keymap.global(chord))
+                    run_command(s, *cmd);
         }
     }
 
@@ -10886,6 +11042,9 @@ void App::frame() {
     // herdr main.json: root row = sidebar (268, 44..480, chrome) | 1 px border | work column
     // (tabs 42, body padding 8 gap 8 with the right panel 368, status 28).
     ImGui::GetWindowDrawList()->AddRectFilled(origin, ImVec2(origin.x + full.x, origin.y + full.y), g_pal->bg);
+    if (win98) {  // herdr layouts/win98.json: the desktop, the panes and the taskbar (win98_*.inl)
+        w98::draw(s, origin, full, connected);
+    } else {
     const float sidebar_w = show_sidebar ? px(s.settings.sidebar_width) : 0.0f;
     const float status_h = layout.status_bar ? px(28) : 0.0f;
     // herdr layouts/terminals.json: root padding 6, a 38 px bar, gap 8 (no body padding).
@@ -10944,7 +11103,10 @@ void App::frame() {
         draw_details(s, ImVec2(right_x, content_pos.y), ImVec2(details_w, content_size.y), connected);
     if (layout.status_bar)
         draw_status_bar(s, ImVec2(work_x, origin.y + full.y - status_h), main_w, status_h);
+    }
     ImGui::End();
+    if (win98)  // its floats, windows and menus (herdr overlays)
+        w98::overlays(s);
 
     draw_peek(s);
     draw_launcher(s);

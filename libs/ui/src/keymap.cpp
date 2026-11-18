@@ -179,12 +179,27 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
      "f"},
 };
 
+// herdr-app defaults/mods/win98/README.md 12-13: keys.json section "layout:win98",
+// win98.start (Ctrl+Esc) and win98.taskman (Ctrl+Shift+Esc).
+constexpr std::pair<const char*, const char*> kWin98[] = {
+    {"ctrl-escape", "win98.start"},
+    {"ctrl-shift-escape", "win98.taskman"},
+};
+
 }  // namespace
+
+const std::map<ImGuiKeyChord, std::string>& Keymap::layout_map() const {
+    static const std::map<ImGuiKeyChord, std::string> kNone;
+    const auto s = sections_.find("layout:" + layout_);
+    return s == sections_.end() ? kNone : s->second;
+}
 
 Keymap Keymap::defaults() {
     Keymap k;
     for (const auto& [chord, cmd] : kGlobal)
         k.global_[*parse(chord)] = cmd;
+    for (const auto& [chord, cmd] : kWin98)
+        k.sections_["layout:win98"][*parse(chord)] = cmd;
     for (int i = 1; i <= 9; ++i) {
         k.global_[*parse("ctrl-" + std::to_string(i))] = "tab.select:" + std::to_string(i);
         k.global_[*parse("alt-" + std::to_string(i))] = "space.select:" + std::to_string(i);
@@ -205,7 +220,10 @@ nlohmann::json Keymap::default_file() {
     nlohmann::json t = nlohmann::json::object();
     for (const auto& [chord, cmd] : kTerminal)
         t[chord] = cmd;
-    return {{"global", g}, {"terminal", t}};
+    nlohmann::json w = nlohmann::json::object();
+    for (const auto& [chord, cmd] : kWin98)
+        w[chord] = cmd;
+    return {{"global", g}, {"terminal", t}, {"layout:win98", w}};
 }
 
 namespace {
@@ -266,7 +284,8 @@ std::vector<std::string> Keymap::apply(const nlohmann::json& overrides,
                 for (const auto& [k, v] : args.items())
                     action += ":" + (v.is_string() ? v.get<std::string>() : v.dump());
             } else {
-                bad.push_back(section + ": " + chord_text + ": the action must be text or {\"command\", \"args\"}");
+                bad.push_back(section + ": " + chord_text +
+                              ": the action must be text or {\"command\", \"args\"}");
                 continue;
             }
             action = migrate(action);

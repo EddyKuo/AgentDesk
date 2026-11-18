@@ -62,3 +62,21 @@ void disable_nav_windowing() {
 }
 
 }  // namespace agentdesk::ui::adapter
+
+namespace agentdesk::ui::adapter {
+
+void register_texture(ImTextureData* tex) {
+    ImGui::RegisterUserTexture(tex);
+}
+
+void unregister_texture(ImTextureData* tex) {
+    if (ImGui::GetCurrentContext() != nullptr)
+        ImGui::UnregisterUserTexture(tex);
+}
+
+void bring_to_front(const char* window_name) {
+    if (ImGuiWindow* w = ImGui::FindWindowByName(window_name))
+        ImGui::BringWindowToDisplayFront(w);
+}
+
+}  // namespace agentdesk::ui::adapter
