@@ -41,7 +41,9 @@
 #include "agentdesk/ui/git_info.hpp"
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/mods.hpp"
+#include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
+#include "agentdesk/ui/updates.hpp"
 #include "agentdesk/ui/workspace.hpp"
 
 namespace agentdesk::desktop {
@@ -310,6 +312,9 @@ struct Settings {
     std::vector<std::string> folded_machines;  // machine headers folded in the sidebar
     std::vector<std::string> panels = {"files", "changes"};  // panel buttons in the tab bar
     Json agents_changed = Json::object();  // session id -> {s: state, at: ms}: herdr agents.js 85-110
+    // herdr settings.rs 718-726 / main.js 857-861: on unless the file says "telemetry": false;
+    // turning it on again removes the key.
+    bool telemetry = true;
 };
 
 std::filesystem::path data_dir() {
@@ -350,6 +355,9 @@ Settings load_settings() {
     std::stringstream ss;
     ss << in.rdbuf();
     const auto j = Json::parse(ss.str(), nullptr, false);
+    // herdr settings.rs 718-726: even when the rest can't be used, the file's own "telemetry".
+    if (j.is_object() && j.contains("telemetry") && j["telemetry"].is_boolean())
+        s.telemetry = j["telemetry"].get<bool>();
     if (j.is_discarded() || j.value("schema_version", 0) != 1)
         return s;
     s.close_notice_shown = j.value("close_notice_shown", false);
@@ -504,6 +512,11 @@ void save_settings(const Settings& s) {
         }
         for (const auto& [k, v] : ours.items())
             doc[k] = v;
+        // herdr settings main.js 858-861: off writes false, on deletes the key.
+        if (s.telemetry)
+            doc.erase("telemetry");
+        else
+            doc["telemetry"] = false;
         {
             std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
             out << doc.dump(2, ' ', false, Json::error_handler_t::replace) << "\n";
@@ -903,9 +916,8 @@ constexpr CommandInfo kCommands[] = {
 
 bool known_command(std::string_view name);
 
-// Command names keys.json may bind (herdr validates actions and reports unknown ones). A
-// "<mod>.<command>" action is accepted when that mod folder exists.
-bool known_command(std::string_view name) {
+// The commands AgentDesk itself has (herdr commands::COMMANDS).
+bool builtin_command(std::string_view name) {
     static const std::set<std::string, std::less<>> kNames = {
         "agent.focus", "agent.keep", "agent.new", "agent.next", "agent.peek", "agent.prev", "app.exit_all",
         "app.feedback", "app.help", "app.keys", "app.palette", "app.picker", "app.reset", "app.settings",
@@ -919,8 +931,16 @@ bool known_command(std::string_view name) {
         "tab.settle", "tab.unsettle", "terminal.copy", "terminal.kill", "terminal.open", "terminal.park",
         "terminal.paste", "terminal.paste_image", "terminal.peek", "terminal.pin", "terminal.right_click",
         "terminal.scroll", "terminal.search", "terminal.select_all", "theme", "window.close", "window.maximize",
-        "window.minimize", "worktree.new", "worktree.open", "worktree.remove", "app.quit", "overlay.close"};
-    if (kNames.contains(name))
+        "window.minimize", "worktree.new", "worktree.open", "worktree.remove", "app.quit", "overlay.close",
+        // herdr commands.rs 98, 99, 105
+        "app.check_updates", "app.update_core", "app.update"};
+    return kNames.contains(name);
+}
+
+// Command names keys.json may bind (herdr validates actions and reports unknown ones). A
+// "<mod>.<command>" action is accepted when that mod folder exists.
+bool known_command(std::string_view name) {
+    if (builtin_command(name))
         return true;
     const auto dot = name.find('.');
     std::error_code ec;
@@ -1994,6 +2014,16 @@ struct App::State {
     float dpi = 1.0f;
     bool window_focused = true;
     bool exit_now = false;
+    // Updates and Privacy (herdr update.rs, telemetry.rs, settings main.js 760-882).
+    std::optional<Clock::time_point> updates_asked;  // main.js 65-71 `this.asked`
+    bool show_data = false;                          // main.js 870 `this.showData`
+    std::optional<std::string> update_dismissed;     // window.rs 4840
+    std::optional<std::string> core_update_error_dismissed;  // window.rs 3974
+    std::string noted_host;                          // host instance whose version updates.cpp has
+    bool was_connected = false;
+    bool window_opened = false;
+    Clock::time_point observed_at{};
+    ImFont* report_font = nullptr;  // JetBrains Mono for the report lines (main.js 840)
 
     ui::Workspace ws;
     std::set<std::string> hidden;  // sessions the user closed the pane of (still running)
@@ -2305,6 +2335,98 @@ void load_keys(App::State& s) {
     }
 }
 
+// What telemetry.cpp asks the app (herdr reads these from its own modules).
+ui::telemetry::Config telemetry_config(App::State& s) {
+    ui::telemetry::Config c;
+    c.data_dir = data_dir();
+    c.app_version = AGENTDESK_VERSION_STRING;
+    // window.rs 171-173 shipped_layouts(): herdr ships main and terminals; ours are named
+    // workspace and terminals (load_layouts).
+    c.shipped_layouts = {"workspace", "terminals"};
+    // settings.rs 80, 101: the presets and shipped themes; ours are the palettes.
+    for (const auto& p : kPalettes)
+        c.shipped_themes.emplace_back(p.id);
+    // mods.rs 281-299 kinds(): shipped ones as shipped (by name), shipped but edited, the
+    // person's own. Shipped: the example mods next to agent-ui.exe (write_example_mods); as
+    // shipped: the same mod.dll and mod.json bytes.
+    c.mod_kinds = [](const std::set<std::string>& names) {
+        wchar_t exe[MAX_PATH]{};
+        ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        const auto shipped = std::filesystem::path(exe).parent_path() / L"mods";
+        std::vector<std::string> builtin;
+        std::size_t edited = 0;
+        std::size_t custom = 0;
+        for (const auto& name : names) {
+            std::error_code ec;
+            const auto from = shipped / win::to_wide(name);
+            if (!std::filesystem::is_regular_file(from / L"mod.dll", ec)) {
+                ++custom;
+                continue;
+            }
+            const auto have = data_dir() / L"mods" / win::to_wide(name);
+            bool same = true;
+            for (const wchar_t* f : {L"mod.dll", L"mod.json"}) {
+                bool a_ok = false;
+                bool b_ok = false;
+                const std::string a = read_text_file(from / f, &a_ok);
+                const std::string b = read_text_file(have / f, &b_ok);
+                same = same && a_ok == b_ok && a == b;
+            }
+            if (same)
+                builtin.push_back(name);
+            else
+                ++edited;
+        }
+        return std::make_tuple(builtin, edited, custom);
+    };
+    // telemetry.rs 317-324: keys.json differs from the shipped one.
+    c.keys_custom = [] {
+        bool ok = false;
+        const std::string text = read_text_file(data_dir() / L"keys.json", &ok);
+        if (!ok)
+            return false;
+        return Json::parse(text, nullptr, false) != ui::Keymap::default_file();
+    };
+    c.core_version = [] { return ui::updates::core().version; };
+    c.refresh = s.config.wake;
+    return c;
+}
+
+// window.rs 834-856: what telemetry.rs counts: how much is open, never what's in it.
+void observe(App::State& s) {
+    if (!ui::telemetry::collecting())
+        return;
+    ui::telemetry::Observation o;
+    o.foreground = s.window_focused;
+    // Every terminal reporting an agent. herdr names it by its 7501 `app`; agent-host does not
+    // pass that on, so it is what runs there (`claude`, `codex`), named by the same table.
+    for (const auto& [id, v] : s.views_by_id) {
+        if (v.agent_state == "Unknown" || v.lost)
+            continue;
+        o.agents.push_back(v.program.empty() ? std::nullopt : std::optional<std::string>(v.program));
+        if (v.agent_state == "Working")
+            ++o.agents_working;
+    }
+    o.spaces = s.ws.spaces.size();
+    for (const auto& sp : s.ws.spaces) {
+        o.tabs += sp.tabs.size();
+        for (const auto& t : sp.tabs)
+            o.terminals += s.ws.sessions_in(t).size();
+    }
+    o.layout = s.settings.layout;
+    o.mods.assign(s.settings.mods_enabled.begin(), s.settings.mods_enabled.end());
+    o.theme = g_pal->id;
+    if (!s.settings.welcomed.empty())
+        o.welcome = s.settings.welcomed;
+    ui::telemetry::observe(std::move(o));
+}
+
+// window.rs 5455-5459
+void reconcile_core_update_error(std::optional<std::string>& dismissed, const ui::updates::CoreInfo& core) {
+    if ((core.error && dismissed != core.error) || (!core.updating && !core.error))
+        dismissed.reset();
+}
+
 }  // namespace
 
 App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_unique<State>()) {
@@ -2356,6 +2478,10 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     s_->git.remote = s_->panels->remote;
     s_->mods = std::make_unique<ui::ModHost>(data_dir() / L"mods");
     s_->mods->load(s_->settings.mods_enabled);
+    // herdr main.rs 154-158: after an update, then the checker, then telemetry.
+    ui::updates::after_update();
+    ui::updates::start();
+    ui::telemetry::start(telemetry_config(*s_), s_->settings.telemetry);
     // herdr: the welcome opens on the first run (until it is finished or skipped).
     if (s_->settings.welcomed.empty() && !s_->config.automated) {
         s_->show_welcome = true;
@@ -2406,6 +2532,19 @@ void start_remotes(App::State& s) {
 }  // namespace
 
 App::~App() = default;
+
+std::filesystem::path data_folder() {
+    return data_dir();
+}
+
+// herdr main.rs 177-192 on_app_quit: telemetry's clean quit, then the waiting update goes in
+// place (not restarted for it).
+void App::on_quit() {
+    ui::telemetry::quit();
+    std::string error;
+    ui::updates::apply(&error);
+    ui::telemetry::stop();
+}
 
 ui::HostClient& App::host() {
     return *s_->host;
@@ -2464,6 +2603,8 @@ long long App::next_wakeup_ms() const {
         ms = std::min<long long>(ms, 450);
     if (!s_->toasts.empty())
         ms = std::min<long long>(ms, 250);
+    if (s_->updates_asked)
+        ms = std::min<long long>(ms, 300);  // settings main.js 66: every 300 ms
     for (const auto& [id, v] : s_->views_by_id) {
         if (v.agent_state == "Working")
             ms = std::min<long long>(ms, 50);  // the working mark spins
@@ -2980,7 +3121,8 @@ void open_rename(App::State& s, const std::string& kind, const std::string& targ
     std::snprintf(s.rename_buf, sizeof s.rename_buf, "%s", current.c_str());
 }
 
-void run_command(App::State& s, const std::string& cmd);
+// person: the person ran it (palette, keys, a click), not a mod or --run (window.rs 2995).
+void run_command(App::State& s, const std::string& cmd, bool person = true);
 
 // Runs a command and says why it failed ("" when it ran): herdr window.rs run_as() answers
 // {"error": ...} for an unknown command, a missing target, or a git step that failed.
@@ -3545,6 +3687,28 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         save_settings(s.settings);
         s.toast("Layout: " + next, "", "", g_pal->info, 2);
         s.focus_view(s.ws.focused_session());
+    } else if (name == "app.check_updates") {
+        ui::updates::check_now();  // window.rs 3603
+    } else if (name == "app.update_core") {
+        // window.rs 3604-3609: nothing waiting is an error. herdr then runs `hc update`, which
+        // replaces herdr-core and keeps the terminals; agent-host has no updater of its own (its
+        // terminals end with it) and comes in the AgentDesk zip, so it is not updated here.
+        const auto c = ui::updates::core();
+        if (!c.ready && !c.error)
+            return "agent-host is up to date";
+        return "agent-host updates with AgentDesk: restart to update";
+    } else if (name == "app.update") {
+        // window.rs 3645-3657
+        std::string error;
+        if (!ui::updates::apply(&error)) {
+            if (error.empty())
+                return "no update is ready yet";
+            return "Close AgentDesk's terminals (or restart Windows) and try again. Couldn't replace "
+                   "AgentDesk's files: " +
+                   error + ".";
+        }
+        ui::updates::relaunch();
+        s.exit_now = true;
     } else if (name == "app.whats_new" || name == "app.feedback") {
         s.show_notes = true;
         s.notes_kind = name == "app.whats_new" ? "whats_new" : "feedback";
@@ -3676,7 +3840,10 @@ std::string exec_command(App::State& s, const std::string& cmd) {
 
 // herdr window.rs 2931-2943: a command run for the person (a click, a key, a menu, a mod) has
 // nobody to read the reply, so a failure shows as an error toast "<command> failed".
-void run_command(App::State& s, const std::string& cmd) {
+void run_command(App::State& s, const std::string& cmd, bool person) {
+    // herdr window.rs 2995-2997 / telemetry.rs 124: a command the person ran, by its name.
+    if (const std::string name = cmd.substr(0, cmd.find(':')); person && builtin_command(name))
+        ui::telemetry::command(name);
     const std::string error = exec_command(s, cmd);
     if (!error.empty())
         s.toast(cmd.substr(0, cmd.find(':')) + " failed", error, "", g_pal->needs_you, 8);
@@ -3800,6 +3967,11 @@ ImU32 mix(ImU32 a, ImU32 b, float t) {
 ImU32 raised_color() {
     return g_pal->light ? mix(g_pal->card, IM_COL32(0, 0, 0, 255), 0.05f)
                         : mix(g_pal->card, IM_COL32(255, 255, 255, 255), 0.09f);
+}
+
+// herdr's accent_foreground: text on the accent fill.
+ImU32 accent_foreground() {
+    return IM_COL32(255, 255, 255, 255);
 }
 
 // Avatar colours: herdr's fixed table (spaces.js MARK), the same in every theme.
@@ -7742,11 +7914,140 @@ void draw_picker(App::State& s) {
 
 // Toasts (mods/toast): 340 wide, bottom-right 16 px in, 8 px apart; a dot coloured by level;
 // title 13 semibold and body 12 muted, one line each; click runs its action and dismisses.
+// ---- the update pill (herdr window.rs 4820-4890) and agent-host's update error (4800-4815)
+// What's waiting, in words (window.rs 4824-4833).
+std::optional<std::string> update_label() {
+    const auto core = ui::updates::core();
+    const auto c = core.ready && !core.updating && !core.managed ? core.ready : std::nullopt;
+    const auto a = ui::updates::ready();
+    if (a && c)
+        return "AgentDesk " + *a + " and agent-host " + *c + " are ready";
+    if (a)
+        return "AgentDesk " + *a + " is ready";
+    if (c)
+        return "agent-host " + *c + " is ready";
+    return std::nullopt;
+}
+
+// Height taken at the bottom right (34 + 8), 0 when hidden: toasts go above it (4727-4732).
+float draw_update_pill(App::State& s) {
+    // 4835-4841. herdr also shows "Updated to <version>" when no release notes opened by
+    // themselves; AgentDesk's What's new always opens after an update (draw_notes), so it never
+    // shows here.
+    const auto app_version = ui::updates::ready();
+    const bool app_ready = app_version.has_value();
+    const auto label = update_label();
+    if (!label)
+        return 0.0f;
+    const std::string dismissal = app_version ? "app:" + *app_version : *label;
+    if (s.update_dismissed == dismissal)
+        return 0.0f;
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float h = px(34);
+    const char* notes = app_ready ? "What changed" : "Open Updates";
+    const float label_w = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, label->c_str()).x;
+    const float restart_w = app_ready ? s.fonts.ui_bold->CalcTextSizeA(fpx(13), FLT_MAX, 0, "Restart").x + px(20) : 0.0f;
+    const float notes_w = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, notes).x + px(12);
+    const float gap = px(10);
+    const float w = px(14) + label_w + gap + (app_ready ? restart_w + gap : 0.0f) + notes_w + gap + px(24) + px(6);
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - px(16) - w, vp->WorkPos.y + vp->WorkSize.y - px(16) - h));
+    ImGui::SetNextWindowSize(ImVec2(w, h));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, h * 0.5f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyle().Colors[ImGuiCol_PopupBg]);
+    ImGui::Begin("##update-pill", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(3);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 wp = ImGui::GetWindowPos();
+    const float cy = wp.y + h * 0.5f;
+    float x = wp.x + px(14);
+    const float th = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, "Ag").y;
+    dl->AddText(s.fonts.ui, fpx(13), ImVec2(x, cy - th * 0.5f), g_pal->text, label->c_str());
+    x += label_w + gap;
+    if (app_ready) {
+        // 4859-4875: "Restart": 24 high, px 10, round, accent, semibold.
+        ImGui::SetCursorScreenPos(ImVec2(x, cy - px(12)));
+        if (ImGui::InvisibleButton("##update-restart", ImVec2(restart_w, px(24))))
+            run_command(s, "app.update");
+        const bool hov = ImGui::IsItemHovered();
+        dl->AddRectFilled(ImVec2(x, cy - px(12)), ImVec2(x + restart_w, cy + px(12)),
+                          hov ? alpha(g_pal->focus, 230) : g_pal->focus, px(12));
+        dl->AddText(s.fonts.ui_bold, fpx(13), ImVec2(x + px(10), cy - th * 0.5f), accent_foreground(), "Restart");
+        x += restart_w + gap;
+    }
+    // 4876-4881: "What changed" / "Open Updates" in the accent colour: the Updates page.
+    ImGui::SetCursorScreenPos(ImVec2(x, cy - px(12)));
+    if (ImGui::InvisibleButton("##update-notes", ImVec2(notes_w, px(24))))
+        run_command(s, "app.settings:updates");
+    dl->AddText(s.fonts.ui, fpx(13), ImVec2(x + px(6), cy - th * 0.5f), g_pal->focus, notes);
+    x += notes_w + gap;
+    // 4882-4897: x dismisses this one.
+    ImGui::SetCursorScreenPos(ImVec2(x, cy - px(12)));
+    if (ImGui::InvisibleButton("##update-dismiss", ImVec2(px(24), px(24))))
+        s.update_dismissed = dismissal;
+    const bool hov = ImGui::IsItemHovered();
+    if (hov)
+        dl->AddCircleFilled(ImVec2(x + px(12), cy), px(12), raised_color());
+    const ImVec2 xt = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, "\xC3\x97");
+    dl->AddText(s.fonts.ui, fpx(13), ImVec2(x + px(12) - xt.x * 0.5f, cy - xt.y * 0.5f), hov ? g_pal->text : g_pal->faint,
+                "\xC3\x97");
+    ImGui::End();
+    return h + px(8);
+}
+
+// 4800-4815: agent-host's update failed (until dismissed): open Updates, or x. `bottom`: how
+// far up from the bottom the toasts reach.
+void draw_core_update_error(App::State& s, float bottom) {
+    const auto core = ui::updates::core();
+    if (!core.error || core.managed || s.core_update_error_dismissed == core.error)
+        return;
+    const std::string text = "agent-host update failed: " + *core.error + " \xC2\xB7 Open Updates";
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float max_w = px(540);
+    const float tw = std::min(s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, text.c_str()).x, max_w - px(24) - px(32));
+    const float w = px(12) + tw + px(8) + px(24) + px(12);
+    const float h = px(12) * 2 + px(24);
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - px(16) - w, vp->WorkPos.y + vp->WorkSize.y - bottom - h));
+    ImGui::SetNextWindowSize(ImVec2(w, h));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, px(8));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyle().Colors[ImGuiCol_PopupBg]);
+    ImGui::Begin("##core-update-error", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 wp = ImGui::GetWindowPos();
+    const float cy = wp.y + h * 0.5f;
+    ImGui::SetCursorScreenPos(ImVec2(wp.x + px(12), wp.y + px(12)));
+    if (ImGui::InvisibleButton("##core-update-error-open", ImVec2(tw, px(24))))
+        run_command(s, "app.settings:updates");
+    text_clipped(dl, s.fonts.ui, fpx(13), ImVec2(wp.x + px(12), cy - fpx(13) * 0.6f), g_pal->text, text, tw);
+    const float xx = wp.x + px(12) + tw + px(8);
+    ImGui::SetCursorScreenPos(ImVec2(xx, cy - px(12)));
+    if (ImGui::InvisibleButton("##core-update-error-dismiss", ImVec2(px(24), px(24))))
+        s.core_update_error_dismissed = core.error;  // window.rs 3973-3976
+    const bool hov = ImGui::IsItemHovered();
+    if (hov)
+        dl->AddCircleFilled(ImVec2(xx + px(12), cy), px(12), raised_color());
+    const ImVec2 xt = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, "\xC3\x97");
+    dl->AddText(s.fonts.ui, fpx(13), ImVec2(xx + px(12) - xt.x * 0.5f, cy - xt.y * 0.5f), hov ? g_pal->text : g_pal->faint,
+                "\xC3\x97");
+    ImGui::End();
+}
+
 void draw_toasts(App::State& s) {
     const auto now = Clock::now();
     std::erase_if(s.toasts, [&](const Toast& t) { return t.until < now; });
     const ImGuiViewport* vp = ImGui::GetMainViewport();
-    float y = vp->WorkPos.y + vp->WorkSize.y - px(16);
+    // window.rs 4727-4732: the update pill sits at the bottom; toasts go above it.
+    const float pill = draw_update_pill(s);
+    float y = vp->WorkPos.y + vp->WorkSize.y - px(16) - pill;
     const float w = px(340);
     int n = 0;
     // window.rs 4794-4796: toast_y grows with each toast in the order opened, so the oldest sits
@@ -7784,6 +8085,8 @@ void draw_toasts(App::State& s) {
         pop_overlay_style();
         y -= px(8);
     }
+    // window.rs 4800-4801: after the toasts, at the next toast_y.
+    draw_core_update_error(s, vp->WorkPos.y + vp->WorkSize.y - y);
 }
 
 // herdr window.rs 4764-4777: a dialog dims the window behind it and a press outside it closes it
@@ -8729,6 +9032,346 @@ void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 siz
     d->AddRect(a, b, g_pal->border, px(6));
 }
 
+// ---- herdr settings main.js helpers used by Updates and Privacy
+// main.js 180-192: px 12, py 5, rounded 7, a 1 px border, raised, 13 px text, hover background.
+ImVec2 settings_button_size(App::State& s, const char* label, ImFont* font = nullptr) {
+    const ImVec2 t = (font != nullptr ? font : s.fonts.ui)->CalcTextSizeA(fpx(13), FLT_MAX, 0, label);
+    return ImVec2(t.x + px(24) + 2.0f, std::round(fpx(13) * 1.3f) + px(10) + 2.0f);
+}
+
+bool settings_button(App::State& s, const char* id, const char* label) {
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    const ImVec2 size = settings_button_size(s, label);
+    const bool clicked = ImGui::InvisibleButton(id, size);
+    const bool hov = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 b(a.x + size.x, a.y + size.y);
+    dl->AddRectFilled(a, b, hov ? g_pal->hover : raised_color(), px(7));
+    dl->AddRect(a, b, g_pal->border, px(7));
+    const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, label);
+    dl->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + (size.x - t.x) * 0.5f, a.y + (size.y - t.y) * 0.5f), g_pal->text, label);
+    return clicked;
+}
+
+// main.js 787-788 primary(): px 12, py 5, rounded 7, accent fill, accent_foreground semibold 13,
+// hover opacity 0.9.
+bool settings_primary(App::State& s, const char* id, const char* label) {
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    const ImVec2 size = settings_button_size(s, label, s.fonts.ui_bold);
+    const bool clicked = ImGui::InvisibleButton(id, size);
+    const bool hov = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(a, ImVec2(a.x + size.x, a.y + size.y), hov ? alpha(g_pal->focus, 230) : g_pal->focus, px(7));
+    const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fpx(13), FLT_MAX, 0, label);
+    dl->AddText(s.fonts.ui_bold, fpx(13), ImVec2(a.x + (size.x - t.x) * 0.5f, a.y + (size.y - t.y) * 0.5f),
+                hov ? alpha(accent_foreground(), 230) : accent_foreground(), label);
+    return clicked;
+}
+
+// main.js 779, 781: a button's place taken by text (px 12, py 5, 13 px).
+void settings_chip(App::State& s, const char* label, ImU32 color) {
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    const ImVec2 size = settings_button_size(s, label);
+    ImGui::Dummy(size);
+    const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, label);
+    ImGui::GetWindowDrawList()->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(12) + 1.0f, a.y + (size.y - t.y) * 0.5f),
+                                        color, label);
+}
+
+// main.js 225-238: 36 x 20, rounded 10, padding 2; accent when on (knob at the end), hover
+// colour when off; a 16 px knob, accent_foreground on, muted off.
+bool settings_toggle(const char* id, bool on) {
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    const ImVec2 size(px(36), px(20));
+    const bool clicked = ImGui::InvisibleButton(id, size);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(a, ImVec2(a.x + size.x, a.y + size.y), on ? g_pal->focus : g_pal->hover, px(10));
+    const float r = px(8);
+    const float cx = on ? a.x + size.x - px(2) - r : a.x + px(2) + r;
+    dl->AddCircleFilled(ImVec2(cx, a.y + size.y * 0.5f), r, on ? accent_foreground() : g_pal->dim);
+    return clicked;
+}
+
+// main.js 757, 815: a dim note under the rows (pt 12, 12.5 px, 18 px lines).
+void settings_footnote(App::State& s, const char* text) {
+    ImGui::Dummy(ImVec2(0, px(12)));
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const char* t = text;
+    const char* end = text + std::strlen(text);
+    float y = p.y;
+    while (t < end) {
+        const char* brk = s.fonts.ui->CalcWordWrapPosition(fpx(12.5f), t, end, w);
+        if (brk == t)
+            brk = t + 1;
+        dl->AddText(s.fonts.ui, fpx(12.5f), ImVec2(p.x, y), g_pal->faint, t, brk);
+        y += px(18);
+        t = brk;
+        while (t < end && (*t == ' ' || *t == '\n'))
+            ++t;
+    }
+    ImGui::Dummy(ImVec2(w, y - p.y));
+}
+
+// main.js 764-767: local HH:MM.
+std::string clock_at(std::uint64_t secs) {
+    const std::time_t t = static_cast<std::time_t>(secs);
+    std::tm tm{};
+    localtime_s(&tm, &t);
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "%02d:%02d", tm.tm_hour, tm.tm_min);
+    return buf;
+}
+
+// main.js 847: new Date(secs * 1000).toLocaleString(): the date and time as Windows writes them.
+std::string local_date_time(std::uint64_t secs) {
+    ULARGE_INTEGER u{};
+    u.QuadPart = (secs + 11644473600ull) * 10000000ull;
+    FILETIME ft{u.LowPart, u.HighPart};
+    FILETIME local{};
+    SYSTEMTIME st{};
+    ::FileTimeToLocalFileTime(&ft, &local);
+    ::FileTimeToSystemTime(&local, &st);
+    wchar_t d[64]{};
+    wchar_t t[64]{};
+    ::GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, DATE_SHORTDATE, &st, nullptr, d, 64, nullptr);
+    ::GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, 0, &st, nullptr, t, 64);
+    return win::to_utf8(std::wstring(d) + L", " + t);
+}
+
+// ---- Updates (herdr settings main.js 760-816). True: the settings dialog should close.
+bool settings_updates(App::State& s) {
+    bool close = false;
+    const auto u = ui::updates::status();
+    const std::string checked = u.checked ? " Checked at " + clock_at(*u.checked) + "." : std::string();
+    const std::string result = u.checking ? std::string("Checking\xE2\x80\xA6")
+                               : u.checked ? "Up to date." + checked
+                                           : std::string("No successful check. Check your connection and try again.");
+    // Pressed: "Checking..." while it looks, then "Up to date" for a moment (a find changes the
+    // row instead). One per row.
+    const bool asked =
+        s.updates_asked && Clock::now() - *s.updates_asked < std::chrono::milliseconds(3000);
+    enum class Control { kNone, kCheck, kRestart, kRetry, kUpdateCore };
+    // The check control's look (main.js 775-786).
+    const auto check_w = [&]() -> float {
+        if (u.checking && s.updates_asked)
+            return settings_button_size(s, "Checking\xE2\x80\xA6").x;
+        if (asked && u.checked && !u.checking)
+            return settings_button_size(s, "\xE2\x9C\x93 Up to date").x;
+        return settings_button_size(s, "Check now").x;
+    };
+    const auto draw_check = [&](const char* id) {
+        if (u.checking && s.updates_asked) {
+            settings_chip(s, "Checking\xE2\x80\xA6", g_pal->faint);
+        } else if (asked && u.checked && !u.checking) {
+            settings_chip(s, "\xE2\x9C\x93 Up to date", g_pal->done);  // t.ansi2
+        } else if (settings_button(s, id, "Check now")) {
+            s.updates_asked = Clock::now();
+            run_command(s, "app.check_updates");
+        }
+    };
+    // main.js 789-793
+    std::string app_text;
+    Control app_control = Control::kNone;
+    if (!u.app_updates) {
+        app_text = "A build from source: it updates with git, not here.";
+    } else if (u.app_ready) {
+        app_text = *u.app_ready + " is ready. Restart to switch now; it also switches when you quit.";
+        app_control = Control::kRestart;
+    } else {
+        app_text = result;
+        app_control = u.checks ? Control::kCheck : Control::kNone;
+    }
+    // main.js 794-805
+    const auto& c = u.core;
+    std::string core_text;
+    Control core_control = Control::kNone;
+    if (c.managed) {
+        core_text = "Managed by " + *c.managed + ": update it there." + (c.ready ? " " + *c.ready + " is available." : "");
+        core_control = u.checks ? Control::kCheck : Control::kNone;
+    } else if (c.updating) {
+        core_text = "Updating\xE2\x80\xA6 your terminals keep running.";
+    } else if (c.error) {
+        core_text = "The update failed: " + *c.error;
+        core_control = Control::kRetry;
+    } else if (c.ready) {
+        core_text = *c.ready + " is ready. Your terminals keep running through it.";
+        core_control = Control::kUpdateCore;
+    } else if (u.checks) {
+        core_text = result;
+        core_control = Control::kCheck;
+    } else {
+        core_text = "Not checked: a build from source looks for no updates.";
+    }
+    const auto control_w = [&](Control k) -> float {
+        switch (k) {
+            case Control::kCheck:
+                return check_w();
+            case Control::kRestart:
+                return settings_button_size(s, "Restart to update", s.fonts.ui_bold).x;
+            case Control::kRetry:
+                return settings_button_size(s, "Try again", s.fonts.ui_bold).x;
+            case Control::kUpdateCore:
+                return settings_button_size(s, "Update agent-host", s.fonts.ui_bold).x;
+            case Control::kNone:
+                break;
+        }
+        return 0.0f;
+    };
+    const auto draw_control = [&](Control k, const char* check_id) {
+        switch (k) {
+            case Control::kCheck:
+                draw_check(check_id);
+                break;
+            case Control::kRestart:
+                if (settings_primary(s, "##st-app-update", "Restart to update"))
+                    run_command(s, "app.update");
+                break;
+            case Control::kRetry:
+                if (settings_primary(s, "##st-core-retry", "Try again"))
+                    run_command(s, "app.update_core");
+                break;
+            case Control::kUpdateCore:
+                if (settings_primary(s, "##st-core-update", "Update agent-host"))
+                    run_command(s, "app.update_core");
+                break;
+            case Control::kNone:
+                break;
+        }
+    };
+    // main.js 806-811: heading "Herdr" (the product), "Herdr <version>", What's new + the control.
+    settings_section(s, "AgentDesk");
+    {
+        const float wn = settings_button_size(s, "What's new").x;
+        const float extra = control_w(app_control);
+        const std::string title = "AgentDesk " + u.app_version;
+        settings_row(s, title.c_str(), app_text.c_str(), wn + (extra > 0 ? px(8) + extra : 0.0f));
+        if (settings_button(s, "##st-whats-new", "What's new")) {
+            close = true;  // main.js 810: closeOverlay, then app.whats_new
+            run_command(s, "app.whats_new");
+        }
+        if (extra > 0) {
+            ImGui::SameLine(0, px(8));
+            draw_control(app_control, "##st-check-app");
+        }
+        settings_row_done(s);
+    }
+    // main.js 812-814: 18 px, heading "herdr-core", "herdr-core <version>".
+    ImGui::Dummy(ImVec2(0, px(18)));
+    settings_section(s, "agent-host");
+    {
+        const std::string title = "agent-host " + c.version.value_or("");
+        settings_row(s, title.c_str(), core_text.c_str(), control_w(core_control));
+        draw_control(core_control, "##st-check-core");
+        settings_row_done(s);
+    }
+    // main.js 815
+    settings_footnote(s, "AgentDesk looks for both every hour and tells you in the corner. agent-host runs your "
+                         "terminals, so they keep running through its updates.");
+    return close;
+}
+
+// main.js 821-842: a report as it goes out, one line per line of JSON.
+void settings_report(App::State& s, const std::string& title, const std::string& about,
+                     const ui::telemetry::Json& report) {
+    if (s.report_font == nullptr)
+        s.report_font = ui::load_terminal_font(L"", 12.0f);  // the bundled JetBrains Mono
+    ImFont* mono = s.report_font != nullptr ? s.report_font : s.fonts.mono;
+    const std::string text = report.dump(2, ' ', false, ui::telemetry::Json::error_handler_t::replace);
+    ImGui::Dummy(ImVec2(0, px(14) - ImGui::GetStyle().ItemSpacing.y));
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float w = ImGui::GetContentRegionAvail().x;
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    dl->AddText(s.fonts.ui, fpx(13.5f), p, g_pal->text, title.c_str());
+    p.y += std::round(fpx(13.5f) * 1.3f) + px(4);
+    if (!about.empty()) {
+        dl->AddText(s.fonts.ui, fpx(12.5f), p, g_pal->faint, about.c_str());
+        p.y += std::round(fpx(12.5f) * 1.3f) + px(4);
+    }
+    p.y += px(4);  // mt 4
+    int lines = 1;
+    for (const char ch : text)
+        lines += ch == '\n' ? 1 : 0;
+    const float h = px(10) * 2 + px(17) * static_cast<float>(lines);
+    const ImVec2 b(p.x + w, p.y + h);
+    dl->AddRectFilled(p, b, g_pal->bg, px(8));
+    dl->AddRect(p, b, g_pal->border, px(8));
+    dl->PushClipRect(ImVec2(p.x + 1, p.y + 1), ImVec2(b.x - 1, b.y - 1), true);
+    float y = p.y + px(10);
+    for (std::size_t at = 0; at <= text.size();) {
+        const auto nl = text.find('\n', at);
+        const std::string line = text.substr(at, nl == std::string::npos ? std::string::npos : nl - at);
+        dl->AddText(mono, fpx(12), ImVec2(p.x + px(10), y + (px(17) - fpx(12)) * 0.5f), g_pal->dim,
+                    line.empty() ? " " : line.c_str());
+        y += px(17);
+        if (nl == std::string::npos)
+            break;
+        at = nl + 1;
+    }
+    dl->PopClipRect();
+    ImGui::SetCursorScreenPos(ImVec2(p.x, b.y));
+    ImGui::Dummy(ImVec2(w, 0));
+}
+
+// ---- Privacy (herdr settings main.js 844-882). True: ui.json changed.
+bool settings_privacy(App::State& s) {
+    bool changed = false;
+    const ui::telemetry::Json st = ui::telemetry::status();
+    const bool have = st.is_object();
+    const bool on = have ? st.value("setting", false) : s.settings.telemetry;
+    std::string why;
+    if (have && st.contains("off_because") && st["off_because"].is_string())
+        why = "Off for now: " + st["off_because"].get<std::string>() + " is set where AgentDesk started.";
+    settings_section(s, "Usage data");
+    settings_row(s, "Share anonymous usage data",
+                 !why.empty() ? why.c_str()
+                              : "Once a day: which agents and features you use, how many spaces and tabs, your system "
+                                "and AgentDesk's version. Never what's in your terminals, never names of files, "
+                                "folders or projects.",
+                 px(36));
+    if (settings_toggle("##st-telemetry", on)) {
+        // main.js 858-861: on -> "telemetry": false; off -> the key goes.
+        s.settings.telemetry = !on;
+        changed = true;
+        ui::telemetry::set_setting(s.settings.telemetry);  // window.rs 955: read again on change
+    }
+    settings_row_done(s);
+    const bool sends = have && st.value("sends", false);
+    const char* label = s.show_data ? "Hide" : "Show";
+    settings_row(s, "What we send",
+                 have && !sends ? "This build never sends: it's built from source. You can still see what a release "
+                                  "would send."
+                                : "Exactly what leaves your computer, word for word.",
+                 settings_button_size(s, label).x);
+    if (settings_button(s, "##st-telemetry-show", label))
+        s.show_data = !s.show_data;
+    settings_row_done(s);
+    if (!s.show_data)
+        return changed;
+    if (!have || !st.value("enabled", false)) {
+        ImGui::Dummy(ImVec2(0, px(14) - ImGui::GetStyle().ItemSpacing.y));
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddText(s.fonts.ui, fpx(13), p, g_pal->faint,
+                                            "Nothing is collected or sent while it's off.");
+        ImGui::Dummy(ImVec2(0, std::round(fpx(13) * 1.3f)));
+        return changed;
+    }
+    // main.js 879-881
+    if (const auto q = st.find("queued"); q != st.end() && q->is_array())
+        for (const auto& r : *q)
+            settings_report(s, "Waiting to send: " + r.value("day", std::string()), "Sent as is, soon.", r);
+    if (const auto d = st.find("draft"); d != st.end() && d->is_object())
+        settings_report(s, "Today so far", "A draft: it changes until the day ends (UTC), then goes out once.", *d);
+    if (const auto l = st.find("last_sent"); l != st.end() && l->is_object() && l->contains("report")) {
+        const auto& r = (*l)["report"];
+        const std::uint64_t at = l->contains("at") && (*l)["at"].is_number_unsigned() ? (*l)["at"].get<std::uint64_t>() : 0;
+        settings_report(s, "Last sent: " + (r.is_object() ? r.value("day", std::string()) : std::string()),
+                        "Sent " + local_date_time(at) + ".", r);
+    }
+    return changed;
+}
+
 void draw_settings(App::State& s) {
     if (s.show_settings) {
         ImGui::OpenPopup("##settings");
@@ -8764,7 +9407,10 @@ void draw_settings(App::State& s) {
     };
     static constexpr Section kSections[] = {{"Look", ui::icon::kPalette},  {"Machines", ui::icon::kServer},
                                             {"Alerts", ui::icon::kWarning}, {"Mods", ui::icon::kExtensions},
-                                            {"Updates", ui::icon::kClock},  {"Privacy", ui::icon::kCheck}};
+                                            {"Updates", ui::icon::kRefresh}, {"Privacy", ui::icon::kShield}};
+    // main.js 888-889: something waits to be installed.
+    const auto upd = ui::updates::status();
+    const bool waiting = upd.app_ready.has_value() || (upd.core.ready.has_value() && !upd.core.managed);
     if (s.settings_section.empty())
         s.settings_section = "Look";
     float ny = wp.y + px(56);
@@ -8782,6 +9428,9 @@ void draw_settings(App::State& s) {
         draw_icon(s, dl, sec.glyph, fpx(14), ImVec2(a.x + px(17), a.y + px(15)), on || hov ? g_pal->text : g_pal->dim);
         dl->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(34), a.y + px(15) - fpx(13) * 0.6f), on || hov ? g_pal->text : g_pal->dim,
                     sec.name);
+        // main.js 921: a 7 px accent dot at the row's end.
+        if (std::string_view(sec.name) == "Updates" && waiting)
+            dl->AddCircleFilled(ImVec2(a.x + nav_w - px(16) - px(10) - px(3.5f), a.y + px(15)), px(3.5f), g_pal->focus);
         ny += px(32);
     }
     // herdr: "Send feedback" at the bottom of the nav.
@@ -9156,19 +9805,9 @@ void draw_settings(App::State& s) {
         if (ImGui::Button("Open mods folder"))
             run_command(s, "mods.folder");
     } else if (sec == "Updates") {
-        settings_section(s, "Versions");
-        ImGui::Text("AgentDesk %s", AGENTDESK_VERSION_STRING);
-        ImGui::TextDisabled("agent-host: protocol v1 over a named pipe");
-        ImGui::Dummy(ImVec2(0, px(6)));
-        ImGui::TextWrapped("AgentDesk ships as a portable zip. To update, close it (agents keep running in "
-                           "agent-host), unpack the new zip over the old one and start it again.");
-        ImGui::Dummy(ImVec2(0, px(6)));
-        if (ImGui::Button("What's new"))
-            run_command(s, "app.whats_new");
+        close = settings_updates(s) || close;
     } else if (sec == "Privacy") {
-        settings_section(s, "Usage data");
-        ImGui::TextWrapped("AgentDesk sends nothing anywhere: no usage reports, no crash uploads. Crashes leave "
-                           "ui-crash.txt in the data folder for you to look at.");
+        changed |= settings_privacy(s);
     }
     ImGui::EndChild();
     if (changed)
@@ -10149,6 +10788,25 @@ void App::frame() {
         apply_style(s.dpi, ui_scale(s.settings));
     }
     const bool connected = s.host->connected();
+    // window.rs 879-887 note_core: on connect and every reconnect, what agent-host says it is.
+    if (connected && s.host->host_instance_id() != s.noted_host) {
+        s.noted_host = s.host->host_instance_id();
+        const std::string v = s.host->host_version();
+        ui::updates::set_core(v.empty() ? std::nullopt : std::optional<std::string>(v), std::nullopt);
+    }
+    // window.rs 795-799: lost the core.
+    if (s.was_connected && !connected)
+        ui::telemetry::count("core_lost");
+    s.was_connected = connected;
+    // window.rs 4142-4147: keep a dismissed core error dismissed until it changes.
+    reconcile_core_update_error(s.core_update_error_dismissed, ui::updates::core());
+    // settings main.js 65-71: after "Check now", follow the look, then "Up to date" for 3 s.
+    if (s.updates_asked) {
+        if (ui::updates::status().checking)
+            s.updates_asked = Clock::now();
+        else if (Clock::now() - *s.updates_asked >= std::chrono::milliseconds(3000))
+            s.updates_asked.reset();
+    }
 
     if (auto doc = s.host->take_ui_state()) {
         if (!s.doc_loaded || doc->dump() != s.last_sent_doc)
@@ -10180,9 +10838,14 @@ void App::frame() {
         create_session(s, s.config.start_profile, s.launch_cwd, "", p);
     }
     update_attention(s);
+    // window.rs 4155-4158: every 25 polls of 400 ms, what is open.
+    if (Clock::now() - s.observed_at >= std::chrono::seconds(10)) {
+        s.observed_at = Clock::now();
+        observe(s);
+    }
     run_mods(s);
     for (const auto& c : std::exchange(s.pending_mod_commands, {}))
-        run_command(s, c);
+        run_command(s, c, false);
     run_input_script(s);
     if (s.started_dev || s.config.start_profile.empty()) {
         if (s.next_dev_command < s.config.run_commands.size() && s.doc_loaded && !s.launch_busy &&
@@ -10190,7 +10853,7 @@ void App::frame() {
             if (s.next_dev_at == Clock::time_point{}) {
                 s.next_dev_at = Clock::now() + std::chrono::milliseconds(800);
             } else {
-                run_command(s, s.config.run_commands[s.next_dev_command++]);
+                run_command(s, s.config.run_commands[s.next_dev_command++], false);
                 s.next_dev_at = Clock::now() + std::chrono::milliseconds(700);
             }
         }
@@ -10312,6 +10975,11 @@ void App::frame() {
         }
     }
     persist(s);
+    // window.rs 832: the window is up.
+    if (!s.window_opened) {
+        s.window_opened = true;
+        ui::telemetry::window_open();
+    }
 }
 
 }  // namespace agentdesk::desktop

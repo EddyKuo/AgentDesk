@@ -26,6 +26,7 @@ struct HostConfig {
     std::filesystem::path ctl_path;     // agentctl.exe advertised to children (AGENTDESK_CTL)
     std::wstring pipe_name;             // AGENTDESK_PIPE
     std::string host_instance_id;       // changes on every host start (design doc 4.3)
+    std::string host_version;           // agent-host's version, said in hello (Settings > Updates)
     std::function<void()> on_shutdown;  // host.shutdown accepted
     std::chrono::milliseconds request_dedupe_window{std::chrono::minutes(10)};  // design doc 3.7
 };

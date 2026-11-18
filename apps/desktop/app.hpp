@@ -29,6 +29,9 @@ struct AppConfig {
     std::filesystem::path shot_signal;
 };
 
+// %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk (created when missing).
+std::filesystem::path data_folder();
+
 class App {
 public:
     App(AppConfig config, std::unique_ptr<ui::HostClient> host);
@@ -50,6 +53,9 @@ public:
     [[nodiscard]] long long next_wakeup_ms() const;
     [[nodiscard]] nlohmann::json report() const;  // developer option --report
     [[nodiscard]] ui::HostClient& host();
+    // The loop ended (herdr main.rs 177-192 on_app_quit): telemetry's clean quit, then the
+    // downloaded update goes in place.
+    void on_quit();
 
     struct State;
 
