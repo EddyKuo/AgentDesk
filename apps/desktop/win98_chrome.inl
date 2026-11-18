@@ -1832,23 +1832,37 @@ void clippy(App::State& s, Box owner) {
     }
     const float cw = std::max(U(s, 64), text.empty() ? 0.0f : bw) + U(s, 8);
     const float ch = U(s, 8) + (text.empty() ? 0.0f : bh + U(s, 2)) + U(s, 80);
+    // win98.json 70-80: on the left edge of the screen row, at its end; dragged elsewhere it
+    // snaps to the nearest edge and third (layout.rs 732-751), 12 px in (floats.rs 14, 78-96).
     const float m = px(12);
-    const ImVec2 at(snap(owner.x0 + m), snap(owner.y1 - m - ch));
+    const Json& pj = shared(s, "win98.float.clippy");
+    const k98::FloatPlace place = pj.is_object()
+                                      ? k98::parse_place(pj.value("edge", ""), pj.value("align", ""))
+                                      : k98::FloatPlace{k98::Edge::kLeft, k98::Align::kEnd};
+    const bool right = place.edge != k98::Edge::kLeft;  // clippy.js 469
+    const auto home = k98::float_home(owner.x0, owner.y0, owner.w(), owner.h(), cw, ch, place, m);
+    ImVec2 at(snap(home[0]), snap(home[1]));
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    if (w.clippy.moving)
+        at = ImVec2(snap(mouse.x - cw * w.clippy.grab.x), snap(mouse.y - ch * w.clippy.grab.y));
     ImGui::SetNextWindowPos(at);
     ImGui::SetNextWindowSize(ImVec2(cw, ch));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, w.clippy.moving ? 0.92f : 1.0f);
     ImGui::Begin("##w98clippy", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoBackground |
                      ImGuiWindowFlags_NoFocusOnAppearing);
-    ImGui::PopStyleVar(2);
+    ImGui::PopStyleVar(3);
     ImDrawList* dl = ImGui::GetWindowDrawList();
+    g_area_hovered = false;
     float y = at.y + U(s, 4);
+    const float inner = cw - U(s, 8);
     const float x = at.x + U(s, 4);
     std::function<void()> run;
     if (!text.empty()) {
-        const Box b = box(ImVec2(x, y), ImVec2(bw, bh));
+        const Box b = box(ImVec2(x + (right ? inner - bw : 0.0f), y), ImVec2(bw, bh));
         dl->AddRectFilled(b.a(), b.b(), rgb(C::kTip), U(s, 8));
         dl->AddRect(b.a(), b.b(), rgb(C::kText), U(s, 8), 0, one(s));
         float ty = b.y0 + one(s) + U(s, 8);
@@ -1878,7 +1892,7 @@ void clippy(App::State& s, Box owner) {
         const double t = std::fmod(ImGui::GetTime() * 1000.0, 800.0) / 800.0;
         bounce = -U(s, 5) * static_cast<float>(t < 0.5 ? t * 2 : 2 - t * 2);
     }
-    const Box cb = box(ImVec2(x, y + bounce), ImVec2(U(s, 64), U(s, 80)));
+    const Box cb = box(ImVec2(x + (right ? inner - U(s, 64) : 0.0f), y + bounce), ImVec2(U(s, 64), U(s, 80)));
     const Pressed p = area("##clippy", cb);
     if (p.hovered)
         ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -1891,7 +1905,30 @@ void clippy(App::State& s, Box owner) {
                 std::floor(static_cast<double>(std::rand()) / (RAND_MAX + 1.0) * std::size(kTips)));
         sfx(s, "clippy");
     }
+    // floats.rs 253-300: a press on it that no control takes drags it (from 4 px); dropped, it
+    // takes the place its center is nearest to.
+    if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !g_area_hovered) {
+        w.clippy.pressing = true;
+        w.clippy.down = mouse;
+        w.clippy.grab = ImVec2((mouse.x - at.x) / cw, (mouse.y - at.y) / ch);
+    }
     ImGui::End();
+    if (w.clippy.pressing) {
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            if (!w.clippy.moving &&
+                std::hypot(mouse.x - w.clippy.down.x, mouse.y - w.clippy.down.y) >= 4 * s.dpi)
+                w.clippy.moving = true;
+        } else {
+            if (w.clippy.moving) {
+                const float cx = mouse.x - cw * w.clippy.grab.x + cw * 0.5f - owner.x0;
+                const float cy = mouse.y - ch * w.clippy.grab.y + ch * 0.5f - owner.y0;
+                const auto to = k98::snap_float(cx, cy, owner.w(), owner.h());
+                set_shared(s, "win98.float.clippy",
+                           Json{{"edge", k98::edge_name(to.edge)}, {"align", k98::align_name(to.align)}});
+            }
+            w.clippy.pressing = w.clippy.moving = false;
+        }
+    }
     if (run)
         run();
 }

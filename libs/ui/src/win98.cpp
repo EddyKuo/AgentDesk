@@ -128,6 +128,80 @@ MenuSize menu_size(const std::vector<MenuRowText>& items, bool start) {
     return {w, h};
 }
 
+// herdr src/layout.rs 732-751.
+FloatPlace snap_float(float x, float y, float w, float h) {
+    x = std::clamp(x, 0.0f, std::max(0.0f, w));
+    y = std::clamp(y, 0.0f, std::max(0.0f, h));
+    const float fx = x / std::max(w, 1.0f), fy = y / std::max(h, 1.0f);
+    const std::pair<Edge, float> d[] = {
+        {Edge::kLeft, fx}, {Edge::kRight, 1.0f - fx}, {Edge::kTop, fy}, {Edge::kBottom, 1.0f - fy}};
+    Edge edge = d[0].first;
+    float best = d[0].second;
+    for (const auto& [e, v] : d)
+        if (v < best) {
+            best = v;
+            edge = e;
+        }
+    const bool vertical = edge == Edge::kLeft || edge == Edge::kRight;
+    const float along = vertical ? fy : fx;
+    const Align align = along < 1.0f / 3.0f   ? Align::kStart
+                        : along > 2.0f / 3.0f ? Align::kEnd
+                                              : Align::kCenter;
+    return {edge, align};
+}
+
+// herdr src/window/floats.rs 78-96.
+std::array<float, 2> float_home(float ox, float oy, float w, float h, float bw, float bh, FloatPlace place,
+                                float margin) {
+    auto along = [&](float start, float room, float len) {
+        switch (place.align) {
+            case Align::kStart:
+                return start + margin;
+            case Align::kCenter:
+                return start + (room - len) / 2.0f;
+            case Align::kEnd:
+                return start + room - margin - len;
+        }
+        return start;
+    };
+    const float x = place.edge == Edge::kLeft    ? ox + margin
+                    : place.edge == Edge::kRight ? ox + w - margin - bw
+                                                 : along(ox, w, bw);
+    const float y = place.edge == Edge::kTop      ? oy + margin
+                    : place.edge == Edge::kBottom ? oy + h - margin - bh
+                                                  : along(oy, h, bh);
+    return {x, y};
+}
+
+const char* edge_name(Edge e) {
+    switch (e) {
+        case Edge::kTop:
+            return "top";
+        case Edge::kRight:
+            return "right";
+        case Edge::kBottom:
+            return "bottom";
+        case Edge::kLeft:
+            return "left";
+    }
+    return "right";
+}
+
+const char* align_name(Align a) {
+    return a == Align::kStart ? "start" : a == Align::kEnd ? "end" : "center";
+}
+
+// layout.rs 36-59: the defaults are right and center.
+FloatPlace parse_place(std::string_view edge, std::string_view align) {
+    FloatPlace p;
+    p.edge = edge == "top"      ? Edge::kTop
+             : edge == "bottom" ? Edge::kBottom
+             : edge == "left"   ? Edge::kLeft
+                                : Edge::kRight;
+    p.align = align == "start" ? Align::kStart : align == "end" ? Align::kEnd : Align::kCenter;
+    return p;
+}
+
 // kit.js 373.
 float dialog_width(std::string_view kind) {
     static const std::map<std::string_view, int> kW = {

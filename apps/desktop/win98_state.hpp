@@ -103,7 +103,11 @@ struct Window {
 struct Clippy {
     std::vector<std::string> dismissed;  // "<session>:<status>"
     std::optional<int> tip;
-    float y_anim = 0;
+    // A drag of the float (herdr floats.rs 253-300): where it was pressed, where in it, moving.
+    bool pressing = false;
+    bool moving = false;
+    ImVec2 down{};
+    ImVec2 grab{};  // the share of its size from its top left
 };
 
 struct W98 {

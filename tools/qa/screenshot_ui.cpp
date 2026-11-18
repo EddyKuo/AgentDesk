@@ -5,7 +5,7 @@
 //                 [--input "<step>;<step>..."]
 // --input is passed to agent-ui, which feeds the steps to ImGui as a person's mouse and keys
 // (nothing outside its window is touched): click:x,y rclick:x,y mclick:x,y dblclick:x,y
-// move:x,y key:<enter|esc|tab|up|down|left|right|home|end|pgup|pgdn|back|del|space|f2|a-z|0-9>
+// press:x,y release:x,y (a left-button drag, with move steps between) move:x,y key:<enter|esc|tab|up|down|left|right|home|end|pgup|pgdn|back|del|space|f2|a-z|0-9>
 // type:<text> wait:<ms> shot:<png> (a capture, relative to --out's folder). The final capture
 // to --out is taken after the last step.
 // --child starts profile:name as a sub-agent of the first session; --remote adds a second host

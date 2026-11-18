@@ -363,3 +363,21 @@ TEST(Win98Solitaire, TargetsAndVictory) {
     EXPECT_LE(s.trails.size(), 300u);
     EXPECT_GT(frames, 52);
 }
+
+// herdr src/layout.rs 759-765 (its own test) and src/window/floats.rs 418-421.
+TEST(Win98Float, SnapsToTheNearestEdgeAndThird) {
+    EXPECT_EQ(snap_float(10, 400, 1200, 800), (FloatPlace{Edge::kLeft, Align::kCenter}));
+    EXPECT_EQ(snap_float(1190, 20, 1200, 800), (FloatPlace{Edge::kRight, Align::kStart}));
+    EXPECT_EQ(snap_float(600, 5, 1200, 800), (FloatPlace{Edge::kTop, Align::kCenter}));
+    EXPECT_EQ(snap_float(1000, 790, 1200, 800), (FloatPlace{Edge::kBottom, Align::kEnd}));
+    EXPECT_EQ(snap_float(-50, 900, 1200, 800).align, Align::kEnd);
+    // win98.json: Clippy on the left, at the end (the bottom), 12 px from the edges.
+    const auto p = float_home(0, 0, 1000, 800, 100, 200, parse_place("left", "end"), 12);
+    EXPECT_FLOAT_EQ(p[0], 12);
+    EXPECT_FLOAT_EQ(p[1], 800 - 12 - 200);
+    const auto c = float_home(0, 0, 1000, 800, 100, 200, parse_place("right", "center"), 12);
+    EXPECT_FLOAT_EQ(c[0], 1000 - 12 - 100);
+    EXPECT_FLOAT_EQ(c[1], 300);
+    EXPECT_STREQ(edge_name(parse_place("bottom", "").edge), "bottom");
+    EXPECT_STREQ(align_name(parse_place("x", "start").align), "start");
+}

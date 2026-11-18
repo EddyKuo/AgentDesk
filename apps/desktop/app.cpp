@@ -9510,6 +9510,23 @@ void draw_welcome(App::State& s) {
         }
         ImGui::EndChild();
         ImGui::PopStyleColor();
+        // herdr welcome/main.js 451-459: "More examples in Settings" (p 12, gap 10, rounded 10,
+        // raised), naming Herdr 98.
+        ImGui::Dummy(ImVec2(0, px(8)));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, v4(raised_color()));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, px(10));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(12), px(12)));
+        ImGui::BeginChild("##examples", ImVec2(-1, 0), ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding,
+                          ImGuiWindowFlags_NoScrollbar);
+        ImGui::PushFont(s.fonts.ui_bold, 13.5f);
+        ImGui::TextUnformatted("More examples in Settings");
+        ImGui::PopFont();
+        ImGui::Dummy(ImVec2(0, px(2)));
+        ImGui::TextWrapped("Settings \xE2\x80\xBA Look has more layouts to try or start from, Herdr 98 among them. Your agent can "
+                           "copy any of them and change anything.");
+        ImGui::EndChild();
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor();
     }
     ImGui::Dummy(ImVec2(0, px(20)));
     ImGui::EndChild();
@@ -10214,6 +10231,12 @@ void run_input_script(App::State& s) {
             s.input_up = button;
             s.input_clicks_left = op == "dblclick" ? 1 : 0;
         }
+    } else if (op == "press" || op == "release") {
+        // A drag: "press:x,y", then "move:x,y" steps, then "release:x,y".
+        const ImVec2 p = xy();
+        s.input_mouse = p;
+        io.AddMousePosEvent(p.x, p.y);
+        io.AddMouseButtonEvent(0, op == "press");
     } else if (op == "key") {
         if (const ImGuiKey k = input_key(arg); k != ImGuiKey_None) {
             io.AddKeyEvent(k, true);
