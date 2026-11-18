@@ -23,3 +23,5 @@ plan: docs/design/AgentDesk_Design.md 5.6
 | 2026-11-18 | Release 版 `agent-host` | 未重建：使用者的 host 正在執行，重建要先停掉它（會中斷 session）。`agent-ui.exe` 已重建 | — | — |
 | 2026-11-19 | Board、Grid、Focus 版面 | 使用者決定移除：herdr-app 只有 main、terminals、win98 三個版面，自訂 JSON 版面保留 | src/window.rs LAYOUTS；使用者 2026-11-19 | — |
 | 2026-11-19 | Herdr 98 版面、線上更新檢查、使用統計 | 使用者決定三項都要做（原本列為刻意保留的差異） | defaults/mods/win98、frame/settings Updates／Privacy、src/telemetry.rs；使用者 2026-11-19 | — |
+| 2026-11-19 | 移除 Board、Grid、Focus | 完成：內建版面只剩 workspace（herdr 的 main）與 terminals；版面檔不再有 `main` 鍵 | src/window.rs LAYOUTS | 69519d6 |
+| 2026-11-19 | 設定 › Look 的版面卡片 | 照 herdr 改：卡片寬 124、62 px 預覽圖、名稱在下方、選中的加打勾與強調色外框 | frame/settings/main.js 242-320 | 69519d6 |
