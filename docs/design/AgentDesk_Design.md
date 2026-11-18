@@ -172,7 +172,7 @@ VT Engine 需要回覆的終端機查詢由 host 處理，UI 不連線時仍可�
 | 建置 | CMake + Ninja + MSVC，固定工具鏈版本及 CMakePresets；只用下方「開發環境基線」列出的已安裝工具 | 決定 |
 | GUI | Dear ImGui 1.93.0 docking（vcpkg `imgui` 的 `docking-experimental`、`win32-binding`、`dx11-binding` features，以 builtin-baseline＋overrides 固定）；Win32 + DX11 backends | 決定 |
 | 終端機核心 | libvterm 0.3.3（官方 tarball 原始碼收錄於 third_party，tarball 已含產生的 `.inc`，建置不需 perl；呼叫端加 `/utf-8`）。libghostty-vt 因需要 Zig 不採用（ADR-11） | 決定（M0） |
-| ConPTY 實作 | 隨附 Microsoft.Windows.Console.ConPTY 1.24.260710001（`conpty.dll` + `OpenConsole.exe`），`scripts/fetch-conpty.ps1` 釘選版本並驗 SHA-256，以 LoadLibraryExW 從執行檔旁的 `conpty\` 載入；找不到時退回系統內建並在 UI 標示「狀態回報不可用」 | 決定（M0，ADR-08） |
+| ConPTY 實作 | 隨附 Microsoft.Windows.Console.ConPTY 1.24.260710001（`conpty.dll` + `OpenConsole.exe`），`fetch_conpty.exe`（`tools/fetch_conpty`）釘選版本並驗 SHA-256，以 LoadLibraryExW 從執行檔旁的 `conpty\` 載入；找不到時退回系統內建並在 UI 標示「狀態回報不可用」 | 決定（M0，ADR-08） |
 | JSON | nlohmann/json 3.12.0（vcpkg） | 決定（S1-1） |
 | IPC | 本機 Named Pipe，binary length prefix + UTF-8 JSON | 決定 |
 | 設定 | JSON 檔，原子替換與 schema_version | 決定 |
@@ -495,7 +495,7 @@ M0 後修正（2026-11-17）：Session actor、背壓與協定分幀已在 M0 �
 
 ### 5.4 MVP 完成狀態（2026-11-17）
 
-M0～M4 已實作，驗收矩陣結果見 `contracts/inbox/TestReport_sprint5.md`：QA-01～QA-22 中 20 項通過，QA-17、QA-21 部分通過，QA-15 待人工。交付物是 `scripts/package.ps1` 產生的 portable zip。
+M0～M4 已實作，驗收矩陣結果見 `contracts/inbox/TestReport_sprint5.md`：QA-01～QA-22 中 20 項通過，QA-17、QA-21 部分通過，QA-15 待人工。交付物是 `agentdesk_package.exe`（`tools/package`）產生的 portable zip。
 
 待人工驗收：繁中注音與候選視窗、100%／150%／200% DPI、Claude Code 實際回報 working／blocked／done、Codex hook 實機、另一個 Windows 帳號連線被拒。8 小時 soak 已於 2026-11-18 通過（見 TestReport_sprint5）。
 

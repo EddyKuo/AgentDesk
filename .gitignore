@@ -30,7 +30,7 @@ Testing/
 # Runtime state written by the app during local runs
 imgui.ini
 
-# Bundled ConPTY is fetched by script, never committed
+# Bundled ConPTY is fetched by fetch_conpty.exe, never committed
 /third_party/conpty/bin/
 
 # Editors / OS

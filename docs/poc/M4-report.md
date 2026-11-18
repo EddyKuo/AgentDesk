@@ -4,16 +4,16 @@
 
 ## 結論
 
-MVP 可發布。`scripts/package.ps1` 產生的 `AgentDesk-0.1.0-win-x64.zip`（2.3 MB）在乾淨目錄冒煙通過。驗收矩陣 22 項中 20 項通過，QA-17、QA-21 部分通過，QA-15 等人工驗收。
+MVP 可發布。`agentdesk_package.exe`（`tools/package`）產生的 `AgentDesk-0.1.0-win-x64.zip`（2.3 MB）在乾淨目錄冒煙通過。驗收矩陣 22 項中 20 項通過，QA-17、QA-21 部分通過，QA-15 等人工驗收。
 
 ## 交付物
 
 | 項目 | 位置 |
 |---|---|
-| portable zip、符號檔 zip | `dist\`（由 `scripts\package.ps1` 產生，不進版控） |
+| portable zip、符號檔 zip | `dist\`（由 `build\<preset>\tools\agentdesk_package.exe` 產生，不進版控） |
 | 使用說明、相容性矩陣 | `docs/user-guide.md`、`docs/compatibility.md`（也放在 zip 的 `docs\`） |
 | 第三方授權 | zip 內 `THIRD_PARTY_NOTICES.md`（由各依賴自己的授權檔組成）、`conpty\LICENSE`、`conpty\NOTICE.md` |
-| 驗證工具 | `tools/soak`、`tools/qa/*.ps1`（QA-05、QA-07、QA-10、截圖、zip 冒煙） |
+| 驗證工具 | `tools/soak`、`build\<preset>\tools\qa\*.exe`（QA-05、QA-07、QA-10、截圖、zip 冒煙） |
 
 ## M4 期間的主要變更
 

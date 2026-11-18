@@ -140,7 +140,7 @@ protected:
     void SetUp() override {
         if (GetParam() == "bundled" &&
             !std::filesystem::exists(std::filesystem::path(AGENTDESK_BUNDLED_CONPTY_DIR) / "conpty" / "conpty.dll")) {
-            GTEST_SKIP() << "bundled ConPTY not fetched (scripts/fetch-conpty.ps1)";
+            GTEST_SKIP() << "bundled ConPTY not fetched (run build/<preset>/tools/fetch_conpty.exe)";
         }
         api_ = api_for(GetParam());
         if (GetParam() == "bundled") {

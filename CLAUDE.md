@@ -16,7 +16,7 @@ MVP（M0～M4，Sprint 1～5）已完成：結論在 `docs/poc/M0-report.md`、`
 scripts\build.cmd msvc-x64-debug all          :: configure + build + ctest
 scripts\build.cmd msvc-x64-debug build        :: 只建置（preset 已 configure 過）
 scripts\build.cmd msvc-x64-release configure  :: 新 preset 第一次要先 configure
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\fetch-conpty.ps1   :: 取得隨附 ConPTY（新 clone 必做）
+build\msvc-x64-debug\tools\fetch_conpty.exe   :: 取得隨附 ConPTY（新 clone 必做；先建置一次，取得後再 configure）
 ```
 
 單一測試（先跑過一次建置）：
@@ -35,7 +35,8 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 - `vt_probe.exe query|report|echo|flood|counter|size|crash`：測試用的假 Agent
 - `soak.exe --probe <vt_probe.exe> --host <agent-host.exe> [--minutes N]`：host 長時間穩定性（handle、執行緒、記憶體趨勢）
 - `apps\desktop\agent-ui.exe [--pipe NAME] [--start "<profile>"] [--exit-after-ms N] [--report file.json]`：UI；參數供自動化驗證
-- `tools\qa\*.ps1`：QA-05、QA-07、QA-10、`screenshot_ui.ps1`（隔離的 host 加 PrintWindow 截圖與 report，用來檢查渲染）、`smoke_zip.ps1`；發布用 `scripts\package.ps1`（先建 Release）
+- `qa\*.exe`：QA-05、QA-07、QA-10（`qa05_ui_detach.exe`、`qa07_silence.exe`、`qa10_ui_host_crash.exe`）、`screenshot_ui.exe`（隔離的 host 加 PrintWindow 截圖與 report，用來檢查渲染）、`smoke_zip.exe`；發布用 `agentdesk_package.exe`（先建 Release）
+- `fetch_conpty.exe`（隨附 ConPTY）、`make_fixtures.exe`（重產 `tests\fixtures\bytes`）
 
 不要用自動化腳本反覆啟動又強制結束實際的 Claude Code：它會把這當成全螢幕渲染器故障，自行關掉該模式。渲染檢查用 PowerShell 或 vt_probe。
 
@@ -68,7 +69,7 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 | `third_party/fonts`、`third_party/herdr` | 隨附字型（Geist、JetBrains Mono、Symbols Nerd Font）與 herdr 的授權、提示音；建置時複製到執行檔旁的 `fonts\`、`sounds\` |
 | `libs/modapi`、`mods/` | mod 介面（純 C 的 `mod_api.h` 與 header-only 的 `mod_sdk.hpp`，ADR-17）與三個範例 mod（各自編成 `mods\<名稱>\mod.dll`，隨 zip 附上 SDK） |
 | `tools/` | 開發與量測工具（不出貨） |
-| `tests/unit`、`tests/integration/windows`、`tests/fixtures` | GoogleTest；fixture 是原始位元組檔，由 `tests/fixtures/make_fixtures.py` 產生 |
+| `tests/unit`、`tests/integration/windows`、`tests/fixtures` | GoogleTest；fixture 是原始位元組檔，由 `build\<preset>\tools\make_fixtures.exe` 產生 |
 | `third_party/libvterm`、`third_party/conpty` | 收錄的 libvterm 0.3.3；隨附 ConPTY 的授權與 NOTICE（二進位由腳本下載到 `bin/`，不進版控） |
 
 ## 架構重點（需要讀好幾個檔案才拼得出來的部分）

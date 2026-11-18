@@ -24,7 +24,7 @@ change_summary: |
 | 指標 | 數值 |
 |---|---|
 | 測試總數／通過／失敗／跳過 | 109／109／0／0（unit 66、windows_integration 43） |
-| UI 端到端腳本 | `tools/qa/qa05_ui_detach.ps1` 通過；Claude Code 經 host→UI 顯示 Idle（osc7501） |
+| UI 端到端腳本 | `build\<preset>\tools\qa\qa05_ui_detach.exe` 通過；Claude Code 經 host→UI 顯示 Idle（osc7501） |
 | Unit Test Coverage | 未量測（工具未選定，ADR_001） |
 | 編譯警告 | 0 |
 | **整體結論** | ✅ S3-M1（UI 是 host client）、S3-M2（多 session 可操作）達成；S3-M3（150% DPI）待人工驗證 |
