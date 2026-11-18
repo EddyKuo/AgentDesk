@@ -186,6 +186,16 @@ std::shared_ptr<const terminal::ScreenSnapshot> Session::snapshot() const {
     return snapshot_;
 }
 
+platform::win::Foreground Session::foreground() const {
+    if (!process_ || info().process_state != ProcessState::kRunning)
+        return {};
+    try {
+        return process_->foreground();
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 std::string Session::foreground_program() const {
     // process_ is set before create() returns and destroyed only with *this.
     if (!process_ || info().process_state != ProcessState::kRunning)

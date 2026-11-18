@@ -17,6 +17,7 @@
 
 #include "agentdesk/platform/win/conpty_api.hpp"
 #include "agentdesk/platform/win/job.hpp"
+#include "agentdesk/platform/win/process_tree.hpp"
 #include "agentdesk/platform/win/unique_handle.hpp"
 
 namespace agentdesk::platform::win {
@@ -63,6 +64,7 @@ public:
     [[nodiscard]] DWORD job_active_processes() const { return job_.active_processes(); }
     // What runs in the terminal now (see process_tree.hpp). The job handle lives as long as *this.
     [[nodiscard]] std::string foreground_program() const;
+    [[nodiscard]] Foreground foreground() const;
 
     // Closes the pseudoconsole while the reader keeps draining, then joins the reader and
     // releases pipes and the job (which kills any remaining descendants). Idempotent.

@@ -1,6 +1,7 @@
 #include "agentdesk/host/session_manager.hpp"
 
 #include <algorithm>
+#include <cwctype>
 
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/platform/win/error.hpp"
@@ -25,6 +26,33 @@ constexpr std::size_t kMaxExitedLive = 8;
 
 Response bad(const Request& r, std::string msg) {
     return protocol::fail(r.id, ErrorCode::kBadRequest, std::move(msg));
+}
+
+// PowerShell's cd (Set-Location) does not change the process's Windows current folder, which is
+// what the host reads to follow the shell. Like herdr, wrap the prompt: after the person's own
+// prompt runs, copy the location into [Environment]::CurrentDirectory. Only for an interactive
+// PowerShell the profile starts without its own -Command/-File; cmd needs nothing.
+void add_folder_hook(platform::win::PtySpawnSpec& spec) {
+    std::wstring exe = spec.executable.filename().native();
+    for (auto& c : exe)
+        c = static_cast<wchar_t>(std::towlower(c));
+    if (exe != L"pwsh.exe" && exe != L"powershell.exe")
+        return;
+    for (const auto& a : spec.args) {
+        std::wstring l = a;
+        for (auto& c : l)
+            c = static_cast<wchar_t>(std::towlower(c));
+        if (l == L"-command" || l == L"-c" || l == L"-file" || l == L"-f" || l == L"-encodedcommand" ||
+            l == L"-ec" || l == L"-noninteractive")
+            return;
+    }
+    spec.args.push_back(L"-NoExit");
+    spec.args.push_back(L"-Command");
+    spec.args.push_back(
+        L"$global:__agentdesk_prompt = $function:prompt; "
+        L"function global:prompt { $r = & $global:__agentdesk_prompt; "
+        L"try { $l = Get-Location; if ($l.Provider.Name -eq 'FileSystem') "
+        L"{ [Environment]::CurrentDirectory = $l.ProviderPath } } catch {}; $r }");
 }
 
 std::optional<terminal::Key> key_from_name(std::string_view n) {
@@ -600,6 +628,7 @@ Response SessionManager::do_create(const Request& req) {
     sc.spec.args = profile->args;
     for (const auto& a : p.value("args", Json::array()))
         sc.spec.args.push_back(win::to_wide(a.get<std::string>()));
+    add_folder_hook(sc.spec);
     sc.spec.cwd = win::to_wide(cwd);  // never silently replaced (design doc 4.2)
     const int cols = std::clamp(p.value("cols", 120), 2, 1000);
     const int rows = std::clamp(p.value("rows", 40), 1, 500);
@@ -691,7 +720,9 @@ Json SessionManager::describe(const Managed& m) const {
         j["rows"] = snap->rows;
         j["history_truncated"] = info.history_truncated;
         j["backpressure_waits"] = info.backpressure_waits;
-        j["program"] = m.session->foreground_program();
+        const auto fg = m.session->foreground();
+        j["program"] = fg.program;
+        j["live_cwd"] = fg.cwd;  // the shell's folder after cd (empty: unknown, use cwd)
     } else {
         j["agent_state"] = "Unknown";
         j["history_only"] = true;  // Lost, or Exited and released to bound resources

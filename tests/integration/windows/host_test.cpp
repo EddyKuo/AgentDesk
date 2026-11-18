@@ -126,6 +126,12 @@ protected:
              {"name", "cmd"},
              {"executable", win::to_utf8(cmd.native())},
              {"args", Json::array()}},
+            {{"id", "powershell"},
+             {"name", "Windows PowerShell"},
+             {"executable", win::to_utf8((fs::path(std::wstring(sys, n)) / L"WindowsPowerShell" / L"v1.0" /
+                                          L"powershell.exe")
+                                             .native())},
+             {"args", {"-NoLogo", "-NoProfile"}}},
             {{"id", "size"},
              {"name", "probe size"},
              {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
@@ -738,6 +744,30 @@ TEST_F(HostFixture, ForegroundProgramFollowsChild) {
     ctl({L"send", w(id), L"--text", w("\"" + win::to_utf8(std::wstring(AGENTDESK_VT_PROBE)) + "\" echo"),
          L"--enter"});
     EXPECT_TRUE(wait_until([&] { return program() == "vt_probe"; }, 10s)) << program();
+}
+
+// live_cwd follows cd in cmd (real current folder) and PowerShell (prompt hook, herdr-style).
+TEST_F(HostFixture, LiveCwdFollowsCd) {
+    const auto target = data_dir_ / L"sub dir";
+    fs::create_directories(target);
+    const std::string want = win::to_utf8(target.native());
+    for (const char* profile : {"cmd", "powershell"}) {
+        const auto id = create(profile, profile);
+        auto live = [&] {
+            const auto j = Json::parse(ctl({L"list", L"--json"}).out, nullptr, false);
+            if (j.is_discarded())
+                return std::string();
+            for (const auto& s : j["sessions"])
+                if (s.value("id", "") == id)
+                    return s.value("live_cwd", "");
+            return std::string();
+        };
+        ASSERT_TRUE(wait_until([&] { return !live().empty(); }, 15s)) << profile;
+        ctl({L"send", w(id), L"--text", w("cd \"" + want + "\""), L"--enter"});
+        EXPECT_TRUE(wait_until([&] { return _stricmp(live().c_str(), want.c_str()) == 0; }, 15s))
+            << profile << ": " << live();
+        ctl({L"stop", w(id), L"--force"});
+    }
 }
 
 // worktree.add: a new branch checked out in its own folder; bad input is refused.
