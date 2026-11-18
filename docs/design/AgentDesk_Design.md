@@ -1,7 +1,7 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.2  
-日期：2026-11-18｜狀態：MVP 已實作（M0～M4），補齊 herdr 的主要功能（5.5），介面與行為依 herdr-app 原始碼移植（5.6、ADR-15）；待人工驗收項目見 5.4  
+產品需求與系統設計文件 v2.3  
+日期：2026-11-18｜狀態：MVP 已實作（M0～M4），補齊 herdr 的主要功能（5.5），介面與行為依 herdr-app 原始碼移植（5.6、ADR-15），WSL 發行版可作為本機 shell（ADR-16）；待人工驗收項目見 5.4  
 技術基線：C++20、Windows 11 x64、Dear ImGui、Win32、DirectX 11、ConPTY
 
 > 產品名稱定為 AgentDesk，本身以 MIT License 釋出。本文件定義類似 Herdr 使用體驗的獨立實作，不宣稱與 Herdr 協定、程式碼或所有功能相容。內容為建議設計；尚未完成 Windows 實機驗證，不將候選套件或時程視為已驗證成果。
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.3 | 2026-11-18 | 使用者要求接入 WSL：新增 ADR-16；1.3 的 P3「WSL 專用 adapter」改為「WSL 作為遠端機器（Linux 版 agent-host）」 |
 | 2.2 | 2026-11-18 | 使用者要求完整複刻 herdr、可直接參考並轉寫其程式碼、介面字太小：新增 ADR-15（取代 ADR-13 的「外觀自訂、不複製程式碼」與 ADR-10 的對應句、ADR-12 的版面細節）；新增 5.6；新分頁、新 space、分割一律先開 shell；關閉面板與分頁會結束其中的程式（與 herdr 相同） |
 | 2.1 | 2026-11-17 | 使用者要求功能與 herdr 一樣好用、外觀不同：新增 ADR-13（對齊範圍，手機版不做）、ADR-14（Lua mod）；4.1 改為 space／分頁／分割樹；3.7.2 新增協定方法；3.8 新增 CLI 指令；新增 5.5 |
 | 2.0 | 2026-11-17 | MVP 完成：4.1 主畫面改為實作的版面（側欄 Spaces／Agents、分頁加分割面板、Details 卡片），新增 ADR-12；新增 5.4 MVP 完成狀態與限制；已結束 session 只保留最新 8 個的完整畫面（3.4 補充） |
@@ -88,7 +89,7 @@ AgentDesk 提供集中工作清單、可分割終端機面板與獨立背景執�
 | P0：POC | 單工作 ConPTY、VT 解析、ImGui 繪製、鍵盤輸入、縮放、中文輸入驗證 |
 | P1：MVP | 多工作、背景 host、重新連線、捲動複製、工作設定、停止與清理、基本 CLI |
 | P2：後續 | 首發兩個 CLI 以外其他 Agent 的可信狀態 adapter、多 Agent 任務派工、匯出、完整搜尋、多視窗、host 升級不中斷工作（程序持有者與 host 分離，參考 herdr-core 的 holder）、Agent 原生 session 續接命令（resume argv） |
-| P3：另案 | WSL 專用 adapter、SSH 遠端、插件執行環境、自動更新、多人協作 |
+| P3：另案 | WSL 作為遠端機器（Linux 版 agent-host）、SSH 遠端、插件執行環境、自動更新、多人協作 |
 
 MVP 狀態整合至少實作一個可控測試 adapter，並整合兩個目標 Agent：Claude Code（OSC 7501）與 Codex CLI（hook＋report-state）。未能取得可信狀態時，允許以「Agent 狀態未知」交付，但不可宣稱能偵測 Agent 已完成工作。
 
@@ -603,7 +604,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-13 | 功能對齊 herdr，外觀自訂 | 使用者要求「一樣好用，但不能讓人覺得一樣，配色可以不同，功能要一樣」。功能依 herdr-app 公開指南（defaults/AGENTS.md、keys.json）整理：space／分頁／分割、注意力與通知、命令面板、worktree、子 Agent 協作、遠端機器、版面與 mod。手機 app 不做（使用者決定）。配色、圖示、字體與命名都是我們自己的；herdr 為 Apache-2.0，只參考行為，不複製程式碼 |
 | ADR-14 | mod 用 Lua 5.5（vcpkg lua[cpp]，MIT） | 每個 mod 一個沙盒 Lua state：沒有 io、os.execute、require、程式載入，有指令數上限，連續出錯就停用。要啟動程式只能用 `agentdesk.exec`（不經 shell）。UI 以資料（widget 清單）回傳，mod 主機不碰 ImGui，可以單元測試。代價是新增一個依賴，mod 能力受限於我們提供的 API |
 | ADR-12 | 主畫面改用固定版面（側欄＋分頁＋分割面板），不用 ImGui DockSpace | 使用者要求介面接近 herdr（https://herdr.dev/gallery/ 觀察到的預設視窗：Spaces 與 Agents 側欄、分頁、卡片面板、細狀態列）。固定版面每次由 host 的 session 清單重建，不需要 imgui.ini。代價是不能任意拖曳停靠，分割只有左右、每分頁最多 3 個 |
-| ADR-15 | 依 herdr-app 原始碼完整複刻介面與行為（2026-11-18） | 使用者要求「一定要完整複刻，有問題就去查 herdr 的 source code」，並同意直接轉寫其程式碼。依據是 herdr-app commit 321c9a8 的版面檔與 mod（審閱與逐項規格見 docs/research/herdr-app-review.md 與 docs/research/herdr-app/）。版面尺寸、互動、狀態與提醒規則、Files／Changes、picker、命令面板、設定、歡迎頁、worktree 對話框都照 herdr；介面用 C++／ImGui 重寫，不搬 JS 執行環境。herdr 是 Apache-2.0：發布包的 THIRD_PARTY_NOTICES 列出 herdr-app 並附授權，隨附它的兩段提示音；隨附 Geist、JetBrains Mono（OFL）與 Symbols Nerd Font（MIT）。配色保留我們自己的四個主題（使用者同意配色可以不同）。介面文字預設 15 px（herdr 為 13），可在設定調整。代價是 NOTICE 義務，以及部分 herdr 功能限於本機（遠端的 Files／Changes） |
+| ADR-16 | WSL 發行版作為本機 shell，不做 Linux 版 host（2026-11-18） | 使用者詢問能否接入 WSL，並選了兩項：列進新增選單、資料夾追蹤跟著 Linux 的 cd。host 從 HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss 列出發行版（略過 docker-desktop*），每個建一個 `wsl.exe -d <名稱>` profile；已有的 profiles.json 只補一次（`wsl_detected`）。資料夾追蹤用 OSC 7：host 透過 `WSLENV` 傳入 bash 的 `PROMPT_COMMAND`，在每次提示字元前送 `file://$WSL_DISTRO_NAME$PWD`，`/mnt/<碟>/…` 對應 `<碟>:\…`，其他對應 `\wsl.localhost\<發行版>\…`；任何 shell 送的 OSC 7 都優先於讀 PEB。Windows 的 git 對 WSL 路徑加 `-c safe.directory=*`（否則因擁有者不同拒絕）。不改使用者 WSL 裡的檔案。不做 Linux 版 agent-host（讓 WSL 當遠端機器）：它要重寫 ConPTY、Job、Named Pipe、背景啟動、程序樹等平台層，還需要 Linux 工具鏈，多換到的只有「Windows 端 host 結束後，WSL 裡的工作仍在」。代價：只支援 bash，`~/.bashrc` 自設 PROMPT_COMMAND 或用 zsh／fish 時資料夾停在啟動位置；WSL 檔案走網路檔案系統，大 repo 的 Changes 較慢 |\n| ADR-15 | 依 herdr-app 原始碼完整複刻介面與行為（2026-11-18） | 使用者要求「一定要完整複刻，有問題就去查 herdr 的 source code」，並同意直接轉寫其程式碼。依據是 herdr-app commit 321c9a8 的版面檔與 mod（審閱與逐項規格見 docs/research/herdr-app-review.md 與 docs/research/herdr-app/）。版面尺寸、互動、狀態與提醒規則、Files／Changes、picker、命令面板、設定、歡迎頁、worktree 對話框都照 herdr；介面用 C++／ImGui 重寫，不搬 JS 執行環境。herdr 是 Apache-2.0：發布包的 THIRD_PARTY_NOTICES 列出 herdr-app 並附授權，隨附它的兩段提示音；隨附 Geist、JetBrains Mono（OFL）與 Symbols Nerd Font（MIT）。配色保留我們自己的四個主題（使用者同意配色可以不同）。介面文字預設 15 px（herdr 為 13），可在設定調整。代價是 NOTICE 義務，以及部分 herdr 功能限於本機（遠端的 Files／Changes） |
 | ADR-11 | 只用已安裝的 VS 2022 C++ 工具鏈，不另外安裝工具 | 使用者要求；開發環境可重現、無額外依賴。代價是排除需要 Zig 的 libghostty-vt |
 
 ### 7.2 主要風險

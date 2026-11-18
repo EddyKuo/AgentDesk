@@ -117,6 +117,18 @@ agentctl report "found 3 problems: ..."
 
 需求：遠端是 Windows 並安裝了 AgentDesk，`agentctl` 在 PATH 上（或填完整路徑），並設定好金鑰登入。AgentDesk 不會在背景跳出密碼輸入；需要密碼或要確認主機金鑰時，設定頁會顯示 ssh 的訊息，請先在自己的終端機執行一次 `ssh <目標>`。
 
+## WSL
+
+裝了 WSL 時，每個 Linux 發行版（例如 Ubuntu）會自動加進 profile，在分頁列「+」選單的 Terminal 底下出現「Ubuntu (WSL)」。它在目前面板所在的資料夾開一個 Linux shell（`D:\src` 會是 `/mnt/d/src`），你再在裡面執行 Linux 版的 `claude` 或 `codex`。Docker Desktop 內部用的發行版不列出。想讓新分頁、新 space 預設就開 WSL，在「設定 > Look」的 Shell 選它。
+
+在 Linux 裡 `cd` 之後，space 名稱、分支和 Files／Changes 面板都會跟著變。`/mnt/c/...` 對應到 `C:\...`，其他位置對應到 `\\wsl.localhost\<發行版>\...`。AgentDesk 透過 `WSLENV` 設定 bash 的 `PROMPT_COMMAND`，讓它每次顯示提示字元前回報所在資料夾（OSC 7）。你 WSL 裡的檔案都不會被修改。
+
+- 資料夾追蹤只支援 bash。用 zsh、fish，或你的 `~/.bashrc` 自己設定了 `PROMPT_COMMAND` 時，資料夾會停在啟動時的位置。
+- Files／Changes 對 WSL 裡的 repo 執行 Windows 的 git，並對這次呼叫加上 `safe.directory=*`（否則 git 會因檔案擁有者是 Linux 使用者而拒絕）。WSL 的檔案走網路檔案系統，大 repo 會比較慢，面板至少每 10 秒更新一次。
+- WSL 不能當「遠端機器」：Add machine 需要對方執行 Windows 版的 AgentDesk。
+
+如果你原本就有 `profiles.json`，AgentDesk 會補上 WSL profile，只補這一次；之後你刪掉的不會再加回來。
+
 ## 版面
 
 Ctrl+Shift+L、命令面板或「設定 > Look」切換：
@@ -219,7 +231,7 @@ agentctl shutdown --stop-sessions
 
 ## 限制
 
-- 只支援 Windows 11 x64；Windows 10 未驗證。不支援 WSL 專用整合、多人協作；沒有手機 app。
+- 只支援 Windows 11 x64；Windows 10 未驗證。不支援多人協作；沒有手機 app。WSL 的支援範圍見上面「WSL」一節。
 - 重新開機、登出或 host 異常結束後無法續接原工作（顯示 Lost）。
 - 歷史捲動為純文字，最多 5000 行；每個工作的歷史上限 10,000 行或 16 MiB，超過時捨棄最舊的部分。
 - 字寬依 libvterm 0.3.3：東亞「模糊寬度」字元一律 1 欄；由零寬連接字組成的 emoji（例如家庭 emoji）不合併，會占多欄；emoji 以單色顯示；不支援 kitty keyboard protocol 與終端機圖片。
@@ -229,4 +241,4 @@ agentctl shutdown --stop-sessions
 - 遠端機器需要遠端也是 Windows 並安裝 AgentDesk；Linux／macOS 的 host 尚未提供。
 - 介面沒有螢幕閱讀器支援（Dear ImGui 的限制）。
 - Files／Changes 面板只支援這台電腦上的資料夾；遠端機器的面板顯示「No folder」。
-- shell 所在資料夾的追蹤支援 PowerShell 與 cmd；其他 shell 只顯示啟動時的資料夾。
+- shell 所在資料夾的追蹤支援 PowerShell、cmd、WSL 的 bash，以及會送 OSC 7 的 shell；其他 shell 只顯示啟動時的資料夾。

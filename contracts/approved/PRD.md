@@ -1,6 +1,6 @@
 ---
 contract_type: PRD
-version: 1.2.0
+version: 1.3.0
 status: approved
 author_agent: PM
 sprint: 0
@@ -10,11 +10,12 @@ skills_used:
   - shared/domain-coding-agents@1.0.0
 upstream_deps:
   - raw_requirement@2026-11-16
-  - docs/design/AgentDesk_Design.md@2.1
+  - docs/design/AgentDesk_Design.md@2.3
 downstream_consumers:
   - RD
   - QA
 change_summary: |
+  1.3.0（Minor）：使用者要求接入 WSL（設計文件 v2.3、ADR-16）。新增 FR-28：WSL 發行版作為本機 shell，資料夾追蹤跟著 Linux 的 cd。不在範圍內的「WSL 支援承諾」改為「WSL 作為遠端機器（Linux 版 host）」。原有需求不變。
   1.2.0（Minor）：使用者要求功能與 herdr 一樣好用、外觀不同（設計文件 v2.1、ADR-13）。新增第 6 節需求：space／分頁／分割、注意力與通知、命令面板與快捷鍵、終端機搜尋與選取、worktree、子 Agent 協作、遠端機器、版面與 mod。原有需求不變。
   1.1.0（Minor）：跟進設計文件 v1.7。2.4 補紀錄被丟棄後顯示 Unknown 並保留 last_agent_state、report-state 新增 --kind／--message；2.7 驗收加退出碼（QA-13）。
   1.0.0：初版。M 模式精簡 PRD：需求本文以 docs/design/AgentDesk_Design.md v1.6 為單一真相來源，
@@ -107,7 +108,7 @@ change_summary: |
 | 授權 | 本身 MIT；依賴須與 MIT 相容 | ADR-10 |
 
 ## 4. 不在範圍內（Out of Scope）
-設計文件 1.3 的 P2、P3 項目，以及：HTTP backend、Docker、資料庫、遠端控制、自動多 Agent 排程、跨重開機續跑（ADR-07）、畫面文字推斷 Agent 狀態（ADR-09）、Windows 10 保證支援、WSL 支援承諾。
+設計文件 1.3 的 P2、P3 項目，以及：HTTP backend、Docker、資料庫、遠端控制、自動多 Agent 排程、跨重開機續跑（ADR-07）、畫面文字推斷 Agent 狀態（ADR-09）、Windows 10 保證支援、WSL 作為遠端機器（需要 Linux 版 agent-host）。
 
 ## 5. 假設與限制
 - 使用者預先安裝並登入 Claude Code（v2.1.295 以上才有 OSC 7501 狀態）與 Codex CLI；精確版本由 M0 凍結。
@@ -133,3 +134,4 @@ change_summary: |
 | FR-25 | Agent 可開子 Agent、給第一則任務、等待它、接收它的回報 | `HostFixture.SubAgentTaskReportAndWait` |
 | FR-26 | 可加入 ssh 可連線的機器，遠端的 space 與 Agent 顯示在同一個側欄 | `HostFixture.ProtocolOverBridgeCommand`；實際 ssh 待人工 |
 | FR-27 | 可切換版面（含看板與格狀），可用 Lua mod 加命令、面板與通知 | `ModsTest.*` |
+| FR-28 | 已安裝的 WSL 發行版自動列為 shell，在目前資料夾開啟；在 Linux 裡 cd 後，space 名稱、分支與 Files／Changes 跟著變（v1.3.0，ADR-16） | `CwdUri.*`；實機 Ubuntu 驗證見 TestReport |
