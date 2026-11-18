@@ -58,6 +58,39 @@ HANDLE g_wake = nullptr;  // set by IPC threads; the UI loop wakes and redraws
 float g_pending_dpi = 0.0f;
 std::atomic<bool> g_close_requested{false};
 std::atomic<int> g_focus_change{-1};  // -1 none, 0 lost, 1 gained
+
+// Windows takes Ctrl+Esc (Start) and Ctrl+Shift+Esc (Task Manager) before any window sees them.
+// herdr's Herdr 98 binds both (mods/win98/README.md 15-16: win98.start, win98.taskman); while
+// AgentDesk is in front and keys.json binds the chord (its layout section or global), a low-level
+// keyboard hook keeps it from the shell and hands it to the app. Anywhere else Windows keeps them.
+HWND g_main_hwnd = nullptr;
+std::atomic<bool> g_take_ctrl_esc{false};
+std::atomic<bool> g_take_ctrl_shift_esc{false};
+std::atomic<int> g_reserved_chord{0};  // 1 Ctrl+Esc, 2 Ctrl+Shift+Esc, waiting for the next frame
+bool g_swallow_esc_up = false;
+
+LRESULT CALLBACK reserved_keys_hook(int code, WPARAM wparam, LPARAM lparam) {
+    if (code == HC_ACTION) {
+        const auto* k = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lparam);  // Win32 contract
+        if (k->vkCode == VK_ESCAPE) {
+            const bool down = wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN;
+            if (!down && g_swallow_esc_up) {
+                g_swallow_esc_up = false;
+                return 1;
+            }
+            const bool ctrl = (::GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+            const bool shift = (::GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+            if (down && ctrl && g_main_hwnd != nullptr && ::GetForegroundWindow() == g_main_hwnd &&
+                (shift ? g_take_ctrl_shift_esc.load() : g_take_ctrl_esc.load())) {
+                g_reserved_chord = shift ? 2 : 1;
+                g_swallow_esc_up = true;
+                ::PostMessageW(g_main_hwnd, WM_NULL, 0, 0);  // wake the loop
+                return 1;
+            }
+        }
+    }
+    return ::CallNextHookEx(nullptr, code, wparam, lparam);
+}
 std::vector<std::string> g_dropped;   // files dropped on the window (UTF-8), for the app
 
 void create_rtv() {
@@ -346,6 +379,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     ::RegisterClassExW(&wc);
     HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"AgentDesk", WS_OVERLAPPEDWINDOW, 100, 100, 1400, 900,
                                 nullptr, nullptr, instance, nullptr);
+    g_main_hwnd = hwnd;
+    // Only for Ctrl+Esc / Ctrl+Shift+Esc while a binding wants them (reserved_keys_hook).
+    HHOOK reserved_hook = ::SetWindowsHookExW(WH_KEYBOARD_LL, reserved_keys_hook, instance, 0);
     if (!create_device(hwnd)) {
         destroy_device();
         ::UnregisterClassW(wc.lpszClassName, instance);
@@ -401,6 +437,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             app.on_close_requested();
         if (const int f = g_focus_change.exchange(-1); f >= 0)
             app.on_focus_changed(f == 1);
+        g_take_ctrl_esc = app.binds_chord(ImGuiMod_Ctrl | ImGuiKey_Escape);
+        g_take_ctrl_shift_esc = app.binds_chord(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Escape);
+        if (const int r = g_reserved_chord.exchange(0); r != 0)  // the bound command, as its window chord
+            app.run_chord(r == 2 ? (ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Escape) : (ImGuiMod_Ctrl | ImGuiKey_Escape));
         if (!g_dropped.empty())
             app.on_files_dropped(std::exchange(g_dropped, {}));
         if (exit_now || app.exit_requested())
@@ -473,6 +513,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
     destroy_device();
+    if (reserved_hook != nullptr)
+        ::UnhookWindowsHookEx(reserved_hook);
+    g_main_hwnd = nullptr;
     ::DestroyWindow(hwnd);
     ::UnregisterClassW(wc.lpszClassName, instance);
     ::CloseHandle(g_wake);
