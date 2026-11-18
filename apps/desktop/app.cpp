@@ -258,6 +258,7 @@ struct Settings {
     float spaces_share = 0.5f;   // spaces / agents split of the sidebar lists
     float panel_width = 368;     // right panel (Files / Changes), 280..900
     std::string agents_sort = "priority";  // or "space"
+    std::vector<std::string> palette_recent;  // last 20 palette commands, newest first
 };
 
 std::filesystem::path data_dir() {
@@ -305,6 +306,9 @@ Settings load_settings() {
     s.spaces_share = std::clamp(j.value("spaces_share", 0.5f), 0.1f, 0.9f);
     s.panel_width = std::clamp(j.value("panel_width", 368.0f), 280.0f, 900.0f);
     s.agents_sort = j.value("agents_sort", std::string("priority"));
+    for (const auto& r : j.value("palette_recent", Json::array()))
+        if (r.is_string())
+            s.palette_recent.push_back(r.get<std::string>());
     if (const auto it = j.find("mods_enabled"); it != j.end() && it->is_array()) {
         s.mods_enabled.clear();
         for (const auto& m : *it)
@@ -353,6 +357,7 @@ void save_settings(const Settings& s) {
             {"spaces_share", s.spaces_share},
             {"panel_width", s.panel_width},
             {"agents_sort", s.agents_sort},
+            {"palette_recent", s.palette_recent},
             {"mods_enabled", std::vector<std::string>(s.mods_enabled.begin(), s.mods_enabled.end())},
             {"layout", s.layout},
             {"machines", [&] {
@@ -1684,6 +1689,12 @@ struct App::State {
     int drag_tab = -1;
     float tab_scroll = 0;
     bool show_confirm = false;
+    bool show_picker = false;
+    char picker_buf[256] = {};
+    int picker_sel = -1;
+    bool picker_reset = true;
+    bool picker_earlier = false;
+    char help_buf[128] = {};
     std::string confirm_title, confirm_detail, confirm_ok, confirm_command;
     std::string settings_tab;  // tab to select when the settings window opens
     bool show_worktree_open = false;
@@ -1730,9 +1741,12 @@ struct App::State {
             return it->second.cwd;
         return settings.last_cwd;
     }
-    void toast(std::string title, std::string body, std::string session, ImU32 color, int seconds = 6) {
+    // herdr toasts: 5 s, 8 s for errors and warnings.
+    void toast(std::string title, std::string body, std::string session, ImU32 color, int seconds = 0) {
         if (!settings.toasts && !session.empty())
             return;
+        if (seconds <= 0)
+            seconds = color == g_pal->needs_you || color == g_pal->working ? 8 : 5;
         toasts.push_back({std::move(title), std::move(body), std::move(session), color,
                           Clock::now() + std::chrono::seconds(seconds)});
         while (toasts.size() > 5)
@@ -2442,9 +2456,33 @@ void run_command(App::State& s, const std::string& cmd) {
         }
         save_settings(s.settings);
     } else if (name == "app.picker") {
-        s.show_palette = true;
-        s.palette_buf[0] = '\0';
-        s.palette_sel = 0;
+        s.show_picker = !s.show_picker;
+        s.picker_buf[0] = '\0';
+        s.picker_sel = -1;
+        s.picker_reset = true;
+    } else if (name == "tab.goto" || name == "tab.close_at") {
+        const auto c = arg.find(':');
+        const int sp = std::atoi(arg.substr(0, c).c_str());
+        const int t = c == std::string::npos ? 0 : std::atoi(arg.substr(c + 1).c_str());
+        s.ws.select_space(sp);
+        s.ws.select_tab(t);
+        if (name == "tab.close_at")
+            run_command(s, "tab.close");
+        s.focus_view(s.ws.focused_session());
+    } else if (name == "space.new_on") {
+        Placement p;
+        p.target = LaunchTarget::kSpace;
+        p.machine = arg;
+        ui::HostClient* h = s.host_for(arg);
+        const std::string shell = pick_shell(s.settings.shell_profile, h->profiles());
+        if (h->connected() && !shell.empty())
+            create_session(s, shell, "", "", p);
+    } else if (name == "window.minimize") {
+        ::ShowWindow(s.config.hwnd, SW_MINIMIZE);
+    } else if (name == "window.maximize") {
+        ::ShowWindow(s.config.hwnd, ::IsZoomed(s.config.hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+    } else if (name == "window.close") {
+        ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
     } else if (name == "machine.add") {
         s.settings_tab = "Machines";
         s.show_settings = true;
@@ -4957,56 +4995,633 @@ void draw_details(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
     ImGui::EndChild();
 }
 
+// ------------------------------------------------------------------ overlays (herdr mods)
+ImU32 popover_color() {
+    return g_pal->light ? mix(g_pal->card, IM_COL32(0, 0, 0, 255), 0.03f)
+                        : mix(g_pal->card, IM_COL32(255, 255, 255, 255), 0.06f);
+}
+
+// herdr overlay frame: popover background, 1 px border, radius 8.
+void push_overlay_style() {
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, v4(popover_color()));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, v4(popover_color()));
+    ImGui::PushStyleColor(ImGuiCol_Border, v4(g_pal->border));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, px(8));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(18), px(18)));
+}
+void pop_overlay_style() {
+    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor(3);
+}
+
+// Title row with a clickable "Esc" chip at the right; returns true when the chip is clicked.
+bool overlay_title(App::State& s, const char* title, float size = 15.0f) {
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fpx(size), FLT_MAX, 0, title);
+    dl->AddText(s.fonts.ui_bold, fpx(size), p, g_pal->text, title);
+    const ImVec2 e = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, "Esc");
+    const ImVec2 ea(p.x + w - e.x - px(10), p.y + (t.y - e.y - px(4)) * 0.5f);
+    ImGui::SetCursorScreenPos(ea);
+    const bool clicked = ImGui::InvisibleButton("##esc", ImVec2(e.x + px(10), e.y + px(4)));
+    dl->AddRect(ea, ImVec2(ea.x + e.x + px(10), ea.y + e.y + px(4)), g_pal->border, px(4));
+    dl->AddText(s.fonts.ui, fpx(11), ImVec2(ea.x + px(5), ea.y + px(2)), ImGui::IsItemHovered() ? g_pal->text : g_pal->faint,
+                "Esc");
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + t.y + px(10)));
+    return clicked;
+}
+
+// Key chips: each part of "Ctrl+Shift+P" in its own bordered chip.
+float key_chips(App::State& s, ImDrawList* dl, float right, float cy, const std::string& chord) {
+    if (chord.empty())
+        return 0;
+    std::vector<std::string> parts;
+    std::string cur;
+    for (const char c : chord) {
+        if (c == '+' && !cur.empty()) {
+            parts.push_back(cur);
+            cur.clear();
+        } else {
+            cur += c;
+        }
+    }
+    if (!cur.empty())
+        parts.push_back(cur);
+    float x = right;
+    for (auto it = parts.rbegin(); it != parts.rend(); ++it) {
+        std::string k = *it;
+        for (auto& c : k)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(10.5f), FLT_MAX, 0, k.c_str());
+        const float w = t.x + px(10);
+        x -= w;
+        dl->AddRectFilled(ImVec2(x, cy - px(9)), ImVec2(x + w, cy + px(9)), raised_color(), px(4));
+        dl->AddRect(ImVec2(x, cy - px(9)), ImVec2(x + w, cy + px(9)), g_pal->border, px(4));
+        dl->AddText(s.fonts.ui, fpx(10.5f), ImVec2(x + px(5), cy - t.y * 0.5f), g_pal->dim, k.c_str());
+        x -= px(4);
+    }
+    return right - x;
+}
+
+// herdr palette fuzzy score (palette/main.js 112-129): letters in order, +1 per hit, +6 at a word
+// start, +3 per consecutive run, -0.3 per skipped char (max 6), -0.02 per title char.
+std::optional<float> palette_score(const std::string& title, const std::string& query, std::vector<int>* hits) {
+    if (query.empty())
+        return 0.0f;
+    float score = 0;
+    std::size_t qi = 0;
+    int run = 0;
+    int last = -1;
+    for (std::size_t i = 0; i < title.size() && qi < query.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(title[i])) != std::tolower(static_cast<unsigned char>(query[qi])))
+            continue;
+        score += 1;
+        const char prev = i == 0 ? ' ' : title[i - 1];
+        if (i == 0 || std::strchr(" :.-_/", prev) != nullptr)
+            score += 6;
+        if (last >= 0 && static_cast<int>(i) == last + 1) {
+            ++run;
+            score += 3.0f * static_cast<float>(run);
+        } else {
+            if (last >= 0)
+                score -= 0.3f * static_cast<float>(std::min<std::size_t>(6, i - static_cast<std::size_t>(last) - 1));
+            run = 0;
+        }
+        last = static_cast<int>(i);
+        if (hits != nullptr)
+            hits->push_back(static_cast<int>(i));
+        ++qi;
+    }
+    if (qi < query.size())
+        return std::nullopt;
+    return score - 0.02f * static_cast<float>(title.size());
+}
+
+const char* command_group(const std::string& id) {
+    auto starts = [&](const char* p) { return id.rfind(p, 0) == 0; };
+    if (starts("tab.") || id == "app.picker")
+        return "Tab";
+    if (starts("pane."))
+        return "Pane";
+    if (starts("space.") || starts("worktree."))
+        return "Space";
+    if (starts("layout") || starts("sidebar.") || starts("details.") || starts("panel"))
+        return "Layout";
+    if (starts("terminal.") || starts("session.") || id == "agent.new")
+        return "Terminal";
+    if (starts("agent."))
+        return "Agent";
+    if (starts("window."))
+        return "Window";
+    return "App";
+}
+
+void draw_palette(App::State& s) {
+    if (!s.show_palette)
+        return;
+    struct Entry {
+        std::string title, cmd, group, chord;
+        float score = 0;
+        std::vector<int> hits;
+    };
+    std::vector<Entry> all;
+    auto add = [&](std::string title, std::string cmd, std::string group) {
+        all.push_back({std::move(title), cmd, std::move(group), s.keymap.chord_for(cmd)});
+    };
+    add("Go to space or tab\xE2\x80\xA6", "app.picker", "Tab");
+    for (const auto& c : kCommands)
+        if (std::string(c.id) != "app.picker")
+            add(c.label, c.id, command_group(c.id));
+    add("Minimize window", "window.minimize", "Window");
+    add("Maximize window", "window.maximize", "Window");
+    add("Close window", "window.close", "Window");
+    for (const auto& p : kPalettes)
+        add(std::string("Theme: ") + p.label, std::string("theme:") + p.id, "App");
+    for (const auto& l : s.layouts)
+        add("Layout: " + l.name, "layout:" + l.name, "Layout");
+    for (const auto& c : s.mods->commands())
+        add(c.mod + ": " + c.label, "mod:" + c.mod + ":" + c.id, "Mods");
+    std::string q;
+    for (const char* c = s.palette_buf; *c != 0; ++c)
+        if (*c != ' ')
+            q += *c;
+    std::vector<Entry> shown;
+    for (auto& e : all) {
+        if (auto sc = palette_score(e.title, q, &e.hits)) {
+            e.score = *sc;
+            shown.push_back(e);
+        } else if (auto sc2 = palette_score(e.group + " " + e.title + " " + e.cmd, q, nullptr)) {
+            e.score = *sc2 - 4;
+            e.hits.clear();
+            shown.push_back(e);
+        }
+    }
+    auto recency = [&](const std::string& cmd) {
+        const auto it = std::find(s.settings.palette_recent.begin(), s.settings.palette_recent.end(), cmd);
+        return it == s.settings.palette_recent.end() ? 1000 : static_cast<int>(it - s.settings.palette_recent.begin());
+    };
+    struct Row {
+        const Entry* e = nullptr;
+        std::string header;
+    };
+    std::vector<Row> rows;
+    std::vector<const Entry*> order;
+    if (q.empty()) {
+        // Recent (5 of the last 20), then groups in herdr's order.
+        int n = 0;
+        for (const auto& cmd : s.settings.palette_recent) {
+            if (n >= 5)
+                break;
+            for (const auto& e : shown)
+                if (e.cmd == cmd) {
+                    if (n == 0)
+                        rows.push_back({nullptr, "Recent"});
+                    rows.push_back({&e, {}});
+                    order.push_back(&e);
+                    ++n;
+                    break;
+                }
+        }
+        for (const char* g : {"Tab", "Pane", "Space", "Layout", "Terminal", "Agent", "Window", "App", "Mods"}) {
+            bool head = false;
+            for (const auto& e : shown) {
+                if (e.group != g)
+                    continue;
+                if (!head) {
+                    rows.push_back({nullptr, g});
+                    head = true;
+                }
+                rows.push_back({&e, {}});
+                order.push_back(&e);
+            }
+        }
+    } else {
+        std::vector<const Entry*> sorted;
+        for (const auto& e : shown)
+            sorted.push_back(&e);
+        std::stable_sort(sorted.begin(), sorted.end(), [&](const Entry* a, const Entry* b) {
+            if (a->score != b->score)
+                return a->score > b->score;
+            return recency(a->cmd) < recency(b->cmd);
+        });
+        for (const auto* e : sorted) {
+            rows.push_back({e, {}});
+            order.push_back(e);
+        }
+    }
+    const int n = static_cast<int>(order.size());
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float w = std::min(px(620), vp->WorkSize.x - px(16));
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + px(60)));
+    ImGui::SetNextWindowSize(ImVec2(w, 0));
+    push_overlay_style();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(10), px(10)));
+    ImGui::Begin("##palette", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::PopStyleVar();
+    if (ImGui::IsWindowAppearing())
+        ImGui::SetKeyboardFocusHere();
+    // Search field, 36 px, search icon, "Esc" hint.
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 sp = ImGui::GetCursorScreenPos();
+    const float fw = ImGui::GetContentRegionAvail().x;
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(34), (px(36) - ImGui::GetFontSize()) * 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, px(7));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, v4(alpha(g_pal->text, 0)));
+    ImGui::SetNextItemWidth(fw);
+    if (ImGui::InputTextWithHint("##q", "Type a command\xE2\x80\xA6", s.palette_buf, sizeof s.palette_buf))
+        s.palette_sel = 0;
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
+    draw_icon(s, dl, ui::icon::kSearch, fpx(14), ImVec2(sp.x + px(17), sp.y + px(18)), g_pal->faint);
+    dl->AddText(s.fonts.ui, fpx(11), ImVec2(sp.x + fw - px(30), sp.y + px(18) - fpx(11) * 0.6f), g_pal->faint, "Esc");
+    dl->AddLine(ImVec2(sp.x - px(10), sp.y + px(40)), ImVec2(sp.x + fw + px(10), sp.y + px(40)), g_pal->border);
+    ImGui::SetCursorScreenPos(ImVec2(sp.x, sp.y + px(46)));
+    // Up/Down stop at the ends; PageUp/PageDown move 10.
+    if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
+        ++s.palette_sel;
+    if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
+        --s.palette_sel;
+    if (ImGui::IsKeyPressed(ImGuiKey_PageDown))
+        s.palette_sel += 10;
+    if (ImGui::IsKeyPressed(ImGuiKey_PageUp))
+        s.palette_sel -= 10;
+    s.palette_sel = std::clamp(s.palette_sel, 0, std::max(0, n - 1));
+    std::string run;
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    ImGui::BeginChild("##list", ImVec2(fw, std::min(px(320) + px(60), std::max(px(40), static_cast<float>(rows.size()) * px(32)))),
+                      ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImDrawList* d = ImGui::GetWindowDrawList();
+    int idx = -1;
+    for (const auto& row : rows) {
+        if (row.e == nullptr) {
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            ImGui::Dummy(ImVec2(fw, px(26)));
+            d->AddText(s.fonts.ui_medium, fpx(11), ImVec2(a.x + px(10), a.y + px(13) - fpx(11) * 0.3f), g_pal->faint,
+                       row.header.c_str());
+            continue;
+        }
+        ++idx;
+        const auto* e = row.e;
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        ImGui::PushID(idx);
+        if (ImGui::InvisibleButton("##e", ImVec2(fw - px(4), px(32))))
+            run = e->cmd;
+        const bool hov = ImGui::IsItemHovered();
+        ImGui::PopID();
+        if (hov && ImGui::GetIO().MouseDelta.x * ImGui::GetIO().MouseDelta.x + ImGui::GetIO().MouseDelta.y * ImGui::GetIO().MouseDelta.y > 0)
+            s.palette_sel = idx;
+        const bool sel = idx == s.palette_sel;
+        if (sel) {
+            d->AddRectFilled(a, ImVec2(a.x + fw - px(4), a.y + px(32)), g_pal->selected, px(7));
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) || ImGui::IsKeyPressed(ImGuiKey_UpArrow) ||
+                ImGui::IsKeyPressed(ImGuiKey_PageDown) || ImGui::IsKeyPressed(ImGuiKey_PageUp))
+                ImGui::SetScrollHereY();
+        }
+        const float cy = a.y + px(16);
+        // Title with matched letters in accent semibold.
+        float x = a.x + px(10);
+        for (std::size_t i = 0; i < e->title.size();) {
+            std::size_t len = 1;
+            const unsigned char c = static_cast<unsigned char>(e->title[i]);
+            if (c >= 0xF0)
+                len = 4;
+            else if (c >= 0xE0)
+                len = 3;
+            else if (c >= 0xC0)
+                len = 2;
+            const bool hit = std::find(e->hits.begin(), e->hits.end(), static_cast<int>(i)) != e->hits.end();
+            ImFont* f = hit ? s.fonts.ui_bold : s.fonts.ui;
+            const char* b = e->title.c_str() + i;
+            d->AddText(f, fpx(13), ImVec2(x, cy - fpx(13) * 0.6f), hit ? g_pal->focus : g_pal->text, b, b + len);
+            x += f->CalcTextSizeA(fpx(13), FLT_MAX, 0, b, b + len).x;
+            i += len;
+        }
+        float right = a.x + fw - px(14);
+        right -= key_chips(s, d, right, cy, e->chord);
+        if (!q.empty()) {
+            const float gw = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, e->group.c_str()).x;
+            d->AddText(s.fonts.ui, fpx(11), ImVec2(right - gw - px(8), cy - fpx(11) * 0.6f), g_pal->faint, e->group.c_str());
+        }
+    }
+    if (n == 0) {
+        ImGui::SetCursorPosX(px(10));
+        ImGui::TextDisabled("Nothing matches \"%s\". Places are in the picker.", s.palette_buf);
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && n > 0)
+        run = order[static_cast<std::size_t>(s.palette_sel)]->cmd;
+    const bool close = ImGui::IsKeyPressed(ImGuiKey_Escape) ||
+                       (!ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
+                        (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)));
+    ImGui::End();
+    pop_overlay_style();
+    if (!run.empty() || close) {
+        s.show_palette = false;
+        s.focus_view(s.ws.focused_session());
+    }
+    if (!run.empty()) {
+        auto& r = s.settings.palette_recent;
+        r.erase(std::remove(r.begin(), r.end(), run), r.end());
+        r.insert(r.begin(), run);
+        if (r.size() > 20)
+            r.resize(20);
+        save_settings(s.settings);
+        run_command(s, run);
+    }
+}
+
+// "Go to…" picker (mods/picker): spaces with their tabs, busy ones first, quiet ones folded under
+// "earlier"; substring filter on "<space> <tab> <programs>"; Up/Down wrap; Ctrl+D closes the tab.
+void draw_picker(App::State& s) {
+    if (!s.show_picker)
+        return;
+    const auto cwds = s.session_cwds();
+    struct Row {
+        enum Kind { kSpace, kTab, kEarlier, kNew } kind;
+        int space = -1;
+        int tab = -1;
+        std::string label, detail, cmd;
+        Attention att = Attention::kNone;
+    };
+    const std::string q = [&] {
+        std::string x = s.picker_buf;
+        for (auto& c : x)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return x;
+    }();
+    struct SpaceRows {
+        int index;
+        int urgency;
+        std::vector<Row> tabs;
+    };
+    std::vector<SpaceRows> busy, quiet;
+    for (int i = 0; i < static_cast<int>(s.ws.spaces.size()); ++i) {
+        const auto& sp = s.ws.spaces[static_cast<std::size_t>(i)];
+        const std::string sname = s.ws.space_title(i, cwds);
+        SpaceRows sr{i, 0, {}};
+        for (int t = 0; t < static_cast<int>(sp.tabs.size()); ++t) {
+            const auto& tab = sp.tabs[static_cast<std::size_t>(t)];
+            const auto ids = s.ws.sessions_in(tab);
+            std::vector<Attention> atts;
+            std::string programs;
+            int subs = 0;
+            for (const auto& id : ids) {
+                atts.push_back(s.attention_of(id));
+                if (s.views_by_id.count(id)) {
+                    const auto& v = s.views_by_id[id];
+                    const auto pn = program_info(v.program, v.profile_id).name;
+                    if (programs.find(pn) == std::string::npos)
+                        programs += (programs.empty() ? "" : " \xC2\xB7 ") + pn;
+                }
+            }
+            for (const auto& [cid, cv] : s.views_by_id)
+                if (!cv.parent.empty() && std::find(ids.begin(), ids.end(), cv.parent) != ids.end() &&
+                    s.ws.find(cid).space < 0)
+                    ++subs;
+            if (subs > 0)
+                programs += " +" + std::to_string(subs);
+            std::string tname = tab.name;
+            if (tname.empty() && !ids.empty())
+                tname = s.pane_title(tab.focused.empty() ? ids.front() : tab.focused);
+            std::string hay = sname + " " + tname + " " + programs;
+            for (auto& c : hay)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (!q.empty() && hay.find(q) == std::string::npos)
+                continue;
+            Row r{Row::kTab, i, t, tname, programs, "", ui::most_urgent(atts)};
+            sr.urgency = std::max(sr.urgency, urgency(r.att));
+            sr.tabs.push_back(std::move(r));
+        }
+        if (sr.tabs.empty())
+            continue;
+        (sr.urgency >= 2 ? busy : quiet).push_back(std::move(sr));
+    }
+    std::stable_sort(busy.begin(), busy.end(), [](const SpaceRows& a, const SpaceRows& b) {
+        return (a.urgency == 4) > (b.urgency == 4);
+    });
+    std::vector<Row> rows;
+    auto put = [&](const SpaceRows& sr) {
+        rows.push_back({Row::kSpace, sr.index, -1, s.ws.space_title(sr.index, cwds), "", "", Attention::kNone});
+        for (const auto& t : sr.tabs)
+            rows.push_back(t);
+    };
+    for (const auto& sr : busy)
+        put(sr);
+    const bool show_quiet = s.picker_earlier || !q.empty() || busy.empty();
+    if (!quiet.empty() && !busy.empty() && q.empty()) {
+        char b[64];
+        std::snprintf(b, sizeof b, "earlier: %zu quiet space%s %s", quiet.size(), quiet.size() == 1 ? "" : "s",
+                      s.picker_earlier ? "\xE2\x96\xB4" : "\xE2\x96\xBE");
+        rows.push_back({Row::kEarlier, -1, -1, b, "", "", Attention::kNone});
+    }
+    if (show_quiet)
+        for (const auto& sr : quiet)
+            put(sr);
+    rows.push_back({Row::kNew, -1, -1, "+ new tab", "", "tab.new", Attention::kNone});
+    rows.push_back({Row::kNew, -1, -1, "+ new space", "", "space.new", Attention::kNone});
+    for (const auto& r : s.remotes)
+        if (r.host->connected())
+            rows.push_back({Row::kNew, -1, -1, "+ new space on " + r.cfg.name, "", "space.new_on:" + r.cfg.name,
+                            Attention::kNone});
+    std::vector<int> selectable;
+    for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+        if (rows[static_cast<std::size_t>(i)].kind != Row::kSpace)
+            selectable.push_back(i);
+    // Opens on the current tab; typing selects the first matching tab.
+    if (s.picker_sel < 0 || s.picker_reset) {
+        s.picker_sel = 0;
+        for (int k = 0; k < static_cast<int>(selectable.size()); ++k) {
+            const auto& r = rows[static_cast<std::size_t>(selectable[static_cast<std::size_t>(k)])];
+            if (r.kind == Row::kTab &&
+                (!q.empty() || (r.space == s.ws.active_space && s.ws.active() && r.tab == s.ws.active()->active_tab))) {
+                s.picker_sel = k;
+                break;
+            }
+        }
+        s.picker_reset = false;
+    }
+    const int n = static_cast<int>(selectable.size());
+    if (n > 0) {
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
+            s.picker_sel = (s.picker_sel + 1) % n;
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
+            s.picker_sel = (s.picker_sel + n - 1) % n;
+        s.picker_sel = std::clamp(s.picker_sel, 0, n - 1);
+    }
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float w = std::min(px(640), vp->WorkSize.x - px(16));
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + px(40)));
+    ImGui::SetNextWindowSize(ImVec2(w, 0));
+    push_overlay_style();
+    ImGui::Begin("##picker", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_AlwaysAutoResize);
+    bool close = overlay_title(s, "Go to\xE2\x80\xA6");
+    if (ImGui::IsWindowAppearing())
+        ImGui::SetKeyboardFocusHere();
+    const ImVec2 sp = ImGui::GetCursorScreenPos();
+    const float fw = ImGui::GetContentRegionAvail().x;
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(34), (px(36) - ImGui::GetFontSize()) * 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, px(7));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_Border, v4(g_pal->focus));
+    ImGui::SetNextItemWidth(fw);
+    if (ImGui::InputTextWithHint("##pq", "Go to a tab, space or agent\xE2\x80\xA6", s.picker_buf, sizeof s.picker_buf))
+        s.picker_reset = true;
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(3);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    draw_icon(s, dl, ui::icon::kSearch, fpx(14), ImVec2(sp.x + px(17), sp.y + px(18)), g_pal->faint);
+    ImGui::Dummy(ImVec2(0, px(6)));
+    std::string run;
+    bool toggle_earlier = false;
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    float list_h = 0;
+    for (const auto& r : rows)
+        list_h += r.kind == Row::kSpace ? px(29) : r.kind == Row::kEarlier ? px(35) : r.kind == Row::kNew ? px(36) : px(32);
+    ImGui::BeginChild("##plist", ImVec2(fw, std::min(px(320), list_h + px(2))), ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NoBackground);
+    ImDrawList* d = ImGui::GetWindowDrawList();
+    int k = -1;
+    for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
+        const auto& r = rows[static_cast<std::size_t>(i)];
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        if (r.kind == Row::kSpace) {
+            ImGui::Dummy(ImVec2(fw, px(29)));
+            const auto& spc = s.ws.spaces[static_cast<std::size_t>(r.space)];
+            const float side = px(18), cy = a.y + px(16);
+            d->AddRectFilled(ImVec2(a.x + px(6), cy - side * 0.5f), ImVec2(a.x + px(6) + side, cy + side * 0.5f),
+                             r.label == "~" ? g_pal->faint : avatar_color(spc.color), px(5));
+            const std::string letter = r.label.empty() ? std::string("?") : std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(r.label[0]))));
+            const ImVec2 lt = s.fonts.ui_bold->CalcTextSizeA(fpx(10.5f), FLT_MAX, 0, letter.c_str());
+            d->AddText(s.fonts.ui_bold, fpx(10.5f), ImVec2(a.x + px(6) + (side - lt.x) * 0.5f, cy - lt.y * 0.5f),
+                       IM_COL32(255, 255, 255, 255), letter.c_str());
+            d->AddText(s.fonts.ui_medium, fpx(13), ImVec2(a.x + px(6) + side + px(9), cy - fpx(13) * 0.6f), g_pal->text,
+                       r.label.c_str());
+            continue;
+        }
+        ++k;
+        const float rh = r.kind == Row::kEarlier ? px(35) : r.kind == Row::kNew ? px(36) : px(32);
+        ImGui::PushID(i);
+        const bool clicked = ImGui::InvisibleButton("##r", ImVec2(fw - px(4), rh));
+        const bool hov = ImGui::IsItemHovered();
+        ImGui::PopID();
+        if (hov && (ImGui::GetIO().MouseDelta.x != 0 || ImGui::GetIO().MouseDelta.y != 0))
+            s.picker_sel = k;
+        const bool sel = k == s.picker_sel;
+        if (sel) {
+            d->AddRectFilled(a, ImVec2(a.x + fw - px(4), a.y + rh), g_pal->selected, px(7));
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) || ImGui::IsKeyPressed(ImGuiKey_UpArrow))
+                ImGui::SetScrollHereY();
+        }
+        const float cy = a.y + rh * 0.5f;
+        if (r.kind == Row::kTab) {
+            // Status glyph: spinner working, ○ idle, ● status colour, · none.
+            const float gx = a.x + px(33);
+            if (r.att == Attention::kWorking)
+                status_mark(s, d, gx - px(2), cy, r.att, true);
+            else if (r.att == Attention::kIdle)
+                d->AddCircle(ImVec2(gx + px(4), cy), px(3.5f), g_pal->idle, 0, px(1.3f));
+            else if (r.att != Attention::kNone)
+                d->AddCircleFilled(ImVec2(gx + px(4), cy), px(3.5f), attention_color(r.att));
+            else
+                d->AddCircleFilled(ImVec2(gx + px(4), cy), px(1.2f), g_pal->faint);
+            const bool here = s.ws.active_space == r.space && s.ws.active() != nullptr && s.ws.active()->active_tab == r.tab;
+            float x = gx + px(16);
+            const float tw = text_clipped(d, here ? s.fonts.ui_bold : s.fonts.ui, fpx(13), ImVec2(x, cy - fpx(13) * 0.6f),
+                                          g_pal->text, r.label, px(220));
+            x += tw + px(8);
+            if (r.att == Attention::kBlocked || r.att == Attention::kDone) {
+                const char* word = r.att == Attention::kBlocked ? "needs you" : "finished";
+                d->AddText(s.fonts.ui, fpx(12), ImVec2(x, cy - fpx(12) * 0.6f), attention_color(r.att), word);
+                x += s.fonts.ui->CalcTextSizeA(fpx(12), FLT_MAX, 0, word).x + px(8);
+            }
+            text_clipped(d, s.fonts.ui, fpx(12), ImVec2(x, cy - fpx(12) * 0.6f), g_pal->faint, r.detail,
+                         a.x + fw - px(12) - x);
+        } else {
+            d->AddText(s.fonts.ui, fpx(r.kind == Row::kEarlier ? 12.0f : 13.0f), ImVec2(a.x + px(12), cy - fpx(13) * 0.6f),
+                       r.kind == Row::kEarlier ? g_pal->faint : g_pal->dim, r.label.c_str());
+        }
+        const bool go = clicked || (sel && ImGui::IsKeyPressed(ImGuiKey_Enter, false));
+        if (go) {
+            if (r.kind == Row::kEarlier)
+                toggle_earlier = true;
+            else if (r.kind == Row::kNew)
+                run = r.cmd;
+            else
+                run = "tab.goto:" + std::to_string(r.space) + ":" + std::to_string(r.tab);
+        }
+        if (sel && r.kind == Row::kTab && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false))
+            run = "tab.close_at:" + std::to_string(r.space) + ":" + std::to_string(r.tab);
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    close = close || ImGui::IsKeyPressed(ImGuiKey_Escape) ||
+            (!ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
+             (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)));
+    ImGui::End();
+    pop_overlay_style();
+    if (toggle_earlier)
+        s.picker_earlier = !s.picker_earlier;  // stays open, selection stays on the toggle
+    if (!run.empty() || close) {
+        s.show_picker = false;
+        s.focus_view(s.ws.focused_session());
+    }
+    if (!run.empty())
+        run_command(s, run);
+}
+
+// Toasts (mods/toast): 340 wide, bottom-right 16 px in, 8 px apart; a dot coloured by level;
+// title 13 semibold and body 12 muted, one line each; click runs its action and dismisses.
 void draw_toasts(App::State& s) {
     const auto now = Clock::now();
     while (!s.toasts.empty() && s.toasts.front().until < now)
         s.toasts.pop_front();
     const ImGuiViewport* vp = ImGui::GetMainViewport();
-    float y = vp->WorkPos.y + vp->WorkSize.y - px(44);
+    float y = vp->WorkPos.y + vp->WorkSize.y - px(16) - px(28);
     const float w = px(340);
     int n = 0;
     for (auto it = s.toasts.rbegin(); it != s.toasts.rend(); ++it, ++n) {
         const auto& t = *it;
-        const float fs = ImGui::GetFontSize();
-        const float body_h =
-            t.body.empty() ? 0 : ImGui::CalcTextSize(t.body.c_str(), nullptr, false, w - px(40)).y;
-        const float h = px(22) + fs + (t.body.empty() ? 0 : body_h + px(6));
+        const float h = t.body.empty() ? px(44) : px(62);
         y -= h;
-        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - w - px(18), y));
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - w - px(16), y));
         ImGui::SetNextWindowSize(ImVec2(w, h));
         char name[32];
         std::snprintf(name, sizeof name, "##toast%d", n);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(14), px(10)));
+        push_overlay_style();
         ImGui::Begin(name, nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
-                         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
-                         ImGuiWindowFlags_NoMove);
-        ImGui::PopStyleVar();
+                         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const ImVec2 wp = ImGui::GetWindowPos();
-        dl->AddRectFilled(ImVec2(wp.x, wp.y + px(10)), ImVec2(wp.x + px(4), wp.y + h - px(10)), t.color,
-                          px(2));
-        ImGui::PushFont(s.fonts.ui_bold, 0.0f);
-        ImGui::TextUnformatted(t.title.c_str());
-        ImGui::PopFont();
+        const float ty = wp.y + (t.body.empty() ? h * 0.5f - fpx(13) * 0.6f : px(14));
+        dl->AddCircleFilled(ImVec2(wp.x + px(18), ty + fpx(13) * 0.55f), px(4), t.color);
+        text_clipped(dl, s.fonts.ui_bold, fpx(13), ImVec2(wp.x + px(32), ty), g_pal->text, t.title, w - px(46));
         if (!t.body.empty()) {
-            ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
-            ImGui::PushTextWrapPos(w - px(26));
-            ImGui::TextUnformatted(t.body.c_str());
-            ImGui::PopTextWrapPos();
-            ImGui::PopStyleColor();
+            std::string body = t.body;
+            std::replace(body.begin(), body.end(), '\n', ' ');
+            text_clipped(dl, s.fonts.ui, fpx(12), ImVec2(wp.x + px(32), ty + px(20)), g_pal->dim, body, w - px(46));
         }
         if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             if (!t.session.empty())
                 s.focus(t.session);
             it->until = now;  // dismiss
         }
+        if (ImGui::IsWindowHovered() && !t.body.empty())
+            ImGui::SetTooltip("%s", t.body.c_str());
         ImGui::End();
+        pop_overlay_style();
         y -= px(8);
     }
 }
 
-// Floating view of a sub-agent over the panes, with "open as pane" and close.
+// Peek (mods/peek): a dialog 80 % x 80 % with a 34 px bar over the live terminal.
 void draw_peek(App::State& s) {
     if (s.peek.empty())
         return;
@@ -5017,31 +5632,53 @@ void draw_peek(App::State& s) {
         return;
     }
     const auto& v = vit->second;
-    const ui::Rect a = s.pane_area;
-    const float w = std::max(px(420), a.w * 0.72f);
-    const float h = std::max(px(300), a.h * 0.72f);
-    ImGui::SetNextWindowPos(ImVec2(a.x + (a.w - w) * 0.5f, a.y + (a.h - h) * 0.5f));
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::GetForegroundDrawList(ImGui::GetMainViewport())->AddRectFilled(vp->WorkPos,
+        ImVec2(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y), IM_COL32(0, 0, 0, 0));
+    const float w = vp->WorkSize.x * 0.8f;
+    const float h = vp->WorkSize.y * 0.8f;
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + (vp->WorkSize.y - h) * 0.5f));
     ImGui::SetNextWindowSize(ImVec2(w, h));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(14), px(12)));
+    push_overlay_style();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(8), px(4)));
     ImGui::Begin("##peek", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoScrollbar);
     ImGui::PopStyleVar();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float fs = ImGui::GetFontSize();
-    program_badge(dl, s.fonts.ui_bold, fs, p, px(20), program_info(v.program, v.profile_id));
-    std::string head = s.pane_title(s.peek);
+    const float bw = ImGui::GetContentRegionAvail().x;
+    const float cy = p.y + px(17);
+    const Attention att = s.attention_of(s.peek);
+    float x = p.x + px(6);
+    x += status_mark(s, dl, x, cy, att == Attention::kNone ? Attention::kIdle : att, true) + px(8);
+    program_badge(dl, s.fonts.ui_bold, fpx(10.5f), ImVec2(x, cy - px(7)), px(14), program_info(v.program, v.profile_id));
+    x += px(14) + px(8);
+    x += text_clipped(dl, s.fonts.ui_bold, fpx(13), ImVec2(x, cy - fpx(13) * 0.6f), g_pal->text, s.pane_title(s.peek),
+                      px(260)) + px(10);
+    const char* word = att == Attention::kWorking   ? "working"
+                       : att == Attention::kBlocked ? "needs you"
+                       : att == Attention::kDone    ? "finished"
+                                                    : "idle";
+    dl->AddText(s.fonts.ui, fpx(12), ImVec2(x, cy - fpx(12) * 0.6f), att == Attention::kNone ? g_pal->faint : attention_color(att),
+                word);
+    x += s.fonts.ui->CalcTextSizeA(fpx(12), FLT_MAX, 0, word).x + px(10);
     if (const auto pit = s.views_by_id.find(v.parent); pit != s.views_by_id.end())
-        head += "   \xE2\x80\xB9 sub-agent of " + s.pane_title(v.parent);
-    dl->AddText(s.fonts.ui_bold, fs, ImVec2(p.x + px(28), p.y + px(2)), g_pal->text, head.c_str());
-    ImGui::SetCursorScreenPos(
-        ImVec2(p.x + w - px(28) - ImGui::CalcTextSize("Open as pane").x - px(70), p.y - px(2)));
-    if (ImGui::Button("Open as pane"))
-        run_command(s, "agent.keep:" + s.peek);
-    ImGui::SameLine();
-    const bool close = ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape);
-    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + px(32)));
+        text_clipped(dl, s.fonts.ui, fpx(12), ImVec2(x, cy - fpx(12) * 0.6f), g_pal->faint, "from " + s.pane_title(v.parent),
+                     px(200));
+    const bool has_pane = s.ws.find(s.peek).space >= 0;
+    const char* go = has_pane ? "\xE2\x86\x97 go to" : "\xE2\x86\x97 keep";
+    const float gw = s.fonts.ui->CalcTextSizeA(fpx(12), FLT_MAX, 0, go).x + px(14);
+    ImGui::SetCursorScreenPos(ImVec2(p.x + bw - px(28) - gw - px(6), cy - px(11)));
+    std::string cmd;
+    if (ImGui::InvisibleButton("##go", ImVec2(gw, px(22))))
+        cmd = has_pane ? "agent.focus:" + s.peek : "agent.keep:" + s.peek;
+    dl->AddText(s.fonts.ui, fpx(12), ImVec2(p.x + bw - px(28) - gw - px(6) + px(7), cy - fpx(12) * 0.6f),
+                ImGui::IsItemHovered() ? g_pal->text : g_pal->dim, go);
+    const bool close = icon_button(s, "##peekx", ui::icon::kClose, ImVec2(p.x + bw - px(26), cy - px(11)), px(22), fpx(12),
+                                   nullptr, g_pal->dim) ||
+                       ImGui::IsKeyPressed(ImGuiKey_Escape);
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + px(34)));
     if (!s.peek.empty()) {
         ImGui::BeginChild("##peekbody", ImVec2(0, 0), ImGuiChildFlags_None,
                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
@@ -5053,13 +5690,16 @@ void draw_peek(App::State& s) {
         vs.view.theme.selection = g_pal->selection;
         vs.view.draw("peek", *sit->second, s.fonts, vs.focus_next);
         vs.focus_next = false;
-        for (const auto& cmd : vs.view.take_commands())
-            run_command(s, cmd);
+        for (const auto& c : vs.view.take_commands())
+            run_command(s, c);
         ImGui::EndChild();
     }
     ImGui::End();
-    if (close)
+    pop_overlay_style();
+    if (close || !cmd.empty())
         s.peek.clear();
+    if (!cmd.empty())
+        run_command(s, cmd);
 }
 
 // ------------------------------------------------------------------ overlays
@@ -5072,180 +5712,98 @@ void center_next(float w, float y_frac = 0.18f) {
 }
 
 void heading(App::State& s, const char* text) {
-    ImGui::PushFont(s.fonts.ui_bold, 16.0f);
+    ImGui::PushFont(s.fonts.ui_bold, fpx(15));
     ImGui::TextUnformatted(text);
     ImGui::PopFont();
 }
 
 void primary_button_style(bool push) {
+    // herdr "solid" buttons: foreground colour fill, background-coloured text.
     if (push) {
-        ImGui::PushStyleColor(ImGuiCol_Button, v4(g_pal->focus));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, v4(alpha(g_pal->focus, 220)));
-        ImGui::PushStyleColor(ImGuiCol_Text, v4(IM_COL32(255, 255, 255, 255)));
+        ImGui::PushStyleColor(ImGuiCol_Button, v4(g_pal->text));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, v4(alpha(g_pal->text, 220)));
+        ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->card));
     } else {
         ImGui::PopStyleColor(3);
     }
 }
 
-void draw_palette(App::State& s) {
-    if (!s.show_palette)
-        return;
-    struct Entry {
-        std::string label;
-        std::string cmd;
-        std::string hint;
-    };
-    std::vector<Entry> entries;
-    for (const auto& c : kCommands)
-        entries.push_back({c.label, c.id, s.keymap.chord_for(c.id)});
-    for (const auto& p : kPalettes)
-        entries.push_back({std::string("Theme: ") + p.label, std::string("theme:") + p.id, ""});
-    for (const auto& l : s.layouts)
-        entries.push_back(
-            {"Layout: " + l.name, "layout:" + l.name, l.name == s.settings.layout ? "current" : ""});
-    for (const auto& c : s.mods->commands())
-        entries.push_back({c.mod + ": " + c.label, "mod:" + c.mod + ":" + c.id, ""});
-    for (const auto& sess : s.sessions) {
-        const auto& v = s.views_by_id[sess->id()];
-        const bool child_without_pane = !v.parent.empty() && s.ws.find(sess->id()).space < 0;
-        entries.push_back({(child_without_pane ? "Peek " : "Go to ") + s.pane_title(sess->id()) +
-                               "  \xC2\xB7 " + folder_name(v.cwd),
-                           (child_without_pane ? "agent.peek:" : "agent.focus:") + sess->id(),
-                           v.agent_state});
-    }
-    for (int i = 0; i < static_cast<int>(s.ws.spaces.size()); ++i)
-        entries.push_back(
-            {"Space: " + s.ws.space_title(i, s.session_cwds()), "space.select:" + std::to_string(i + 1), ""});
-    std::vector<const Entry*> shown;
-    for (const auto& e : entries)
-        if (fuzzy_match(e.label, s.palette_buf))
-            shown.push_back(&e);
-    s.palette_sel = std::clamp(s.palette_sel, 0, std::max(0, static_cast<int>(shown.size()) - 1));
-
-    center_next(px(560), 0.12f);
-    ImGui::Begin("##palette", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
-                     ImGuiWindowFlags_AlwaysAutoResize);
-    if (ImGui::IsWindowAppearing())
-        ImGui::SetKeyboardFocusHere();
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::InputTextWithHint("##q", "Type a command, agent or space", s.palette_buf,
-                                 sizeof s.palette_buf))
-        s.palette_sel = 0;
-    const bool typing = ImGui::IsItemActive();
-    if (typing && ImGui::IsKeyPressed(ImGuiKey_DownArrow))
-        ++s.palette_sel;
-    if (typing && ImGui::IsKeyPressed(ImGuiKey_UpArrow))
-        --s.palette_sel;
-    s.palette_sel = std::clamp(s.palette_sel, 0, std::max(0, static_cast<int>(shown.size()) - 1));
-    std::string run;
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(px(8), px(1)));
-    ImGui::BeginChild("##list",
-                      ImVec2(0, std::min(px(380), static_cast<float>(shown.size()) * px(29) + px(4))));
-    for (int i = 0; i < static_cast<int>(shown.size()); ++i) {
-        const auto* e = shown[static_cast<std::size_t>(i)];
-        ImGui::PushID(i);
-        const bool sel = i == s.palette_sel;
-        if (ImGui::Selectable("##e", sel, 0, ImVec2(0, px(26))))
-            run = e->cmd;
-        if (sel && typing)
-            ImGui::SetScrollHereY();
-        ImGui::SameLine(px(10));
-        ImGui::TextUnformatted(e->label.c_str());
-        if (!e->hint.empty()) {
-            ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize(e->hint.c_str()).x - px(8));
-            ImGui::TextDisabled("%s", e->hint.c_str());
-        }
-        ImGui::PopID();
-    }
-    ImGui::EndChild();
-    ImGui::PopStyleVar();
-    if (typing && ImGui::IsKeyPressed(ImGuiKey_Enter) && !shown.empty())
-        run = shown[static_cast<std::size_t>(s.palette_sel)]->cmd;
-    const bool close =
-        ImGui::IsKeyPressed(ImGuiKey_Escape) || (!ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
-                                                 ImGui::IsMouseClicked(ImGuiMouseButton_Left));
-    ImGui::End();
-    if (!run.empty() || close) {
-        s.show_palette = false;
-        s.focus_view(s.ws.focused_session());
-    }
-    if (!run.empty())
-        run_command(s, run);
-}
-
+// Keybinds (mods/help): 640 x 520, filter, grouped spaces / tabs / panes / agents / terminal / window.
 void draw_help(App::State& s) {
     if (!s.show_help)
         return;
-    center_next(px(620), 0.08f);
-    ImGui::Begin("##help", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
-                     ImGuiWindowFlags_AlwaysAutoResize);
-    heading(s, "Keyboard shortcuts");
-    ImGui::TextDisabled(
-        "Change them in keys.json (Commands > Edit keys.json). These keys are not sent to programs.");
-    ImGui::BeginChild("##keys", ImVec2(0, px(460)));
-    if (ImGui::BeginTable("##k", 2, ImGuiTableFlags_RowBg)) {
-        ImGui::TableSetupColumn("a", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("b", ImGuiTableColumnFlags_WidthFixed, px(170));
-        auto row = [&](const std::string& label, const std::string& keys) {
-            if (keys.empty())
-                return;
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(label.c_str());
-            ImGui::TableNextColumn();
-            ImGui::TextDisabled("%s", keys.c_str());
-        };
-        // In the palette's order; numbered and directional families on one line each.
-        for (const auto& c : kCommands) {
-            const std::string id = c.id;
-            if (id.rfind("pane.go:", 0) == 0 || id.rfind("pane.swap:", 0) == 0)
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float w = std::min(px(640), vp->WorkSize.x - px(16));
+    const float h = std::min(px(520), vp->WorkSize.y - px(16));
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + (vp->WorkSize.y - h) * 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(w, h));
+    push_overlay_style();
+    ImGui::Begin("##help", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove);
+    bool close = overlay_title(s, "Keybinds");
+    if (ImGui::IsWindowAppearing())
+        ImGui::SetKeyboardFocusHere();
+    ImGui::SetNextItemWidth(-1);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(10), (px(32) - ImGui::GetFontSize()) * 0.5f));
+    ImGui::InputTextWithHint("##hf", "Type to filter\xE2\x80\xA6", s.help_buf, sizeof s.help_buf);
+    ImGui::PopStyleVar();
+    std::string f = s.help_buf;
+    for (auto& c : f)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    struct Item {
+        std::string key, label;
+    };
+    std::map<std::string, std::vector<Item>> groups;
+    auto label_of = [](const std::string& cmd) {
+        if (cmd.rfind("send:", 0) == 0)
+            return "type \"" + cmd.substr(5) + "\"";
+        std::string l = cmd;
+        for (auto& c : l)
+            if (c == '.' || c == ':' || c == '_')
+                c = ' ';
+        return l;
+    };
+    auto group_of = [](const std::string& cmd) -> std::string {
+        if (cmd.rfind("space.", 0) == 0)
+            return "spaces";
+        if (cmd.rfind("tab.", 0) == 0)
+            return "tabs";
+        if (cmd.rfind("pane.", 0) == 0)
+            return "panes";
+        if (cmd.rfind("agent.", 0) == 0)
+            return "agents";
+        return "window";
+    };
+    for (const auto& [chord, cmd] : s.keymap.global_map())
+        groups[group_of(cmd)].push_back({ui::Keymap::format(chord), label_of(cmd)});
+    for (const char* c : {"terminal.copy", "terminal.paste", "terminal.search", "terminal.select_all"})
+        groups["terminal"].push_back({s.keymap.chord_for(c) + " (terminal)", label_of(c)});
+    ImGui::BeginChild("##keys", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    for (const char* g : {"spaces", "tabs", "panes", "agents", "terminal", "window"}) {
+        bool head = false;
+        for (const auto& it : groups[g]) {
+            std::string hay = it.key + " " + it.label;
+            for (auto& c : hay)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (!f.empty() && hay.find(f) == std::string::npos)
                 continue;
-            row(c.label, s.keymap.chord_for(id));
-        }
-        auto family = [&](const char* label, const std::vector<std::string>& cmds) {
-            std::string keys;
-            for (const auto& cmd : cmds) {
-                const auto k = s.keymap.chord_for(cmd);
-                if (!k.empty())
-                    keys += (keys.empty() ? "" : "  ") + k;
+            if (!head) {
+                ImGui::Dummy(ImVec2(0, px(6)));
+                ImGui::PushFont(s.fonts.ui_medium, fpx(11));
+                ImGui::TextDisabled("%s", g);
+                ImGui::PopFont();
+                head = true;
             }
-            row(label, keys);
-        };
-        family("Focus pane left / down / up / right",
-               {"pane.go:left", "pane.go:down", "pane.go:up", "pane.go:right"});
-        family("Swap pane left / down / up / right",
-               {"pane.swap:left", "pane.swap:down", "pane.swap:up", "pane.swap:right"});
-        family("Resize pane",
-               {"pane.resize:left", "pane.resize:right", "pane.resize:up", "pane.resize:down"});
-        {
-            const auto t1 = s.keymap.chord_for("tab.select:1");
-            const auto s1 = s.keymap.chord_for("space.select:1");
-            if (!t1.empty())
-                row("Go to tab 1-9", t1.substr(0, t1.size() - 1) + "1...9");
-            if (!s1.empty())
-                row("Go to space 1-9", s1.substr(0, s1.size() - 1) + "1...9");
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, px(32)));
+            ImDrawList* d = ImGui::GetWindowDrawList();
+            d->AddText(s.fonts.ui_medium, fpx(12.5f), ImVec2(a.x, a.y + px(16) - fpx(12.5f) * 0.6f), g_pal->focus, it.key.c_str());
+            d->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(190), a.y + px(16) - fpx(13) * 0.6f), g_pal->text, it.label.c_str());
         }
-        for (const auto& [label, cmd] :
-             std::vector<std::pair<const char*, const char*>>{{"Copy", "terminal.copy"},
-                                                              {"Paste", "terminal.paste"},
-                                                              {"Find in terminal", "terminal.search"},
-                                                              {"Select all", "terminal.select_all"}}) {
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(label);
-            ImGui::TableNextColumn();
-            ImGui::TextDisabled("%s", s.keymap.chord_for(cmd).c_str());
-        }
-        ImGui::EndTable();
     }
     ImGui::EndChild();
-    ImGui::TextDisabled(
-        "Mouse: drag between panes to resize, double-click a tab or space to rename, right-click for "
-        "menus, double/triple-click selects a word/line.");
-    const bool close = ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape);
+    close = close || ImGui::IsKeyPressed(ImGuiKey_Escape);
     ImGui::End();
+    pop_overlay_style();
     if (close)
         s.show_help = false;
 }
@@ -5352,28 +5910,50 @@ void draw_launcher(App::State& s) {
     ImGui::EndPopup();
 }
 
+// Prompt (mods/prompt): 380 wide, title, "Esc", field "Name" prefilled and fully selected, a hint,
+// Cancel / Save. An empty name goes back to the automatic name.
 void draw_rename(App::State& s) {
     if (s.show_rename) {
         ImGui::OpenPopup("##rename");
         s.show_rename = false;
     }
-    center_next(px(420), 0.22f);
-    if (!ImGui::BeginPopupModal("##rename", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize))
+    center_next(px(380), 0.22f);
+    push_overlay_style();
+    const bool open = ImGui::BeginPopupModal("##rename", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
+    pop_overlay_style();
+    if (!open)
         return;
-    heading(s, s.rename_kind == "space" ? "Rename space"
-               : s.rename_kind == "tab" ? "Rename tab"
-                                        : "Rename pane");
-    ImGui::TextDisabled("Leave empty to go back to the automatic name.");
+    const char* title = s.rename_kind == "space" ? "Rename space" : s.rename_kind == "tab" ? "Rename tab" : "Rename pane";
+    bool cancel = overlay_title(s, title);
+    ImGui::PushFont(s.fonts.ui, fpx(12));
+    ImGui::TextDisabled("Name");
+    ImGui::PopFont();
     if (ImGui::IsWindowAppearing())
         ImGui::SetKeyboardFocusHere();
     ImGui::SetNextItemWidth(-1);
-    const bool enter =
-        ImGui::InputText("##n", s.rename_buf, sizeof s.rename_buf, ImGuiInputTextFlags_EnterReturnsTrue);
-    primary_button_style(true);
-    const bool ok = ImGui::Button("Rename") || enter;
-    primary_button_style(false);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(10), (px(36) - ImGui::GetFontSize()) * 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_Border, v4(g_pal->focus));
+    const bool enter = ImGui::InputText("##n", s.rename_buf, sizeof s.rename_buf,
+                                        ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
+    ImGui::PushFont(s.fonts.ui, fpx(11.5f));
+    ImGui::TextDisabled("%s", s.rename_kind == "space" ? "empty: named after its folder"
+                              : s.rename_kind == "tab" ? "empty: its number"
+                                                       : "empty: its program");
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(6)));
+    const float bw = px(80);
+    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - bw * 2 - px(26));
+    ImGui::PushStyleColor(ImGuiCol_Button, v4(raised_color()));
+    cancel = ImGui::Button("Cancel", ImVec2(bw, px(30))) || cancel || ImGui::IsKeyPressed(ImGuiKey_Escape);
+    ImGui::PopStyleColor();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
+    primary_button_style(true);
+    const bool ok = ImGui::Button("Save", ImVec2(bw, px(30))) || enter;
+    primary_button_style(false);
+    if (cancel)
         ImGui::CloseCurrentPopup();
     if (ok) {
         for (auto& sp : s.ws.spaces) {
@@ -5386,8 +5966,7 @@ void draw_rename(App::State& s) {
         if (s.rename_kind == "pane") {
             const auto loc = s.ws.find(s.rename_target);
             if (loc.space >= 0) {
-                auto& t =
-                    s.ws.spaces[static_cast<std::size_t>(loc.space)].tabs[static_cast<std::size_t>(loc.tab)];
+                auto& t = s.ws.spaces[static_cast<std::size_t>(loc.space)].tabs[static_cast<std::size_t>(loc.tab)];
                 if (s.rename_buf[0] == '\0')
                     t.pane_names.erase(s.rename_target);
                 else
@@ -5728,29 +6307,33 @@ void draw_confirm(App::State& s) {
         s.show_confirm = false;
     }
     center_next(px(380), 0.24f);
-    if (!ImGui::BeginPopupModal("##confirm", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize))
+    push_overlay_style();
+    const bool open = ImGui::BeginPopupModal("##confirm", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
+    pop_overlay_style();
+    if (!open)
         return;
-    ImGui::PushFont(s.fonts.ui_bold, fpx(14));
-    ImGui::TextUnformatted(s.confirm_title.c_str());
-    ImGui::PopFont();
+    bool cancel = overlay_title(s, s.confirm_title.c_str());
     if (!s.confirm_detail.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
         ImGui::TextWrapped("%s", s.confirm_detail.c_str());
         ImGui::PopStyleColor();
     }
-    ImGui::Dummy(ImVec2(0, px(6)));
-    const float bw = px(90);
-    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - bw * 2 - px(24));
-    if (ImGui::Button("Cancel", ImVec2(bw, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape))
-        ImGui::CloseCurrentPopup();
+    ImGui::Dummy(ImVec2(0, px(8)));
+    const float bw = px(84);
+    ImGui::SetCursorPosX(ImGui::GetWindowWidth() - bw * 2 - px(26));
+    ImGui::PushStyleColor(ImGuiCol_Button, v4(raised_color()));
+    cancel = ImGui::Button("Cancel", ImVec2(bw, px(30))) || cancel || ImGui::IsKeyPressed(ImGuiKey_Escape);
+    ImGui::PopStyleColor();
     ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Button, v4(g_pal->needs_you));
-    ImGui::PushStyleColor(ImGuiCol_Text, v4(IM_COL32(255, 255, 255, 255)));
-    if (ImGui::Button(s.confirm_ok.c_str(), ImVec2(bw, 0)) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
+    primary_button_style(true);
+    const bool ok = ImGui::Button(s.confirm_ok.c_str(), ImVec2(bw, px(30))) || ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+    primary_button_style(false);
+    if (cancel)
+        ImGui::CloseCurrentPopup();
+    if (ok) {
         ImGui::CloseCurrentPopup();
         run_command(s, s.confirm_command);
     }
-    ImGui::PopStyleColor(2);
     ImGui::EndPopup();
 }
 
@@ -6000,6 +6583,7 @@ void App::frame() {
     draw_worktree_open(s);
     draw_close_notice(s);
     draw_palette(s);
+    draw_picker(s);
     draw_help(s);
     draw_toasts(s);
 
