@@ -30,7 +30,8 @@ class HostClient;
 struct SessionView {
     std::string id;
     std::string name;
-    std::string cwd;
+    std::string cwd;        // current folder: follows cd in the shell (live_cwd), else start_cwd
+    std::string start_cwd;  // folder the session was started in
     std::string created_at;  // ISO 8601 UTC, from the host
     std::string program;     // what runs in the terminal now ("claude", "pwsh"), from the host
     std::string parent;      // session that started this one (sub-agent), or empty

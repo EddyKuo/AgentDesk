@@ -82,7 +82,13 @@ Json mods_json(std::uint8_t m) {
 
 void update_view_from_json(SessionView& v, const Json& j) {
     v.name = j.value("name", v.name);
-    v.cwd = j.value("cwd", v.cwd);
+    v.start_cwd = j.value("cwd", v.start_cwd);
+    // The shell's folder after cd (host reads it from the process); else where it started.
+    const std::string live = j.value("live_cwd", "");
+    if (!live.empty())
+        v.cwd = live;
+    else if (v.cwd.empty() || j.value("process_state", "") != "Running")
+        v.cwd = v.start_cwd;
     v.created_at = j.value("created_at", v.created_at);
     if (const auto p = j.find("program"); p != j.end() && p->is_string())
         v.program = p->get<std::string>();

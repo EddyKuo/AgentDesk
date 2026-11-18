@@ -23,7 +23,12 @@ std::string read_first_line(const fs::path& p) {
     return line;
 }
 
-std::string lookup(const std::string& dir_utf8) {
+struct Found {
+    std::string branch;
+    std::string top;
+};
+
+Found lookup(const std::string& dir_utf8) {
     std::error_code ec;
     fs::path dir(agentdesk::platform::win::to_wide(dir_utf8));
     for (int depth = 0; depth < 32 && !dir.empty(); ++depth) {
@@ -47,9 +52,11 @@ std::string lookup(const std::string& dir_utf8) {
         if (!head.empty()) {
             const std::string line = read_first_line(head);
             constexpr std::string_view kRef = "ref: refs/heads/";
+            const auto u8 = dir.u8string();
+            std::string top(u8.begin(), u8.end());
             if (line.rfind(kRef, 0) == 0)
-                return line.substr(kRef.size());
-            return line.size() >= 7 ? line.substr(0, 7) : line;
+                return {line.substr(kRef.size()), top};
+            return {line.size() >= 7 ? line.substr(0, 7) : line, top};
         }
         const fs::path parent = dir.parent_path();
         if (parent == dir)
@@ -61,9 +68,10 @@ std::string lookup(const std::string& dir_utf8) {
 
 }  // namespace
 
-std::string git_branch(const std::string& dir_utf8) {
+namespace {
+const Found& cached(const std::string& dir_utf8) {
     struct Entry {
-        std::string branch;
+        Found found;
         std::chrono::steady_clock::time_point at;
     };
     static std::map<std::string, Entry> cache;
@@ -71,13 +79,22 @@ std::string git_branch(const std::string& dir_utf8) {
     auto& e = cache[dir_utf8];
     if (e.at == std::chrono::steady_clock::time_point{} || now - e.at > std::chrono::seconds(4)) {
         try {
-            e.branch = lookup(dir_utf8);
+            e.found = lookup(dir_utf8);
         } catch (const std::exception&) {
-            e.branch.clear();
+            e.found = {};
         }
         e.at = now;
     }
-    return e.branch;
+    return e.found;
+}
+}  // namespace
+
+std::string git_branch(const std::string& dir_utf8) {
+    return cached(dir_utf8).branch;
+}
+
+std::string git_top(const std::string& dir_utf8) {
+    return cached(dir_utf8).top;
 }
 
 }  // namespace agentdesk::ui

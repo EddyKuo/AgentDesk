@@ -886,10 +886,15 @@ struct App::State {
             return Attention::kNone;
         return attention.get(id);
     }
+    // Folder that names an unnamed space (herdr): the repo's top folder, else the live folder.
     [[nodiscard]] std::map<std::string, std::string> session_cwds() const {
         std::map<std::string, std::string> m;
-        for (const auto& [id, v] : views_by_id)
-            m[id] = v.cwd;
+        for (const auto& [id, v] : views_by_id) {
+            const auto mi = machine_of.find(id);
+            const bool remote = mi != machine_of.end() && !mi->second.empty();
+            const std::string top = remote ? std::string() : ui::git_top(v.cwd);
+            m[id] = top.empty() ? v.cwd : top;
+        }
         return m;
     }
     [[nodiscard]] std::string focused_cwd() const {
