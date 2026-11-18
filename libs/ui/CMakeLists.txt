@@ -19,7 +19,8 @@ agentdesk_library(agentdesk_ui
     src/telemetry.cpp
     src/updates.cpp
     src/win98.cpp
-    src/image_cache.cpp)
+    src/image_cache.cpp
+    src/programs.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # host/input.hpp is part of the public interface (TerminalSource::send).

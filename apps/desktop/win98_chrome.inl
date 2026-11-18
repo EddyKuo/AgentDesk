@@ -196,12 +196,11 @@ std::vector<Task> tasks(App::State& s) {
         const auto& v = it->second;
         if (v.process_state == "Exited" || v.lost)
             continue;
-        const std::string prog = program_of(v);
+        const ui::Program prog = program_of(v);
         Task t;
         t.address = v.id;
         t.program = prog;
-        t.name =
-            !prog.empty() ? program_info(v.program, v.profile_id).name : (!v.name.empty() ? v.name : v.id);
+        t.name = prog.name;
         t.status = is_agent(v) ? status_word(s.attention_of(v.id)) : std::string();
         out.push_back(t);
     }
@@ -219,11 +218,12 @@ std::string pane_title_98(App::State& s, const std::string& id) {
     if (it == s.views_by_id.end())
         return {};
     const auto& v = it->second;
-    const std::string prog = program_of(v);
+    // window.js 12-13: no program, or a shell -> "DOS Prompt - <dos path>".
+    const ui::Program prog = program_of(v);
     const std::string where = k98::dos_path(v.cwd, home_dir());
-    if (prog.empty() || is_shell(prog) || is_shell_profile(prog))
+    if (prog.shell)
         return "DOS Prompt - " + where;
-    const std::string pname = program_info(v.program, v.profile_id).name;
+    const std::string pname = prog.name;
     std::string t;
     if (const auto si = s.by_id.find(id); si != s.by_id.end())
         t = si->second->snapshot()->title;
@@ -279,7 +279,8 @@ void pane_header(App::State& s, const std::string& id, Box b, bool focused) {
                      true});
         open_menu(s, std::move(m), std::nullopt);
     };
-    std::string program;
+    ui::Program program;
+    program.shell = true;  // no session: MS-DOS
     if (const auto it = s.views_by_id.find(id); it != s.views_by_id.end())
         program = program_of(it->second);
     const auto ev = title_bar(
@@ -559,10 +560,12 @@ void tab_button(App::State& s, ImDrawList* dl, int i, const ui::Tab& t, Box b) {
             }
     if (lead_id.empty() && !ids.empty())
         lead_id = ids.front();
-    std::string program, pname;
+    ui::Program program;
+    program.shell = true;
+    std::string pname;
     if (const auto it = s.views_by_id.find(lead_id); it != s.views_by_id.end()) {
         program = program_of(it->second);
-        pname = program_info(it->second.program, it->second.profile_id).name;
+        pname = program.name;
     }
     const std::string name = ui::Workspace::tab_title(t, i);
     const std::string tip =
@@ -683,7 +686,7 @@ void quick(App::State& s, ImDrawList* dl, const char* id, Box b,
 
 struct TrayAgent {
     std::string id;
-    std::string program;
+    ui::Program program;
     std::string status;
     std::string tip;
 };
@@ -708,7 +711,7 @@ std::vector<TrayAgent> tray_agents(App::State& s) {
         a.id = id;
         a.program = program_of(it->second);
         a.status = status_word(s.attention_of(id));
-        a.tip = program_info(it->second.program, it->second.profile_id).name + ": " + a.status + " - " +
+        a.tip = a.program.name + ": " + a.status + " - " +
                 sname + " \\ " + tname;
         out.push_back(a);
         if (out.size() == 10)
@@ -1775,7 +1778,7 @@ std::optional<News> clippy_news(App::State& s) {
         const auto ch = s.changed.find(id);
         const long long seq = ch == s.changed.end() ? 0 : ch->second.at;
         list.push_back({seq,
-                        {id, status, program_info(it->second.program, it->second.profile_id).name,
+                        {id, status, program_of(it->second).name,
                          "'" + sname + " \\ " + tname + "'"}});
     }
     std::stable_sort(list.begin(), list.end(), [](const auto& a, const auto& b) {

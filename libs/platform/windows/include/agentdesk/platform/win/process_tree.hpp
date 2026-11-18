@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <string>
+#include <vector>
 
 namespace agentdesk::platform::win {
 
@@ -13,6 +14,9 @@ namespace agentdesk::platform::win {
 struct Foreground {
     std::string program;  // lower-case image name without ".exe"; empty if the job is empty
     std::string cwd;      // UTF-8 current folder of that process (empty if unreadable)
+    // That process's command line as words (CommandLineToArgvW); empty if unreadable. herdr
+    // resolves a terminal's program from its argv (programs.rs 270-327).
+    std::vector<std::string> argv;
 };
 Foreground foreground(HANDLE job, DWORD root_pid);
 
@@ -23,6 +27,10 @@ std::string foreground_program(HANDLE job, DWORD root_pid);
 // CurrentDirectory). A trailing backslash is removed except for a drive root. Empty for
 // 32-bit (WOW64) processes, processes we cannot open, or on failure.
 std::wstring process_cwd(DWORD pid);
+
+// Command line of a 64-bit process, read from its PEB (RTL_USER_PROCESS_PARAMETERS CommandLine).
+// Empty in the same cases as process_cwd.
+std::wstring process_command_line(DWORD pid);
 
 // True for interactive shells whose children are "the program in front" (pwsh, powershell, cmd,
 // bash, zsh, fish, nu, ...). `name` is lower-case, ".exe" optional.

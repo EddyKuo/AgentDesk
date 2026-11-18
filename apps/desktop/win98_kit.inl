@@ -426,58 +426,22 @@ void glyph(App::State& s, ImDrawList* dl, const std::string& name, float w, floa
           true);
 }
 
-// herdr programs.json: the agents with an icon (taskbar.js 15-27), tint, tile and color.
-struct ProgramArt {
-    const char* key;
-    const char* name;
-    const char* file;
-    bool tint;
-    const char* tile;
-};
-constexpr ProgramArt kPrograms[] = {
-    {"claude", "Claude Code", "claude.svg", false, "#1c1d21"},
-    {"codex", "Codex", "codex.svg", false, "#1c1d21"},
-    {"pi", "Pi", "pi.svg", true, "#1c1d21"},
-    {"opencode", "OpenCode", "opencode.svg", true, "#1c1d21"},
-    {"amp", "Amp", "amp.svg", false, "#1c1d21"},
-    {"gemini", "Gemini", "gemini.svg", true, "#8e75b2"},
-    {"agent", "Cursor", "cursor.svg", true, "#1c1d21"},
-    {"copilot", "Copilot", "copilot.svg", true, "#1c1d21"},
-    {"grok", "Grok", "grok.svg", true, "#1c1d21"},
-    {"kimi", "Kimi", "kimi.svg", false, "#1c1d21"},
-    {"crush", "Crush", "crush.svg", false, "#1c1d21"},
-};
-
-const ProgramArt* program_art(const std::string& program) {
-    for (const auto& p : kPrograms)
-        if (program == p.key || program.rfind(std::string(p.key) + ".", 0) == 0)
-            return &p;
-    if (program == "cursor" || program == "cursor-agent")
-        return &kPrograms[6];
-    return nullptr;
-}
-
-// kit.js 210-225: a program's icon; shells (and programs without an icon) are MS-DOS.
-void program_icon(App::State& s, ImDrawList* dl, const std::string& program, float size, ImVec2 at) {
-    const ProgramArt* p =
-        program.empty() || is_shell(program) || is_shell_profile(program) ? nullptr : program_art(program);
-    if (p == nullptr) {
+// kit.js 208-225 programIcon: from the app's program table (herdr programs.json, programs_of in
+// app.cpp); shells, the generic shell entry and programs without an icon are MS-DOS. A tinted
+// glyph sits on its tile (navy without one), 4 px smaller, in its color (white without one).
+void program_icon(App::State& s, ImDrawList* dl, const ui::Program& p, float size, ImVec2 at) {
+    if (p.shell || p.key == "shell" || p.icon.empty()) {
         icon(s, dl, "dos", size, at);
         return;
     }
-    const auto file = root_dir() / L"programs" / win::to_wide(p->file);
+    const auto file = program_icon_file(p);
     const Box b = box(at, ImVec2(U(s, size), U(s, size)));
-    if (p->tint) {
-        fill(dl, b, hex(p->tile));
-        image(s, dl, file, b.inset(U(s, 2)), rgb(C::kWhite), true);
+    if (p.tint) {
+        fill(dl, b, p.tile.empty() ? rgb(C::kNavy) : hex(p.tile));
+        image(s, dl, file, b.inset(U(s, 2)), p.color.empty() ? rgb(C::kWhite) : hex(p.color), true);
     } else {
         image(s, dl, file, b);
     }
-}
-
-// The program a session shows (its process, else its profile).
-std::string program_of(const ui::SessionView& v) {
-    return v.program.empty() ? v.profile_id : v.program;
 }
 
 // ---------------------------------------------------------------- buttons (kit.js 139-174)

@@ -459,7 +459,9 @@ void Session::refresh_agent_from_engine() {
         auto& a = info_.agent;
         if (root != nullptr) {
             const AgentState next = from_status(root->report.state);
-            if (next != a.state || a.source != "osc7501" || a.message != root->report.msg) {
+            const std::string app = engine_->status().effective_app(std::string());
+            if (next != a.state || a.source != "osc7501" || a.message != root->report.msg || a.app != app) {
+                a.app = app;
                 if (next != a.state)
                     a.last_state = a.state;
                 a.state = next;
@@ -475,6 +477,7 @@ void Session::refresh_agent_from_engine() {
             a.state = AgentState::kUnknown;
             a.kind = terminal::StatusKind::kNone;
             a.message.clear();
+            a.app.clear();
             a.updated_at = std::chrono::system_clock::now();
             changed = true;
         }

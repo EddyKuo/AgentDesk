@@ -34,6 +34,8 @@ struct SessionView {
     std::string start_cwd;  // folder the session was started in
     std::string created_at;  // ISO 8601 UTC, from the host
     std::string program;     // what runs in the terminal now ("claude", "pwsh"), from the host
+    std::vector<std::string> program_argv;  // its command line as words (herdr resolves by it)
+    std::string agent_app;                  // the 7501 report's `app`, if any
     std::string parent;      // session that started this one (sub-agent), or empty
     std::map<std::string, std::string> labels;
     std::string profile_id;
@@ -108,6 +110,8 @@ public:
     [[nodiscard]] std::string last_error() const;
     [[nodiscard]] std::vector<std::shared_ptr<RemoteSession>> sessions() const;
     [[nodiscard]] std::vector<std::pair<std::string, std::string>> profiles() const;  // id, name
+    // The program a profile starts (its executable), for its icon; empty if unknown.
+    [[nodiscard]] std::string profile_executable(const std::string& id) const;
 
     void request_start_host();  // reconnect, starting agent-host.exe if needed
     void create_session(std::string profile_id, std::string cwd, std::string name,
@@ -142,6 +146,7 @@ private:
     std::deque<Task> tasks_;
     std::map<std::string, std::shared_ptr<RemoteSession>> sessions_;
     std::vector<std::pair<std::string, std::string>> profiles_;
+    std::map<std::string, std::string> profile_exes_;
     std::optional<protocol::Json> pending_ui_state_;
     std::string instance_id_;
     std::string host_version_;

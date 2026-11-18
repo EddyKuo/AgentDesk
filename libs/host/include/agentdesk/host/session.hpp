@@ -41,6 +41,7 @@ struct AgentStatus {
     terminal::StatusKind kind = terminal::StatusKind::kNone;
     std::string message;
     AgentState last_state = AgentState::kUnknown;  // value before the record was dropped
+    std::string app;  // the 7501 report's `app` (herdr shows a terminal by it first), or empty
 };
 
 struct SessionInfo {

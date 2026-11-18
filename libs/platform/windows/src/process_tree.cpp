@@ -7,6 +7,7 @@
 #include <set>
 #include <vector>
 
+#include <shellapi.h>
 #include <tlhelp32.h>
 #include <winternl.h>
 
@@ -68,7 +69,11 @@ bool is_shell_name(const std::wstring& name) {
     return kShells.contains(strip_exe(lower(name)));
 }
 
-std::wstring process_cwd(DWORD pid) {
+namespace {
+
+// One UNICODE_STRING inside RTL_USER_PROCESS_PARAMETERS of a 64-bit process (x64 offsets:
+// PEB.ProcessParameters at 0x20; CurrentDirectory.DosPath at 0x38, CommandLine at 0x70).
+std::wstring read_process_parameter(DWORD pid, std::size_t offset) {
     const auto query = nt_query();
     if (query == nullptr)
         return {};
@@ -82,20 +87,43 @@ std::wstring process_cwd(DWORD pid) {
     ULONG len = 0;
     if (query(h.get(), ProcessBasicInformation, &pbi, sizeof(pbi), &len) != 0 || pbi.PebBaseAddress == nullptr)
         return {};
-    // x64 layouts: PEB.ProcessParameters at 0x20; RTL_USER_PROCESS_PARAMETERS.CurrentDirectory
-    // (CURDIR: UNICODE_STRING DosPath + HANDLE) at 0x38.
     const auto* peb = reinterpret_cast<const std::byte*>(pbi.PebBaseAddress);
     const std::byte* params = nullptr;
     if (!read_remote(h.get(), peb + 0x20, params) || params == nullptr)
         return {};
-    UNICODE_STRING dos{};
-    if (!read_remote(h.get(), params + 0x38, dos) || dos.Buffer == nullptr || dos.Length == 0 ||
-        dos.Length > 32767 * sizeof(wchar_t))
+    UNICODE_STRING str{};
+    if (!read_remote(h.get(), params + offset, str) || str.Buffer == nullptr || str.Length == 0 ||
+        str.Length > 32767 * sizeof(wchar_t))
         return {};
-    std::wstring path(dos.Length / sizeof(wchar_t), L'\0');
+    std::wstring out(str.Length / sizeof(wchar_t), L'\0');
     SIZE_T got = 0;
-    if (!::ReadProcessMemory(h.get(), dos.Buffer, path.data(), dos.Length, &got) || got != dos.Length)
+    if (!::ReadProcessMemory(h.get(), str.Buffer, out.data(), str.Length, &got) || got != str.Length)
         return {};
+    return out;
+}
+
+std::vector<std::string> split_command_line(const std::wstring& line) {
+    std::vector<std::string> out;
+    if (line.empty())
+        return out;
+    int n = 0;
+    wchar_t** words = ::CommandLineToArgvW(line.c_str(), &n);
+    if (words == nullptr)
+        return out;
+    for (int i = 0; i < n; ++i)
+        out.push_back(to_utf8(words[i]));
+    ::LocalFree(words);
+    return out;
+}
+
+}  // namespace
+
+std::wstring process_command_line(DWORD pid) {
+    return read_process_parameter(pid, 0x70);
+}
+
+std::wstring process_cwd(DWORD pid) {
+    std::wstring path = read_process_parameter(pid, 0x38);
     if (path.size() > 3 && path.back() == L'\\')
         path.pop_back();
     return path;
@@ -139,6 +167,7 @@ Foreground foreground(HANDLE job, DWORD root_pid) {
     if (cwd.empty() && front != root_pid)
         cwd = process_cwd(root_pid);
     out.cwd = to_utf8(cwd);
+    out.argv = split_command_line(process_command_line(front));
     return out;
 }
 

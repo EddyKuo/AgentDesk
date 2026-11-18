@@ -795,7 +795,9 @@ Response SessionManager::do_create(const Request& req) {
 
     SessionRecord rec;
     rec.id = new_uuid();
-    rec.name = p.value("name", profile->name);
+    // herdr: a terminal has a name only when someone gives it one (hc run --name, pane.rename);
+    // without one it shows by its program (programs.rs). Not the profile's name.
+    rec.name = p.value("name", std::string());
     rec.cwd = cwd;
     rec.profile_id = profile_id;
     rec.created_at = iso8601_now();
@@ -918,6 +920,8 @@ Json SessionManager::describe(const Managed& m) const {
         j["backpressure_waits"] = info.backpressure_waits;
         const auto fg = m.session->foreground();
         j["program"] = fg.program;
+        j["program_argv"] = fg.argv;
+        j["agent_app"] = info.agent.app;
         j["live_cwd"] = fg.cwd;  // the shell's folder after cd (empty: unknown, use cwd)
     } else {
         j["agent_state"] = "Unknown";
