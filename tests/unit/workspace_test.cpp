@@ -143,6 +143,7 @@ TEST(Workspace, DividersMatchSplits) {
 
 TEST(Attention, DoneOnlyWhenFinishedUnseenAndClearsWhenSeen) {
     AttentionTracker t;
+    EXPECT_FALSE(t.update("a", "Idle", false));  // first listing: never alerts
     EXPECT_FALSE(t.update("a", "Working", false));
     EXPECT_EQ(t.get("a"), Attention::kWorking);
     EXPECT_TRUE(t.update("a", "Idle", false));  // finished while not looking
@@ -227,4 +228,18 @@ TEST(Workspace, MovePaneToEdgeOrSwap) {
     EXPECT_EQ(r["a"].x, bx);
     EXPECT_EQ(r["b"].x, ax);
     EXPECT_FALSE(w.move_pane("a", "a", std::nullopt));
+}
+
+// herdr: needs-you alerts even while looking; error counts as needs you; a first listing that
+// is already done shows done without alerting.
+TEST(Attention, HerdrAlertRules) {
+    AttentionTracker t;
+    t.update("a", "Working", true);
+    EXPECT_TRUE(t.update("a", "Blocked", true));
+    EXPECT_FALSE(t.update("a", "Error", true));  // still needs you: no second alert
+    EXPECT_EQ(t.get("a"), Attention::kBlocked);
+    EXPECT_FALSE(t.update("b", "Done", false));
+    EXPECT_EQ(t.get("b"), Attention::kDone);
+    t.seen("b");
+    EXPECT_EQ(t.get("b"), Attention::kIdle);
 }

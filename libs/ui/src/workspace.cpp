@@ -677,26 +677,34 @@ Node* node_at(Node& root, const std::vector<int>& path) {
 
 // ------------------------------------------------------------------ attention
 bool AttentionTracker::update(const std::string& session, const std::string& agent_state, bool looking) {
+    // herdr model.rs 529-572: to blocked/error from anything else always alerts (also while
+    // looking: the caller then plays the sound but shows no note); from busy (working/blocked/
+    // error) to anything else alerts only when not looking, and that agent is "done" until seen.
+    // States in the first listing never alert; one already done shows as done.
     auto& e = entries_[session];
     const std::string prev = e.last;
+    const bool first = !e.known;
+    e.known = true;
     e.last = agent_state;
-    if (looking) {
+    const auto needs = [](const std::string& st) { return st == "Blocked" || st == "Error"; };
+    const auto busy = [&](const std::string& st) { return st == "Working" || needs(st); };
+    if (first) {
+        e.unseen_done = agent_state == "Done" && !looking;
+        return false;
+    }
+    if (prev == agent_state) {
+        if (looking)
+            e.unseen_done = false;
+        return false;
+    }
+    if (needs(agent_state))
+        return !needs(prev);
+    if (busy(prev)) {
+        e.unseen_done = !looking;
+        return !looking;
+    }
+    if (looking)
         e.unseen_done = false;
-        return false;
-    }
-    if (prev == agent_state)
-        return false;
-    if (agent_state == "Blocked")
-        return true;
-    // Finished while the user was elsewhere: working -> idle/done.
-    if (prev == "Working" && (agent_state == "Idle" || agent_state == "Done")) {
-        e.unseen_done = true;
-        return true;
-    }
-    if (agent_state == "Done" && !prev.empty()) {
-        e.unseen_done = true;
-        return true;
-    }
     return false;
 }
 
@@ -705,7 +713,7 @@ Attention AttentionTracker::get(const std::string& session) const {
     if (it == entries_.end())
         return Attention::kNone;
     const auto& e = it->second;
-    if (e.last == "Blocked")
+    if (e.last == "Blocked" || e.last == "Error")
         return Attention::kBlocked;
     if (e.unseen_done)
         return Attention::kDone;

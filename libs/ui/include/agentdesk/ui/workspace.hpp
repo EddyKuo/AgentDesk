@@ -151,6 +151,7 @@ private:
     struct Entry {
         std::string last;
         bool unseen_done = false;
+        bool known = false;  // seen in an earlier listing
     };
     std::map<std::string, Entry> entries_;
 };

@@ -290,11 +290,25 @@ std::filesystem::path data_dir() {
     return dir;
 }
 
+// herdr first run (settings.rs 778-802): zoom from Windows' text size (Accessibility
+// TextScaleFactor, 100..225 %), x1.15 on a screen 2400 px or wider, rounded to tenths.
+float first_run_zoom() {
+    DWORD factor = 100, size = sizeof(factor);
+    ::RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Accessibility", L"TextScaleFactor", RRF_RT_REG_DWORD,
+                   nullptr, &factor, &size);
+    float z = std::clamp(static_cast<float>(factor) / 100.0f, 1.0f, 2.0f);
+    if (::GetSystemMetrics(SM_CXSCREEN) >= 2400)
+        z *= 1.15f;
+    return std::clamp(std::round(z * 10.0f) / 10.0f, 0.5f, 3.0f);
+}
+
 Settings load_settings() {
     Settings s;
     std::ifstream in(data_dir() / L"ui.json", std::ios::binary);
-    if (!in)
+    if (!in) {
+        s.zoom = first_run_zoom();
         return s;
+    }
     std::stringstream ss;
     ss << in.rdbuf();
     const auto j = Json::parse(ss.str(), nullptr, false);
@@ -4108,9 +4122,15 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
         for (int i = 0; i < static_cast<int>(sp->tabs.size()); ++i) {
             auto& tab = sp->tabs[static_cast<std::size_t>(i)];
             const auto ids = s.ws.sessions_in(tab);
+            // herdr: an unnamed tab follows its agent's live title; a shell shows its program.
             std::string label = tab.name;
-            if (label.empty() && !ids.empty())
-                label = s.pane_title(tab.focused.empty() ? ids.front() : tab.focused);
+            if (label.empty() && !ids.empty()) {
+                const std::string shown_id = tab.focused.empty() ? ids.front() : tab.focused;
+                if (const auto vi = s.views_by_id.find(shown_id); vi != s.views_by_id.end() && is_agent(vi->second))
+                    label = agent_detail(s, shown_id, vi->second);
+                if (label.empty())
+                    label = s.pane_title(shown_id);
+            }
             if (label.empty())
                 label = std::to_string(i + 1);
             if (!tab.zoomed.empty())
