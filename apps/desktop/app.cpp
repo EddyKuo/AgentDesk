@@ -474,81 +474,31 @@ std::vector<LayoutSpec> load_layouts() {
 
 // ------------------------------------------------------------------ example mods (first run)
 // Written to <data>\mods when that folder does not exist yet; ours, small, and meant to be read.
-constexpr const char* kTabTimerMod = R"(-- Shows how long each tab's agent has been working
-local started = {}
-
-agentdesk.on("agent_state", function(ev)
-  if ev.state == "Working" then
-    started[ev.session] = started[ev.session] or os.time()
-  else
-    started[ev.session] = nil
-  end
-end)
-
-local function since(t)
-  local s = os.time() - t
-  if s < 60 then return s .. "s" end
-  return math.floor(s / 60) .. "m"
-end
-
-agentdesk.decorate("tab", function(tab)
-  local oldest
-  for _, id in ipairs(tab.sessions) do
-    local t = started[id]
-    if t and (not oldest or t < oldest) then oldest = t end
-  end
-  if oldest then return since(oldest) end
-  return ""
-end)
-)";
-
-constexpr const char* kNtfyMod = R"(-- Phone notification through ntfy.sh when an agent needs you
--- Set your topic in settings.json next to this file, then enable the mod in Settings > Mods.
-local topic = agentdesk.setting("topic", "")
-
-agentdesk.on("agent_state", function(ev)
-  if topic == "" then return end
-  if ev.state == "Blocked" or (ev.previous == "Working" and ev.state == "Idle") then
-    local what = ev.state == "Blocked" and "needs you" or "finished"
-    agentdesk.exec({"curl", "-s", "-d", ev.title .. " " .. what, "https://ntfy.sh/" .. topic})
-  end
-end)
-
-agentdesk.command("test", "Send a test notification", function()
-  if topic == "" then
-    agentdesk.notify("ntfy: no topic", "Put {"topic": "..."} in mods\ntfy-notify\settings.json")
-  else
-    agentdesk.exec({"curl", "-s", "-d", "AgentDesk test", "https://ntfy.sh/" .. topic})
-  end
-end)
-)";
-
-constexpr const char* kAgentCountMod = R"(-- Sidebar panel: how many agents are working, waiting or done
-agentdesk.panel{ id = "summary", title = "Agents now", where = "sidebar", draw = function(ui)
-  local n = { Working = 0, Blocked = 0, Idle = 0, Done = 0 }
-  for _, s in ipairs(agentdesk.sessions()) do
-    if n[s.state] then n[s.state] = n[s.state] + 1 end
-  end
-  ui:row("Need you", tostring(n.Blocked), n.Blocked > 0 and "bad" or "dim")
-  ui:row("Working", tostring(n.Working), n.Working > 0 and "warn" or "dim")
-  ui:row("Idle / done", tostring(n.Idle + n.Done), "dim")
-end }
-)";
-
+// The example mods (C++ DLLs built from mods\ in the source tree) ship next to agent-ui.exe in
+// mods\<name>\. Copied into <data>\mods on first run, and into folders that still hold the old
+// Lua example of the same name (its settings.json is kept). They stay off until enabled.
 void write_example_mods() {
+    wchar_t exe[MAX_PATH]{};
+    ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    const auto shipped = std::filesystem::path(exe).parent_path() / L"mods";
     const auto dir = data_dir() / L"mods";
     std::error_code ec;
-    if (std::filesystem::exists(dir, ec))
-        return;
-    auto put = [&](const wchar_t* name, const char* lua, const char* settings) {
-        std::filesystem::create_directories(dir / name, ec);
-        std::ofstream(dir / name / L"main.lua", std::ios::binary) << lua;
-        if (settings != nullptr)
-            std::ofstream(dir / name / L"settings.json", std::ios::binary) << settings;
-    };
-    put(L"tab-timer", kTabTimerMod, nullptr);
-    put(L"ntfy-notify", kNtfyMod, "{\n  \"topic\": \"\"\n}\n");
-    put(L"agent-summary", kAgentCountMod, nullptr);
+    for (const auto& e : std::filesystem::directory_iterator(shipped, ec)) {
+        if (!e.is_directory() || !std::filesystem::is_regular_file(e.path() / L"mod.dll", ec))
+            continue;
+        const auto to = dir / e.path().filename();
+        if (std::filesystem::is_regular_file(to / L"mod.dll", ec))
+            continue;  // already there (maybe the person's own build): leave it
+        if (std::filesystem::exists(to, ec) && !std::filesystem::is_regular_file(to / L"main.lua", ec))
+            continue;  // a folder of the person's own with that name
+        std::filesystem::create_directories(to, ec);
+        for (const wchar_t* f : {L"mod.dll", L"mod.json"})
+            std::filesystem::copy_file(e.path() / f, to / f, std::filesystem::copy_options::overwrite_existing, ec);
+        if (!std::filesystem::exists(to / L"settings.json", ec) &&
+            std::filesystem::is_regular_file(e.path() / L"settings.json", ec))
+            std::filesystem::copy_file(e.path() / L"settings.json", to / L"settings.json", ec);
+        std::filesystem::remove(to / L"main.lua", ec);  // the Lua version it replaces
+    }
 }
 
 // ------------------------------------------------------------------ programs
@@ -2981,6 +2931,10 @@ void run_command(App::State& s, const std::string& cmd) {
         s.show_help = !s.show_help;
     } else if (name == "app.settings") {
         s.show_settings = true;
+        // herdr app.settings {section}: open on that page ("mods", "alerts", ...).
+        for (const char* sec : {"Look", "Machines", "Alerts", "Mods", "Updates", "Privacy"})
+            if (_stricmp(arg.c_str(), sec) == 0)
+                s.settings_tab = sec;
     } else if (name == "app.zoom_in" || name == "app.zoom_out" || name == "app.zoom_reset") {
         s.settings.zoom =
             name == "app.zoom_reset"
@@ -3153,11 +3107,26 @@ ImU32 mod_color(const std::string& c) {
     return g_pal->text;
 }
 
+float fpx(float v);
+float px(float v);
+
+// Mod panels, inset and titled like the sidebar's own sections (herdr spaces/agents headers).
 void draw_mod_panels(App::State& s, const std::string& where) {
+    const float inset = px(18);
     for (const auto& panel : s.mods->panels(where)) {
         ImGui::PushID((panel.mod + "/" + panel.id).c_str());
-        if (!panel.title.empty())
-            ImGui::TextDisabled("%s", panel.title.c_str());
+        ImGui::Dummy(ImVec2(0, px(8)));
+        ImGui::Indent(inset);
+        if (!panel.title.empty()) {
+            ImGui::PushFont(s.fonts.ui_medium, fpx(11.5f));
+            ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
+            ImGui::TextUnformatted(panel.title.c_str());
+            ImGui::PopStyleColor();
+            ImGui::PopFont();
+            ImGui::Dummy(ImVec2(0, px(2)));
+        }
+        ImGui::PushFont(s.fonts.ui, fpx(12.5f));
+        ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x - inset);
         for (std::size_t i = 0; i < panel.widgets.size(); ++i) {
             const auto& w = panel.widgets[i];
             ImGui::PushID(static_cast<int>(i));
@@ -3176,7 +3145,7 @@ void draw_mod_panels(App::State& s, const std::string& where) {
                     break;
                 case ui::ModWidget::Kind::kProgress:
                     ImGui::PushStyleColor(ImGuiCol_PlotHistogram, v4(g_pal->focus));
-                    ImGui::ProgressBar(w.value, ImVec2(-1, px(6)), "");
+                    ImGui::ProgressBar(w.value, ImVec2(ImGui::GetContentRegionAvail().x - inset, px(6)), "");
                     ImGui::PopStyleColor();
                     if (!w.text.empty())
                         ImGui::TextDisabled("%s", w.text.c_str());
@@ -3186,7 +3155,7 @@ void draw_mod_panels(App::State& s, const std::string& where) {
                     ImGui::TextUnformatted(w.text.c_str());
                     ImGui::PopStyleColor();
                     const float rw = ImGui::CalcTextSize(w.text2.c_str()).x;
-                    ImGui::SameLine(ImGui::GetContentRegionMax().x - rw - px(4));
+                    ImGui::SameLine(ImGui::GetContentRegionMax().x - rw - inset);
                     ImGui::PushStyleColor(ImGuiCol_Text, v4(mod_color(w.color)));
                     ImGui::TextUnformatted(w.text2.c_str());
                     ImGui::PopStyleColor();
@@ -3206,6 +3175,9 @@ void draw_mod_panels(App::State& s, const std::string& where) {
             }
             ImGui::PopID();
         }
+        ImGui::PopTextWrapPos();
+        ImGui::PopFont();
+        ImGui::Unindent(inset);
         ImGui::PopID();
         ImGui::Dummy(ImVec2(0, px(4)));
     }
@@ -7171,9 +7143,10 @@ void draw_settings(App::State& s) {
         changed |= ImGui::Checkbox("##toasts", &s.settings.toasts);
         settings_row_done(s);
     } else if (sec == "Mods") {
-        ImGui::TextWrapped("Mods are small Lua programs in the mods folder (one folder per mod, main.lua). They can "
-                           "react to agents, add commands, panels and tab text. They run in a sandbox without file "
-                           "access; agentdesk.exec can start programs.");
+        ImGui::TextWrapped("Mods are C++ DLLs in the mods folder (one folder per mod, mod.dll). They can react to "
+                           "agents, add commands, panels and tab text, and start programs. A mod runs with your "
+                           "rights like any program you install, so only turn on mods you trust; one that crashes "
+                           "is turned off. The sdk folder of the zip has the headers and the examples' sources.");
         settings_section(s, "Installed");
         for (const auto& m : s.mods->mods()) {
             ImGui::PushID(m.name.c_str());
@@ -7362,7 +7335,7 @@ void draw_welcome(App::State& s) {
         ImGui::Text("Press %s for the command palette, %s to jump to a space or agent.",
                     s.keymap.chord_for("app.palette").c_str(), s.keymap.chord_for("app.picker").c_str());
         ImGui::Dummy(ImVec2(0, px(6)));
-        ImGui::TextWrapped("Change any shortcut in keys.json, the look in Settings (%s), and add Lua mods in the mods "
+        ImGui::TextWrapped("Change any shortcut in keys.json, the look in Settings (%s), and add C++ mods in the mods "
                            "folder. agentctl drives AgentDesk from a terminal or from your agents.",
                            s.keymap.chord_for("app.settings").c_str());
     }

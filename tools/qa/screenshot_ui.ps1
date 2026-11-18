@@ -8,7 +8,8 @@ param(
     [int]$WaitSeconds = 6,
     [string]$Run = '',
     [string]$Child = '',  # profile:name started as a sub-agent of the first session
-    [string]$Remote = ''  # machine name: a second host shown as that machine (pipe: target)
+    [string]$Remote = '',  # machine name: a second host shown as that machine (pipe: target)
+    [string]$Mods = ''     # comma-separated mods to enable (example mods are copied on first run)
 )
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -54,8 +55,14 @@ if ($Remote) {
     $env:AGENTDESK_DATA_DIR = $data2
     & (Join-Path $dir 'agentctl.exe') --pipe $pipe2 run --profile chinese --name 'build-agent' --cwd $data2 | Out-Null
     $env:AGENTDESK_DATA_DIR = $data
-    $ui = @{ schema_version = 1; machines = @(@{ name = $Remote; target = 'pipe:' + $pipe2; ctl = '' }) } | ConvertTo-Json -Depth 5
-    [IO.File]::WriteAllText((Join-Path $data 'ui.json'), $ui, (New-Object Text.UTF8Encoding($false)))
+    $uiDoc = @{ schema_version = 1; machines = @(@{ name = $Remote; target = 'pipe:' + $pipe2; ctl = '' }) }
+}
+if ($Mods) {
+    if (-not $uiDoc) { $uiDoc = @{ schema_version = 1 } }
+    $uiDoc.mods_enabled = @($Mods.Split(','))
+}
+if ($uiDoc) {
+    [IO.File]::WriteAllText((Join-Path $data 'ui.json'), ($uiDoc | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
 }
 $pipe = '\\.\pipe\AgentDeskShot-' + $PID
 $ui = Join-Path $dir 'agent-ui.exe'

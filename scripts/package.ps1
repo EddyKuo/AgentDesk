@@ -22,6 +22,17 @@ New-Item -ItemType Directory -Force $stage, (Join-Path $stage 'conpty\x64'), (Jo
 foreach ($f in @('agent-ui.exe', 'agent-host.exe', 'agentctl.exe')) { Copy-Item (Join-Path $bin $f) $stage }
 Copy-Item -Recurse (Join-Path $bin 'fonts') (Join-Path $stage 'fonts')
 Copy-Item -Recurse (Join-Path $bin 'sounds') (Join-Path $stage 'sounds')
+# Example mods (C++ DLLs) and the SDK to build your own: headers and the examples' sources.
+foreach ($m in Get-ChildItem -Directory (Join-Path $bin 'mods')) {
+    $to = Join-Path $stage "mods\$($m.Name)"
+    New-Item -ItemType Directory -Force $to | Out-Null
+    Get-ChildItem $m.FullName -File | Where-Object { $_.Extension -in '.dll', '.json' } | Copy-Item -Destination $to
+}
+New-Item -ItemType Directory -Force (Join-Path $stage 'sdk\include\agentdesk'), (Join-Path $stage 'sdk\examples') | Out-Null
+Copy-Item (Join-Path $root 'libs\modapi\include\agentdesk\mod_api.h'), (Join-Path $root 'libs\modapi\include\agentdesk\mod_sdk.hpp') (Join-Path $stage 'sdk\include\agentdesk')
+foreach ($m in Get-ChildItem -Directory (Join-Path $root 'mods')) {
+    Copy-Item -Recurse $m.FullName (Join-Path $stage "sdk\examples\$($m.Name)")
+}
 Copy-Item (Join-Path $bin 'conpty\conpty.dll') (Join-Path $stage 'conpty')
 Copy-Item (Join-Path $bin 'conpty\x64\OpenConsole.exe') (Join-Path $stage 'conpty\x64')
 Copy-Item (Join-Path $root 'third_party\conpty\LICENSE') (Join-Path $stage 'conpty\LICENSE')
@@ -41,7 +52,6 @@ $components = @(
     @{ Name = 'libvterm 0.3.3'; Url = 'https://www.leonerd.org.uk/code/libvterm/'; File = (Join-Path $root 'third_party\libvterm\LICENSE') },
     @{ Name = 'Dear ImGui 1.93.0 (docking)'; Url = 'https://github.com/ocornut/imgui'; File = (Join-Path $share 'imgui\copyright') },
     @{ Name = 'nlohmann/json 3.12.0'; Url = 'https://github.com/nlohmann/json'; File = (Join-Path $share 'nlohmann-json\copyright') },
-    @{ Name = 'Lua 5.5.1'; Url = 'https://www.lua.org/'; File = (Join-Path $share 'lua\copyright') },
     @{ Name = 'Microsoft.Windows.Console.ConPTY 1.24.260710001'; Url = 'https://github.com/microsoft/terminal'; File = (Join-Path $root 'third_party\conpty\LICENSE') },
     @{ Name = 'herdr-app (behaviour and parts ported to C++, modified)'; Url = 'https://github.com/herdrdev/herdr-app'; File = (Join-Path $root 'third_party\herdr\LICENSE') },
     @{ Name = 'Geist font'; Url = 'https://github.com/vercel/geist-font'; File = (Join-Path $root 'third_party\fonts\OFL-Geist.txt') },

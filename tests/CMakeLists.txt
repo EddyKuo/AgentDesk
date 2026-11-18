@@ -18,7 +18,17 @@ agentdesk_executable(unit_tests
 target_link_libraries(unit_tests PRIVATE
     agentdesk::ui agentdesk::protocol agentdesk::terminal agentdesk::platform_win agentdesk::vterm
     nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock shell32)
-target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}")
+# A mod DLL for the mod tests (tests/fixtures/mods/test_mod.cpp), built as test_mods/mod.dll.
+add_library(test_mod SHARED fixtures/mods/test_mod.cpp)
+agentdesk_target_defaults(test_mod)
+target_link_libraries(test_mod PRIVATE agentdesk::modapi)
+set(_test_mods "${CMAKE_CURRENT_BINARY_DIR}/test_mods")
+set_target_properties(test_mod PROPERTIES OUTPUT_NAME mod RUNTIME_OUTPUT_DIRECTORY "${_test_mods}"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${_test_mods}" RUNTIME_OUTPUT_DIRECTORY_RELEASE "${_test_mods}"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${_test_mods}")
+add_dependencies(unit_tests test_mod)
+target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}"
+    AGENTDESK_TEST_MOD=L"$<TARGET_FILE:test_mod>")
 gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)
 
 # Windows integration layer: real child processes in ConPTY + job objects.
