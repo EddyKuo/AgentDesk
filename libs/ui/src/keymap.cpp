@@ -288,6 +288,71 @@ std::vector<std::string> Keymap::apply(const nlohmann::json& overrides,
     return bad;
 }
 
+// herdr-app src/keys.rs 89-109 (listing): the file's sections as written (sorted maps), the
+// defaults when it does not read, then the escape hatch.
+std::vector<Keymap::Binding> Keymap::listing(const nlohmann::json& file) {
+    auto readable = [](const nlohmann::json& j) {
+        if (!j.is_object())
+            return false;
+        for (const auto& [section, entries] : j.items()) {
+            if (!entries.is_object())
+                return false;
+            for (const auto& [k, v] : entries.items())
+                if (!v.is_string() && !v.is_object())
+                    return false;
+        }
+        return true;
+    };
+    const nlohmann::json doc = readable(file) ? file : default_file();
+    std::vector<Binding> out;
+    bool hatch = false;
+    for (const auto& [section, entries] : doc.items()) {
+        for (const auto& [k, v] : entries.items()) {
+            std::string action = v.is_string() ? migrate(v.get<std::string>()) : v.dump();
+            if (section == "global" && lower(k) == "ctrl-alt-shift-escape")
+                hatch = true;
+            out.push_back({section, k, std::move(action)});
+        }
+    }
+    if (!hatch)
+        out.push_back({"global", "ctrl-alt-shift-escape", "app.reset"});
+    return out;
+}
+
+// herdr-app defaults/mods/help/main.js 17-22.
+std::string Keymap::help_label(std::string_view action) {
+    if (action.rfind("send:", 0) == 0)
+        return "type " + nlohmann::json(std::string(action.substr(5))).dump();
+    // const [name, arg] = action.split(":"): the first two parts.
+    const auto c = action.find(':');
+    std::string name(action.substr(0, c));
+    std::string arg;
+    if (c != std::string_view::npos) {
+        const auto rest = action.substr(c + 1);
+        arg = std::string(rest.substr(0, rest.find(':')));
+    }
+    for (auto& ch : name)
+        if (ch == '.' || ch == '_')
+            ch = ' ';
+    return arg.empty() ? name : name + " " + arg;
+}
+
+// herdr-app defaults/mods/help/main.js 8-15.
+const char* Keymap::help_group(std::string_view action) {
+    auto starts = [&](std::string_view p) { return action.rfind(p, 0) == 0; };
+    if (starts("space."))
+        return "spaces";
+    if (starts("tab."))
+        return "tabs";
+    if (starts("pane."))
+        return "panes";
+    if (starts("agent."))
+        return "agents";
+    if (starts("terminal.") || starts("send:"))
+        return "terminal";
+    return "window";
+}
+
 std::optional<std::string> Keymap::global(ImGuiKeyChord chord) const {
     if (const auto s = sections_.find("layout:" + layout_); s != sections_.end()) {
         if (const auto it = s->second.find(chord); it != s->second.end())
