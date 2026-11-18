@@ -28,8 +28,8 @@ public:
     ImageCache(const ImageCache&) = delete;
     ImageCache& operator=(const ImageCache&) = delete;
 
-    // An SVG file drawn at w x h pixels. `mono`: its currentColor is white, to be tinted by the
-    // color it is drawn with (herdr's svg().text_color()). Missing or unreadable: !ok().
+    // An SVG file drawn at w x h pixels. `mono`: its shape in white, to be tinted by the color it
+    // is drawn with (GPUI's svg().text_color(): the SVG is a mask). Missing or unreadable: !ok().
     Image svg(const std::filesystem::path& file, int w, int h, bool mono = false);
     // A PNG (or any WIC format) at its own size.
     Image picture(const std::filesystem::path& file);
@@ -42,7 +42,8 @@ private:
         std::unique_ptr<ImTextureData> data;
         Image image;
     };
-    Image keep(const std::tuple<std::wstring, int, int, bool>& key, int w, int h, std::unique_ptr<unsigned char[]> rgba);
+    Image keep(const std::tuple<std::wstring, int, int, bool>& key, int w, int h,
+               std::unique_ptr<unsigned char[]> rgba);
     std::map<std::tuple<std::wstring, int, int, bool>, Entry> entries_;
 };
 

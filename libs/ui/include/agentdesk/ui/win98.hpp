@@ -121,8 +121,8 @@ struct DateTime {
 std::string clock_text(const DateTime& d);  // "3:07 PM"
 // toLocaleDateString("en-US", {weekday: long, year: numeric, month: long, day: numeric})
 std::string long_date(const DateTime& d);
-std::string month_name(int month);             // "November"
-std::string time_text(const DateTime& d);      // toLocaleTimeString("en-US"): "3:07:09 PM"
+std::string month_name(int month);              // "November"
+std::string time_text(const DateTime& d);       // toLocaleTimeString("en-US"): "3:07:09 PM"
 std::string time_zone_text(const DateTime& d);  // dialog.js 688-691: "UTC+08:00"
 // dialog.js 656-666: the month's weeks, Sunday first; 0 is an empty cell.
 std::vector<std::array<int, 7>> calendar(int year, int month);
@@ -192,7 +192,7 @@ public:
     std::vector<Cell>& cells() { return cells_; }
     [[nodiscard]] const Options& options() const { return options_; }
     Options& options() { return options_; }
-    int held = -1;  // the cell pressed and not released (mines.js 40)
+    int held = -1;       // the cell pressed and not released (mines.js 40)
     bool saved = false;  // the options changed (best time, level): the caller persists them
 
 private:
@@ -255,7 +255,7 @@ public:
     static int suit(int c) { return c / 13; }
     static bool red(int c) { return suit(c) < 2; }
 
-    void deal();  // sol.js 223-234
+    void deal();                                          // sol.js 223-234
     [[nodiscard]] bool valid_pick(const Loc& loc) const;  // sol.js 251-259
     // sol.js 260-275. True when it moved; "tada" goes to `sound` on a win.
     bool move(const Loc& from, const Loc& to);
@@ -266,10 +266,10 @@ public:
     enum class Down { kNothing, kMoved, kTurned, kPick, kUnpick };
     Down down(const Loc& loc);
     [[nodiscard]] static std::optional<Loc> target(float x, float y);  // sol.js 305-309
-    void tick_second();  // sol.js 242-246
+    void tick_second();                                                // sol.js 242-246
     // sol.js 313-327: one 33 ms frame of the bouncing cards; false when it ended.
     bool animate();
-    void command(const std::string& cmd);  // sol.js 332-340 (deal, undo, autowin)
+    void command(const std::string& cmd);                        // sol.js 332-340 (deal, undo, autowin)
     [[nodiscard]] std::vector<int> cards(const Loc& loc) const;  // sol.js 250
     [[nodiscard]] std::size_t pile_size(const Loc& loc) const;
     // sol.js 420: the step between face-up cards of a column.

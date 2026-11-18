@@ -123,16 +123,17 @@ MenuSize menu_size(const std::vector<MenuRowText>& items, bool start) {
     const float l = static_cast<float>(longest), k = static_cast<float>(keys);
     const float w = start ? std::max(180.0f, MenuMetrics::kBanner + 48 + l * 6 + 24)
                           : std::max(120.0f, 28 + l * 6 + (keys != 0 ? k * 6 + 24 : 0.0f) + 20);
-    const float h = static_cast<float>(rows) * row + static_cast<float>(seps) * MenuMetrics::kSep + MenuMetrics::kFrame * 2;
+    const float h = static_cast<float>(rows) * row + static_cast<float>(seps) * MenuMetrics::kSep +
+                    MenuMetrics::kFrame * 2;
     return {w, h};
 }
 
 // kit.js 373.
 float dialog_width(std::string_view kind) {
     static const std::map<std::string_view, int> kW = {
-        {"prompt", 340},  {"confirm", 330}, {"run", 350},     {"shutdown", 330}, {"about", 380},
-        {"taskman", 360}, {"display", 400}, {"mycomputer", 420}, {"bin", 380},  {"message", 330},
-        {"network", 380}, {"welcome", 560}, {"logoff", 300},  {"datetime", 330}};
+        {"prompt", 340},  {"confirm", 330}, {"run", 350},        {"shutdown", 330}, {"about", 380},
+        {"taskman", 360}, {"display", 400}, {"mycomputer", 420}, {"bin", 380},      {"message", 330},
+        {"network", 380}, {"welcome", 560}, {"logoff", 300},     {"datetime", 330}};
     const auto it = kW.find(kind);
     return it == kW.end() ? 340.0f : static_cast<float>(it->second);
 }
@@ -158,7 +159,8 @@ std::string dos_path(std::string_view path, std::string_view home) {
         return s;
     };
     const std::string lp = lower(p), lh = lower(h);
-    if (!h.empty() && (lp == lh || (lp.size() > lh.size() && lp.compare(0, lh.size(), lh) == 0 && lp[lh.size()] == '\\')))
+    if (!h.empty() &&
+        (lp == lh || (lp.size() > lh.size() && lp.compare(0, lh.size(), lh) == 0 && lp[lh.size()] == '\\')))
         p = "C:\\My Documents" + p.substr(h.size());
     else if (!(p.size() >= 2 && p[1] == ':'))
         p = "C:" + p;
@@ -223,22 +225,25 @@ std::string clock_text(const DateTime& d) {
 }
 
 std::string month_name(int month) {
-    static const char* const kMonths[] = {"January", "February", "March",     "April",   "May",      "June",
-                                          "July",    "August",   "September", "October", "November", "December"};
+    static const char* const kMonths[] = {"January",   "February", "March",    "April",
+                                          "May",       "June",     "July",     "August",
+                                          "September", "October",  "November", "December"};
     return kMonths[std::clamp(month, 0, 11)];
 }
 
 // taskbar.js 44-46 (en-US long date).
 std::string long_date(const DateTime& d) {
-    static const char* const kDays[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-    return std::string(kDays[std::clamp(d.weekday, 0, 6)]) + ", " + month_name(d.month) + " " + std::to_string(d.day) + ", " +
-           std::to_string(d.year);
+    static const char* const kDays[] = {"Sunday",   "Monday", "Tuesday", "Wednesday",
+                                        "Thursday", "Friday", "Saturday"};
+    return std::string(kDays[std::clamp(d.weekday, 0, 6)]) + ", " + month_name(d.month) + " " +
+           std::to_string(d.day) + ", " + std::to_string(d.year);
 }
 
 // dialog.js 687: toLocaleTimeString("en-US").
 std::string time_text(const DateTime& d) {
     int h = d.hour % 12 == 0 ? 12 : d.hour % 12;
-    return std::to_string(h) + ":" + pad(d.minute, 2) + ":" + pad(d.second, 2) + (d.hour >= 12 ? " PM" : " AM");
+    return std::to_string(h) + ":" + pad(d.minute, 2) + ":" + pad(d.second, 2) +
+           (d.hour >= 12 ? " PM" : " AM");
 }
 
 // dialog.js 688-691.
@@ -358,7 +363,8 @@ void Mines::start(int i, long long now_ms) {
         if (!excluded.contains(j))
             pool.push_back(j);
     for (int n = 0; n < total_ && n < static_cast<int>(pool.size()); ++n) {
-        const int j = n + static_cast<int>(std::floor(random_() * static_cast<double>(static_cast<int>(pool.size()) - n)));
+        const int j = n + static_cast<int>(
+                              std::floor(random_() * static_cast<double>(static_cast<int>(pool.size()) - n)));
         std::swap(pool[static_cast<std::size_t>(n)], pool[static_cast<std::size_t>(j)]);
         cells_[static_cast<std::size_t>(pool[static_cast<std::size_t>(n)])].mine = true;
     }
@@ -508,7 +514,8 @@ std::string Mines::best_text() const {
         const auto it = options_.best.find(key);
         if (!out.empty())
             out += "\n";
-        out += std::string(name) + ": " + std::to_string(it == options_.best.end() ? 999 : it->second) + " seconds";
+        out += std::string(name) + ": " + std::to_string(it == options_.best.end() ? 999 : it->second) +
+               " seconds";
     }
     return out;
 }
@@ -522,9 +529,9 @@ std::string counter_chars(int value) {
 
 // mines.js 8, 18.
 std::array<bool, 7> segments_lit(char ch) {
-    static const char* const kSegments[] = {"abcdef", "bc",      "abdeg", "abcdg",   "bcfg",
+    static const char* const kSegments[] = {"abcdef", "bc",     "abdeg", "abcdg",   "bcfg",
                                             "acdfg",  "acdefg", "abc",   "abcdefg", "abcdfg"};
-    const std::string_view lit = ch == '-' ? std::string_view("g")
+    const std::string_view lit = ch == '-'                ? std::string_view("g")
                                  : ch >= '0' && ch <= '9' ? std::string_view(kSegments[ch - '0'])
                                                           : std::string_view();
     std::array<bool, 7> out{};
@@ -663,8 +670,9 @@ bool Solitaire::move(const Loc& from, const Loc& to) {
             return false;
     } else if (to.type == Pile::kTab) {
         const auto& dest = g.tab[static_cast<std::size_t>(to.i)];
-        if (dest.empty() ? rank(c) != 13
-                         : !dest.back().up || red(dest.back().c) == red(c) || rank(dest.back().c) != rank(c) + 1)
+        if (dest.empty()
+                ? rank(c) != 13
+                : !dest.back().up || red(dest.back().c) == red(c) || rank(dest.back().c) != rank(c) + 1)
             return false;
     } else {
         return false;
@@ -688,7 +696,10 @@ bool Solitaire::move(const Loc& from, const Loc& to) {
         for (const int x : moving)
             g.home[static_cast<std::size_t>(to.i)].push_back(x);
     if (scoring)
-        g.score += to.type == Pile::kHome ? 10 : from.type == Pile::kHome ? -15 : from.type == Pile::kWaste ? 5 : 0;
+        g.score += to.type == Pile::kHome      ? 10
+                   : from.type == Pile::kHome  ? -15
+                   : from.type == Pile::kWaste ? 5
+                                               : 0;
     pick.reset();
     if (std::all_of(g.home.begin(), g.home.end(), [](const auto& p) { return p.size() == 13; }))
         victory();
@@ -849,7 +860,8 @@ float Solitaire::tab_step(int i) const {
     for (const auto& c : p)
         face += c.up ? 1 : 0;
     const int down = static_cast<int>(p.size()) - face;
-    return std::min(18.0f, static_cast<float>(kH - 126 - kCH - down * 7) / static_cast<float>(std::max(1, face - 1)));
+    return std::min(
+        18.0f, static_cast<float>(kH - 126 - kCH - down * 7) / static_cast<float>(std::max(1, face - 1)));
 }
 
 }  // namespace agentdesk::ui::win98

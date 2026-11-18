@@ -251,7 +251,8 @@ TEST(Win98Mines, ChordAndRequests) {
         if (!c.open || c.n == 0)
             continue;
         for (const int j : m.neighbors(i))
-            if (m.cells()[static_cast<std::size_t>(j)].mine && m.cells()[static_cast<std::size_t>(j)].mark != 1)
+            if (m.cells()[static_cast<std::size_t>(j)].mine &&
+                m.cells()[static_cast<std::size_t>(j)].mark != 1)
                 m.mark(j);
         m.chord(i, 100);
         for (const int j : m.neighbors(i)) {
