@@ -487,9 +487,13 @@ Response SessionManager::do_git_run(const Request& req) {
             return bad(req, "args must be plain strings");
         args.push_back(win::to_wide(x.get<std::string>()));
     }
+    // The Changes panel, branch tails and the worktree dialogs (list, remove, submodule status).
     static const std::set<std::wstring> kCommands = {L"status", L"diff", L"rev-parse", L"rev-list", L"add",
-                                                      L"commit"};
+                                                      L"commit", L"log", L"worktree", L"submodule"};
     if (!kCommands.contains(args.front()))
+        return bad(req, "git command not allowed");
+    if ((args.front() == L"worktree" && (args.size() < 2 || (args[1] != L"list" && args[1] != L"remove"))) ||
+        (args.front() == L"submodule" && (args.size() < 2 || args[1] != L"status")))
         return bad(req, "git command not allowed");
     for (const auto& x : args) {
         if (x == L"--")

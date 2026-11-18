@@ -361,7 +361,7 @@ Settings load_settings() {
         s.theme_dark = j.value("theme_dark", light ? std::string("midnight") : s.theme);
         s.theme_light = j.value("theme_light", light ? s.theme : std::string("paper"));
     }
-    s.zoom = std::clamp(j.value("zoom", 1.0f), 0.6f, 2.5f);
+    s.zoom = std::clamp(j.value("zoom", 1.0f), 0.5f, 3.0f);
     s.font_size = std::clamp(j.value("font_size", 14.0f), 9.0f, 28.0f);
     s.sounds = j.value("sounds", true);
     s.toasts = j.value("toasts", true);
@@ -418,12 +418,24 @@ float ui_scale(const Settings& s) {
     return s.zoom * ui_text_factor(s);
 }
 
+std::string g_settings_problem;  // why the last write did not happen (shown once as a toast)
+
+std::string read_text_file(const std::filesystem::path& p, bool* ok = nullptr) {
+    std::ifstream in(p, std::ios::binary);
+    if (ok != nullptr)
+        *ok = static_cast<bool>(in);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+// herdr settings.js 115-148: re-read the file, apply our keys onto it (keys we do not own stay),
+// write only if nobody changed it meanwhile (3 tries), and never overwrite a file that does not
+// parse.
 void save_settings(const Settings& s) {
     const auto path = data_dir() / L"ui.json";
     const auto tmp = std::filesystem::path(path).concat(L".tmp");
-    {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        out << Json{
+    const Json ours = Json{
             {"schema_version", 1},
             {"close_notice_shown", s.close_notice_shown},
             {"last_cwd", s.last_cwd},
@@ -466,9 +478,40 @@ void save_settings(const Settings& s) {
                  for (const auto& m : s.machines)
                      list.push_back({{"name", m.name}, {"target", m.target}, {"ctl", m.ctl}});
                  return list;
-             }()}}.dump(2);
+             }()}};
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        std::error_code ec;
+        const bool exists = std::filesystem::exists(path, ec);
+        bool read_ok = true;
+        const std::string before = exists ? read_text_file(path, &read_ok) : std::string();
+        if (exists && !read_ok) {
+            g_settings_problem = "Cannot read ui.json";
+            return;
+        }
+        Json doc = Json::object();
+        if (exists && !before.empty()) {
+            doc = Json::parse(before, nullptr, false);
+            if (!doc.is_object()) {
+                g_settings_problem = "ui.json has errors: fix it first";
+                return;
+            }
+        }
+        for (const auto& [k, v] : ours.items())
+            doc[k] = v;
+        {
+            std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+            out << doc.dump(2, ' ', false, Json::error_handler_t::replace) << "\n";
+        }
+        bool again_ok = true;
+        const std::string now = exists ? read_text_file(path, &again_ok) : std::string();
+        if (now != before) {  // changed while we wrote: start over from the new text
+            std::filesystem::remove(tmp, ec);
+            continue;
+        }
+        ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+        return;
     }
-    ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    g_settings_problem = "Not saved to ui.json";
 }
 
 // ------------------------------------------------------------------ layouts
@@ -849,6 +892,8 @@ constexpr CommandInfo kCommands[] = {
     {"mods.folder", "Open the mods folder"},
     {"app.exit_all", "Exit and stop all sessions"},
 };
+
+bool known_command(std::string_view name);
 
 // Command names keys.json may bind (herdr validates actions and reports unknown ones). A
 // "<mod>.<command>" action is accepted when that mod folder exists.
@@ -1791,6 +1836,8 @@ struct App::State {
     Settings settings;
     ui::Keymap keymap;
     std::vector<std::string> keymap_errors;
+    std::filesystem::file_time_type keys_mtime{};
+    Clock::time_point keys_checked{};
     ui::FontSet fonts;
     float dpi = 1.0f;
     bool window_focused = true;
@@ -1915,6 +1962,7 @@ struct App::State {
     std::string settings_tab;  // tab to select when the settings window opens
     bool show_worktree_open = false;
     std::vector<WorktreeEntry> worktree_list;
+    std::string worktree_machine;  // machine the listed worktrees are on
     char wt_filter[128] = {};
     int wt_sel = 0;
 
@@ -2036,7 +2084,39 @@ struct App::State {
 namespace {
 void start_remotes(App::State& s);
 void apply_terminal_font(App::State& s);
+void load_keys(App::State& s);
 void apply_ui_font(App::State& s);
+}  // namespace
+
+namespace {
+// keys.json (herdr keys.rs): installed from the defaults when missing; read again whenever it
+// changes on disk; problems go to keys.error (removed once the file applies) and the defaults
+// stay in force.
+void load_keys(App::State& s) {
+    const auto path = data_dir() / L"keys.json";
+    const auto err_path = data_dir() / L"keys.error";
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) {
+        std::filesystem::create_directories(path.parent_path(), ec);
+        std::ofstream(path, std::ios::binary) << ui::Keymap::default_file().dump(2) << "\n";
+    }
+    s.keys_mtime = std::filesystem::last_write_time(path, ec);
+    s.keymap = ui::Keymap::defaults();
+    s.keymap_errors.clear();
+    const auto j = Json::parse(read_text_file(path), nullptr, false);
+    if (j.is_discarded())
+        s.keymap_errors.emplace_back("keys.json is not valid JSON");
+    else
+        s.keymap_errors = s.keymap.apply(j, known_command);
+    if (s.keymap_errors.empty()) {
+        std::filesystem::remove(err_path, ec);
+    } else {
+        std::ofstream out(err_path, std::ios::binary);
+        for (const auto& e : s.keymap_errors)
+            out << e << "\n";
+    }
+}
+
 }  // namespace
 
 App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_unique<State>()) {
@@ -2046,18 +2126,7 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     g_pal = palette_by_id(s_->settings.theme);
     s_->folded_machines.insert(s_->settings.folded_machines.begin(), s_->settings.folded_machines.end());
     s_->keymap = ui::Keymap::defaults();
-    {
-        std::ifstream in(data_dir() / L"keys.json", std::ios::binary);
-        if (in) {
-            std::stringstream ss;
-            ss << in.rdbuf();
-            const auto j = Json::parse(ss.str(), nullptr, false);
-            if (j.is_discarded())
-                s_->keymap_errors.emplace_back("keys.json is not valid JSON");
-            else
-                s_->keymap_errors = s_->keymap.apply(j, known_command);
-        }
-    }
+    load_keys(*s_);
     std::string cwd = s_->settings.last_cwd;
     if (cwd.empty()) {
         const auto u8 = std::filesystem::current_path().u8string();
@@ -2570,6 +2639,28 @@ std::string pick_shell(const std::string& wanted, const std::vector<std::pair<st
 
 void open_confirm(App::State& s, std::string title, std::string detail, std::string ok, std::string command);
 
+// git in `cwd` on `machine` ("" = here); other machines run it through their agent-host's
+// git.run (herdr worktree.js runs git on the space's machine).
+host::ToolResult git_at(App::State& s, const std::string& machine, const std::string& cwd, std::vector<std::wstring> args,
+                        std::chrono::seconds timeout = std::chrono::seconds(30)) {
+    if (machine.empty()) {
+        const std::filesystem::path p(win::to_wide(cwd));
+        args.insert(args.begin(), {L"git", L"-C", p.native()});
+        return host::run_tool(args, p, timeout);
+    }
+    host::ToolResult r;
+    Json a = Json::array();
+    for (const auto& x : args)
+        a.push_back(win::to_utf8(x));
+    if (const auto res = s.panels->remote ? s.panels->remote(machine, "git.run", Json{{"cwd", cwd}, {"args", a}})
+                                          : std::nullopt) {
+        r.started = true;
+        r.exit_code = res->value("exit_code", 1ul);
+        r.output = res->value("output", "");
+    }
+    return r;
+}
+
 // What removing a linked worktree would lose (herdr worktree.js): uncommitted changes, and
 // submodules with commits their upstream does not have. Plain git, no shell.
 struct WorktreeRisk {
@@ -2584,13 +2675,12 @@ struct WorktreeRisk {
     }
 };
 
-WorktreeRisk worktree_risk(const std::string& top) {
+WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std::string& top) {
     WorktreeRisk r;
     const std::filesystem::path p(win::to_wide(top));
-    const auto st = host::run_tool({L"git", L"-C", p.native(), L"status", L"--porcelain"}, p, std::chrono::seconds(10));
+    const auto st = git_at(s, machine, top, {L"status", L"--porcelain"});
     r.dirty = st.started && st.exit_code == 0 && !st.output.empty();
-    const auto subs = host::run_tool({L"git", L"-C", p.native(), L"submodule", L"status", L"--recursive"}, p,
-                                     std::chrono::seconds(10));
+    const auto subs = git_at(s, machine, top, {L"submodule", L"status", L"--recursive"});
     std::stringstream ss(subs.started && subs.exit_code == 0 ? subs.output : std::string());
     for (std::string line; std::getline(ss, line);) {
         // " <sha> <path> (<describe>)"
@@ -2601,8 +2691,7 @@ WorktreeRisk worktree_risk(const std::string& top) {
             continue;
         r.submodules = true;
         const auto sp = p / win::to_wide(path);
-        const auto ahead = host::run_tool({L"git", L"-C", sp.native(), L"rev-list", L"--count", L"@{u}..HEAD"}, sp,
-                                          std::chrono::seconds(10));
+        const auto ahead = git_at(s, machine, win::to_utf8(sp.native()), {L"rev-list", L"--count", L"@{u}..HEAD"});
         if (ahead.started && (ahead.exit_code != 0 || std::atoi(ahead.output.c_str()) > 0))
             r.unpushed.push_back(path);  // no upstream counts as unpushed
     }
@@ -2881,11 +2970,11 @@ void run_command(App::State& s, const std::string& cmd) {
         // skipped): main checkout first, then by the branch's last commit, newest first.
         s.worktree_list.clear();
         const std::string cwd = s.focused_cwd();
-        const auto g = s.git.get(cwd);
+        const std::string machine = s.machine_of[s.ws.focused_session()];
+        s.worktree_machine = machine;
+        const auto g = s.git.get(cwd, machine);
         if (!cwd.empty()) {
-            const std::filesystem::path p(win::to_wide(cwd));
-            const auto r = host::run_tool({L"git", L"-C", p.native(), L"worktree", L"list", L"--porcelain"}, p,
-                                          std::chrono::seconds(10));
+            const auto r = git_at(s, machine, cwd, {L"worktree", L"list", L"--porcelain"});
             std::stringstream ss(r.output + "\n");
             WorktreeEntry e;
             bool skip = false;
@@ -2908,9 +2997,8 @@ void run_command(App::State& s, const std::string& cmd) {
                 } else if (l.empty() && !e.path.empty()) {
                     if (!skip) {
                         e.main = _stricmp(e.path.c_str(), g.common_top.c_str()) == 0;
-                        const std::filesystem::path wp(win::to_wide(e.path));
-                        const auto t = host::run_tool({L"git", L"-C", wp.native(), L"log", L"-1", L"--format=%ct"}, wp,
-                                                      std::chrono::seconds(5));
+                        const auto t = git_at(s, machine, e.path, {L"log", L"-1", L"--format=%ct"},
+                                              std::chrono::seconds(5));
                         e.time = std::atoll(t.output.c_str());
                         const long long age = static_cast<long long>(std::time(nullptr)) - e.time;
                         e.age = e.time == 0        ? std::string()
@@ -2935,15 +3023,19 @@ void run_command(App::State& s, const std::string& cmd) {
         else
             s.show_worktree_open = true;
     } else if (name == "worktree.open_at") {
+        // arg: "<machine>|<path>": a space on that machine already in the checkout, else a new one.
+        const auto bar = arg.find('|');
+        const std::string machine = bar == std::string::npos ? std::string() : arg.substr(0, bar);
+        const std::string path = bar == std::string::npos ? arg : arg.substr(bar + 1);
         int best = -1;
         for (int i = 0; i < static_cast<int>(s.ws.spaces.size()) && best < 0; ++i) {
             const auto& sp = s.ws.spaces[static_cast<std::size_t>(i)];
-            if (!sp.machine.empty() || sp.tabs.empty())
+            if (sp.machine != machine || sp.tabs.empty())
                 continue;
             const auto ids = s.ws.sessions_in(sp.tabs.front());
             if (!ids.empty() && s.views_by_id.count(ids.front())) {
-                const auto top = s.git.get(s.views_by_id[ids.front()].cwd).top;
-                if (_stricmp(top.c_str(), arg.c_str()) == 0)
+                const auto top = s.git.get(s.views_by_id[ids.front()].cwd, machine).top;
+                if (_stricmp(top.c_str(), path.c_str()) == 0)
                     best = i;
             }
         }
@@ -2954,57 +3046,67 @@ void run_command(App::State& s, const std::string& cmd) {
         }
         Placement p;
         p.target = LaunchTarget::kSpace;
-        ui::HostClient* h = s.host_for("");
+        p.machine = machine;
+        ui::HostClient* h = s.host_for(machine);
         const std::string shell = pick_shell(s.settings.shell_profile, h->profiles());
         if (!shell.empty())
-            create_session(s, shell, arg, "", p);
+            create_session(s, shell, path, "", p);
     } else if (name == "worktree.remove") {
-        const auto g = s.git.get(s.focused_cwd());
+        const std::string machine = s.machine_of[s.ws.focused_session()];
+        const auto g = s.git.get(s.focused_cwd(), machine);
         if (g.repo && !g.worktree) {
             s.toast("Not a worktree", "This is the repository's main checkout, not a worktree.", "", g_pal->working);
         } else if (g.repo) {
-            const auto risk = worktree_risk(g.top);
+            const auto risk = worktree_risk(s, machine, g.top);
             const auto loc = s.ws.find(s.ws.focused_session());
             open_confirm(s, "Remove worktree " + (loc.space >= 0 ? s.ws.space_title(loc.space, s.session_cwds()) : g.top) + "?",
                          worktree_remove_text(g.top, risk), "Remove",
-                         "worktree.remove_checked:" + risk.signature() + "|" + g.top);
+                         "worktree.remove_checked:" + risk.signature() + "|" + machine + "|" + g.top);
         }
     } else if (name == "worktree.remove_checked") {
         // herdr worktree.js 228-245: Enter re-checks; a risk that appeared since the dialog
         // opened asks once more ("Enter again removes it anyway").
         const auto bar = arg.find('|');
+        const auto bar2 = bar == std::string::npos ? std::string::npos : arg.find('|', bar + 1);
         const std::string seen = arg.substr(0, bar);
-        const std::string top = bar == std::string::npos ? std::string() : arg.substr(bar + 1);
-        const auto risk = worktree_risk(top);
+        const std::string machine = bar2 == std::string::npos ? std::string() : arg.substr(bar + 1, bar2 - bar - 1);
+        const std::string top = bar2 == std::string::npos ? std::string() : arg.substr(bar2 + 1);
+        const auto risk = worktree_risk(s, machine, top);
         const std::string force = risk.dirty || risk.submodules ? "worktree.remove_force:" : "worktree.remove_now:";
         if (risk.signature() != seen) {
             open_confirm(s, "Remove worktree?",
                          worktree_remove_text(top, risk) + "\n\nIt changed since this opened. Enter again removes it anyway.",
-                         "Remove", force + top);
+                         "Remove", force + machine + "|" + top);
         } else {
-            run_command(s, force + top);
+            run_command(s, force + machine + "|" + top);
         }
     } else if (name == "worktree.remove_now" || name == "worktree.remove_force") {
-        const auto g = s.git.get(arg);
-        const std::filesystem::path main(win::to_wide(g.common_top.empty() ? arg : g.common_top));
+        // arg: "<machine>|<top>" (an older "<top>" means this computer)
+        const auto bar = arg.find('|');
+        const std::string machine = bar == std::string::npos ? std::string() : arg.substr(0, bar);
+        const std::string top = bar == std::string::npos ? arg : arg.substr(bar + 1);
+        const auto g = s.git.get(top, machine);
+        const std::string main = g.common_top.empty() ? top : g.common_top;
         // End the terminals of spaces in that checkout first (they hold the folder open).
         for (int i = static_cast<int>(s.ws.spaces.size()) - 1; i >= 0; --i) {
             bool inside = false;
             for (const auto& t : s.ws.spaces[static_cast<std::size_t>(i)].tabs)
                 for (const auto& id : s.ws.sessions_in(t))
-                    if (s.views_by_id.count(id) && _strnicmp(s.views_by_id[id].cwd.c_str(), arg.c_str(), arg.size()) == 0)
+                    if (s.views_by_id.count(id) && s.machine_of[id] == machine &&
+                        _strnicmp(s.views_by_id[id].cwd.c_str(), top.c_str(), top.size()) == 0)
                         inside = true;
             if (inside)
                 run_command(s, "space.close_now:" + s.ws.spaces[static_cast<std::size_t>(i)].id);
         }
-        std::vector<std::wstring> argv = {L"git", L"-C", main.native(), L"worktree", L"remove"};
+        std::vector<std::wstring> argv = {L"worktree", L"remove"};
         if (name == "worktree.remove_force")
             argv.push_back(L"--force");
-        argv.push_back(win::to_wide(arg));
-        const auto r = host::run_tool(argv, main, std::chrono::seconds(30));
+        argv.push_back(win::to_wide(top));
+        const auto r = git_at(s, machine, main, argv);
         if (!r.started || r.exit_code != 0)
-            s.toast("Could not remove the worktree", r.output, "", g_pal->needs_you, 10);
-        s.git.invalidate(arg);
+            s.toast("Could not remove the worktree", r.started ? r.output : std::string("git did not run"), "",
+                    g_pal->needs_you, 10);
+        s.git.invalidate(top);
     } else if (name == "tab.move") {
         if (auto* sp = s.ws.active())
             s.ws.move_tab(s.ws.active_space, sp->active_tab, sp->active_tab + (arg == "left" ? -1 : 1));
@@ -3119,17 +3221,16 @@ void run_command(App::State& s, const std::string& cmd) {
         s.settings.zoom =
             name == "app.zoom_reset"
                 ? 1.0f
-                : std::clamp(s.settings.zoom + (name == "app.zoom_in" ? 0.1f : -0.1f), 0.6f, 2.5f);
+                : std::clamp(std::round((s.settings.zoom + (name == "app.zoom_in" ? 0.1f : -0.1f)) * 10.0f) / 10.0f,
+                             0.5f, 3.0f);
         save_settings(s.settings);
         g_scale = s.dpi * ui_scale(s.settings);
         apply_style(s.dpi, ui_scale(s.settings));
     } else if (name == "app.keys") {
         const auto path = data_dir() / L"keys.json";
-        std::error_code ec;
-        if (!std::filesystem::exists(path, ec))
-            std::ofstream(path) << "{\n  \"global\": {\n  },\n  \"terminal\": {\n  }\n}\n";
+        load_keys(s);  // writes the defaults when the file is missing
         ::ShellExecuteW(nullptr, L"open", L"notepad.exe", path.c_str(), nullptr, SW_SHOWNORMAL);
-        s.toast("keys.json opened", "Changes apply the next time AgentDesk starts.", "", g_pal->info);
+        s.toast("keys.json opened", "Saved changes apply right away.", "", g_pal->info);
     } else if (name == "app.exit_all") {
         s.show_exit = true;
         s.exit_error.clear();
@@ -6925,14 +7026,18 @@ void draw_worktree(App::State& s) {
     pop_overlay_style();
     if (!open)
         return;
-    const GitInfo g = s.git.get(s.wt_repo);
+    const std::string wt_machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
+    const GitInfo g = s.git.get(s.wt_repo, wt_machine);
     const std::string repo = folder_name(g.common_top.empty() ? g.top : g.common_top);
+    // Another machine's home is its own: its agent-host picks %USERPROFILE%\.agentdesk\worktrees
+    // there unless a folder is set.
     std::string root = s.settings.worktree_dir;
-    if (root.empty()) {
+    if (root.empty() && wt_machine.empty()) {
         wchar_t home[MAX_PATH]{};
         ::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
         root = win::to_utf8(home) + "\\.agentdesk\\worktrees";
     }
+    const std::string shown_root = root.empty() ? std::string("~\\.agentdesk\\worktrees") : root;
     bool cancel = overlay_title(s, g.repo ? ("New worktree of " + repo).c_str() : "New worktree");
     ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
     if (!g.repo)
@@ -6940,10 +7045,9 @@ void draw_worktree(App::State& s) {
     else
         ImGui::TextWrapped("A new space on a checkout in %s\\%s\\. A branch that exists is checked out; a new one "
                            "starts from here.",
-                           display_path(root).c_str(), repo.c_str());
+                           display_path(shown_root).c_str(), repo.c_str());
     ImGui::PopStyleColor();
     ImGui::Dummy(ImVec2(0, px(6)));
-    const std::string wt_machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
     ui::HostClient* wthost = s.host_for(wt_machine);
     bool create = false;
     if (g.repo) {
@@ -6979,7 +7083,9 @@ void draw_worktree(App::State& s) {
         } else if (wthost->connected()) {
             s.wt_busy = true;
             s.wt_error.clear();
-            Json params{{"repo", g.top}, {"branch", branch}, {"path", root + "\\" + repo + "\\" + branch_slug(branch)}};
+            Json params{{"repo", g.top}, {"branch", branch}};
+            if (!root.empty())
+                params["path"] = root + "\\" + repo + "\\" + branch_slug(branch);
             const std::string shell = pick_shell(s.settings.shell_profile, wthost->profiles());
             wthost->call(
                 "worktree.add", params,
@@ -7116,7 +7222,7 @@ void draw_worktree_open(App::State& s) {
     close = close || ImGui::IsKeyPressed(ImGuiKey_Escape);
     if (!go.empty()) {
         close = true;
-        run_command(s, "worktree.open_at:" + go);
+        run_command(s, "worktree.open_at:" + s.worktree_machine + "|" + go);
     }
     if (close)
         ImGui::CloseCurrentPopup();
@@ -7448,12 +7554,18 @@ void draw_settings(App::State& s) {
         ImGui::NewLine();
         }
         settings_section(s, "Size and fonts");
-        settings_row(s, "Zoom", "Everything: terminals, panels, text.", px(180));
+        settings_row(s, "Zoom", "Everything: terminals, panels, text.", px(180) + px(70));
         if (stepper(s, "zoom", s.settings.zoom, 0.1f, 0.5f, 3.0f, "%.0f%%", 100.0f)) {
             g_scale = s.dpi * ui_scale(s.settings);
             apply_style(s.dpi, ui_scale(s.settings));
             changed = true;
         }
+        ImGui::SameLine(0, px(8));
+        ImGui::BeginDisabled(std::abs(s.settings.zoom - 1.0f) < 0.001f);
+        if (ImGui::Button("Reset", ImVec2(px(62), 0))) {  // herdr: Zoom stepper + Reset
+            run_command(s, "app.zoom_reset");
+        }
+        ImGui::EndDisabled();
         settings_row_done(s);
         settings_row(s, "Interface text", "Sidebar, tabs, menus and panels, at 100% zoom.", px(180));
         if (stepper(s, "uitext", s.settings.ui_text, 1.0f, 11.0f, 24.0f, "%.0f px")) {
@@ -7464,7 +7576,7 @@ void draw_settings(App::State& s) {
         settings_row_done(s);
         {
             settings_row(s, "Terminal font", nullptr, px(200) + px(10) + px(120));
-            if (font_picker(s, "##tfont", s.settings.terminal_font, "JetBrains Mono (default)", px(200))) {
+            if (font_picker(s, "##tfont", s.settings.terminal_font, "Default (JetBrains Mono)", px(200))) {
                 apply_terminal_font(s);
                 changed = true;
             }
@@ -7508,7 +7620,7 @@ void draw_settings(App::State& s) {
         changed |= stepper(s, "ss", s.settings.scroll_speed, 0.1f, 0.1f, 5.0f, "%.0f%%", 100.0f);
         settings_row_done(s);
         settings_row(s, "Interface font", nullptr, px(200));
-        if (font_picker(s, "##uifont", s.settings.ui_font, "Geist (default)", px(200))) {
+        if (font_picker(s, "##uifont", s.settings.ui_font, "Default (Geist)", px(200))) {
             apply_ui_font(s);
             changed = true;
         }
@@ -7755,6 +7867,12 @@ void draw_welcome(App::State& s) {
                 "Claude Code and Codex tell AgentDesk when they work, finish or need you.");
         feature(ui::icon::kChanges, "Files and Changes", "Look at what your agents changed, and commit it.");
         ImGui::Dummy(ImVec2(0, px(6)));
+        // herdr welcome page 1: Appearance System / Light / Dark.
+        ImGui::TextDisabled("Appearance");
+        ImGui::SameLine(px(120));
+        if (segmented(s, "##wappearance", s.settings.appearance,
+                      {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}}))
+            changed = true;
         ImGui::TextDisabled("Size");
         ImGui::SameLine(px(120));
         if (stepper(s, "wzoom", s.settings.zoom, 0.1f, 0.5f, 3.0f, "%.0f%%", 100.0f)) {
@@ -7762,12 +7880,6 @@ void draw_welcome(App::State& s) {
             apply_style(s.dpi, ui_scale(s.settings));
             changed = true;
         }
-        // herdr welcome page 1: Appearance System / Light / Dark.
-        ImGui::TextDisabled("Appearance");
-        ImGui::SameLine(px(120));
-        if (segmented(s, "##wappearance", s.settings.appearance,
-                      {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}}))
-            changed = true;
     } else if (page == 1) {
         title("Add your other machines",
               "A desktop at home, a server: AgentDesk reaches them over ssh, and agents there keep running while "
@@ -8149,7 +8261,8 @@ void draw_confirm(App::State& s) {
     ImGui::PopStyleColor();
     ImGui::SameLine();
     primary_button_style(true);
-    const bool ok = ImGui::Button(s.confirm_ok.c_str(), ImVec2(bw, px(30))) || ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+    // herdr confirm/main.js: Cancel and Confirm.
+    const bool ok = ImGui::Button("Confirm", ImVec2(bw, px(30))) || ImGui::IsKeyPressed(ImGuiKey_Enter, false);
     primary_button_style(false);
     if (cancel)
         ImGui::CloseCurrentPopup();
@@ -8240,6 +8353,22 @@ void App::frame() {
     State& s = *s_;
     g_scale = s.dpi * ui_scale(s.settings);
     s.fonts.mono_size = s.settings.font_size / ui_text_factor(s.settings);
+    if (Clock::now() - s.keys_checked > std::chrono::milliseconds(400)) {
+        s.keys_checked = Clock::now();
+        std::error_code ec;
+        const auto t = std::filesystem::last_write_time(data_dir() / L"keys.json", ec);
+        if (!ec && t != s.keys_mtime) {
+            load_keys(s);
+            if (s.keymap_errors.empty())
+                s.toast("keys.json applied", "", "", g_pal->info, 2);
+            else
+                s.toast("keys.json not applied", s.keymap_errors.front(), "", g_pal->needs_you, 8);
+        }
+    }
+    if (!g_settings_problem.empty()) {
+        s.toast(g_settings_problem, "", "", g_pal->needs_you, 8);
+        g_settings_problem.clear();
+    }
     s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
     if (const Palette* want = effective_palette(s.settings.appearance, s.settings.theme_dark, s.settings.theme_light,
                                                 s.layout().theme);

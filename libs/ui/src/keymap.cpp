@@ -116,75 +116,96 @@ std::string Keymap::format(ImGuiKeyChord chord) {
     return out;
 }
 
+namespace {
+
+// herdr's defaults/keys.json for Windows (spec-settings-fonts.md 3.2), plus ctrl-1..9 / alt-1..9.
+constexpr std::pair<const char*, const char*> kGlobal[] = {
+    {"ctrl-shift-t", "tab.new"},
+    {"ctrl-shift-n", "space.new"},
+    {"ctrl-shift-k", "app.picker"},
+    {"ctrl-alt-shift-escape", "app.reset"},
+    {"alt-[", "tab.prev"},
+    {"alt-]", "tab.next"},
+    {"ctrl-shift-w", "tab.close"},
+    {"ctrl-shift-x", "pane.close"},
+    {"ctrl-shift-o", "pane.split:right"},
+    {"ctrl-shift-e", "pane.split:down"},
+    {"ctrl-shift-z", "pane.zoom"},
+    {"ctrl-shift-p", "app.palette"},
+    {"ctrl-shift-/", "app.help"},  // = ctrl-? and ctrl-shift-? (same key)
+    {"ctrl-shift-b", "sidebar.toggle"},
+    {"ctrl-shift-l", "layout.switch"},
+    {"ctrl-,", "app.settings"},
+    {"ctrl-tab", "tab.next"},
+    {"ctrl-shift-tab", "tab.prev"},
+    {"ctrl-pagedown", "tab.next"},
+    {"ctrl-pageup", "tab.prev"},
+    {"ctrl-shift-pagedown", "space.next"},
+    {"ctrl-shift-pageup", "space.prev"},
+    {"alt-down", "agent.next"},
+    {"alt-up", "agent.prev"},
+    {"alt-h", "pane.go:left"},
+    {"alt-j", "pane.go:down"},
+    {"alt-k", "pane.go:up"},
+    {"alt-l", "pane.go:right"},
+    {"alt-left", "pane.go:left"},
+    {"alt-right", "pane.go:right"},
+    {"alt-shift-h", "pane.swap:left"},
+    {"alt-shift-j", "pane.swap:down"},
+    {"alt-shift-k", "pane.swap:up"},
+    {"alt-shift-l", "pane.swap:right"},
+    {"ctrl-=", "app.zoom_in"},
+    {"ctrl-shift-=", "app.zoom_in"},
+    {"ctrl--", "app.zoom_out"},
+    {"ctrl-0", "app.zoom_reset"},
+    {"f2", "tab.rename"},
+    {"shift-f2", "space.rename"},
+};
+
+constexpr std::pair<const char*, const char*> kTerminal[] = {
+    {"ctrl-shift-c", "terminal.copy"},
+    {"ctrl-insert", "terminal.copy"},
+    {"ctrl-shift-v", "terminal.paste"},
+    {"shift-insert", "terminal.paste"},
+    {"ctrl-shift-f", "terminal.search"},
+    // herdr terminal.paste_image: on Windows it pastes the clipboard text.
+    {"ctrl-v", "terminal.paste"},
+    {"ctrl-backspace", "send:\x17"},
+    {"ctrl-left",
+     "send:\x1b"
+     "b"},
+    {"ctrl-right",
+     "send:\x1b"
+     "f"},
+};
+
+}  // namespace
+
 Keymap Keymap::defaults() {
     Keymap k;
-    const std::pair<const char*, const char*> global[] = {
-        {"ctrl-shift-t", "tab.new"},
-        {"ctrl-shift-n", "space.new"},
-        {"ctrl-shift-k", "app.picker"},
-        {"ctrl-alt-shift-escape", "app.reset"},
-        {"alt-[", "tab.prev"},
-        {"alt-]", "tab.next"},
-        {"ctrl-shift-w", "tab.close"},
-        {"ctrl-shift-x", "pane.close"},
-        {"ctrl-shift-o", "pane.split:right"},
-        {"ctrl-shift-e", "pane.split:down"},
-        {"ctrl-shift-z", "pane.zoom"},
-        {"ctrl-shift-p", "app.palette"},
-        {"ctrl-shift-/", "app.help"},  // = ctrl-? and ctrl-shift-? (same key)
-        {"ctrl-shift-b", "sidebar.toggle"},
-        {"ctrl-shift-l", "layout.switch"},
-        {"ctrl-,", "app.settings"},
-        {"ctrl-tab", "tab.next"},
-        {"ctrl-shift-tab", "tab.prev"},
-        {"ctrl-pagedown", "tab.next"},
-        {"ctrl-pageup", "tab.prev"},
-        {"ctrl-shift-pagedown", "space.next"},
-        {"ctrl-shift-pageup", "space.prev"},
-        {"alt-down", "agent.next"},
-        {"alt-up", "agent.prev"},
-        {"alt-h", "pane.go:left"},
-        {"alt-j", "pane.go:down"},
-        {"alt-k", "pane.go:up"},
-        {"alt-l", "pane.go:right"},
-        {"alt-left", "pane.go:left"},
-        {"alt-right", "pane.go:right"},
-        {"alt-shift-h", "pane.swap:left"},
-        {"alt-shift-j", "pane.swap:down"},
-        {"alt-shift-k", "pane.swap:up"},
-        {"alt-shift-l", "pane.swap:right"},
-        {"ctrl-=", "app.zoom_in"},
-        {"ctrl-shift-=", "app.zoom_in"},
-        {"ctrl--", "app.zoom_out"},
-        {"ctrl-0", "app.zoom_reset"},
-        {"f2", "tab.rename"},
-        {"shift-f2", "space.rename"},
-    };
-    for (const auto& [chord, cmd] : global)
+    for (const auto& [chord, cmd] : kGlobal)
         k.global_[*parse(chord)] = cmd;
     for (int i = 1; i <= 9; ++i) {
         k.global_[*parse("ctrl-" + std::to_string(i))] = "tab.select:" + std::to_string(i);
         k.global_[*parse("alt-" + std::to_string(i))] = "space.select:" + std::to_string(i);
     }
-    const std::pair<const char*, const char*> terminal[] = {
-        {"ctrl-shift-c", "terminal.copy"},
-        {"ctrl-insert", "terminal.copy"},
-        {"ctrl-shift-v", "terminal.paste"},
-        {"shift-insert", "terminal.paste"},
-        {"ctrl-shift-f", "terminal.search"},
-        // herdr terminal.paste_image: on Windows it pastes the clipboard text.
-        {"ctrl-v", "terminal.paste"},
-        {"ctrl-backspace", "send:\x17"},
-        {"ctrl-left",
-         "send:\x1b"
-         "b"},
-        {"ctrl-right",
-         "send:\x1b"
-         "f"},
-    };
-    for (const auto& [chord, cmd] : terminal)
+    for (const auto& [chord, cmd] : kTerminal)
         k.terminal_[*parse(chord)] = cmd;
     return k;
+}
+
+nlohmann::json Keymap::default_file() {
+    nlohmann::json g = nlohmann::json::object();
+    for (const auto& [chord, cmd] : kGlobal)
+        g[chord] = cmd;
+    for (int i = 1; i <= 9; ++i) {
+        g["ctrl-" + std::to_string(i)] = "tab.select:" + std::to_string(i);
+        g["alt-" + std::to_string(i)] = "space.select:" + std::to_string(i);
+    }
+    nlohmann::json t = nlohmann::json::object();
+    for (const auto& [chord, cmd] : kTerminal)
+        t[chord] = cmd;
+    return {{"global", g}, {"terminal", t}};
 }
 
 namespace {

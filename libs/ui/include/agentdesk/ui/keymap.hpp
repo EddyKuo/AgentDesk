@@ -21,6 +21,8 @@ namespace agentdesk::ui {
 class Keymap {
 public:
     static Keymap defaults();
+    // The defaults as a keys.json document (written when the file is missing, like herdr).
+    static nlohmann::json default_file();
 
     // Applies a keys.json document. Returns its problems (bad chords, unknown sections or
     // actions); when there are any, nothing from the file is installed (herdr keys.rs: the

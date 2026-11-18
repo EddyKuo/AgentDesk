@@ -16,7 +16,7 @@ MVP（M0～M4，Sprint 1～5）已完成：結論在 `docs/poc/M0-report.md`、`
 scripts\build.cmd msvc-x64-debug all          :: configure + build + ctest
 scripts\build.cmd msvc-x64-debug build        :: 只建置（preset 已 configure 過）
 scripts\build.cmd msvc-x64-release configure  :: 新 preset 第一次要先 configure
-build\msvc-x64-debug\tools\fetch_conpty.exe   :: 取得隨附 ConPTY（新 clone 必做；先建置一次，取得後再 configure）
+build\msvc-x64-debug\tools\fetch_conpty.exe   :: 取得隨附 ConPTY（新 clone 必做：先建置一次產生這個工具，執行後再重新 configure）
 ```
 
 單一測試（先跑過一次建置）：
