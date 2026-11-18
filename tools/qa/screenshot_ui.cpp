@@ -218,6 +218,17 @@ int wmain(int argc, wchar_t** argv) {
                             {"name", "Windows PowerShell"},
                             {"executable", ps},
                             {"args", {"-NoLogo", "-NoProfile"}}});
+        // Shells that report an agent state over OSC 7501 and stay open: "state-working",
+        // "state-blocked", "state-idle", "state-done" (sidebar agents list checks).
+        for (const char* st : {"working", "blocked", "idle", "done"}) {
+            profiles.push_back(
+                    {{"id", std::string("state-") + st},
+                     {"name", std::string("state ") + st},
+                     {"executable", ps},
+                     {"args",
+                      {"-NoLogo", "-NoProfile", "-NoExit", "-Command",
+                       std::string("[Console]::Write([char]27 + ']7501;state=") + st + "' + [char]7)"}}});
+        }
         dk::write_file(data / L"profiles.json", dk::profiles_json(profiles));
         ::SetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", data.c_str());
 

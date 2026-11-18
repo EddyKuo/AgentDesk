@@ -307,6 +307,7 @@ struct Settings {
     std::string seen_version;    // What's new was shown for this version (herdr: once after an update)
     std::vector<std::string> folded_machines;  // machine headers folded in the sidebar
     std::vector<std::string> panels = {"files", "changes"};  // panel buttons in the tab bar
+    Json agents_changed = Json::object();  // session id -> {s: state, at: ms}: herdr agents.js 85-110
 };
 
 std::filesystem::path data_dir() {
@@ -396,6 +397,8 @@ Settings load_settings() {
     for (const auto& r : j.value("palette_recent", Json::array()))
         if (r.is_string())
             s.palette_recent.push_back(r.get<std::string>());
+    if (const auto it = j.find("agents_changed"); it != j.end() && it->is_object())
+        s.agents_changed = *it;
     if (const auto it = j.find("mods_enabled"); it != j.end() && it->is_array()) {
         s.mods_enabled.clear();
         for (const auto& m : *it)
@@ -471,6 +474,7 @@ void save_settings(const Settings& s) {
             {"seen_version", s.seen_version},
             {"folded_machines", s.folded_machines},
             {"panels", s.panels},
+            {"agents_changed", s.agents_changed},
             {"mods_enabled", std::vector<std::string>(s.mods_enabled.begin(), s.mods_enabled.end())},
             {"layout", s.layout},
             {"machines", [&] {
@@ -934,10 +938,14 @@ namespace {
 // herdr's spaces mod asks git for the checkout's top, its common dir (worktrees), the branch and
 // ahead/behind of upstream; at most a few at a time, again when the folder changes and every
 // 60 s (spaces.js 105-147, 229-264). Here one background thread runs git for queued folders.
+// Like herdr's watchFolder (spaces.js 266-286) a second thread watches each local repo's git
+// folder, so a commit or checkout made outside shows at once; the 60 s look again happens only
+// while the window is in front (spaces.js 140).
 struct GitInfo {
     bool repo = false;
     std::string top;         // checkout top (a worktree's own folder)
     std::string common_top;  // main checkout's top (differs for a linked worktree)
+    std::string common_dir;  // the repo's own git folder (`git rev-parse --git-common-dir`)
     bool worktree = false;
     std::string branch;      // "HEAD" when detached
     int ahead = 0;
@@ -946,10 +954,20 @@ struct GitInfo {
 
 class GitCache {
 public:
-    GitCache() : worker_([this](std::stop_token st) { run(st); }) {}
+    GitCache()
+        : wake_(::CreateEventW(nullptr, FALSE, FALSE, nullptr)),
+          worker_([this](std::stop_token st) { run(st); }),
+          watcher_([this](std::stop_token st) { watch_loop(st); }) {}
     ~GitCache() {
         worker_.request_stop();
+        watcher_.request_stop();
         cv_.notify_all();
+        if (wake_ != nullptr)
+            ::SetEvent(wake_);
+        watcher_.join();
+        worker_.join();
+        if (wake_ != nullptr)
+            ::CloseHandle(wake_);
     }
     GitCache(const GitCache&) = delete;
     GitCache& operator=(const GitCache&) = delete;
@@ -966,7 +984,9 @@ public:
         std::lock_guard lock(mutex_);
         auto& e = entries_[key];
         const auto now = Clock::now();
-        if (!e.queued && (e.at == Clock::time_point{} || now - e.at > std::chrono::seconds(60))) {
+        e.used = now;
+        // The fallback look (60 s) only while the window is in front (spaces.js 140-145).
+        if (!e.queued && (e.at == Clock::time_point{} || (active_ && now - e.at > std::chrono::seconds(60)))) {
             e.queued = true;
             queue_.push_back(key);
             cv_.notify_one();
@@ -979,13 +999,114 @@ public:
         if (auto it = entries_.find(dir); it != entries_.end())
             it->second.at = Clock::time_point{};
     }
+    // `dir` and every other folder in its repo (spaces.js 149-153: a commit there moves their
+    // ahead/behind too).
+    void invalidate_repo(const std::string& dir, const std::string& machine = {}) {
+        if (dir.empty())
+            return;
+        std::lock_guard lock(mutex_);
+        const std::string key = machine.empty() ? dir : machine + "|" + dir;
+        std::string common;
+        if (const auto it = entries_.find(key); it != entries_.end()) {
+            it->second.at = Clock::time_point{};
+            common = it->second.info.common_top;
+        } else {
+            // A folder nobody asked about yet: the repo of a known checkout that holds it.
+            for (const auto& [k, e] : entries_) {
+                const std::string& top = e.info.top;
+                if (machine_of(k) == machine && e.info.repo && dir.size() >= top.size() &&
+                    _strnicmp(dir.c_str(), top.c_str(), top.size()) == 0 &&
+                    (dir.size() == top.size() || dir[top.size()] == '\\' || dir[top.size()] == '/')) {
+                    common = e.info.common_top;
+                    break;
+                }
+            }
+        }
+        if (common.empty())
+            return;
+        for (auto& [k, e] : entries_)
+            if (machine_of(k) == machine && e.info.repo && _stricmp(e.info.common_top.c_str(), common.c_str()) == 0)
+                e.at = Clock::time_point{};
+    }
+    // The window is in front: the 60 s fallback runs only then.
+    void set_active(bool active) { active_ = active; }
 
 private:
     struct Entry {
         GitInfo info;
         Clock::time_point at{};
         bool queued = false;
+        Clock::time_point used{};  // last asked for by the UI
     };
+
+    static std::string machine_of(const std::string& key) {
+        const auto bar = key.find('|');
+        return bar == std::string::npos ? std::string() : key.substr(0, bar);
+    }
+
+    // Local repos' git folders, each with a change notification (spaces.js 266-286 watchFolder).
+    // A change looks again at every folder of that repo; folders no longer asked about for
+    // 10 minutes stop being watched. At most 62 at once (WaitForMultipleObjects).
+    void watch_loop(std::stop_token st) {
+        std::map<std::string, HANDLE> handles;
+        while (!st.stop_requested()) {
+            {
+                std::set<std::string> wanted;
+                {
+                    std::lock_guard lock(mutex_);
+                    const auto now = Clock::now();
+                    for (const auto& [k, e] : entries_)
+                        if (machine_of(k).empty() && e.info.repo && !e.info.common_dir.empty() &&
+                            now - e.used < std::chrono::minutes(10))
+                            wanted.insert(e.info.common_dir);
+                }
+                for (auto it = handles.begin(); it != handles.end();) {
+                    if (!wanted.contains(it->first)) {
+                        ::FindCloseChangeNotification(it->second);
+                        it = handles.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+                for (const auto& dir : wanted) {
+                    if (handles.size() >= 62 || handles.contains(dir))
+                        continue;
+                    const HANDLE h = ::FindFirstChangeNotificationW(
+                            win::to_wide(dir).c_str(), TRUE,
+                            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE);
+                    if (h != INVALID_HANDLE_VALUE)
+                        handles[dir] = h;
+                }
+            }
+            std::vector<HANDLE> wait{wake_};
+            std::vector<std::string> dirs{""};
+            for (const auto& [d, h] : handles) {
+                wait.push_back(h);
+                dirs.push_back(d);
+            }
+            const DWORD r = ::WaitForMultipleObjects(static_cast<DWORD>(wait.size()), wait.data(), FALSE, 2000);
+            if (st.stop_requested())
+                break;
+            if (r == WAIT_FAILED)
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (r <= WAIT_OBJECT_0 || r >= WAIT_OBJECT_0 + wait.size())
+                continue;
+            const std::string dir = dirs[r - WAIT_OBJECT_0];
+            // A git command writes many files: let it finish, then look once.
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            ::FindNextChangeNotification(handles[dir]);
+            std::lock_guard lock(mutex_);
+            for (auto& [k, e] : entries_) {
+                if (!machine_of(k).empty() || _stricmp(e.info.common_dir.c_str(), dir.c_str()) != 0 || e.queued)
+                    continue;
+                e.queued = true;
+                queue_.push_back(k);
+            }
+            cv_.notify_one();
+        }
+        for (const auto& [d, h] : handles)
+            ::FindCloseChangeNotification(h);
+    }
 
     static std::string trim(std::string s) {
         while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' '))
@@ -1042,6 +1163,7 @@ private:
             common = cwd / common;
         common = machine.empty() ? std::filesystem::weakly_canonical(common, ec) : common.lexically_normal();
         g.common_top = norm(win::to_utf8(common.parent_path().native()));
+        g.common_dir = norm(win::to_utf8(common.native()));
         g.worktree = _stricmp(g.common_top.c_str(), g.top.c_str()) != 0;
         g.branch = lines[2];
         const auto c = git({L"rev-list", L"--left-right", L"--count", L"HEAD...@{upstream}"});
@@ -1066,9 +1188,12 @@ private:
             const GitInfo info = query(dir);
             std::lock_guard lock(mutex_);
             auto& e = entries_[dir];
+            const bool new_dir = e.info.common_dir != info.common_dir;
             e.info = info;
             e.at = Clock::now();
             e.queued = false;
+            if (new_dir && wake_ != nullptr)
+                ::SetEvent(wake_);  // a repo to watch
         }
     }
 
@@ -1076,7 +1201,10 @@ private:
     std::condition_variable_any cv_;
     std::deque<std::string> queue_;
     std::map<std::string, Entry> entries_;
+    std::atomic<bool> active_{true};
+    HANDLE wake_ = nullptr;
     std::jthread worker_;
+    std::jthread watcher_;
 };
 // ------------------------------------------------------------------ Files / Changes panels
 // herdr-app mods/files and mods/changes (docs/research/herdr-app/spec-files-changes.md): both
@@ -1930,8 +2058,18 @@ struct App::State {
     } tab_wheel;
     std::set<std::string> folded_groups;
     std::set<std::string> folded_agents;
-    std::map<std::string, Attention> last_att;
-    std::map<std::string, Clock::time_point> changed_at;
+    // Each agent's last state and when it changed (ms since 1970), kept across restarts in
+    // ui.json (herdr agents.js 85-110).
+    struct Changed {
+        std::string s;
+        long long at = 0;
+    };
+    std::map<std::string, Changed> changed;
+    bool changed_loaded = false;
+    std::map<std::string, bool> busy_terminal;  // a command or an agent turn running (spaces.js 128-133)
+    std::string spaces_revealed;                // active space last brought into view (spaces.js 533-539)
+    int spaces_revealed_at = -1;
+    float spaces_list_h = 0;
     int drag_space = -1;
     int drag_tab = -1;
     std::string drag_pane;          // pane being dragged by its grip (herdr pane drag)
@@ -1989,14 +2127,26 @@ struct App::State {
             return Attention::kNone;
         return attention.get(id);
     }
-    // Folder that names an unnamed space (herdr): the repo's top folder, else the live folder.
-    [[nodiscard]] std::map<std::string, std::string> session_cwds() const {
+    // Folder that names an unnamed space (herdr model.rs 271-279): its first terminal's git top
+    // (a worktree's own folder), on whichever machine it runs, else that terminal's folder.
+    [[nodiscard]] std::map<std::string, std::string> session_cwds() {
         std::map<std::string, std::string> m;
-        for (const auto& [id, v] : views_by_id) {
-            const auto mi = machine_of.find(id);
-            const bool remote = mi != machine_of.end() && !mi->second.empty();
-            const std::string top = remote ? std::string() : ui::git_top(v.cwd);
-            m[id] = top.empty() ? v.cwd : top;
+        for (const auto& sp : ws.spaces) {
+            if (sp.tabs.empty())
+                continue;
+            const auto ids = ws.sessions_in(sp.tabs.front());
+            if (ids.empty())
+                continue;
+            const auto it = views_by_id.find(ids.front());
+            if (it == views_by_id.end() || it->second.cwd.empty())
+                continue;
+            const auto mi = machine_of.find(ids.front());
+            const std::string machine = mi != machine_of.end() ? mi->second : sp.machine;
+            const GitInfo g = git.get(it->second.cwd, machine);
+            std::string top = g.repo ? g.top : std::string();
+            if (top.empty() && machine.empty())
+                top = ui::git_top(it->second.cwd);  // until git answers
+            m[ids.front()] = top.empty() ? it->second.cwd : top;
         }
         return m;
     }
@@ -3612,18 +3762,6 @@ float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a,
     return 0;
 }
 
-// "<1m", "5m", "2h", "3d" (agents.js 67-73).
-std::string ago(Clock::time_point t) {
-    const auto m = std::chrono::duration_cast<std::chrono::minutes>(Clock::now() - t).count();
-    if (m < 1)
-        return "<1m";
-    if (m < 60)
-        return std::to_string(m) + "m";
-    if (m < 60 * 24)
-        return std::to_string(m / 60) + "h";
-    return std::to_string(m / (60 * 24)) + "d";
-}
-
 // Dragging an empty part of the brand row or the tab bar moves the window (herdr window_drag:
 // posts SC_MOVE so snapping works); double-click toggles maximize.
 void window_drag_area(App::State& s, ImVec2 a, ImVec2 b) {
@@ -3690,6 +3828,8 @@ void confirm_close_space(App::State& s, int index) {
 }
 
 // ---------------------------------------------------------------- sidebar: brand row
+// workspace-chrome/main.js 48-53: the mark and name, then search and the sidebar toggle (no
+// tooltips on either).
 void draw_brand(App::State& s, ImVec2 pos, float w, bool rail) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float h = px(46);
@@ -3705,14 +3845,12 @@ void draw_brand(App::State& s, ImVec2 pos, float w, bool rail) {
     }
     const float b = px(26);
     float bx = rail ? pos.x + (w - b) * 0.5f : pos.x + w - px(10) - b;
-    if (icon_button(s, "##sidebar-toggle", ui::icon::kSidebar, ImVec2(bx, cy - b * 0.5f), b, fpx(15),
-                    rail ? "Expand sidebar" : "Collapse sidebar", g_pal->dim))
+    if (icon_button(s, "##sidebar-toggle", ui::icon::kSidebar, ImVec2(bx, cy - b * 0.5f), b, fpx(15), nullptr,
+                    g_pal->dim))
         run_command(s, "sidebar.rail");
     if (!rail) {
         bx -= b + px(4);
-        const std::string tip = "Find a space or agent  " + s.keymap.chord_for("app.picker");
-        if (icon_button(s, "##search", ui::icon::kSearch, ImVec2(bx, cy - b * 0.5f), b, fpx(15), tip.c_str(),
-                        g_pal->dim))
+        if (icon_button(s, "##search", ui::icon::kSearch, ImVec2(bx, cy - b * 0.5f), b, fpx(15), nullptr, g_pal->dim))
             run_command(s, "app.picker");
     }
     window_drag_area(s, pos, ImVec2(pos.x + w, pos.y + h));
@@ -3720,27 +3858,43 @@ void draw_brand(App::State& s, ImVec2 pos, float w, bool rail) {
 
 // ---------------------------------------------------------------- sidebar: spaces
 struct SpaceRow {
-    int index = -1;           // space index, or -1 for a machine header
-    std::string machine;      // header: machine name ("" = this computer)
-    int tree = 0;             // 0 = top level, 1 = worktree "├─", 2 = last worktree "└─"
+    int index = -1;       // space index, or -1 for a machine header
+    std::string machine;  // header: machine name ("" = this computer)
+    bool tree = false;    // a worktree drawn under its main checkout
 };
 
-std::vector<SpaceRow> space_rows(App::State& s, const std::map<std::string, std::string>& cwds) {
-    // Folder of each space's first terminal, and its git facts.
-    std::vector<GitInfo> info(s.ws.spaces.size());
-    for (std::size_t i = 0; i < s.ws.spaces.size(); ++i) {
-        const auto& sp = s.ws.spaces[i];
-        for (const auto& t : sp.tabs) {
-            const auto ids = s.ws.sessions_in(t);
-            if (!ids.empty()) {
-                const auto it = s.views_by_id.find(ids.front());
-                if (it != s.views_by_id.end())
-                    info[i] = s.git.get(it->second.cwd, sp.machine);
-                break;
-            }
-        }
+// Git facts of a space's first terminal (spaces.js 22-27 place(): where the space is now).
+GitInfo space_git(App::State& s, const ui::Space& sp) {
+    for (const auto& t : sp.tabs) {
+        const auto ids = s.ws.sessions_in(t);
+        if (ids.empty())
+            continue;
+        const auto it = s.views_by_id.find(ids.front());
+        return it == s.views_by_id.end() ? GitInfo{} : s.git.get(it->second.cwd, sp.machine);
     }
-    (void)cwds;
+    return {};
+}
+
+std::vector<SpaceRow> space_rows(App::State& s) {
+    // spaces.js 298-335: each linked worktree goes right under the first main checkout of its
+    // repo, and the spaces are moved (space.move) so the model order is the drawn one: rail
+    // numbers and the space.select keys then follow what you see.
+    const std::size_t n = s.ws.spaces.size();
+    std::vector<ui::SpaceRepo> info(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto& sp = s.ws.spaces[i];
+        const GitInfo g = space_git(s, sp);
+        std::string key = g.common_top;
+        for (auto& c : key)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        info[i] = {g.repo, g.repo && g.worktree, sp.machine + "|" + key};
+    }
+    std::vector<bool> tree;
+    std::vector<int> order = ui::nest_worktrees(info, &tree);
+    if (s.drag_space < 0 && s.ws.reorder_spaces(order)) {
+        for (int i = 0; i < static_cast<int>(order.size()); ++i)
+            order[static_cast<std::size_t>(i)] = i;
+    }
     std::vector<std::string> machines = {""};
     for (const auto& r : s.remotes)
         machines.push_back(r.cfg.name);
@@ -3750,36 +3904,12 @@ std::vector<SpaceRow> space_rows(App::State& s, const std::map<std::string, std:
     std::vector<SpaceRow> rows;
     for (const auto& m : machines) {
         if (!s.remotes.empty())
-            rows.push_back({-1, m, 0});
+            rows.push_back({-1, m, false});
         if (s.folded_machines.contains(m))
             continue;
-        // Linked worktrees go directly under the first main-checkout space of their repo.
-        std::vector<int> top;
-        std::map<int, std::vector<int>> nested;
-        for (int i = 0; i < static_cast<int>(s.ws.spaces.size()); ++i) {
-            if (s.ws.spaces[static_cast<std::size_t>(i)].machine != m)
-                continue;
-            const auto& g = info[static_cast<std::size_t>(i)];
-            int parent = -1;
-            if (g.repo && g.worktree) {
-                for (int j = 0; j < static_cast<int>(s.ws.spaces.size()) && parent < 0; ++j) {
-                    const auto& h = info[static_cast<std::size_t>(j)];
-                    if (j != i && s.ws.spaces[static_cast<std::size_t>(j)].machine == m && h.repo && !h.worktree &&
-                        _stricmp(h.top.c_str(), g.common_top.c_str()) == 0)
-                        parent = j;
-                }
-            }
-            if (parent >= 0)
-                nested[parent].push_back(i);
-            else
-                top.push_back(i);
-        }
-        for (const int i : top) {
-            rows.push_back({i, m, 0});
-            const auto& kids = nested[i];
-            for (std::size_t k = 0; k < kids.size(); ++k)
-                rows.push_back({kids[k], m, k + 1 == kids.size() ? 2 : 1});
-        }
+        for (std::size_t k = 0; k < order.size(); ++k)
+            if (s.ws.spaces[static_cast<std::size_t>(order[k])].machine == m)
+                rows.push_back({order[k], m, tree[k]});
     }
     return rows;
 }
@@ -3819,9 +3949,17 @@ void space_menu(App::State& s, int i) {
 
 float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
+    {
+        // A space remembers where it was made (herdr Space.folder): its name when nothing else says.
+        std::map<std::string, std::string> starts;
+        for (const auto& [id, v] : s.views_by_id)
+            starts[id] = v.start_cwd.empty() ? v.cwd : v.start_cwd;
+        s.ws.remember_folders(starts);
+    }
+    const auto rows = space_rows(s);
     const auto cwds = s.session_cwds();
-    s.ws.assign_colors();
-    // Header (31 px): "Spaces" + "+".
+    s.ws.assign_colors(&cwds);
+    // Header (31 px): "Spaces" + "+" (spaces.js 541-545).
     if (!rail) {
         const ImVec2 t = s.fonts.ui_medium->CalcTextSizeA(fpx(11.5f), FLT_MAX, 0, "Spaces");
         dl->AddText(s.fonts.ui_medium, fpx(11.5f), ImVec2(pos.x + px(16), pos.y + (px(31) - t.y) * 0.5f), g_pal->faint,
@@ -3830,8 +3968,7 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
     {
         const float b = px(26);
         const ImVec2 bp = rail ? ImVec2(pos.x + (w - b) * 0.5f, pos.y + px(2)) : ImVec2(pos.x + w - px(10) - b, pos.y + px(2.5f));
-        const std::string tip = "New space  " + s.keymap.chord_for("space.new");
-        if (icon_button(s, "##space-new", ui::icon::kPlus, bp, b, fpx(14), tip.c_str(), g_pal->dim))
+        if (icon_button(s, "##space-new", ui::icon::kPlus, bp, b, fpx(14), nullptr, g_pal->dim))
             run_command(s, "space.new");
     }
     const float head = px(31);
@@ -3841,10 +3978,12 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
     ImDrawList* d = ImGui::GetWindowDrawList();
     const float pad = rail ? 0.0f : px(8);
     const float rw = ImGui::GetContentRegionAvail().x - pad * 2;
-    const auto rows = space_rows(s, cwds);
     const ImVec2 mouse = ImGui::GetIO().MousePos;
     int drop_target = -1;
     float drop_y = 0;
+    // Where the active space's row is (spaces.js 342-345, 533-539).
+    int active_at = -1;
+    float active_top = 0, active_bottom = 0;
     for (std::size_t ri = 0; ri < rows.size(); ++ri) {
         const SpaceRow& row = rows[ri];
         const ImVec2 a0 = ImGui::GetCursorScreenPos();
@@ -3893,8 +4032,6 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
                                  "unreachable", right - x - nw - px(7));
                 if (on)
                     draw_icon(s, d, ui::icon::kPlus, fpx(12), ImVec2(plus_x + px(8), cy), over_plus ? g_pal->text : g_pal->faint);
-                if (over_plus)
-                    ImGui::SetTooltip("New space on %s", s.machine_label(row.machine).c_str());
                 d->AddCircleFilled(ImVec2(a.x + rw - px(8) - px(11) - px(7) - px(3), cy), px(3),
                                    on ? g_pal->done : g_pal->faint);
                 draw_icon(s, d,
@@ -3934,7 +4071,8 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         const std::string title = s.ws.space_title(i, cwds);
         ImGui::PushID(sp.id.c_str());
         if (rail) {
-            // 32x26 cell: position number, status glyph at the right (spaces.js 501-515).
+            // 32x26 cell, the cells touching: position number (13 px), status glyph at the right
+            // (spaces.js 501-515).
             const float cw = px(32), ch = px(26);
             const ImVec2 c(a0.x + (ImGui::GetContentRegionAvail().x - cw) * 0.5f, a0.y);
             ImGui::SetCursorScreenPos(c);
@@ -3942,13 +4080,13 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
                 s.ws.select_space(i);
                 s.focus_view(s.ws.focused_session());
             }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", title.c_str());
             if (active)
                 d->AddRectFilled(c, ImVec2(c.x + cw, c.y + ch), g_pal->selected, px(6));
+            else if (ImGui::IsItemHovered())
+                d->AddRectFilled(c, ImVec2(c.x + cw, c.y + ch), g_pal->hover, px(6));
             const std::string num = std::to_string(i + 1);
-            const ImVec2 t = s.fonts.ui_medium->CalcTextSizeA(fpx(12), FLT_MAX, 0, num.c_str());
-            d->AddText(s.fonts.ui_medium, fpx(12), ImVec2(c.x + (cw - t.x) * 0.5f, c.y + (ch - t.y) * 0.5f),
+            const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, num.c_str());
+            d->AddText(s.fonts.ui, fpx(13), ImVec2(c.x + (cw - t.x) * 0.5f, c.y + (ch - t.y) * 0.5f),
                        active ? g_pal->text : g_pal->dim, num.c_str());
             std::vector<Attention> atts;
             for (const auto& t2 : sp.tabs)
@@ -3958,15 +4096,25 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             const bool strong = att == Attention::kBlocked || att == Attention::kDone;
             d->AddCircleFilled(ImVec2(c.x + cw - px(5), c.y + ch * 0.5f), strong ? px(2.5f) : px(1.2f),
                                att == Attention::kNone ? g_pal->faint : attention_color(att));
-            ImGui::SetCursorScreenPos(ImVec2(a0.x, c.y + ch + px(2)));
+            if (active) {
+                active_at = static_cast<int>(ri);
+                active_top = c.y;
+                active_bottom = c.y + ch;
+            }
+            ImGui::SetCursorScreenPos(ImVec2(a0.x, c.y + ch));
             ImGui::PopID();
             continue;
         }
-        const float rh = row.tree > 0 ? px(28) : px(30);
+        const float rh = row.tree ? px(28) : px(30);
         ImGui::SetCursorScreenPos(a);
         ImGui::InvisibleButton("##space", ImVec2(rw, rh), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
         const bool hov = ImGui::IsItemHovered();
         const ImVec2 b(a.x + rw, a.y + rh);
+        if (active) {
+            active_at = static_cast<int>(ri);
+            active_top = a.y;
+            active_bottom = b.y;
+        }
         // Select on mouse-up on the same row; a press dragged onto another row of the same
         // machine moves the space there (spaces.js 466-489).
         if (ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
@@ -3994,9 +4142,8 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         auto faded = [&](ImU32 c) { return alpha(c, static_cast<int>(((c >> 24) & 0xFF) * fade / 255)); };
         const float cy = a.y + rh * 0.5f;
         float x = a.x + px(8);
-        if (row.tree > 0) {
-            d->AddText(s.fonts.ui, fpx(12), ImVec2(x, cy - fpx(12) * 0.6f), faded(g_pal->faint),
-                       row.tree == 2 ? "\xE2\x94\x94\xE2\x94\x80" : "\xE2\x94\x9C\xE2\x94\x80");
+        if (row.tree) {
+            // A worktree: indented 22 px, the branch icon in place of the avatar (spaces.js 494).
             x += px(22);
             draw_icon(s, d, ui::icon::kBranch, fpx(13), ImVec2(x + px(6.5f), cy), faded(g_pal->faint));
             x += px(13) + px(9);
@@ -4019,15 +4166,8 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             x += side + px(9);
         }
         // Git tail, right-aligned: "repo · branch ↑N ↓N".
-        GitInfo g;
-        for (const auto& t2 : sp.tabs) {
-            const auto ids = s.ws.sessions_in(t2);
-            if (!ids.empty() && s.views_by_id.count(ids.front())) {
-                g = s.git.get(s.views_by_id[ids.front()].cwd, sp.machine);
-                break;
-            }
-        }
-        const GitTail tail = git_tail(g, title, row.tree > 0);
+        const GitInfo g = space_git(s, sp);
+        const GitTail tail = git_tail(g, title, row.tree);
         std::string ahead = tail.ahead > 0 ? "\xE2\x86\x91" + std::to_string(tail.ahead) : std::string();
         std::string behind = tail.behind > 0 ? "\xE2\x86\x93" + std::to_string(tail.behind) : std::string();
         const float ts = fpx(11.5f);
@@ -4059,8 +4199,6 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             const float used = std::min(tail_w, tw(tail.text));
             text_clipped(d, s.fonts.ui, ts, ImVec2(rx - used, cy - ts * 0.6f), faded(g_pal->faint), tail.text, used);
         }
-        if (hov && !ImGui::IsMouseDragging(ImGuiMouseButton_Left))
-            ImGui::SetTooltip("%s", title.c_str());
         ImGui::PopID();
         ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + rh));
     }
@@ -4071,6 +4209,28 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         if (s.drag_space >= 0 && drop_target >= 0)
             s.ws.move_space(s.drag_space, drop_target);
         s.drag_space = -1;
+    }
+    // Bring the active space into view when it, or its place in the list, changes, and when the
+    // list is resized; a row already in view stays put (spaces.js 533-539, 547-548).
+    {
+        const std::string active_id =
+            s.ws.spaces.empty() ? std::string()
+                                : s.ws.spaces[static_cast<std::size_t>(std::clamp(s.ws.active_space, 0,
+                                                                                  static_cast<int>(s.ws.spaces.size()) - 1))].id;
+        const float list_h = ImGui::GetWindowHeight();
+        const bool moved = active_id != s.spaces_revealed || active_at != s.spaces_revealed_at;
+        const bool resized = std::abs(list_h - s.spaces_list_h) > 0.5f;
+        if ((moved || resized) && active_at >= 0) {
+            const float top = ImGui::GetWindowPos().y;
+            const float scroll = ImGui::GetScrollY();
+            if (active_top < top)
+                ImGui::SetScrollY(scroll - (top - active_top));
+            else if (active_bottom > top + list_h)
+                ImGui::SetScrollY(scroll + (active_bottom - (top + list_h)));
+        }
+        s.spaces_revealed = active_id;
+        s.spaces_revealed_at = active_at;
+        s.spaces_list_h = list_h;
     }
     // Mod panels for the sidebar, below the spaces.
     if (!rail)
@@ -4152,86 +4312,230 @@ std::string agent_detail(App::State& s, const std::string& id, const ui::Session
     return title;
 }
 
+long long now_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count();
+}
+
+// "<1m", "5m", "2h", "3d" from ms (agents.js 67-73).
+std::string ago_ms(long long ms) {
+    const long long m = std::max(0LL, ms) / 60000;
+    if (m < 1)
+        return "<1m";
+    if (m < 60)
+        return std::to_string(m) + "m";
+    const long long h = m / 60;
+    return h < 24 ? std::to_string(h) + "h" : std::to_string(h / 24) + "d";
+}
+
+// agents.js 95-110: stamps agents whose state changed. Done and idle count as one: looking at a
+// finished agent turns done into idle, and looking isn't the agent doing anything. Kept in
+// ui.json across restarts; ones gone for 30 days are dropped.
+void track_agents(App::State& s, const std::vector<std::string>& list) {
+    if (!s.changed_loaded) {
+        s.changed_loaded = true;
+        for (const auto& [id, c] : s.settings.agents_changed.items())
+            if (c.is_object())
+                s.changed[id] = {c.value("s", ""), c.value("at", 0LL)};
+    }
+    const long long now = now_ms();
+    bool dirty = false;
+    for (const auto& id : list) {
+        const Attention a = s.attention_of(id);
+        if (a == Attention::kNone)
+            continue;  // no state known yet (just started, or not running)
+        const std::string st = a == Attention::kBlocked ? "blocked" : a == Attention::kWorking ? "working" : "idle";
+        auto& c = s.changed[id];
+        if (c.s == st)
+            continue;
+        c = {st, now};
+        dirty = true;
+    }
+    if (!dirty)
+        return;
+    const std::set<std::string> listed(list.begin(), list.end());
+    Json out = Json::object();
+    for (auto it = s.changed.begin(); it != s.changed.end();) {
+        if (!listed.contains(it->first) && now - it->second.at > 30LL * 86400000LL) {
+            it = s.changed.erase(it);
+            continue;
+        }
+        out[it->first] = {{"s", it->second.s}, {"at", it->second.at}};
+        ++it;
+    }
+    s.settings.agents_changed = std::move(out);
+    save_settings(s.settings);
+}
+
+// herdr spaces.js 128-133 and 266-286: a command or an agent's turn that ends may have committed
+// or checked out, so every space in that repo looks again; the 60 s fallback runs only while the
+// window is in front.
+void refresh_git_facts(App::State& s) {
+    s.git.set_active(s.window_focused);
+    for (const auto& [id, v] : s.views_by_id) {
+        const bool busy = v.agent_state == "Working" || !(is_shell(v.program) || is_agent(v));
+        const auto it = s.busy_terminal.find(id);
+        if (it != s.busy_terminal.end() && it->second && !busy) {
+            const auto mi = s.machine_of.find(id);
+            s.git.invalidate_repo(v.cwd, mi == s.machine_of.end() ? std::string() : mi->second);
+        }
+        s.busy_terminal[id] = busy;
+    }
+}
+
 void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddLine(ImVec2(pos.x, pos.y), ImVec2(pos.x + w, pos.y), g_pal->border);
-    const bool grouped = s.settings.agents_sort == "space";
-    // Agents and their sub-agents.
-    std::map<std::string, std::vector<std::string>> children;
+    const bool by_priority = s.settings.agents_sort != "space";
+    // Live terminals by the agent that started them (agents.js 171-172), and the agents: a
+    // sub-agent without a pane isn't one of them; it shows in its parent's tree (53-54).
+    std::map<std::string, std::vector<std::string>> kids;
     std::vector<std::string> list;
+    std::map<std::string, std::size_t> seq;  // creation order (agents.js 240 seq)
+    {
+        std::vector<std::pair<std::string, std::size_t>> born;
+        for (std::size_t i = 0; i < s.sessions.size(); ++i)
+            born.emplace_back(s.views_by_id[s.sessions[i]->id()].created_at, i);
+        std::stable_sort(born.begin(), born.end());
+        for (std::size_t k = 0; k < born.size(); ++k)
+            seq[s.sessions[born[k].second]->id()] = k;
+    }
     for (const auto& sess : s.sessions) {
-        const auto& v = s.views_by_id[sess->id()];
-        if (!is_agent(v) || v.lost)
+        const std::string& id = sess->id();
+        const auto& v = s.views_by_id[id];
+        if (v.lost)
             continue;
-        if (!v.parent.empty() && s.views_by_id.count(v.parent) && !s.ws.pinned.contains(sess->id()))
-            children[v.parent].push_back(sess->id());
-        else
-            list.push_back(sess->id());
+        const bool sub = !v.parent.empty() && s.views_by_id.count(v.parent) != 0;
+        if (sub && v.process_state != "Exited")
+            kids[v.parent].push_back(id);
+        if (!is_agent(v))
+            continue;
+        if (sub && s.ws.find(id).space < 0 && !s.ws.pinned.contains(id))
+            continue;
+        list.push_back(id);
     }
-    // Last state change, done and idle counting as one (agents.js 95-110).
-    for (const auto& id : list) {
-        Attention a = s.attention_of(id);
-        if (a == Attention::kDone)
-            a = Attention::kIdle;
-        const auto it = s.last_att.find(id);
-        if (it == s.last_att.end() || it->second != a) {
-            s.last_att[id] = a;
-            if (it != s.last_att.end() || !s.changed_at.count(id))
-                s.changed_at[id] = Clock::now();
-        }
-    }
-    auto rollup = [&](const std::string& id) {
-        int u = urgency(s.attention_of(id));
-        for (const auto& c : children[id])
-            u = std::max(u, urgency(s.attention_of(c)));
-        return u;
+    const std::set<std::string> listed(list.begin(), list.end());
+    track_agents(s, list);
+    auto since = [&](const std::string& id) {
+        const auto it = s.changed.find(id);
+        return it == s.changed.end() ? 0LL : it->second.at;
     };
-    std::vector<std::string> order = list;
-    if (!grouped) {
-        std::stable_sort(order.begin(), order.end(), [&](const std::string& a, const std::string& b) {
-            const int ua = rollup(a), ub = rollup(b);
-            if (ua != ub)
-                return ua > ub;
-            return s.changed_at[a] > s.changed_at[b];
+    // A kept sub-agent (one with a pane) is listed too: where a tree shows it, it gets no row of
+    // its own, unless it's pinned (agents.js 231-234). The rail shows no trees.
+    if (!rail) {
+        std::set<std::string> nested;
+        for (const auto& a : list)
+            for (const auto& r : ui::agent_tree(kids, a))
+                nested.insert(r.id);
+        std::erase_if(list, [&](const std::string& a) { return !s.ws.pinned.contains(a) && nested.contains(a); });
+    }
+    // Most urgent of the agent and its sub-agents (agents.js 238).
+    std::map<std::string, int> urgency_of;
+    for (const auto& a : list) {
+        int u = ui::attention_rank(s.attention_of(a));
+        for (const auto& r : ui::agent_tree(kids, a))
+            u = std::max(u, ui::attention_rank(ui::kid_status(s.attention_of(r.id))));
+        urgency_of[a] = u;
+    }
+    if (by_priority) {
+        std::stable_sort(list.begin(), list.end(), [&](const std::string& a, const std::string& b) {
+            return ui::priority_before({urgency_of[a], since(a), static_cast<long long>(seq[a])},
+                                       {urgency_of[b], since(b), static_cast<long long>(seq[b])});
         });
     } else {
         // Model order: space, tab, pane.
         const auto all = s.ws.all_sessions();
-        std::stable_sort(order.begin(), order.end(), [&](const std::string& a, const std::string& b) {
-            const auto ia = std::find(all.begin(), all.end(), a) - all.begin();
-            const auto ib = std::find(all.begin(), all.end(), b) - all.begin();
-            return ia < ib;
+        std::stable_sort(list.begin(), list.end(), [&](const std::string& a, const std::string& b) {
+            return std::find(all.begin(), all.end(), a) < std::find(all.begin(), all.end(), b);
         });
     }
-    std::stable_partition(order.begin(), order.end(), [&](const std::string& id) { return s.ws.pinned.contains(id); });
-    s.agent_order.clear();
-    for (const auto& id : order) {
-        s.agent_order.push_back(id);
-        for (const auto& c : children[id])
-            s.agent_order.push_back(c);
+    std::stable_partition(list.begin(), list.end(), [&](const std::string& id) { return s.ws.pinned.contains(id); });
+    s.agent_order = list;  // agents.js 244 setAgentOrder
+
+    // A row reads "space · detail": the detail is a tab someone named or the agent's own title,
+    // never an automatic tab number unless two rows would otherwise read the same (279-296).
+    const auto cwds = s.session_cwds();
+    std::map<std::string, int> tab_counts;
+    auto tab_key = [&](const std::string& id) {
+        const auto loc = s.ws.find(id);
+        return loc.space < 0 ? std::string() : s.ws.spaces[static_cast<std::size_t>(loc.space)].tabs[static_cast<std::size_t>(loc.tab)].id;
+    };
+    for (const auto& a : list)
+        if (const auto k = tab_key(a); !k.empty())
+            ++tab_counts[k];
+    auto live_title = [&](const std::string& id) {
+        const auto it = s.by_id.find(id);
+        return it == s.by_id.end() ? std::string() : it->second->snapshot()->title;
+    };
+    std::map<std::string, std::string> label, space_name;
+    std::vector<std::pair<std::string, std::string>> detail_in;
+    for (const auto& a : list) {
+        const auto& v = s.views_by_id[a];
+        const auto loc = s.ws.find(a);
+        if (loc.space >= 0) {
+            const auto& tab = s.ws.spaces[static_cast<std::size_t>(loc.space)].tabs[static_cast<std::size_t>(loc.tab)];
+            const bool many = tab_counts[tab.id] > 1;
+            const std::string lead = many ? a : lead_pane(s, s.ws.sessions_in(tab));
+            const auto& lv = s.views_by_id[lead];
+            label[a] = ui::agent_tab_label({ui::Workspace::tab_title(tab, loc.tab), !tab.name.empty() && !many,
+                                            live_title(lead), program_info(lv.program, lv.profile_id).name,
+                                            lv.program.empty() ? lv.profile_id : lv.program, lead});
+            space_name[a] = s.ws.space_title(loc.space, cwds);
+        } else {
+            const std::string t = ui::clean_agent_title(live_title(a));
+            label[a] = !t.empty() ? t : program_info(v.program, v.profile_id).name;
+        }
+        detail_in.emplace_back(space_name[a], label[a]);
+    }
+    std::map<std::string, std::string> detail;
+    {
+        const auto d = ui::agent_details(detail_in);
+        for (std::size_t i = 0; i < list.size(); ++i)
+            detail[list[i]] = d[i];
     }
 
     float y = pos.y;
     if (!rail) {
-        // Header (41 px: pt 14, pb 5): "Agents" + sort button.
+        // Header (41 px: pt 14, pb 5): "Agents" + the sort button showing the current sort's icon
+        // (agents.js 424-445).
         const float hy = pos.y + px(14);
         const ImVec2 t = s.fonts.ui_medium->CalcTextSizeA(fpx(11.5f), FLT_MAX, 0, "Agents");
         dl->AddText(s.fonts.ui_medium, fpx(11.5f), ImVec2(pos.x + px(16), hy + (px(22) - t.y) * 0.5f), g_pal->faint,
                     "Agents");
-        const std::string tip = std::string("Sort agents: ") + (grouped ? "Grouped by space" : "Priority");
-        if (icon_button(s, "##agents-sort", ui::icon::kSort, ImVec2(pos.x + w - px(16) - px(22), hy), px(22), fpx(14),
-                        tip.c_str(), g_pal->faint))
+        const std::string tip = std::string("Sort agents: ") + (by_priority ? "Priority" : "Grouped by space");
+        if (icon_button(s, "##agents-sort", by_priority ? ui::icon::kClock : ui::icon::kLayers,
+                        ImVec2(pos.x + w - px(16) - px(22), hy), px(22), fpx(14), tip.c_str(), g_pal->faint))
             ImGui::OpenPopup("##sortagents");
+        // The sort menu (agents.js 140-164): "Sort agents", then 31 px rows with each sort's icon
+        // and a check on the current one.
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(5), px(5)));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
         ImGui::SetNextWindowSize(ImVec2(px(200), 0));
-        if (ImGui::BeginPopup("##sortagents")) {
-            ImGui::TextDisabled("Sort agents");
-            if (ImGui::MenuItem("Priority", nullptr, !grouped)) {
-                s.settings.agents_sort = "priority";
-                save_settings(s.settings);
-            }
-            if (ImGui::MenuItem("Grouped by space", nullptr, grouped)) {
-                s.settings.agents_sort = "space";
-                save_settings(s.settings);
+        const bool open = ImGui::BeginPopup("##sortagents");
+        ImGui::PopStyleVar(2);
+        if (open) {
+            const ImVec2 m = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddText(s.fonts.ui, fpx(11), ImVec2(m.x + px(8), m.y + px(4)), g_pal->faint,
+                                                "Sort agents");
+            ImGui::Dummy(ImVec2(px(190), px(4) + fpx(11) * 1.15f + px(6)));
+            struct Sort {
+                const char* id;
+                const char* label;
+                const char* icon;
+            };
+            for (const Sort& o : {Sort{"priority", "Priority", ui::icon::kClock},
+                                  Sort{"space", "Grouped by space", ui::icon::kLayers}}) {
+                const bool on = (o.id == std::string("space")) != by_priority;
+                if (menu_row(s, o.icon, o.label)) {
+                    s.settings.agents_sort = o.id;
+                    save_settings(s.settings);
+                }
+                if (on) {
+                    const ImVec2 r1 = ImGui::GetItemRectMax();
+                    const ImVec2 r0 = ImGui::GetItemRectMin();
+                    draw_icon(s, ImGui::GetWindowDrawList(), ui::icon::kCheck, fpx(14),
+                              ImVec2(r1.x - px(8) - px(7), (r0.y + r1.y) * 0.5f), g_pal->text);
+                }
             }
             ImGui::EndPopup();
         }
@@ -4246,175 +4550,230 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
     ImDrawList* d = ImGui::GetWindowDrawList();
     const float pad = px(8);
     const float rw = ImGui::GetContentRegionAvail().x - (rail ? px(12) : pad * 2);
-    const auto cwds = s.session_cwds();
+    const std::string shown = s.ws.focused_session();
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    auto inside = [&](ImVec2 a, ImVec2 b) { return mouse.x >= a.x && mouse.x < b.x && mouse.y >= a.y && mouse.y < b.y; };
 
-    if (order.empty() && !rail) {
+    if (list.empty() && !rail) {
         ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x + px(12), ImGui::GetCursorScreenPos().y));
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + w - px(36));
         ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
         ImGui::PushFont(s.fonts.ui, fpx(12));
-        ImGui::TextWrapped("No agent status yet. Agents show up here when they report their status.");
+        ImGui::TextWrapped(
+                "No agent status yet. Agents show up here when they report their status. Older versions and agents "
+                "inside tmux may not.");
         ImGui::PopFont();
         ImGui::PopStyleColor();
         ImGui::PopTextWrapPos();
     }
 
-    auto agent_row = [&](const std::string& id, bool full, bool child, bool last_child) {
+    // A sub-agent's row (agents.js 182-206): its tree lines, icon, name and status.
+    auto sub_row = [&](const ui::TreeRow& r, bool compact) {
+        const std::string& k = r.id;
+        const auto& v = s.views_by_id[k];
+        ImGui::PushID(("sub:" + k).c_str());
+        const ImVec2 a0 = ImGui::GetCursorScreenPos();
+        const ImVec2 a(a0.x + pad, a0.y);
+        const float rh = px(26);
+        const ImVec2 b(a.x + rw, a.y + rh);
+        ImGui::SetCursorScreenPos(a);
+        const bool clicked = ImGui::InvisibleButton("##sub", ImVec2(rw, rh));
+        const bool hov = ImGui::IsItemHovered();
+        const bool on = k == shown;
+        if (hov)
+            d->AddRectFilled(a, b, g_pal->hover, px(8));
+        else if (on)
+            d->AddRectFilled(a, b, raised_color(), px(8));
+        const float cy = a.y + rh * 0.5f;
+        float x = a.x + px(39);
+        // Each line: a 9x17 box from 4 px above the row, 1.5 px left border; ├ and └ add the bottom
+        // border with a 6 px rounded corner; 4 px after it.
+        for (const auto line : r.lines) {
+            const float top = a.y - px(4), bottom = a.y + px(13), lx = x + px(0.75f);
+            if (line == ui::TreeLine::kBar) {
+                d->AddLine(ImVec2(lx, top), ImVec2(lx, bottom), g_pal->border, px(1.5f));
+            } else if (line != ui::TreeLine::kNone) {
+                const float rr = px(6);
+                const float by = bottom - px(0.75f);
+                d->PathLineTo(ImVec2(lx, top));
+                d->PathLineTo(ImVec2(lx, by - rr));
+                d->PathArcTo(ImVec2(lx + rr, by - rr), rr, 3.14159265f, 3.14159265f * 0.5f, 8);
+                d->PathLineTo(ImVec2(x + px(9), by));
+                d->PathStroke(g_pal->border, 0, px(1.5f));
+            }
+            x += px(9) + px(4);
+        }
+        program_badge(d, s.fonts.ui_bold, fpx(11.0f), ImVec2(x, cy - px(7)), px(14), program_info(v.program, v.profile_id));
+        x += px(14) + px(8);
+        const Attention st = ui::kid_status(s.attention_of(k));
+        const float mw = std::max(status_mark(s, d, 0, cy, st, compact, true), px(13));
+        status_mark(s, d, b.x - px(8) - mw, cy, st, compact);
+        const std::string name = !v.name.empty() ? v.name : program_info(v.program, v.profile_id).name;
+        text_clipped(d, s.fonts.ui, fpx(12.5f), ImVec2(x, cy - fpx(12.5f) * 0.6f), on ? g_pal->text : g_pal->dim, name,
+                     b.x - px(8) - mw - x);
+        if (clicked) {
+            if (listed.contains(k) || s.ws.find(k).space >= 0)
+                s.focus(k);
+            else
+                run_command(s, "agent.peek:" + k);  // agents.js 199: one without a pane is peeked
+        }
+        ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + rh));
+        ImGui::PopID();
+    };
+
+    // An agent's row (agents.js 298-374).
+    auto agent_row = [&](const std::string& id, int index, const std::vector<ui::TreeRow>& subs) {
         const auto& v = s.views_by_id[id];
+        const Attention att = s.attention_of(id);
+        const bool focused = id == shown;
         ImGui::PushID(id.c_str());
         const ImVec2 a0 = ImGui::GetCursorScreenPos();
         if (rail) {
+            // 26 px, the number right-aligned (13 px, foreground when focused), the status in a
+            // 14 px cell (agents.js 303-317).
             const ImVec2 a(a0.x + px(6), a0.y);
             const float rh = px(26);
             ImGui::SetCursorScreenPos(a);
             if (ImGui::InvisibleButton("##ar", ImVec2(rw, rh)))
                 s.focus(id);
             const bool hov = ImGui::IsItemHovered();
-            if (id == s.ws.focused_session())
+            if (focused)
                 d->AddRectFilled(a, ImVec2(a.x + rw, a.y + rh), g_pal->selected, px(6));
             else if (hov)
                 d->AddRectFilled(a, ImVec2(a.x + rw, a.y + rh), g_pal->hover, px(6));
-            if (hov)
-                ImGui::SetTooltip("%s", s.pane_title(id).c_str());
-            const int n = static_cast<int>(std::find(s.agent_order.begin(), s.agent_order.end(), id) -
-                                           s.agent_order.begin()) + 1;
-            const std::string num = std::to_string(n);
-            const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, num.c_str());
-            d->AddText(s.fonts.ui, fpx(11), ImVec2(a.x + px(4), a.y + (rh - t.y) * 0.5f), g_pal->faint, num.c_str());
-            status_mark(s, d, a.x + rw - px(16), a.y + rh * 0.5f, s.attention_of(id), true);
+            const float cell = a.x + rw - px(2) - px(14);
+            const float mw = status_mark(s, d, 0, a.y + rh * 0.5f, att, true, true);
+            status_mark(s, d, cell + (px(14) - mw) * 0.5f, a.y + rh * 0.5f, att, true);
+            const std::string num = std::to_string(index + 1);
+            const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, num.c_str());
+            d->AddText(s.fonts.ui, fpx(13), ImVec2(cell - px(4) - t.x, a.y + (rh - t.y) * 0.5f),
+                       focused ? g_pal->text : g_pal->dim, num.c_str());
             ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + rh));
             ImGui::PopID();
             return;
         }
-        const float rh = child ? px(26) : px(30);
+        const float rh = px(30);
         const ImVec2 a(a0.x + pad, a0.y);
         const ImVec2 b(a.x + rw, a.y + rh);
         ImGui::SetCursorScreenPos(a);
         const bool clicked = ImGui::InvisibleButton("##agent", ImVec2(rw, rh));
         const bool hov = ImGui::IsItemHovered();
-        const bool shown = id == s.ws.focused_session();
-        if (shown)
+        if (focused)
             d->AddRectFilled(a, b, g_pal->selected, px(8));
         else if (hov)
             d->AddRectFilled(a, b, g_pal->hover, px(8));
         const float cy = a.y + rh * 0.5f;
-        const Attention att = s.attention_of(id);
-        float x = a.x + px(8);
-        if (child) {
-            // Tree line: 9x17 box, 1.5 px left/bottom border (agents.js 182-206).
-            const float tx = a.x + px(14);
-            d->AddLine(ImVec2(tx, a.y - px(4)), ImVec2(tx, last_child ? cy : b.y), g_pal->border, px(1.5f));
-            d->AddLine(ImVec2(tx, cy), ImVec2(tx + px(9), cy), g_pal->border, px(1.5f));
-            x = a.x + px(31);
-        }
-        const float isz = child ? px(14) : px(16);
-        program_badge(d, s.fonts.ui_bold, fpx(child ? 11.0f : 12.5f), ImVec2(x, cy - isz * 0.5f), isz,
-                      program_info(v.program, v.profile_id));
-        x += isz + px(9);
-        // Right side: status mark, then time or pin (on hover).
+        const bool pinned = s.ws.pinned.contains(id);
+        // Left: the program icon (16 px); with sub-agents, clicking it folds them (360-365).
+        const float x0 = a.x + px(8);
+        program_badge(d, s.fonts.ui_bold, fpx(12.5f), ImVec2(x0, cy - px(8)), px(16), program_info(v.program, v.profile_id));
+        const bool on_icon = !subs.empty() && inside(ImVec2(x0, cy - px(8)), ImVec2(x0 + px(16), cy + px(8)));
+        float x = x0 + px(16) + px(9);
+        // Right, from the edge leftwards: status, pin (hovered) or time, fold, machine (369-373).
+        const bool compact = by_priority && !pinned;
         float rx = b.x - px(8);
-        const bool compact = !full;
-        const float mw = status_mark(s, d, 0, cy, att, compact, true);
+        const float mw = std::max(status_mark(s, d, 0, cy, att, compact, true), px(13));
         status_mark(s, d, rx - mw, cy, att, compact);
-        rx -= mw + px(6);
-        if (!child) {
-            const auto& kids = children[id];
-            if (!kids.empty()) {
-                const bool open = !s.folded_agents.contains(id);
-                const float cw = px(18);
-                ImGui::SetCursorScreenPos(ImVec2(rx - cw, cy - px(9)));
-                if (ImGui::InvisibleButton("##fold", ImVec2(cw, px(18)))) {
-                    if (open)
-                        s.folded_agents.insert(id);
-                    else
-                        s.folded_agents.erase(id);
-                }
-                if (open) {
-                    draw_icon(s, d, ui::icon::kChevronDown, fpx(11), ImVec2(rx - cw * 0.5f, cy), g_pal->faint);
-                } else {
-                    int u = 0;
-                    for (const auto& c : kids)
-                        u = std::max(u, urgency(s.attention_of(c)));
-                    const std::string n = std::to_string(kids.size());
-                    d->AddText(s.fonts.ui, fpx(11), ImVec2(rx - cw - px(8), cy - fpx(11) * 0.6f),
-                               u >= 3 ? g_pal->done : g_pal->faint, n.c_str());
-                    draw_icon(s, d, ui::icon::kChevronRight, fpx(11), ImVec2(rx - cw * 0.5f, cy), g_pal->faint);
-                }
-                rx -= cw + px(10);
-            }
-            const bool pinned = s.ws.pinned.contains(id);
-            if (hov || ImGui::IsPopupOpen("##pin")) {
-                const float pb = px(20);
-                if (icon_button(s, "##pinbtn", pinned ? ui::icon::kPinned : ui::icon::kPin,
-                                ImVec2(rx - pb, cy - pb * 0.5f), pb, fpx(13), pinned ? "Unpin" : "Pin to the top",
-                                g_pal->faint)) {
-                    if (pinned)
-                        s.ws.pinned.erase(id);
-                    else
-                        s.ws.pinned.insert(id);
-                    s.doc_dirty = true;
-                    s.doc_dirty_at = Clock::now();
-                }
-                rx -= pb + px(6);
-            } else {
-                const std::string t = s.changed_at.count(id) ? ago(s.changed_at[id]) : std::string("<1m");
-                const float tw = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, t.c_str()).x;
-                d->AddText(s.fonts.ui, fpx(11), ImVec2(rx - tw, cy - fpx(11) * 0.6f), g_pal->faint, t.c_str());
-                rx -= tw + px(8);
-            }
-            if (s.machine_of.count(id) && !s.machine_of[id].empty()) {
-                const std::string& m = s.machine_of[id];
-                const float mw2 = s.fonts.ui->CalcTextSizeA(fpx(10), FLT_MAX, 0, m.c_str()).x;
-                d->AddText(s.fonts.ui, fpx(10), ImVec2(rx - mw2, cy - fpx(10) * 0.6f), g_pal->faint, m.c_str());
-                rx -= mw2 + px(6);
-            }
+        rx -= mw + px(9);
+        bool on_pin = false, on_fold = false;
+        if (hov) {
+            const float pb = px(17);
+            const ImVec2 p0(rx - pb, cy - pb * 0.5f), p1(rx, cy + pb * 0.5f);
+            on_pin = inside(p0, p1);
+            if (on_pin)
+                d->AddRectFilled(p0, p1, g_pal->hover, px(4));
+            draw_icon(s, d, pinned ? ui::icon::kPinned : ui::icon::kPin, fpx(13), ImVec2(rx - pb * 0.5f, cy),
+                      on_pin ? g_pal->text : g_pal->faint);
+            if (on_pin)
+                ImGui::SetTooltip("%s", pinned ? "Unpin" : "Pin to the top");
+            rx -= pb + px(9);
+        } else if (const long long when = since(id); when != 0) {
+            const std::string t = ago_ms(now_ms() - when);
+            const float tw = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, t.c_str()).x;
+            d->AddText(s.fonts.ui, fpx(11), ImVec2(rx - tw, cy - fpx(11) * 0.6f), g_pal->faint, t.c_str());
+            rx -= tw + px(9);
         }
-        // Name: "<space> · <detail>" (priority / pinned) or the detail (grouped).
-        const ImU32 name_col = att == Attention::kIdle && !shown ? g_pal->dim : g_pal->text;
-        std::string space_name;
-        const auto loc = s.ws.find(id);
-        if (loc.space >= 0)
-            space_name = s.ws.space_title(loc.space, cwds);
-        else if (!v.parent.empty())
-            space_name = s.pane_title(v.parent);
-        else
-            space_name = folder_name(v.cwd);
-        std::string detail = agent_detail(s, id, v);
+        if (!subs.empty()) {
+            // The fold chevron; folded, the count too, coloured by the most urgent sub-agent (253-277).
+            const bool open = !s.folded_agents.contains(id);
+            Attention top = Attention::kNone;
+            for (const auto& r : subs) {
+                const Attention ks = ui::kid_status(s.attention_of(r.id));
+                if (ui::attention_rank(ks) > ui::attention_rank(top))
+                    top = ks;
+            }
+            const std::string count = std::to_string(subs.size());
+            const float cw = open ? 0.0f : s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, count.c_str()).x + px(3);
+            const float fw = px(3) + px(11) + cw + px(3);
+            const ImVec2 f0(rx - fw, cy - px(9)), f1(rx, cy + px(9));
+            on_fold = inside(f0, f1);
+            if (on_fold)
+                d->AddRectFilled(f0, f1, g_pal->hover, px(4));
+            const ImU32 col = on_fold ? g_pal->text : open || top == Attention::kNone ? g_pal->faint : attention_color(top);
+            draw_icon(s, d, open ? ui::icon::kChevronDown : ui::icon::kChevronRight, fpx(11),
+                      ImVec2(f0.x + px(3) + px(5.5f), cy), col);
+            if (!open)
+                d->AddText(s.fonts.ui, fpx(11), ImVec2(f0.x + px(3) + px(11) + px(3), cy - fpx(11) * 0.6f), col,
+                           count.c_str());
+            rx -= fw + px(9);
+        }
+        if (const auto mi = s.machine_of.find(id); mi != s.machine_of.end() && !mi->second.empty()) {
+            const float mw2 = s.fonts.ui->CalcTextSizeA(fpx(10), FLT_MAX, 0, mi->second.c_str()).x;
+            d->AddText(s.fonts.ui, fpx(10), ImVec2(rx - mw2, cy - fpx(10) * 0.6f), g_pal->faint, mi->second.c_str());
+            rx -= mw2 + px(9);
+        }
+        // Name: under a space header the space goes without saying; without one (priority,
+        // pinned) the row names its space, then "· detail" (339-342, 366-368).
+        const bool full = by_priority || pinned;
+        std::string more = detail[id];
         if (const auto deco = s.mods->decorate("agent", {{"id", id},
                                                          {"title", s.pane_title(id)},
                                                          {"state", v.agent_state},
                                                          {"program", v.program},
                                                          {"cwd", v.cwd}});
             !deco.empty())
-            detail = deco + (detail.empty() ? "" : "  " + detail);
-        const float fs = child ? fpx(12.5f) : fpx(13);
-        if (child) {
-            text_clipped(d, s.fonts.ui, fs, ImVec2(x, cy - fs * 0.6f), shown ? g_pal->text : g_pal->dim,
-                         v.name.empty() ? s.pane_title(id) : v.name, rx - x);
-        } else if (full) {
-            const float nw = text_clipped(d, s.fonts.ui, fs, ImVec2(x, cy - fs * 0.6f), name_col, space_name,
-                                          std::min(detail.empty() ? px(200) : px(120), rx - x));
-            if (!detail.empty())
-                text_clipped(d, s.fonts.ui, fs, ImVec2(x + nw, cy - fs * 0.6f), g_pal->faint,
-                             " \xC2\xB7 " + detail, rx - x - nw);
-        } else {
-            text_clipped(d, s.fonts.ui, fs, ImVec2(x, cy - fs * 0.6f), name_col,
-                         detail.empty() ? program_info(v.program, v.profile_id).name : detail,
-                         std::min(px(200), rx - x));
-        }
+            more = deco + (more.empty() ? "" : "  " + more);
+        const std::string& lab = label[id];
+        const bool number = !lab.empty() && std::all_of(lab.begin(), lab.end(), [](char c) { return c >= '0' && c <= '9'; });
+        std::string name;
+        if (full)
+            name = space_name[id].empty() ? lab : space_name[id];
+        else if (!more.empty())
+            name = more;
+        else
+            name = number ? program_info(v.program, v.profile_id).name : lab;
+        const ImU32 name_col = att == Attention::kIdle && !focused ? g_pal->dim : g_pal->text;
+        const float fs = fpx(13);
+        const float nw = text_clipped(d, s.fonts.ui, fs, ImVec2(x, cy - fs * 0.6f), name_col, name,
+                                      std::min(full && !more.empty() ? px(120) : px(200), rx - x));
+        if (full && !more.empty())
+            text_clipped(d, s.fonts.ui, fs, ImVec2(x + nw + px(5), cy - fs * 0.6f), g_pal->faint,
+                         "\xC2\xB7 " + more, rx - x - nw - px(5));
         if (clicked) {
-            if (s.ws.find(id).space < 0 && !v.parent.empty())
-                run_command(s, "agent.peek:" + id);  // a sub-agent without a pane: peek
-            else
+            if (on_icon || on_fold) {
+                if (s.folded_agents.contains(id))
+                    s.folded_agents.erase(id);
+                else
+                    s.folded_agents.insert(id);
+            } else if (on_pin) {
+                if (pinned)
+                    s.ws.pinned.erase(id);
+                else
+                    s.ws.pinned.insert(id);
+            } else {
                 s.focus(id);
+            }
         }
-        if (hov && !v.agent_message.empty())
+        if (hov && !on_pin && !v.agent_message.empty())
             ImGui::SetTooltip("%s", v.agent_message.c_str());
         ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + rh));
         ImGui::PopID();
     };
 
-    auto group_header = [&](const std::string& key, const std::string& label, ImU32 col, int count, int fold_urgency) {
+    // A group's header; it folds the group. Folded, it says how many and the most urgent state
+    // (agents.js 386-412).
+    auto group_header = [&](const std::string& key, const std::string& text, ImU32 col,
+                            const std::vector<std::string>& members) {
         const ImVec2 a0 = ImGui::GetCursorScreenPos();
         const ImVec2 a(a0.x + pad, a0.y + px(8));
         const float hh = px(22);
@@ -4426,74 +4785,81 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             else
                 s.folded_groups.insert(key);
         }
-        const bool hov = ImGui::IsItemHovered();
         ImGui::PopID();
         const bool folded = s.folded_groups.contains(key);
         const float cy = a.y + hh * 0.5f;
-        const float tw = text_clipped(d, s.fonts.ui_medium, fpx(11), ImVec2(a.x + px(8), cy - fpx(11) * 0.6f),
-                                      hov ? g_pal->text : col, label, rw - px(60));
-        const std::string n = std::to_string(count);
-        d->AddText(s.fonts.ui, fpx(11), ImVec2(a.x + px(8) + tw + px(6), cy - fpx(11) * 0.6f), g_pal->faint, n.c_str());
+        float x = a.x + px(8);
+        const float right = a.x + rw - px(8) - (folded ? px(11) + px(6) + px(20) : 0.0f);
+        x += text_clipped(d, s.fonts.ui_medium, fpx(11), ImVec2(x, cy - fpx(11) * 0.6f), col, text, right - x);
+        if (by_priority || folded) {
+            const std::string n = std::to_string(members.size());
+            d->AddText(s.fonts.ui_medium, fpx(11), ImVec2(x + px(6), cy - fpx(11) * 0.6f), g_pal->faint, n.c_str());
+        }
         if (folded) {
-            float x = a.x + rw - px(8) - px(11);
-            draw_icon(s, d, ui::icon::kChevronRight, fpx(11), ImVec2(x + px(5.5f), cy), g_pal->faint);
-            if (grouped && fold_urgency >= 2) {
-                const Attention fa = fold_urgency == 4   ? Attention::kBlocked
-                                     : fold_urgency == 3 ? Attention::kDone
-                                                         : Attention::kWorking;
-                status_mark(s, d, x - px(20), cy, fa, true);
+            const float cx = a.x + rw - px(8) - px(11);
+            draw_icon(s, d, ui::icon::kChevronRight, fpx(11), ImVec2(cx + px(5.5f), cy), g_pal->faint);
+            Attention top = Attention::kNone;
+            for (const auto& id : members)
+                if (ui::attention_rank(s.attention_of(id)) > ui::attention_rank(top))
+                    top = s.attention_of(id);
+            if (!by_priority && top != Attention::kNone && top != Attention::kIdle) {
+                const float mw = status_mark(s, d, 0, cy, top, true, true);
+                status_mark(s, d, cx - px(6) - mw, cy, top, true);
             }
         }
         ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + hh));
         return !folded;
     };
 
+    auto with_kids = [&](const std::string& id, int index) {
+        const std::vector<ui::TreeRow> subs = rail ? std::vector<ui::TreeRow>{} : ui::agent_tree(kids, id);
+        agent_row(id, index, subs);
+        if (s.folded_agents.contains(id))
+            return;
+        for (const auto& r : subs)
+            sub_row(r, by_priority);  // sub-rows are compact only in Priority (agents.js 250)
+    };
+
     if (rail) {
-        for (const auto& id : order)
-            agent_row(id, false, false, false);
+        for (std::size_t i = 0; i < list.size(); ++i)
+            with_kids(list[i], static_cast<int>(i));
     } else {
-        // Groups: Pinned, then Needs you / Done / Working / Idle, or one per space.
+        // Groups in list order: Pinned, then Needs you / Done / Working / Idle, or one per space
+        // (agents.js 376-384).
         struct Group {
             std::string key, label;
             ImU32 color;
             std::vector<std::string> ids;
         };
         std::vector<Group> groups;
-        for (const auto& id : order) {
-            std::string key, label;
+        for (const auto& id : list) {
+            std::string key, text;
             ImU32 col = g_pal->faint;
             if (s.ws.pinned.contains(id)) {
                 key = "pinned";
-                label = "Pinned";
-            } else if (grouped) {
+                text = "Pinned";
+            } else if (!by_priority) {
                 const auto loc = s.ws.find(id);
                 key = loc.space >= 0 ? "space:" + s.ws.spaces[static_cast<std::size_t>(loc.space)].id : "space:-";
-                label = loc.space >= 0 ? s.ws.space_title(loc.space, cwds) : std::string("Other");
+                text = space_name[id];
             } else {
-                const int u = rollup(id);
+                const int u = std::max(urgency_of[id], 1);
                 key = u == 4 ? "blocked" : u == 3 ? "done" : u == 2 ? "working" : "idle";
-                label = u == 4 ? "Needs you" : u == 3 ? "Done" : u == 2 ? "Working" : "Idle";
+                text = u == 4 ? "Needs you" : u == 3 ? "Done" : u == 2 ? "Working" : "Idle";
                 col = u == 4 ? g_pal->needs_you : u == 3 ? g_pal->done : u == 2 ? g_pal->working : g_pal->faint;
             }
             if (groups.empty() || groups.back().key != key)
-                groups.push_back({key, label, col, {}});
+                groups.push_back({key, text, col, {}});
             groups.back().ids.push_back(id);
         }
+        int index = 0;
         for (const auto& g : groups) {
-            int fu = 0;
-            for (const auto& id : g.ids)
-                fu = std::max(fu, rollup(id));
-            if (!group_header(g.key, g.label, g.color, static_cast<int>(g.ids.size()), fu))
+            if (!group_header(g.key, g.label, g.color, g.ids)) {
+                index += static_cast<int>(g.ids.size());
                 continue;
-            for (const auto& id : g.ids) {
-                const bool full = g.key == "pinned" || !grouped;
-                agent_row(id, full, false, false);
-                if (!s.folded_agents.contains(id)) {
-                    const auto& kids = children[id];
-                    for (std::size_t k = 0; k < kids.size(); ++k)
-                        agent_row(kids[k], false, true, k + 1 == kids.size());
-                }
             }
+            for (const auto& id : g.ids)
+                with_kids(id, index++);
         }
     }
     ImGui::Dummy(ImVec2(0, px(8)));
@@ -4511,11 +4877,13 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
 }
 
 // ---------------------------------------------------------------- sidebar: footer
+// workspace-chrome/main.js 35-46: Settings in muted, Add machine all dim; hover brings both to
+// the foreground.
 void draw_sidebar_footer(App::State& s, ImVec2 pos, float w, bool rail) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddLine(pos, ImVec2(pos.x + w, pos.y), g_pal->border);
     float y = pos.y + px(4);
-    auto item = [&](const char* id, const char* glyph, const char* label, ImU32 icol, const char* cmd) {
+    auto item = [&](const char* id, const char* glyph, const char* label, ImU32 col, const char* cmd) {
         const float rh = px(28);
         const float x0 = rail ? pos.x + (w - px(32)) * 0.5f : pos.x + px(8);
         const float iw = rail ? px(32) : w - px(16);
@@ -4525,14 +4893,14 @@ void draw_sidebar_footer(App::State& s, ImVec2 pos, float w, bool rail) {
         if (hov)
             dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + iw, y + rh), g_pal->hover, px(8));
         const float cy = y + rh * 0.5f;
+        const ImU32 c = hov ? g_pal->text : col;
         if (rail) {
-            draw_icon(s, dl, glyph, fpx(14), ImVec2(x0 + iw * 0.5f, cy), hov ? g_pal->text : icol);
+            draw_icon(s, dl, glyph, fpx(14), ImVec2(x0 + iw * 0.5f, cy), c);
             if (hov)
                 ImGui::SetTooltip("%s", label);
         } else {
-            draw_icon(s, dl, glyph, fpx(14), ImVec2(x0 + px(8) + px(7), cy), hov ? g_pal->text : icol);
-            dl->AddText(s.fonts.ui, fpx(13), ImVec2(x0 + px(8) + px(14) + px(9), cy - fpx(13) * 0.6f),
-                        hov ? g_pal->text : g_pal->dim, label);
+            draw_icon(s, dl, glyph, fpx(14), ImVec2(x0 + px(8) + px(7), cy), c);
+            dl->AddText(s.fonts.ui, fpx(13), ImVec2(x0 + px(8) + px(14) + px(9), cy - fpx(13) * 0.6f), c, label);
         }
         if (clicked)
             run_command(s, cmd);
@@ -4543,6 +4911,7 @@ void draw_sidebar_footer(App::State& s, ImVec2 pos, float w, bool rail) {
 }
 
 void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
+    refresh_git_facts(s);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), g_pal->sidebar);
     ImGui::SetCursorScreenPos(pos);
@@ -4969,7 +5338,9 @@ void draw_status_bar(App::State& s, ImVec2 pos, float width, float height) {
         text("host ends when the launching terminal closes", g_pal->working);
     }
     // Right: the palette hint (click opens the palette).
-    const std::string hint = s.keymap.chord_for("app.palette") + "  commands";
+    // workspace-status/main.js 8-15: without a binding the hint is just "commands".
+    const std::string chord = s.keymap.chord_for("app.palette");
+    const std::string hint = chord.empty() ? std::string("commands") : chord + "  commands";
     const float hw = s.fonts.ui->CalcTextSizeA(fs, FLT_MAX, 0, hint.c_str()).x;
     const ImVec2 ha(pos.x + width - px(14) - hw, pos.y);
     if (ha.x > x + px(16)) {
