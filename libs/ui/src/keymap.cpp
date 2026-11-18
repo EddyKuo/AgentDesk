@@ -284,7 +284,8 @@ std::vector<std::string> Keymap::apply(const nlohmann::json& overrides,
                 for (const auto& [k, v] : args.items())
                     action += ":" + (v.is_string() ? v.get<std::string>() : v.dump());
             } else {
-                bad.push_back(section + ": " + chord_text + ": the action must be text or {\"command\", \"args\"}");
+                bad.push_back(section + ": " + chord_text +
+                              ": the action must be text or {\"command\", \"args\"}");
                 continue;
             }
             action = migrate(action);

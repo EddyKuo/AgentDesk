@@ -993,6 +993,7 @@ void desktop(App::State& s, ImDrawList* dl, Box b) {
     std::function<void()> open;
     std::function<MenuItems()> menu;
     bool menu_open = false;
+    bool icon_hovered = false;
     for (std::size_t i = 0; i < items.size(); ++i) {
         const auto& it = items[i];
         const float x = snap(b.x0 + (b.w() - U(s, 76)) * 0.5f);
@@ -1000,6 +1001,7 @@ void desktop(App::State& s, ImDrawList* dl, Box b) {
         ImGui::PushID(it.key.c_str());
         const Pressed p = area("##dk", ib);
         ImGui::PopID();
+        icon_hovered = icon_hovered || p.hovered;
         if (p.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             w.desktop_sel = it.key;
         if (p.clicked)
@@ -1045,7 +1047,8 @@ void desktop(App::State& s, ImDrawList* dl, Box b) {
     }
     dl->PopClipRect();
     // The desktop itself: a press clears the selection; right-click is its menu.
-    if (ImGui::IsMouseHoveringRect(b.a(), b.b()) && ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered()) {
+    // (A focused terminal keeps an item active, so ImGui::IsAnyItemHovered() is no help here.)
+    if (ImGui::IsMouseHoveringRect(b.a(), b.b()) && ImGui::IsWindowHovered() && !icon_hovered) {
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             w.desktop_sel.clear();
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
@@ -1360,6 +1363,7 @@ ImVec2 render_mines(App::State& s, Window& win, ImDrawList* dl, ImVec2 at) {
                   false, w.arial);
         }
     }
+    area("##mines-own", Box{in.x0, my, in.x1, in.y1});  // own(): the menu bar and body are not for dragging
     if (!sound.empty())
         sfx(s, sound);
     if (std::exchange(m.saved, false))
@@ -1632,6 +1636,8 @@ ImVec2 render_sol(App::State& s, Window& /*win*/, ImDrawList* dl, ImVec2 at) {
         w.sol_press.reset();
         w.sol_drag.reset();
     }
+    area("##sol-own",
+         Box{in.x0, my, in.x1, in.y1});  // own(): the menu and the status bar are not for dragging
     // The status bar: the message, the score, the time.
     const float sy = table.y1 + U(s, 1);
     const float sh = U(s, 19);
@@ -1916,8 +1922,10 @@ void sync_games(App::State& s) {
 void draw_windows(App::State& s) {
     W98& w = st(s);
     // Closed windows go first (their games too).
+    bool closed = false;
     for (auto& win : w.windows)
         if (win->closing) {
+            closed = closed || win->role == "dialog" || win->role == "sol-dialog";
             if (win->role == "mines")
                 w.mines.reset();
             if (win->role == "sol") {
@@ -1929,6 +1937,8 @@ void draw_windows(App::State& s) {
                 w.drag_id = 0;
         }
     std::erase_if(w.windows, [](const auto& x) { return x->closing; });
+    if (closed && w.menus.empty())
+        keyboard_back(s);
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     std::vector<int> ids;
     for (const auto& win : w.windows)
@@ -1994,6 +2004,7 @@ void draw_windows(App::State& s) {
         ImGui::PopStyleVar(3);
         ImDrawList* dl = ImGui::GetWindowDrawList();
         ImGui::PushID(id);
+        g_area_hovered = false;
         ImVec2 size;
         if (win->role == "dialog")
             size = render_dialog(s, *win, dl, pos);
@@ -2009,7 +2020,7 @@ void draw_windows(App::State& s) {
         if (hovered &&
             (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right))) {
             w.focus = id;
-            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsAnyItemHovered() && !screen) {
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !g_area_hovered && !screen) {
                 w.drag_id = id;
                 w.drag_grab =
                     ImVec2(ImGui::GetIO().MousePos.x - win->pos.x, ImGui::GetIO().MousePos.y - win->pos.y);
@@ -2051,7 +2062,7 @@ void draw_windows(App::State& s) {
         }
     }
     for (const auto& n : order)
-        ui::adapter::bring_to_front(n.c_str());
+        raise(n);
 }
 
 // settings/main.js 302-309: the layout's preview picture (win98.json "preview":
@@ -2128,7 +2139,7 @@ void overlays(App::State& s) {
     const float tb_h = snap(U(s, k98::kTaskbarPx));
     clippy(s, Box{vp->WorkPos.x, vp->WorkPos.y, vp->WorkPos.x + vp->WorkSize.x,
                   vp->WorkPos.y + vp->WorkSize.y - tb_h});
-    ui::adapter::bring_to_front("##w98clippy");  // a float: over the layout, under the overlays
+    raise("##w98clippy");  // a float: over the layout, under the overlays
     draw_windows(s);
     draw_menus(s);
     // Timers: the clock, blinking carets and badges, the games, the screens.

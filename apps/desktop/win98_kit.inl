@@ -501,6 +501,10 @@ struct Pressed {
     Box content;  // where its face goes (moved 1 px while held)
 };
 
+// Some control was under the pointer (reset by the caller; a focused terminal keeps an ImGui item
+// active, which makes ImGui::IsAnyItemHovered() always true).
+bool g_area_hovered = false;
+
 // The press handling of an area: an invisible ImGui button.
 Pressed area(const char* id, Box b, bool on_down = false) {
     Pressed p;
@@ -510,6 +514,7 @@ Pressed area(const char* id, Box b, bool on_down = false) {
     // on_mouse_down: the press itself; on_click: released over it.
     p.clicked = on_down ? ImGui::IsItemActivated() : released;
     p.hovered = ImGui::IsItemHovered();
+    g_area_hovered = g_area_hovered || p.hovered;
     p.held = ImGui::IsItemActive();
     p.right = p.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
     p.double_click = p.clicked && ImGui::GetIO().MouseClickedLastCount[0] >= 2;
@@ -896,13 +901,36 @@ void menu_row(App::State& s, ImDrawList* dl, int menu_id, int i, Box r, bool sta
     }
 }
 
+// Puts a Herdr 98 window above the others, unless one of AgentDesk's own dialogs (an ImGui popup:
+// Settings, the palette) is open over everything.
+void raise(const std::string& name) {
+    if (!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId))
+        ui::adapter::bring_to_front(name.c_str());
+}
+
+// When a menu or a dialog closes, the keyboard goes to the dialog on top (dialogs focus
+// themselves, dialog.js 50-51), else back to the terminal.
+void keyboard_back(App::State& s) {
+    W98& w = st(s);
+    for (auto it = w.windows.rbegin(); it != w.windows.rend(); ++it)
+        if (!(*it)->closing && ((*it)->role == "dialog" || (*it)->role == "sol-dialog")) {
+            if (w.focus != (*it)->id) {
+                w.focus = (*it)->id;
+                (*it)->want_focus = true;
+            }
+            return;
+        }
+    w.focus = 0;
+    s.focus_view(s.ws.focused_session());
+}
+
 // menu.js 388-426: every open menu, the last one opened on top with the keyboard.
 void draw_menus(App::State& s) {
     W98& w = st(s);
     if (w.menus.empty()) {
         if (w.menu_focus != 0) {  // the keyboard back to the terminal
             w.menu_focus = 0;
-            s.focus_view(s.ws.focused_session());
+            keyboard_back(s);
         }
         return;
     }
@@ -931,7 +959,7 @@ void draw_menus(App::State& s) {
                 }
         }
         if (w.menus.empty()) {
-            s.focus_view(s.ws.focused_session());
+            keyboard_back(s);
             return;
         }
     }
@@ -991,10 +1019,10 @@ void draw_menus(App::State& s) {
         if (id == last && find_menu(s, id) != nullptr && ImGui::IsWindowFocused())
             menu_keys(s, id);
         ImGui::End();
-        ui::adapter::bring_to_front(name.c_str());
+        raise(name);
     }
     if (w.menus.empty())
-        s.focus_view(s.ws.focused_session());
+        keyboard_back(s);
 }
 
 // ---------------------------------------------------------------- overlay windows
@@ -1054,8 +1082,10 @@ void open_dialog(App::State& s, Dialog d) {
         sfx(s, d.icon == "error" ? "chord" : "ding");
     if (d.kind == "shutdown" || d.kind == "logoff")
         sfx(s, "ding");
-    if (d.kind == "screen" && d.mode == "boot")
+    if (d.kind == "screen" && d.mode == "boot") {  // dialog.js 86-88: straight to "Starting"
+        d.stage = 1;
         sfx(s, "startup");
+    }
     if (d.kind == "screen" && d.mode == "shutdown")
         sfx(s, "shutdown");
     win->dialog = std::make_unique<Dialog>(std::move(d));
