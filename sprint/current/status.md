@@ -85,3 +85,4 @@ plan: docs/design/AgentDesk_Design.md 5.6
 | 2026-11-19 | Herdr 98 的程式圖示 | 照 herdr：改用同一張程式表（原本只有 11 個 Agent 圖示）；shell、通用 shell 項目與沒有圖示的都是 MS-DOS；tint 的放在 tile 色（沒有就 navy）上、小 4 px、用 color（沒有就白色） | mods/win98/kit.js 208-225；mods/win98/window.js 9-16 | — |
 | 2026-11-19 | 圖示授權 | 隨附：LobeHub（MIT）、Lucide（ISC）、oh-my-pi（MIT）、Simple Icons（CC0），列入 THIRD_PARTY_NOTICES | defaults/icons/LICENSES.md | — |
 | 2026-11-19 | Herdr 98 小幫手放開後的彈回 | 照 herdr：從放開的位置以 360 ms、略為超過再回來的曲線彈回新位置；拖曳門檻改為兩軸距離取大者 4 px；圖片本身按下不拖曳（own），只能從邊緣拖 | src/window/floats.rs 16-17、64-75、212-215、261-262、288-297；mods/win98/kit.js 140-142 | — |
+| 2026-11-19 | Herdr 98 的 Ctrl+Esc、Ctrl+Shift+Esc | 不改：Windows 自己先攔下這兩個組合鍵（開始選單、工作管理員），任何程式都收不到，herdr 在 Windows 上也一樣；保留 herdr 的預設按鍵，不另外裝系統鍵盤攔截 | mods/win98/README.md 15-16 | — |
