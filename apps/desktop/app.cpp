@@ -5294,12 +5294,8 @@ void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
         if (ImGui::IsItemHovered() || ImGui::IsItemActive())
             ImGui::SetMouseCursor(d.vertical ? ImGuiMouseCursor_ResizeNS : ImGuiMouseCursor_ResizeEW);
         if (ImGui::IsItemActive()) {
-            if (ui::Node* node = ui::node_at(tab->root, d.path)) {
-                const ImVec2 m = ImGui::GetIO().MousePos;
-                const float f = d.vertical ? (m.y - d.parent.y) / std::max(1.0f, d.parent.h)
-                                           : (m.x - d.parent.x) / std::max(1.0f, d.parent.w);
-                node->ratio = std::clamp(f, 0.1f, 0.9f);
-            }
+            const ImVec2 m = ImGui::GetIO().MousePos;
+            ui::drag_divider(tab->root, d, d.vertical ? m.y - gap * 0.5f : m.x - gap * 0.5f, gap);
             dl->AddRectFilled(ImVec2(d.bar.x, d.bar.y), ImVec2(d.bar.x + d.bar.w, d.bar.y + d.bar.h),
                               alpha(g_pal->focus, 120), px(3));
         }

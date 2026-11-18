@@ -4,7 +4,8 @@
 //
 //   Workspace -> Space (a place to work, usually one repo/folder)
 //             -> Tab   (a piece of work: terminals split right/down)
-//             -> Node  (binary split tree; leaves are session ids)
+//             -> Node  (split tree like herdr's layout.rs: a row or column holds any number of
+//                       children with weights; leaves are session ids)
 #include <map>
 #include <optional>
 #include <set>
@@ -23,9 +24,9 @@ struct Rect {
 
 struct Node {
     std::string session;         // leaf when non-empty
-    bool vertical = false;       // split: false = side by side (right), true = stacked (down)
-    float ratio = 0.5f;          // share of the first child
-    std::vector<Node> children;  // 0 (leaf) or 2
+    bool vertical = false;       // container: false = a row (side by side), true = a column
+    std::vector<Node> children;  // 0 (leaf) or 2+
+    std::vector<float> weights;  // one per child; shares of the container
 
     [[nodiscard]] bool leaf() const { return children.empty(); }
 };
@@ -37,6 +38,7 @@ struct Tab {
     std::string focused;                            // session id
     std::string zoomed;                             // session id shown alone, or empty
     std::map<std::string, std::string> pane_names;  // session id -> name
+    std::vector<std::string> focus_history;          // panes focused before, oldest first (herdr Tab::focus)
     bool settled = false;  // herdr tab.settle: put away (not in the tab bar), still running
 };
 
@@ -114,7 +116,7 @@ public:
     bool swap_dir(Dir dir, Rect area);
     // Moves the nearest border of the focused pane in `dir` by `px` (tab layout inside `area`).
     bool resize(Dir dir, float px, Rect area);
-    void toggle_zoom();
+    void toggle_zoom(const std::string& pane = {});  // herdr pane.zoom {pane}: zooms and focuses it
 
     // ---- naming
     [[nodiscard]] std::string space_title(int index,
@@ -136,11 +138,14 @@ std::map<std::string, Rect> layout_tree(const Node& root, Rect area, float gap);
 
 // One draggable border of a split: the node path to the split and its hit rectangle.
 struct Divider {
-    std::vector<int> path;  // child indices from the root to the split node
+    std::vector<int> path;  // child indices from the root to the container
+    int index = 0;          // the border between children `index` and `index + 1`
     bool vertical = false;  // true: horizontal bar between stacked panes
     Rect bar;
-    Rect parent;  // the split node's area (to turn a drag into a ratio)
+    Rect parent;  // the container's area (to turn a drag into weights)
 };
+// Moves the border `d` so that it sits at `pos` (x for a row, y for a column) inside d.parent.
+void drag_divider(Node& root, const Divider& d, float pos, float gap);
 std::vector<Divider> dividers(const Node& root, Rect area, float gap);
 Node* node_at(Node& root, const std::vector<int>& path);
 

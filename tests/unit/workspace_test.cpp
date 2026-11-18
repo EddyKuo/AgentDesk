@@ -83,21 +83,28 @@ TEST(Workspace, ResizeMovesBorderAndClamps) {
     w.add_space("a");
     w.split("a", "b", Dir::kRight);
     w.focus("a");
+    auto share = [&] {
+        const auto& ws = w.active_tab()->root.weights;
+        return ws[0] / (ws[0] + ws[1]);
+    };
     ASSERT_TRUE(w.resize(Dir::kRight, 100, kArea));
-    EXPECT_NEAR(w.active_tab()->root.ratio, 0.6f, 0.001f);
+    EXPECT_NEAR(share(), 0.6f, 0.002f);
     for (int i = 0; i < 20; ++i)
         w.resize(Dir::kRight, 100, kArea);
-    EXPECT_NEAR(w.active_tab()->root.ratio, 0.9f, 0.001f);
+    EXPECT_NEAR(share(), 0.95f, 0.002f);
     EXPECT_FALSE(w.resize(Dir::kDown, 50, kArea));  // no stacked split
 }
 
-TEST(Workspace, ZoomTogglesAndUnzoomsOnFocusElsewhere) {
+// herdr model.rs 131-133: focusing another pane of a zoomed tab moves the zoom to it.
+TEST(Workspace, ZoomTogglesAndMovesWithFocus) {
     Workspace w;
     w.add_space("a");
     w.split("a", "b", Dir::kRight);
     w.toggle_zoom();
     EXPECT_EQ(w.active_tab()->zoomed, "b");
     w.focus("a");
+    EXPECT_EQ(w.active_tab()->zoomed, "a");
+    w.toggle_zoom();
     EXPECT_TRUE(w.active_tab()->zoomed.empty());
 }
 
@@ -315,4 +322,56 @@ TEST(Keymap, DefaultFileAppliesCleanly) {
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-3")), "tab.select:3");
     EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-v")), "terminal.paste");
     EXPECT_EQ(Keymap::defaults().global_map(), k.global_map());
+}
+
+// herdr layout.rs / model.rs rules: splitting along the container's axis adds a sibling sharing
+// the target's weight; closing gives the space back to all siblings; focus returns to the pane
+// focused before; new tabs go right after the shown one; closing the shown tab shows the one
+// that slides into its slot; moving a tab keeps the shown one.
+TEST(Workspace, HerdrSplitCloseAndTabRules) {
+    Workspace w;
+    w.add_space("a");
+    w.split("a", "b", Dir::kRight);
+    w.split("b", "c", Dir::kRight);  // same axis: one row [a, b, c]
+    const Node& root = w.active_tab()->root;
+    ASSERT_EQ(root.children.size(), 3u);
+    EXPECT_FLOAT_EQ(root.weights[0], 1.0f);
+    EXPECT_FLOAT_EQ(root.weights[1], 0.5f);
+    EXPECT_FLOAT_EQ(root.weights[2], 0.5f);
+    w.focus("a");
+    w.focus("c");
+    w.remove("c");  // back to a, the pane focused before c
+    EXPECT_EQ(w.focused_session(), "a");
+    ASSERT_EQ(w.active_tab()->root.children.size(), 2u);
+
+    // Round trip keeps the n-ary tree.
+    w.split("a", "d", Dir::kDown);
+    const auto back = Workspace::from_json(w.to_json());
+    EXPECT_EQ(back.spaces[0].tabs[0].root.children.size(), 2u);
+    EXPECT_TRUE(back.spaces[0].tabs[0].root.children[0].vertical);
+
+    Workspace t;
+    t.add_space("x");
+    t.add_tab("y");
+    t.select_tab(0);
+    t.add_tab("z");  // after the shown tab x
+    EXPECT_EQ(t.spaces[0].tabs[1].root.session, "z");
+    EXPECT_EQ(t.spaces[0].active_tab, 1);
+    t.close_tab(0, 1);  // y slides into the slot
+    EXPECT_EQ(t.spaces[0].tabs[t.spaces[0].active_tab].root.session, "y");
+    t.select_tab(0);
+    ASSERT_TRUE(t.move_tab(0, 1, 0));  // move y; x stays shown
+    EXPECT_EQ(t.spaces[0].tabs[t.spaces[0].active_tab].root.session, "x");
+}
+
+// herdr: focusing another pane of a zoomed tab moves the zoom; pane.go works while zoomed.
+TEST(Workspace, ZoomFollowsFocus) {
+    Workspace w;
+    w.add_space("a");
+    w.split("a", "b", Dir::kRight);
+    w.toggle_zoom("b");
+    EXPECT_EQ(w.active_tab()->zoomed, "b");
+    ASSERT_TRUE(w.focus_dir(Dir::kLeft, kArea));
+    EXPECT_EQ(w.focused_session(), "a");
+    EXPECT_EQ(w.active_tab()->zoomed, "a");
 }
