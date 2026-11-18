@@ -30,6 +30,7 @@ add_subdirectory(tools)
 
 if(AGENTDESK_BUILD_APPS)
     add_subdirectory(apps)
+    add_subdirectory(mods)
 endif()
 
 if(AGENTDESK_BUILD_TESTS)

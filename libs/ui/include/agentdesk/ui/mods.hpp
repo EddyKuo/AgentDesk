@@ -1,9 +1,10 @@
 #pragma once
-// Mods: small Lua programs that extend the window (ADR-14). Each mod lives in
-// <data>\mods\<name>\main.lua and runs in its own sandboxed Lua state: no io, no os.execute, no
-// require or loadfile; os.time/clock/date only. Mods see sessions, react to events, run any
-// window command, send input, show notifications, add palette commands, draw simple panels and
-// add text to tabs and agent rows. agentdesk.exec starts a program directly (no shell).
+// Mods: C++ DLLs that extend the window (ADR-17, replacing the Lua mods of ADR-14). Each mod is
+// <data>\mods\<name>\mod.dll with an optional mod.json and settings.json, built against
+// agentdesk/mod_api.h (or the mod_sdk.hpp helper). Only enabled mods are loaded. Mods see
+// sessions, react to events, run any window command, send input, show notifications, add palette
+// commands, draw simple panels and add text to tabs and agent rows; exec starts a program
+// directly (no shell). Every call into a mod is guarded: one that crashes is turned off.
 //
 // The host is ImGui-free: panels come back as widget lists that the app draws, and button
 // clicks are fed back for the next draw. UI thread only.
@@ -108,15 +109,14 @@ public:
 
     ModOutput take_output();
 
-    struct Mod;  // one Lua state
+    struct Mod;  // one loaded DLL
 
 private:
-    friend struct ModHostAccess;  // the Lua C callbacks
+    friend struct ModHostAccess;  // the C callbacks given to mods
     std::filesystem::path dir_;
     std::vector<std::unique_ptr<Mod>> mods_;
     std::vector<ModSession> sessions_;
     ModOutput output_;
-    std::set<std::string> clicked_;  // mod/panel/widget, consumed by the next draw
 };
 
 }  // namespace agentdesk::ui
