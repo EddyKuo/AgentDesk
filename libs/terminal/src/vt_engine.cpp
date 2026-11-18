@@ -1,11 +1,16 @@
 #include "agentdesk/terminal/vt_engine.hpp"
 
 #include <algorithm>
+#include <cstdlib>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <tuple>
 
 #include <vterm.h>
+#include <vterm_agentdesk.h>
+
+#include "agentdesk/terminal/bytes.hpp"
 
 namespace agentdesk::terminal {
 
@@ -700,6 +705,241 @@ ScreenSnapshot VtEngine::snapshot() const {
     std::sort(snap.links.begin(), snap.links.end(),
               [](const Hyperlink& a, const Hyperlink& b) { return std::tie(a.row, a.col0) < std::tie(b.row, b.col0); });
     return snap;
+}
+
+// ---- agent-host handover (design doc 7.4 OQ-09)
+
+namespace {
+
+constexpr std::uint32_t kStateMagic = 0x53454441u;  // "ADES"
+constexpr std::uint32_t kStateFormat = 1;
+constexpr std::size_t kCellBytes = kMaxCharsPerCell * 4 + 12;
+
+void put_cell(ByteWriter& w, const Cell& c) {
+    for (const char32_t cp : c.chars)
+        w.u32(static_cast<std::uint32_t>(cp));
+    w.u8(c.width);
+    w.u8(c.attrs);
+    w.boolean(c.default_fg);
+    w.boolean(c.default_bg);
+    w.u8(c.fg.r);
+    w.u8(c.fg.g);
+    w.u8(c.fg.b);
+    w.u8(c.bg.r);
+    w.u8(c.bg.g);
+    w.u8(c.bg.b);
+    w.u8(static_cast<std::uint8_t>(c.fg_ansi));
+    w.u8(static_cast<std::uint8_t>(c.bg_ansi));
+}
+
+Cell get_cell(ByteReader& r) {
+    Cell c;
+    for (auto& cp : c.chars)
+        cp = static_cast<char32_t>(r.u32());
+    c.width = r.u8();
+    c.attrs = r.u8();
+    c.default_fg = r.boolean();
+    c.default_bg = r.boolean();
+    c.fg.r = r.u8();
+    c.fg.g = r.u8();
+    c.fg.b = r.u8();
+    c.bg.r = r.u8();
+    c.bg.g = r.u8();
+    c.bg.b = r.u8();
+    c.fg_ansi = static_cast<std::int8_t>(r.u8());
+    c.bg_ansi = static_cast<std::int8_t>(r.u8());
+    return c;
+}
+
+void put_report(ByteWriter& w, const StatusReport& s) {
+    w.u8(static_cast<std::uint8_t>(s.state));
+    w.str(s.id);
+    w.u8(static_cast<std::uint8_t>(s.kind));
+    w.boolean(s.progress.has_value());
+    w.u8(s.progress.value_or(0));
+    w.str(s.app);
+    w.str(s.title);
+    w.str(s.msg);
+}
+
+StatusReport get_report(ByteReader& r) {
+    StatusReport s;
+    const auto state = r.u8();
+    if (state > static_cast<std::uint8_t>(StatusState::kClear))
+        r.fail();
+    s.state = static_cast<StatusState>(state);
+    s.id = r.str();
+    const auto kind = r.u8();
+    if (kind > static_cast<std::uint8_t>(StatusKind::kAuth))
+        r.fail();
+    s.kind = static_cast<StatusKind>(kind);
+    const bool has_progress = r.boolean();
+    const auto progress = r.u8();
+    if (has_progress)
+        s.progress = progress;
+    s.app = r.str();
+    s.title = r.str();
+    s.msg = r.str();
+    return s;
+}
+
+}  // namespace
+
+bool VtEngine::at_handover_point() const {
+    return vterm_agentdesk_at_ground(vt_.get()) != 0;
+}
+
+std::string VtEngine::save_state() const {
+    char* raw = nullptr;
+    const std::size_t n = vterm_agentdesk_save(vt_.get(), &raw);
+    if (n == 0)
+        return {};
+    std::string vterm_state(raw, n);
+    std::free(raw);
+
+    ByteWriter w;
+    w.u32(kStateMagic);
+    w.u32(kStateFormat);
+    w.i32(rows_);
+    w.i32(cols_);
+    w.str(vterm_state);
+    w.str(pty_input_);
+    w.str(utf8_carry_);
+    w.u64(history_.size());
+    for (const auto& line : history_) {
+        w.u64(line.line_id);
+        w.boolean(line.wrapped);
+        w.u64(line.cells.size());
+        for (const auto& c : line.cells)
+            put_cell(w, c);
+    }
+    w.u64(history_bytes_);
+    w.u64(next_line_id_);
+    w.boolean(history_truncated_);
+    w.i32(cursor_.row);
+    w.i32(cursor_.col);
+    w.boolean(cursor_.visible);
+    w.boolean(alt_screen_);
+    w.u8(static_cast<std::uint8_t>(mouse_mode_));
+    w.boolean(win32_on_);
+    w.str(win32_tail_);
+    w.u64(links_.size());
+    for (const auto& t : links_) {
+        w.i32(t.link.row);
+        w.i32(t.link.col0);
+        w.i32(t.link.col1);
+        w.str(t.link.uri);
+        w.str(t.text);
+    }
+    w.boolean(open_link_.has_value());
+    if (open_link_) {
+        w.i32(open_link_->first.row);
+        w.i32(open_link_->first.col);
+        w.boolean(open_link_->first.visible);
+        w.str(open_link_->second);
+    }
+    w.str(title_);
+    w.str(title_pending_);
+    w.str(osc_);
+    w.i32(osc_command_);
+    w.boolean(osc_overflow_);
+    w.str(cwd_uri_);
+    w.u64(status_.counter());
+    w.u64(status_.records().size());
+    for (const auto& [key, record] : status_.records()) {
+        w.str(key);
+        w.u64(record.updated_order);
+        put_report(w, record.report);
+    }
+    w.boolean(status_query_answered_);
+    w.u64(generation_);
+    w.u64(seq_);
+    w.u32(kStateMagic);
+    return w.take();
+}
+
+std::unique_ptr<VtEngine> VtEngine::restore(const VtEngineOptions& options, EngineEvents events,
+                                            std::string_view state) {
+    ByteReader r(state);
+    const auto bad = [] { return std::runtime_error("not a terminal state this agent-host reads"); };
+    if (r.u32() != kStateMagic || r.u32() != kStateFormat)
+        throw bad();
+    VtEngineOptions sized = options;
+    sized.rows = r.i32();
+    sized.cols = r.i32();
+    if (!r.ok() || sized.rows < 1 || sized.rows > 500 || sized.cols < 2 || sized.cols > 1000)
+        throw bad();
+    auto e = std::make_unique<VtEngine>(sized, std::move(events));
+    const std::string vterm_state = r.str();
+    if (!r.ok() || vterm_agentdesk_load(e->vt_.get(), vterm_state.data(), vterm_state.size()) == 0)
+        throw bad();
+    e->pty_input_ = r.str();
+    e->utf8_carry_ = r.str();
+    const auto lines = r.count(17);
+    for (std::uint64_t i = 0; i < lines && r.ok(); ++i) {
+        HistoryLine line;
+        line.line_id = r.u64();
+        line.wrapped = r.boolean();
+        const auto cells = r.count(kCellBytes);
+        line.cells.reserve(static_cast<std::size_t>(cells));
+        for (std::uint64_t c = 0; c < cells && r.ok(); ++c)
+            line.cells.push_back(get_cell(r));
+        e->history_.push_back(std::move(line));
+    }
+    e->history_bytes_ = static_cast<std::size_t>(r.u64());
+    e->next_line_id_ = r.u64();
+    e->history_truncated_ = r.boolean();
+    e->cursor_.row = r.i32();
+    e->cursor_.col = r.i32();
+    e->cursor_.visible = r.boolean();
+    e->alt_screen_ = r.boolean();
+    const auto mouse = r.u8();
+    if (mouse > static_cast<std::uint8_t>(MouseMode::kMove))
+        r.fail();
+    e->mouse_mode_ = static_cast<MouseMode>(mouse);
+    e->win32_on_ = r.boolean();
+    e->win32_tail_ = r.str();
+    const auto links = r.count(28);
+    for (std::uint64_t i = 0; i < links && r.ok(); ++i) {
+        TrackedLink t;
+        t.link.row = r.i32();
+        t.link.col0 = r.i32();
+        t.link.col1 = r.i32();
+        t.link.uri = r.str();
+        t.text = r.str();
+        e->links_.push_back(std::move(t));
+    }
+    if (r.boolean()) {
+        CursorState at;
+        at.row = r.i32();
+        at.col = r.i32();
+        at.visible = r.boolean();
+        std::string uri = r.str();
+        e->open_link_.emplace(at, std::move(uri));
+    }
+    e->title_ = r.str();
+    e->title_pending_ = r.str();
+    e->osc_ = r.str();
+    e->osc_command_ = r.i32();
+    e->osc_overflow_ = r.boolean();
+    e->cwd_uri_ = r.str();
+    const auto counter = r.u64();
+    std::map<std::string, StatusRecord> records;
+    const auto record_count = r.count(8);
+    for (std::uint64_t i = 0; i < record_count && r.ok(); ++i) {
+        std::string key = r.str();
+        StatusRecord record;
+        record.updated_order = r.u64();
+        record.report = get_report(r);
+        records.emplace(std::move(key), std::move(record));
+    }
+    e->status_.restore(std::move(records), counter);
+    e->status_query_answered_ = r.boolean();
+    e->generation_ = r.u64();
+    e->seq_ = r.u64();
+    if (r.u32() != kStateMagic || !r.ok() || !r.at_end())
+        throw bad();
+    return e;
 }
 
 }  // namespace agentdesk::terminal

@@ -1189,3 +1189,99 @@ void vterm_screen_set_default_colors(VTermScreen *screen, const VTermColor *defa
   if(screen->buffers[1])
     reset_default_colours(screen, screen->buffers[1]);
 }
+
+/* ---- AgentDesk addition (not upstream): raw access for agent-host's state handover.
+ * See include/vterm_agentdesk.h and agentdesk_handover.c. */
+#include "agentdesk_handover.h"
+
+static void agentdesk_pen_out(const ScreenPen *pen, AgentDeskCell *out)
+{
+  out->fg = pen->fg;
+  out->bg = pen->bg;
+  out->bold = pen->bold;
+  out->underline = pen->underline;
+  out->italic = pen->italic;
+  out->blink = pen->blink;
+  out->reverse = pen->reverse;
+  out->conceal = pen->conceal;
+  out->strike = pen->strike;
+  out->font = pen->font;
+  out->small = pen->small;
+  out->baseline = pen->baseline;
+  out->protected_cell = pen->protected_cell;
+  out->dwl = pen->dwl;
+  out->dhl = pen->dhl;
+}
+
+static void agentdesk_pen_in(ScreenPen *pen, const AgentDeskCell *in)
+{
+  pen->fg = in->fg;
+  pen->bg = in->bg;
+  pen->bold = in->bold;
+  pen->underline = in->underline;
+  pen->italic = in->italic;
+  pen->blink = in->blink;
+  pen->reverse = in->reverse;
+  pen->conceal = in->conceal;
+  pen->strike = in->strike;
+  pen->font = in->font;
+  pen->small = in->small;
+  pen->baseline = in->baseline;
+  pen->protected_cell = in->protected_cell;
+  pen->dwl = in->dwl;
+  pen->dhl = in->dhl;
+}
+
+int agentdesk_screen_has_buffer(const VTermScreen *screen, int bufidx)
+{
+  return screen->buffers[bufidx] != NULL;
+}
+
+int agentdesk_screen_selected(const VTermScreen *screen)
+{
+  return screen->buffer == screen->buffers[BUFIDX_ALTSCREEN] && screen->buffers[BUFIDX_ALTSCREEN] != NULL;
+}
+
+void agentdesk_screen_select(VTermScreen *screen, int bufidx)
+{
+  screen->buffer = screen->buffers[bufidx];
+}
+
+void agentdesk_screen_get_cell(const VTermScreen *screen, int bufidx, int index, AgentDeskCell *out)
+{
+  const ScreenCell *cell = screen->buffers[bufidx] + index;
+  for(int i = 0; i < VTERM_MAX_CHARS_PER_CELL; i++)
+    out->chars[i] = cell->chars[i];
+  agentdesk_pen_out(&cell->pen, out);
+}
+
+void agentdesk_screen_set_cell(VTermScreen *screen, int bufidx, int index, const AgentDeskCell *in)
+{
+  ScreenCell *cell = screen->buffers[bufidx] + index;
+  for(int i = 0; i < VTERM_MAX_CHARS_PER_CELL; i++)
+    cell->chars[i] = in->chars[i];
+  agentdesk_pen_in(&cell->pen, in);
+}
+
+void agentdesk_screen_get_pen(const VTermScreen *screen, AgentDeskCell *out)
+{
+  for(int i = 0; i < VTERM_MAX_CHARS_PER_CELL; i++)
+    out->chars[i] = 0;
+  agentdesk_pen_out(&screen->pen, out);
+}
+
+void agentdesk_screen_set_pen(VTermScreen *screen, const AgentDeskCell *in)
+{
+  agentdesk_pen_in(&screen->pen, in);
+}
+
+int agentdesk_screen_get_flags(const VTermScreen *screen)
+{
+  return (screen->global_reverse ? 1 : 0) | (screen->reflow ? 2 : 0);
+}
+
+void agentdesk_screen_set_flags(VTermScreen *screen, int flags)
+{
+  screen->global_reverse = (flags & 1) != 0;
+  screen->reflow = (flags & 2) != 0;
+}
