@@ -17,20 +17,20 @@
 
 ## 架構
 
-herdr-app 是 Rust 寫的視窗程式（約 1.5 MB 原始碼），終端機用 libghostty。畫面上幾乎每一塊都是一個 JavaScript mod（跑在內建的 QuickJS），由 `defaults/layouts/main.json` 排版：spaces、agents、tabs、pane、files、changes、picker、new-menu、peek、toast、worktree、machine-add、settings 等。mod 回傳一棵元件樹，Rust 端負責畫。
+herdr-app 是 Rust 寫的視窗程式（約 1.5 MB 原始碼），終端機用 libghostty。視窗裡的側欄、分頁列、面板、選單等區塊，幾乎都是一個 JavaScript mod（跑在內建的 QuickJS），由 `defaults/layouts/main.json` 排版：spaces、agents、tabs、pane、files、changes、picker、new-menu、peek、toast、worktree、machine-add、settings 等。mod 回傳一棵元件樹，Rust 端負責畫。
 
-AgentDesk 不搬 JS 執行環境，改用 C++／ImGui 照同樣的行為重寫；版面數字、互動規則、狀態判斷照 herdr。
+AgentDesk 不搬 JS 執行環境，改用 C++／ImGui 重寫，版面數字、互動規則、狀態判斷都和 herdr 相同。
 
 ## 視窗版面
 
 - 系統標題列隱藏。整個視窗是一列：左側欄（預設 268 px，可拖曳 44～480 px）＋ 1 px 分隔線＋工作區。
 - 左側欄由上而下：品牌列 46 px（logo、名稱、搜尋、收合鈕）、Spaces 與 Agents 兩個列表（各占一半，中間分界可拖曳）、底部 69 px（Settings、Add machine）。側欄窄於 160 px 時每個區塊改成只剩圖示的窄欄；Ctrl+Shift+B 完全隱藏。
 - 工作區由上而下：分頁列 42 px、內容區（邊距 8、間距 8）、狀態列 28 px。內容區是面板，右側可再開 368 px 的 Files 或 Changes 面板（可拖曳 280～900 px，起始隱藏）。
-- 所有尺寸是設計 px，乘上 zoom。
+- 上面的尺寸都以 zoom 1 為準，實際大小再乘上 zoom。
 
 ## 左側 Spaces
 
-- 每列 30 px：18 px 彩色字母頭像（固定六色，不跟主題變）、名稱，靠右是 `repo · branch`，後面接綠色 ↑N、紅色 ↓N（領先／落後遠端）。main、master 和名稱已經表達的部分會省略。
+- 每列 30 px：18 px 彩色字母頭像（固定六種顏色，換主題也不變）、名稱，靠右是 `repo · branch`，後面接綠色 ↑N、紅色 ↓N（領先／落後遠端）。main、master 和名稱已經表達的部分會省略。
 - worktree 的 space 以 `├─`／`└─` 掛在主 repo 的 space 下面，列高 28 px。
 - 有遠端機器時才依機器分組，組標題可收合。
 - 放開滑鼠才算選取；拖曳可在同一台機器內調整順序，以 2 px 強調色線標示落點。
@@ -48,7 +48,7 @@ AgentDesk 不搬 JS 執行環境，改用 C++／ImGui 照同樣的行為重寫�
 ## 分頁列
 
 - 分頁是 29 px 高的膠囊：程式圖示、最多 170 px 的名稱（沒命名時 Agent 跟著它的即時標題，shell 顯示程式名稱）、狀態 spinner 或點，關閉鈕只出現在目前分頁。
-- 雙擊改名；放開滑鼠才選取，拖到別的分頁上放開就移動順序（沒有拖曳預覽）；滾輪切換分頁；放不下時出現水平捲軸並保持目前分頁可見。
+- 雙擊改名；放開滑鼠才選取，拖到別的分頁上放開就移動順序（沒有拖曳預覽）；滾輪切換分頁；分頁太多排不下時出現水平捲軸，並捲到目前分頁。
 - 新分頁插在目前分頁後面。關分頁不詢問，除非是最後一個，這時問要不要關 space。
 - Files、Changes 兩個按鈕在分頁列右側：按目前開著的那個會關掉，按另一個會切換，開關狀態依 space 記住，沒有預設快捷鍵。
 - Windows 上，分頁列右端畫 26 px 的最小化、最大化／還原、關閉；拖曳分頁列會送 `SC_MOVE`，所以能用系統貼齊；雙擊切換最大化。
@@ -65,7 +65,7 @@ AgentDesk 不搬 JS 執行環境，改用 C++／ImGui 照同樣的行為重寫�
 - New 選單：Terminal（開 shell 分頁）、已安裝的 Agent（數字鍵 1～9，最多再列 2 個「not installed」）、New space、New worktree…、Open worktree…。選單裡沒有機器選項；遠端機器在 picker 裡以「new space on <machine>」出現。
 - 沒帶參數的新分頁、新 space、分割都開 shell。新分頁的資料夾依序取：目前面板的即時資料夾、space 的資料夾、家目錄；分割用被分割面板的資料夾。Windows 上預設 shell 是 PATH 上的 pwsh.exe，沒有才用 powershell.exe。
 - picker 用子字串搜尋（不是模糊比對），忙碌的 space 排前面（Blocked 最前），安靜的收進「earlier」；上下鍵循環，Ctrl+D 關掉選到的分頁，Esc 關閉。
-- 命令面板用模糊比對，有「Recent」群組（最近 5 個），群組順序固定，顯示快捷鍵，上下鍵到頭就停。
+- 命令面板用模糊比對，有「Recent」群組（最近 5 個），群組順序固定，顯示快捷鍵，上下鍵移到第一項或最後一項就停住（picker 則會循環）。
 - toast 一般 5 秒，錯誤和警告 8 秒。
 
 ## Files 與 Changes
@@ -103,7 +103,7 @@ AgentDesk 不搬 JS 執行環境，改用 C++／ImGui 照同樣的行為重寫�
 
 ## 提醒與首次啟動
 
-- 音效預設開啟，可換成自己的 MP3，Windows 上用 MCI 播放。「Needs you」一定響；「完成」只在沒看的時候響並跳 toast。沒有找到系統通知或工作列閃爍。
+- 音效預設開啟，可換成自己的 MP3，Windows 上用 MCI 播放。「Needs you」一定響；「完成」只在沒看的時候響並跳 toast。原始碼裡沒有看到 Windows 系統通知或工作列閃爍。
 - 第一次啟動（`shared.json` 沒有 `frame.welcomed`）開 4 頁歡迎視窗：外觀與 zoom、加機器、開啟面板、命令面板快捷鍵。按 Esc 記為略過；完成時若沒有任何 space 就開一個。
 
 ## 跟 AgentDesk 目前的差異
