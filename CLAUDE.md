@@ -70,7 +70,7 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 | `libs/modapi`、`mods/` | mod 介面（純 C 的 `mod_api.h` 與 header-only 的 `mod_sdk.hpp`，ADR-17）與三個範例 mod（各自編成 `mods\<名稱>\mod.dll`，隨 zip 附上 SDK） |
 | `tools/` | 開發與量測工具（不出貨） |
 | `tests/unit`、`tests/integration/windows`、`tests/fixtures` | GoogleTest；fixture 是原始位元組檔，由 `build\<preset>\tools\make_fixtures.exe` 產生 |
-| `third_party/libvterm`、`third_party/conpty` | 收錄的 libvterm 0.3.3；隨附 ConPTY 的授權與 NOTICE（二進位由腳本下載到 `bin/`，不進版控） |
+| `third_party/libvterm`、`third_party/conpty` | 收錄的 libvterm 0.3.3（加了換版用的狀態存取，ADR-19）；隨附 ConPTY 的授權與 NOTICE（二進位由腳本下載到 `bin/`，不進版控） |
 
 ## 架構重點（需要讀好幾個檔案才拼得出來的部分）
 

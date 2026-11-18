@@ -144,6 +144,7 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 
 - **workspace**（設定裡顯示為 AgentDesk）：預設，側欄＋分頁＋分割面板＋右側面板。
 - **terminals**：herdr 的第二個版面，沒有側欄與狀態列。上方的分頁列左邊是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是命令面板與新分頁按鈕。面板標題列的按鈕一直顯示。
+- **Herdr 98**（herdr 的 win98 版面）：Windows 98 的樣子，有工作列、開始選單、桌面圖示、踩地雷、接龍和小幫手。按鍵在 keys.json 的 `layout:win98` 區段；Ctrl+Esc 開開始選單、Ctrl+Shift+Esc 開工作管理員，只在 AgentDesk 位於最前面時由它接手，其他時候仍是 Windows 的功能。
 
 自訂版面放在 `%LOCALAPPDATA%\AgentDesk\layouts\<名稱>.json`：
 
@@ -161,11 +162,16 @@ Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy
 - **Machines**：遠端機器清單與「Add a machine…」。
 - **Alerts**：提示音開關與試聽、右下角通知開關。
 - **Mods**：啟用或停用 mod、看錯誤、重新載入。
-- **Updates**：版本與「What's new」。更新後第一次啟動會自動顯示一次。
+- **Updates**：AgentDesk 與 agent-host 的版本、「What's new」（更新後第一次啟動會自動顯示一次）、「Check now」。AgentDesk 沒有內建的更新伺服器，要設定環境變數 `AGENTDESK_RELEASES_URL` 才會每小時檢查一次；有新版時會在右下角提示，按「Restart to update」換版，或下次結束時換。agent-host 可以單獨更新，終端機裡的程式不會中斷。
+- **Privacy**：使用統計的開關，以及「What we send」逐字顯示會送出的內容。只有設定 `AGENTDESK_TELEMETRY_URL` 時才會送出；`DO_NOT_TRACK` 或 `AGENTDESK_TELEMETRY=0` 會關閉這一次執行。
 
-左下的「Send feedback」開一個草稿視窗，草稿最後會附上 AgentDesk 與 Windows 的版本。AgentDesk 不會自己送出任何東西：按「Copy」複製，或按「Save to file」存到 `%LOCALAPPDATA%\AgentDesk\feedback\`，再用你習慣的方式寄出。
+左下的「Send feedback」開一個草稿視窗，草稿最後會附上 AgentDesk 與 Windows 的版本。Send feedback 的草稿不會自己送出：按「Copy」複製，或按「Save to file」存到 `%LOCALAPPDATA%\AgentDesk\feedback\`，再用你習慣的方式寄出。
 
 介面字型是隨附的 Geist，終端機預設是隨附的 JetBrains Mono Medium；中文字以微軟正黑體補上。
+
+## 程式圖示
+
+面板、分頁和 Agent 清單的圖示與名稱來自 herdr 的程式表（執行檔旁的 `programs\programs.json`，125 個程式）。要改某個程式的名稱或圖示，在 `%LOCALAPPDATA%\AgentDesk\programs.json` 寫同樣格式的項目（只寫要改的欄位），存檔後立刻套用；檔案有錯時原因寫在 `programs.error`。
 
 ## Mod
 
