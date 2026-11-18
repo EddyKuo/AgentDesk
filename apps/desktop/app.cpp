@@ -3710,14 +3710,14 @@ void draw_mod_panels(App::State& s, const std::string& where) {
         ImGui::Dummy(ImVec2(0, px(8)));
         ImGui::Indent(inset);
         if (!panel.title.empty()) {
-            ImGui::PushFont(s.fonts.ui_medium, fpx(11.5f));
+            ImGui::PushFont(s.fonts.ui_medium, 11.5f);
             ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
             ImGui::TextUnformatted(panel.title.c_str());
             ImGui::PopStyleColor();
             ImGui::PopFont();
             ImGui::Dummy(ImVec2(0, px(2)));
         }
-        ImGui::PushFont(s.fonts.ui, fpx(12.5f));
+        ImGui::PushFont(s.fonts.ui, 12.5f);
         ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x - inset);
         for (std::size_t i = 0; i < panel.widgets.size(); ++i) {
             const auto& w = panel.widgets[i];
@@ -4741,7 +4741,7 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x + px(12), ImGui::GetCursorScreenPos().y));
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + w - px(36));
         ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
-        ImGui::PushFont(s.fonts.ui, fpx(12));
+        ImGui::PushFont(s.fonts.ui, 12);
         ImGui::TextWrapped(
                 "No agent status yet. Agents show up here when they report their status. Older versions and agents "
                 "inside tmux may not.");
@@ -6567,7 +6567,7 @@ void draw_code_preview(App::State& s, SidePanels& p, ImVec2 size) {
     layout_code(layout, text, p.preview_path);
     const CodeLang lang = code_lang(p.preview_path);
     ImGui::BeginChild("##preview", size, ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoBackground);
-    ImGui::PushFont(s.fonts.mono, fpx(12));
+    ImGui::PushFont(s.fonts.mono, 12);
     ImFont* font = ImGui::GetFont();
     const float fs = ImGui::GetFontSize();
     const float lh = std::round(ImGui::GetTextLineHeightWithSpacing());
@@ -6744,7 +6744,7 @@ void draw_files_panel(App::State& s, ImVec2 pos, ImVec2 size) {
         const ImVec2 area(size.x - 2, pos.y + size.y - top - px(4));
         if (!p.preview_message.empty() && p.preview_text.empty()) {
             ImGui::BeginChild("##preview", area, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
-            ImGui::PushFont(s.fonts.mono, fpx(12));
+            ImGui::PushFont(s.fonts.mono, 12);
             ImGui::Dummy(ImVec2(0, px(4)));
             ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
             ImGui::SetCursorPosX(px(10));
@@ -6819,7 +6819,7 @@ void draw_files_panel(App::State& s, ImVec2 pos, ImVec2 size) {
     auto note = [&](const std::string& t) {
         ImGui::SetCursorPosX(px(14));
         ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
-        ImGui::PushFont(s.fonts.ui, fpx(12));
+        ImGui::PushFont(s.fonts.ui, 12);
         ImGui::TextWrapped("%s", t.c_str());
         ImGui::PopFont();
         ImGui::PopStyleColor();
@@ -6937,7 +6937,7 @@ void draw_changes_panel(App::State& s, ImVec2 pos, ImVec2 size) {
         auto note = [&](const std::string& t2) {
             ImGui::SetCursorPosX(px(14));
             ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
-            ImGui::PushFont(s.fonts.ui, fpx(12));
+            ImGui::PushFont(s.fonts.ui, 12);
             ImGui::TextWrapped("%s", t2.c_str());
             ImGui::PopFont();
             ImGui::PopStyleColor();
@@ -6974,7 +6974,7 @@ void draw_changes_panel(App::State& s, ImVec2 pos, ImVec2 size) {
             ImGui::SetCursorPos(ImVec2(px(14), px(10)));
             ImGui::TextDisabled("Select a file to view its changes");
         } else {
-            ImGui::PushFont(s.fonts.mono, fpx(11));
+            ImGui::PushFont(s.fonts.mono, 11);
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
             const float rh = px(20);
             std::size_t longest = 0;
@@ -8591,7 +8591,7 @@ void draw_worktree_open(App::State& s) {
 // Modal 620 px high, left navigation 190 px; every change applies and saves at once (no Save).
 void settings_section(App::State& s, const char* title) {
     ImGui::Dummy(ImVec2(0, px(10)));
-    ImGui::PushFont(s.fonts.ui_medium, fpx(11));
+    ImGui::PushFont(s.fonts.ui_medium, 11);
     ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
     std::string up;
     for (const char* c = title; *c != 0; ++c)
@@ -8890,13 +8890,13 @@ void draw_settings(App::State& s) {
             changed = true;
         settings_row_done(s);
         ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
-        ImGui::PushFont(s.fonts.ui, fpx(11.5f));
+        ImGui::PushFont(s.fonts.ui, 11.5f);
         ImGui::TextWrapped("A layout file with its own \"theme\" uses that one instead.");
         ImGui::PopFont();
         ImGui::PopStyleColor();
         for (const bool light_cards : {false, true}) {
         ImGui::Dummy(ImVec2(0, px(4)));
-        ImGui::PushFont(s.fonts.ui_medium, fpx(12));
+        ImGui::PushFont(s.fonts.ui_medium, 12);
         ImGui::TextDisabled("%s", light_cards ? "Light" : "Dark");
         ImGui::PopFont();
         for (const auto& p : kPalettes) {
@@ -9325,7 +9325,7 @@ void draw_welcome(App::State& s) {
         ImGui::PopStyleVar();
     }
     auto title = [&](const char* t, const char* sub) {
-        ImGui::PushFont(s.fonts.ui_bold, fpx(20));
+        ImGui::PushFont(s.fonts.ui_bold, 20);
         ImGui::TextWrapped("%s", t);
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(0, px(4)));
@@ -9339,7 +9339,7 @@ void draw_welcome(App::State& s) {
         draw_icon(s, ImGui::GetWindowDrawList(), glyph, fpx(16), ImVec2(a.x + px(10), a.y + px(10)), g_pal->focus);
         ImGui::SetCursorScreenPos(ImVec2(a.x + px(32), a.y));
         ImGui::BeginGroup();
-        ImGui::PushFont(s.fonts.ui_medium, fpx(13.5f));
+        ImGui::PushFont(s.fonts.ui_medium, 13.5f);
         ImGui::TextUnformatted(head);
         ImGui::PopFont();
         ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
@@ -9897,7 +9897,7 @@ void draw_notes(App::State& s) {
         const std::string about = std::string("AgentDesk ") + AGENTDESK_VERSION_STRING + ", Windows " +
                                   std::to_string(os.dwMajorVersion) + "." + std::to_string(os.dwMinorVersion) + "." +
                                   std::to_string(os.dwBuildNumber) + ", layout " + s.settings.layout;
-        ImGui::PushFont(s.fonts.ui, fpx(11.5f));
+        ImGui::PushFont(s.fonts.ui, 11.5f);
         ImGui::TextDisabled("Added at the end: %s", about.c_str());
         ImGui::PopFont();
         const std::string draft = std::string(s.feedback_buf) + "\n\n-- " + about + "\n";
