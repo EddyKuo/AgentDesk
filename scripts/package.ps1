@@ -33,6 +33,9 @@ Copy-Item (Join-Path $root 'libs\modapi\include\agentdesk\mod_api.h'), (Join-Pat
 foreach ($m in Get-ChildItem -Directory (Join-Path $root 'mods')) {
     Copy-Item -Recurse $m.FullName (Join-Path $stage "sdk\examples\$($m.Name)")
 }
+Copy-Item (Join-Path $root 'libs\modapi\sdk\CMakeLists.txt') (Join-Path $stage 'sdk')
+# mod_sdk.hpp uses nlohmann/json (MIT, listed in the notices): ship its headers with the SDK.
+Copy-Item -Recurse (Join-Path $BuildDir 'vcpkg_installed\x64-windows-static-md\include\nlohmann') (Join-Path $stage 'sdk\include\nlohmann')
 Copy-Item (Join-Path $bin 'conpty\conpty.dll') (Join-Path $stage 'conpty')
 Copy-Item (Join-Path $bin 'conpty\x64\OpenConsole.exe') (Join-Path $stage 'conpty\x64')
 Copy-Item (Join-Path $root 'third_party\conpty\LICENSE') (Join-Path $stage 'conpty\LICENSE')
