@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <imgui.h>
 
@@ -53,10 +54,34 @@ struct CellPos {
 
 CellPos cell_at(float x, float y, float origin_x, float origin_y, float cell_w, float cell_h, GridSize grid);
 
-// Text of a linear selection between two cells (inclusive, any order) on one snapshot.
-// Continuation cells of wide characters are skipped; rows end with "\r\n" except the last;
-// trailing blanks of each row are trimmed. Never contains control characters.
+// East Asian wide or emoji presentation code point (two cells). Used where text is laid out
+// without engine widths (history lines); the live screen uses the engine's cell widths.
+bool is_wide_codepoint(char32_t cp);
+
+// One line of cells, from the live screen or laid out from a history line's text.
+struct LineCells {
+    std::vector<terminal::Cell> cells;
+    bool wrapped = false;  // soft-wrapped: continues on the next line
+};
+LineCells cells_from_text(const std::string& utf8, bool wrapped);
+
+// Text of a linear selection between two cells (inclusive, any order) over consecutive lines
+// (CellPos::row indexes `lines`). As herdr copies (src/vt.rs:1158-1163, Ghostty's formatter with
+// unwrap and trim): soft-wrapped lines join without a break, trailing blanks of each line and
+// trailing blank lines are trimmed, lines end with "\r\n". Continuation cells of wide characters
+// are skipped. Never contains control characters.
+std::string selection_text(const std::vector<LineCells>& lines, CellPos a, CellPos b);
+// The same over one snapshot's rows.
 std::string selection_text(const terminal::ScreenSnapshot& snap, CellPos a, CellPos b);
+
+// Lines to scroll while a selection drag is held past the edge (herdr src/terminal.rs:1280-1288):
+// 0 inside; otherwise 1..5 lines toward the pointer (negative = up), every 50 ms.
+int selection_scroll_lines(float y, float cell_h, int rows);
+
+// Paths typed in as a paste, quoted the way PowerShell/cmd read them, joined by spaces with a
+// trailing space, never Enter (herdr src/terminal/drag_paths.rs quote_paths, Windows branch).
+// Empty when there is no path or one has control characters.
+std::optional<std::string> quote_paths(const std::vector<std::string>& paths);
 
 // Pasted text policy (design doc 3.5): NUL rejected, at most 1 MiB, multi-line needs preview.
 enum class PasteCheck { kOk, kNeedsConfirmation, kRejectedNul, kRejectedTooLarge };

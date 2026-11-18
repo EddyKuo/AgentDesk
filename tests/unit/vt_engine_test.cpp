@@ -242,12 +242,78 @@ TEST(VtEngine, CtrlCAndTextEncodeAsExpected) {
 
 TEST(VtEngine, PasteIsBracketedOnlyWhenEnabledAndEndMarkerStripped) {
     VtEngine e(small_options());
-    e.paste("a\nb");
-    EXPECT_EQ(e.take_pty_input(), "a\nb");
+    e.paste("a\nb\r\nc");
+    EXPECT_EQ(e.take_pty_input(), "a\rb\rc");  // herdr src/vt.rs:1631: line breaks are Enter
     e.feed("\x1b[?2004h");
     e.paste("x\x1b[201~y");
     EXPECT_EQ(e.take_pty_input(), "\x1b[200~xy\x1b[201~");
     EXPECT_THROW(e.paste(std::string("a\0b", 3)), std::invalid_argument);
+}
+
+// herdr src/win32_keys.rs: once ConPTY asks for win32-input-mode (even split across writes),
+// modified Enter and Escape go as key-down + key-up win32 events; plain Enter stays CR.
+TEST(VtEngine, Win32InputModeEncodesModifiedEnterAndEscape) {
+    VtEngine e(small_options());
+    e.key(Key::kEnter, agentdesk::terminal::kModShift);
+    EXPECT_EQ(e.take_pty_input(), "\x1b[13;2u");  // libvterm's own encoding until asked
+    e.key(Key::kEscape);
+    EXPECT_EQ(e.take_pty_input(), "\x1b");
+    e.feed("\x1b[?90");
+    e.feed("01h");
+    EXPECT_TRUE(e.win32_input());
+    e.key(Key::kEnter, agentdesk::terminal::kModShift);
+    EXPECT_EQ(e.take_pty_input(), "\x1b[13;28;13;1;16;1_\x1b[13;28;13;0;16;1_");
+    e.key(Key::kEnter, kModCtrl);
+    EXPECT_EQ(e.take_pty_input(), "\x1b[13;28;10;1;8;1_\x1b[13;28;10;0;8;1_");
+    e.key(Key::kEnter, agentdesk::terminal::kModAlt);
+    EXPECT_EQ(e.take_pty_input(), "\x1b[13;28;13;1;2;1_\x1b[13;28;13;0;2;1_");
+    e.key(Key::kEnter);
+    EXPECT_EQ(e.take_pty_input(), "\r");
+    e.key(Key::kEscape);
+    EXPECT_EQ(e.take_pty_input(), "\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_");
+    e.feed("x\x1b[?9001h y \x1b[?9001l");
+    EXPECT_FALSE(e.win32_input());
+    e.key(Key::kEscape);
+    EXPECT_EQ(e.take_pty_input(), "\x1b");
+}
+
+// Soft-wrapped rows are flagged on the screen and in history; hard line breaks are not.
+TEST(VtEngine, SoftWrapIsFlaggedOnScreenAndInHistory) {
+    VtEngineOptions o;
+    o.rows = 3;
+    o.cols = 5;
+    VtEngine e(o);
+    e.feed("abcdefg\r\nhi");
+    auto s = e.snapshot();
+    EXPECT_TRUE(s.row_wrapped(0));
+    EXPECT_FALSE(s.row_wrapped(1));
+    EXPECT_FALSE(s.row_wrapped(2));
+    e.feed("\r\none\r\ntwo\r\n");  // scrolls "abcde" (wrapped) then "fg" (not) into history
+    ASSERT_GE(e.history().size(), 2u);
+    EXPECT_TRUE(e.history()[0].wrapped);
+    EXPECT_FALSE(e.history()[1].wrapped);
+}
+
+// OSC 8 links are remembered with their cells, follow scrolling and vanish when overwritten.
+TEST(VtEngine, Osc8LinksFollowTheirCells) {
+    VtEngineOptions o;
+    o.rows = 4;
+    o.cols = 20;
+    VtEngine e(o);
+    e.feed("see \x1b]8;id=1;file:///C:/x.txt\x1b\\x.txt\x1b]8;;\x1b\\ now");
+    auto s = e.snapshot();
+    ASSERT_EQ(s.links.size(), 1u);
+    EXPECT_EQ(s.links[0], (agentdesk::terminal::Hyperlink{0, 4, 9, "file:///C:/x.txt"}));
+    e.feed("\r\n\r\n\r\n\r\n");  // scrolls one line up past the top: the link goes with it
+    EXPECT_TRUE(e.snapshot().links.empty());
+    e.feed("\x1b[H\x1b]8;;https://a.b\x1b\\ab\x1b]8;;\x1b\\\r\n");
+    ASSERT_EQ(e.snapshot().links.size(), 1u);
+    e.feed("\r\n");
+    s = e.snapshot();
+    ASSERT_EQ(s.links.size(), 1u);
+    EXPECT_EQ(s.links[0].row, 0);  // not scrolled yet (cursor moved down only)
+    e.feed("\x1b[1;1HXY");  // overwritten: no longer a link
+    EXPECT_TRUE(e.snapshot().links.empty());
 }
 
 TEST(VtEngine, ResizeBumpsGenerationAndClampsSize) {

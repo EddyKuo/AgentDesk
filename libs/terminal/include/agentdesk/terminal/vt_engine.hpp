@@ -59,6 +59,15 @@ enum class MouseMode : std::uint8_t { kNone, kClick, kDrag, kMove };
 
 enum class MouseAction : std::uint8_t { kPress, kRelease, kMove };
 
+// An OSC 8 hyperlink shown on one screen row: cells [col0, col1) open `uri`.
+struct Hyperlink {
+    int row = 0;
+    int col0 = 0;
+    int col1 = 0;
+    std::string uri;
+    friend bool operator==(const Hyperlink&, const Hyperlink&) = default;
+};
+
 struct ScreenSnapshot {
     int rows = 0;
     int cols = 0;
@@ -69,7 +78,16 @@ struct ScreenSnapshot {
     std::string title;
     std::uint64_t generation = 0;
     std::uint64_t seq = 0;
+    // Per row: 1 when the row was soft-wrapped (its text continues on the next row). Copying
+    // joins such rows without a line break (herdr vt.rs selection_text, unwrap). May be empty
+    // (treated as all 0).
+    std::vector<std::uint8_t> wrapped;
+    std::vector<Hyperlink> links;  // OSC 8 links on the screen, by row
 
+    [[nodiscard]] bool row_wrapped(int row) const {
+        return row >= 0 && static_cast<std::size_t>(row) < wrapped.size() &&
+               wrapped[static_cast<std::size_t>(row)] != 0;
+    }
     [[nodiscard]] const Cell& at(int row, int col) const {
         return cells[static_cast<std::size_t>(row) * static_cast<std::size_t>(cols) +
                      static_cast<std::size_t>(col)];
@@ -81,6 +99,7 @@ struct ScreenSnapshot {
 struct HistoryLine {
     std::uint64_t line_id = 0;
     std::vector<Cell> cells;
+    bool wrapped = false;  // continues on the next line (soft wrap)
 };
 
 struct HistoryLimits {
@@ -162,6 +181,9 @@ public:
     // Ignored while the program has mouse reporting off; moves are sent only when it asked.
     void mouse(int row, int col, int button, MouseAction action, std::uint8_t mods = kModNone);
     [[nodiscard]] MouseMode mouse_mode() const noexcept { return mouse_mode_; }
+    // The program asked for win32-input-mode (CSI ?9001h, ConPTY does): modified Enter and
+    // Escape are then sent as win32 key events (herdr src/win32_keys.rs).
+    [[nodiscard]] bool win32_input() const noexcept { return win32_on_; }
 
     // Bytes to write to the PTY input, in order: query replies (DA/DSR/CPR/OSC 7501) and
     // encoded input. The caller must write them before any later input.
@@ -190,6 +212,9 @@ private:
     void push_history(int cols, const void* vterm_cells);
     bool pop_history(int cols, void* vterm_cells);
     void handle_osc(int command, std::string body);
+    void watch_win32_mode(std::string_view bytes);
+    void move_links(int src_row0, int src_row1, int dest_row0, int dest_row1, int dy);
+    [[nodiscard]] std::string cells_text(int row, int col0, int col1) const;
     [[nodiscard]] Cell convert(const void* vterm_cell) const;
 
     struct VTermDeleter {
@@ -208,6 +233,14 @@ private:
     CursorState cursor_;
     bool alt_screen_ = false;
     MouseMode mouse_mode_ = MouseMode::kNone;
+    bool win32_on_ = false;
+    std::string win32_tail_;  // end of the last write, for a request split across two
+    struct TrackedLink {
+        Hyperlink link;
+        std::string text;  // the cells' text when the link closed; overwritten cells drop it
+    };
+    std::vector<TrackedLink> links_;
+    std::optional<std::pair<CursorState, std::string>> open_link_;  // OSC 8 opened at, uri
     std::string title_;
     std::string title_pending_;
     std::string osc_;

@@ -2242,6 +2242,18 @@ void App::on_focus_changed(bool focused) {
     s_->window_focused = focused;
 }
 
+void App::on_files_dropped(std::vector<std::string> paths) {
+    std::string target;
+    for (const auto& [id, vs] : s_->views) {
+        if (vs.view.hovered())
+            target = id;
+    }
+    if (target.empty())
+        target = s_->ws.focused_session();
+    if (const auto it = s_->views.find(target); it != s_->views.end())
+        it->second.view.drop_paths(std::move(paths));
+}
+
 bool App::exit_requested() const {
     return s_->exit_now;
 }
@@ -3176,7 +3188,7 @@ void run_command(App::State& s, const std::string& cmd) {
                name == "terminal.select_all" || name == "terminal.scroll") {
         // Run by the focused terminal on its next frame (palette, keys.json in global).
         if (!focused.empty())
-            s.views[focused].view.request(name == "terminal.paste_image" ? std::string("terminal.paste") : cmd);
+            s.views[focused].view.request(cmd);
     } else if (name == "worktree.new") {
         s.show_worktree = true;
         s.wt_error.clear();

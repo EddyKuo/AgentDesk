@@ -12,6 +12,7 @@
 #include "agentdesk/ui/fonts.hpp"
 #include "agentdesk/ui/input_mapping.hpp"
 #include "agentdesk/ui/keymap.hpp"
+#include "agentdesk/ui/links.hpp"
 #include "agentdesk/ui/terminal_source.hpp"
 
 namespace agentdesk::ui {
@@ -26,10 +27,6 @@ struct TerminalTheme {
     ImU32 scrollbar = IM_COL32(120, 120, 135, 120);
 };
 
-// East Asian wide or emoji presentation code point (two cells). Used where text is laid out
-// without engine widths (history lines); the live screen uses the engine's cell widths.
-bool is_wide_codepoint(char32_t cp);
-
 // Most history lines a view fetches for scrolling and search (paged, 200 per request).
 inline constexpr int kMaxScrollback = 5000;
 
@@ -43,10 +40,12 @@ public:
 
     // Earliest time a redraw is needed without new input (pending debounced resize).
     [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> next_deadline() const;
-    [[nodiscard]] bool has_selection() const {
-        return (sel_anchor_.has_value() && sel_end_.has_value()) ||
-               (line_sel_a_.has_value() && line_sel_b_.has_value());
-    }
+    [[nodiscard]] bool has_selection() const { return sel_a_.has_value() && sel_b_.has_value(); }
+    // Files dropped on this terminal: their paths are typed in, quoted, as a paste on the next
+    // draw (herdr src/terminal.rs:717-723).
+    void drop_paths(std::vector<std::string> paths) { dropped_.push_back(std::move(paths)); }
+    // The pointer was over the terminal on the last draw.
+    [[nodiscard]] bool hovered() const noexcept { return hovered_; }
     [[nodiscard]] int scroll_offset() const noexcept { return scroll_offset_; }
     // App commands typed into this view (global key chords, context menu), oldest first.
     std::vector<std::string> take_commands() { return std::exchange(commands_, {}); }
@@ -78,6 +77,10 @@ private:
     void run_command(const std::string& cmd, TerminalSource& source, const terminal::ScreenSnapshot& snap);
     void copy_selection(const terminal::ScreenSnapshot& snap);
     void request_paste(TerminalSource& source, std::string text);
+    // herdr src/terminal.rs:788-815. full (terminal.paste): copied files as quoted paths, text,
+    // else an image alone as Ctrl+V. !full (terminal.paste_image, Ctrl+V): text, else Ctrl+V.
+    void paste_clipboard(TerminalSource& source, bool full);
+    void paste_paths(TerminalSource& source, const std::vector<std::string>& paths);
     void draw_paste_popup(TerminalSource& source);
     void draw_context_menu(TerminalSource& source, const terminal::ScreenSnapshot& snap);
     void draw_search_bar(ImVec2 area_min, ImVec2 area_max);
@@ -88,9 +91,29 @@ private:
     std::uint8_t mouse_buttons_ = 0;  // bit per button 1..3 pressed inside and not yet released
     std::optional<CellPos> last_mouse_cell_;
 
-    std::optional<CellPos> sel_anchor_;
-    std::optional<CellPos> sel_end_;
+    // Selection ends as (line key, column): key is a history line_id or kScreenKey + screen row,
+    // so a selection made while scrolled back covers cells of history lines too.
+    struct SelPoint {
+        std::uint64_t key = 0;
+        int col = 0;
+        friend bool operator==(const SelPoint&, const SelPoint&) = default;
+    };
+    std::optional<SelPoint> sel_a_;  // anchor
+    std::optional<SelPoint> sel_b_;  // end
     bool selecting_ = false;
+    std::chrono::steady_clock::time_point drag_scrolled_at_{};
+    bool hovered_ = false;
+    std::vector<std::vector<std::string>> dropped_;
+    // Ctrl+hover link: where the pointer was when it was looked up, and what it found.
+    struct HoverLink {
+        int line = -1;  // combined line index (history then screen)
+        int col = -1;
+        std::uint64_t seq = 0;
+        int available = -1;
+        std::optional<LinkTarget> target;
+        std::vector<std::pair<int, std::pair<int, int>>> spans;  // line, [col0, col1)
+    };
+    HoverLink hover_link_;
     std::optional<GridSize> pending_size_;
     std::chrono::steady_clock::time_point pending_since_{};
     std::optional<GridSize> requested_size_;
@@ -100,14 +123,10 @@ private:
     std::string notice_;
     std::vector<std::string> commands_;
     std::vector<std::string> requested_;
-    // Scrollback: lines of history above the live screen (0 = live). While scrolled, selection
-    // works on whole lines keyed by history line_id (or a screen-row key).
+    // Scrollback: lines of history above the live screen (0 = live).
     int scroll_offset_ = 0;
     bool dragging_scrollbar_ = false;
-    std::optional<std::uint64_t> line_sel_a_;
-    std::optional<std::uint64_t> line_sel_b_;
-    std::vector<std::pair<std::uint64_t, std::string>> viewport_lines_;  // key, text (scrolled mode)
-    std::string selected_text() const;
+    std::shared_ptr<const std::vector<HistoryLineText>> hist_;  // this frame's history
     // Search over history + screen (case-insensitive). Lines are indexed history first.
     struct Match {
         int line = 0;

@@ -168,8 +168,8 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
     {"ctrl-shift-v", "terminal.paste"},
     {"shift-insert", "terminal.paste"},
     {"ctrl-shift-f", "terminal.search"},
-    // herdr terminal.paste_image: on Windows it pastes the clipboard text.
-    {"ctrl-v", "terminal.paste"},
+    // herdr terminal.paste_image: on Windows the clipboard text, else Ctrl+V for the program.
+    {"ctrl-v", "terminal.paste_image"},
     {"ctrl-backspace", "send:\x17"},
     {"ctrl-left",
      "send:\x1b"

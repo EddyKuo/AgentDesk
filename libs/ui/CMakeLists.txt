@@ -10,9 +10,11 @@ agentdesk_library(agentdesk_ui
     src/git_info.cpp
     src/mods.cpp
     src/remote_screen.cpp
-    src/host_client.cpp)
+    src/host_client.cpp
+    src/links.cpp
+    src/clipboard.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # host/input.hpp is part of the public interface (TerminalSource::send).
-target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi)
+target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32)
 target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agentdesk::host agentdesk::ipc agentdesk::protocol)

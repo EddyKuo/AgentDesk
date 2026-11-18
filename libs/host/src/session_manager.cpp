@@ -1109,7 +1109,7 @@ Response SessionManager::do_history(const Request& req) {
     const auto info = m->session->info();
     Json out = Json::array();
     for (const auto& line : lines)
-        out.push_back({{"line_id", line.line_id}, {"text", line_text(line)}});
+        out.push_back({{"line_id", line.line_id}, {"text", line_text(line)}, {"wrapped", line.wrapped}});
     return protocol::ok(req.id, {{"lines", out},
                                  {"first_available_line_id", info.first_history_line_id},
                                  {"truncated", info.history_truncated}});
@@ -1213,7 +1213,15 @@ void SessionManager::fanout(const std::string& id, std::shared_ptr<const termina
             for (int r = 0; r < snap->rows; ++r) {
                 const auto a = sub.last->cells.begin() + static_cast<std::ptrdiff_t>(r) * snap->cols;
                 const auto b = snap->cells.begin() + static_cast<std::ptrdiff_t>(r) * snap->cols;
-                if (!std::equal(a, a + snap->cols, b))
+                auto row_links = [r](const terminal::ScreenSnapshot& s) {
+                    std::vector<terminal::Hyperlink> out;
+                    for (const auto& l : s.links)
+                        if (l.row == r)
+                            out.push_back(l);
+                    return out;
+                };
+                if (!std::equal(a, a + snap->cols, b) || snap->row_wrapped(r) != sub.last->row_wrapped(r) ||
+                    ((!snap->links.empty() || !sub.last->links.empty()) && row_links(*snap) != row_links(*sub.last)))
                     changed.push_back(r);
             }
             Json rows = Json::array();

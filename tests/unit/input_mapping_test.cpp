@@ -1,8 +1,12 @@
 #include "agentdesk/ui/input_mapping.hpp"
 
+#include <filesystem>
+#include <fstream>
+
 #include <gtest/gtest.h>
 
 #include "agentdesk/terminal/vt_engine.hpp"
+#include "agentdesk/ui/links.hpp"
 
 using namespace agentdesk::ui;
 using agentdesk::terminal::Key;
@@ -66,4 +70,74 @@ TEST(InputMapping, SelectionTextHandlesWideAndCombining) {
     EXPECT_EQ(selection_text(snap, {0, 3}, {0, 2}), "中");  // reversed order, wide char kept whole
     // columns: a=0 b=1 中=2..3 é=4 x=5
     EXPECT_EQ(selection_text(snap, {0, 5}, {1, 2}), "x\r\nred");
+}
+
+// herdr src/vt.rs:1158-1163 (unwrap, trim): soft-wrapped rows join, trailing blank lines go.
+TEST(InputMapping, SelectionTextJoinsSoftWrapsAndTrims) {
+    VtEngineOptions o;
+    o.rows = 5;
+    o.cols = 6;
+    VtEngine e(o);
+    e.feed("hello world\r\nab  \r\n");
+    const auto snap = e.snapshot();
+    EXPECT_EQ(selection_text(snap, {0, 0}, {4, 5}), "hello world\r\nab");
+    // History lines laid out from text select by cells too.
+    std::vector<LineCells> lines = {cells_from_text("x中y", true), cells_from_text("z", false)};
+    EXPECT_EQ(lines[0].cells.size(), 4u);
+    EXPECT_EQ(selection_text(lines, {0, 1}, {1, 0}), "中yz");
+}
+
+TEST(InputMapping, SelectionDragScrollsOneToFiveLines) {
+    EXPECT_EQ(selection_scroll_lines(10.0f, 20.0f, 10), 0);
+    EXPECT_EQ(selection_scroll_lines(-1.0f, 20.0f, 10), -1);
+    EXPECT_EQ(selection_scroll_lines(-45.0f, 20.0f, 10), -3);
+    EXPECT_EQ(selection_scroll_lines(-500.0f, 20.0f, 10), -5);
+    EXPECT_EQ(selection_scroll_lines(200.0f, 20.0f, 10), 1);
+    EXPECT_EQ(selection_scroll_lines(260.0f, 20.0f, 10), 4);
+}
+
+// herdr src/terminal/drag_paths.rs quote_paths (Windows): plain paths as they are, the rest in
+// single quotes with ' doubled, a trailing space, never Enter.
+TEST(InputMapping, QuotePathsForPaste) {
+    EXPECT_EQ(*quote_paths({"C:/work/a.txt"}), "C:/work/a.txt ");
+    EXPECT_EQ(*quote_paths({"C:\\Users\\me\\O'Brien notes.txt", "D:/x"}),
+              "'C:\\Users\\me\\O''Brien notes.txt' D:/x ");
+    EXPECT_EQ(*quote_paths({"C:/中文/a.png"}), "'C:/中文/a.png' ");
+    EXPECT_FALSE(quote_paths({}).has_value());
+    EXPECT_FALSE(quote_paths({"a\nb"}).has_value());
+}
+
+// herdr src/links.rs (Ghostty's pattern): URLs without trailing punctuation, rooted and bare
+// paths without a trailing colon.
+TEST(Links, FindsUrlsAndPaths) {
+    auto link = [](const std::string& text, std::size_t at) -> std::string {
+        const auto r = find_link(text, at);
+        return r ? text.substr(r->first, r->second - r->first) : std::string("<none>");
+    };
+    EXPECT_EQ(link("see https://example.com/a?b=1, then", 8), "https://example.com/a?b=1");
+    EXPECT_EQ(link("see https://example.com/a?b=1, then", 2), "<none>");
+    EXPECT_EQ(link("docs (https://en.wikipedia.org/wiki/Foo_(bar)).", 10), "https://en.wikipedia.org/wiki/Foo_(bar)");
+    EXPECT_EQ(link("edit ./src/main.cpp:42: done", 8), "./src/main.cpp:42");
+    EXPECT_EQ(link("edit src/main.cpp here", 6), "src/main.cpp");
+    EXPECT_EQ(link("open ~/notes.md", 7), "~/notes.md");
+    EXPECT_EQ(link("at C:\\work\\x.txt.", 5), "C:\\work\\x.txt.");
+    EXPECT_EQ(link("plain words only", 3), "<none>");
+    EXPECT_EQ(link("a/b without dot", 1), "<none>");
+}
+
+TEST(Links, ResolvesUrlsAndExistingFilesOnly) {
+    const auto dir = std::filesystem::temp_directory_path() / "agentdesk_links_test";
+    std::filesystem::create_directories(dir / "src");
+    { std::ofstream(dir / "src" / "main.cpp") << "x"; }
+    const std::string cwd = dir.string();
+    EXPECT_EQ(resolve_link("https://example.com", cwd), (LinkTarget{false, "https://example.com"}));
+    EXPECT_FALSE(resolve_link("ms-msdt:/id", cwd).has_value());  // only Ghostty's link schemes
+    const auto f = resolve_link("src/main.cpp:42:7", cwd);
+    ASSERT_TRUE(f.has_value());
+    EXPECT_TRUE(f->file);
+    EXPECT_EQ(std::filesystem::path(f->target), dir / "src" / "main.cpp");
+    EXPECT_TRUE(resolve_link("./src/main.cpp.", cwd).has_value());  // the sentence's period
+    EXPECT_FALSE(resolve_link("src/missing.cpp", cwd).has_value());
+    EXPECT_FALSE(resolve_link("src/main.cpp", "").has_value());  // relative needs the folder
+    std::filesystem::remove_all(dir);
 }

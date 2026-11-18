@@ -35,6 +35,9 @@ public:
     void frame();               // between ImGui::NewFrame() and ImGui::Render()
     void on_close_requested();  // window X
     void on_focus_changed(bool focused);
+    // Files dropped on the window: their paths go to the terminal under the pointer (else the
+    // focused one) as a paste.
+    void on_files_dropped(std::vector<std::string> paths);
     [[nodiscard]] bool exit_requested() const;
     // Earliest redraw needed without input (debounced resize, toasts, persistence).
     [[nodiscard]] long long next_wakeup_ms() const;
