@@ -123,6 +123,7 @@ Keymap Keymap::defaults() {
         {"ctrl-shift-n", "space.new"},
         {"ctrl-shift-r", "agent.new"},
         {"ctrl-shift-k", "app.picker"},
+        {"ctrl-alt-shift-escape", "app.reset"},
         {"alt-[", "tab.prev"},
         {"alt-]", "tab.next"},
         {"ctrl-shift-w", "tab.close"},

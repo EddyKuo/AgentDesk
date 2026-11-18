@@ -784,6 +784,8 @@ constexpr CommandInfo kCommands[] = {
     {"machine.add", "Add machine"},
     {"panel:files", "Show / hide the Files panel"},
     {"app.welcome", "Welcome"},
+    {"app.reset", "Reset to the default screen"},
+    {"terminal.kill", "End the focused terminal and its sub-agents"},
     {"panel:changes", "Show / hide the Changes panel"},
     {"pane.rename", "Rename pane"},
     {"tab.rename", "Rename tab"},
@@ -2472,6 +2474,26 @@ void run_command(App::State& s, const std::string& cmd) {
                 s.focus_view(s.ws.focused_session());
             }
         }
+    } else if (name == "terminal.kill") {
+        // herdr: end a terminal and its sub-agents.
+        const std::string target = arg.empty() ? focused : arg;
+        for (const auto& [id, v] : s.views_by_id)
+            if (id == target || v.parent == target)
+                if (auto it = s.by_id.find(id); it != s.by_id.end())
+                    it->second->stop(true);
+    } else if (name == "app.reset") {
+        // herdr escape hatch: keys.json set aside, default layout, sidebar back.
+        const auto keys = data_dir() / L"keys.json";
+        std::error_code ec;
+        if (std::filesystem::exists(keys, ec))
+            std::filesystem::rename(keys, std::filesystem::path(keys).concat(L".aside"), ec);
+        s.keymap = ui::Keymap::defaults();
+        s.keymap_errors.clear();
+        s.settings.layout = "workspace";
+        s.settings.sidebar = true;
+        s.settings.sidebar_width = 268;
+        save_settings(s.settings);
+        s.toast("Back to the default screen", "keys.json was set aside as keys.json.aside.", "", g_pal->info);
     } else if (name == "pane.park") {
         // herdr terminal.park: a sub-agent's pane goes away; it keeps running under its parent
         // (agents list, peek).
@@ -3824,6 +3846,9 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
                 run_command(s, "agent.peek:" + id);
             if (s.ws.find(id).space < 0 && menu_row(s, ui::icon::kSplitRight, "Open as pane"))
                 run_command(s, "agent.keep:" + id);
+            menu_separator();
+            if (menu_row(s, ui::icon::kClose, "End", {}, v.process_state == "Running"))
+                run_command(s, "terminal.kill:" + id);
             ImGui::EndPopup();
         }
         ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + rh));
