@@ -83,21 +83,28 @@ TEST(Workspace, ResizeMovesBorderAndClamps) {
     w.add_space("a");
     w.split("a", "b", Dir::kRight);
     w.focus("a");
+    auto share = [&] {
+        const auto& ws = w.active_tab()->root.weights;
+        return ws[0] / (ws[0] + ws[1]);
+    };
     ASSERT_TRUE(w.resize(Dir::kRight, 100, kArea));
-    EXPECT_NEAR(w.active_tab()->root.ratio, 0.6f, 0.001f);
+    EXPECT_NEAR(share(), 0.6f, 0.002f);
     for (int i = 0; i < 20; ++i)
         w.resize(Dir::kRight, 100, kArea);
-    EXPECT_NEAR(w.active_tab()->root.ratio, 0.9f, 0.001f);
+    EXPECT_NEAR(share(), 0.95f, 0.002f);
     EXPECT_FALSE(w.resize(Dir::kDown, 50, kArea));  // no stacked split
 }
 
-TEST(Workspace, ZoomTogglesAndUnzoomsOnFocusElsewhere) {
+// herdr model.rs 131-133: focusing another pane of a zoomed tab moves the zoom to it.
+TEST(Workspace, ZoomTogglesAndMovesWithFocus) {
     Workspace w;
     w.add_space("a");
     w.split("a", "b", Dir::kRight);
     w.toggle_zoom();
     EXPECT_EQ(w.active_tab()->zoomed, "b");
     w.focus("a");
+    EXPECT_EQ(w.active_tab()->zoomed, "a");
+    w.toggle_zoom();
     EXPECT_TRUE(w.active_tab()->zoomed.empty());
 }
 
@@ -208,7 +215,7 @@ TEST(Keymap, HerdrSectionsObjectsAndValidation) {
     EXPECT_FALSE(k.global(*Keymap::parse("ctrl-shift-t")).has_value());  // to the program
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-j")), "tab.next");
     EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-shift-f")), "terminal");
-    EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-v")), "terminal.paste");
+    EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-v")), "terminal.paste_image");
 
     const auto errs = k.apply({{"windows", {{"f5", "tab.new"}}}, {"global", {{"f6", "no.such"}}}}, known);
     EXPECT_EQ(errs.size(), 2u);
@@ -313,6 +320,163 @@ TEST(Keymap, DefaultFileAppliesCleanly) {
     EXPECT_TRUE(k.apply(file, [](std::string_view) { return true; }).empty());
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-t")), "tab.new");
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-3")), "tab.select:3");
-    EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-v")), "terminal.paste");
+    EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-v")), "terminal.paste_image");
     EXPECT_EQ(Keymap::defaults().global_map(), k.global_map());
+}
+
+// herdr layout.rs / model.rs rules: splitting along the container's axis adds a sibling sharing
+// the target's weight; closing gives the space back to all siblings; focus returns to the pane
+// focused before; new tabs go right after the shown one; closing the shown tab shows the one
+// that slides into its slot; moving a tab keeps the shown one.
+TEST(Workspace, HerdrSplitCloseAndTabRules) {
+    Workspace w;
+    w.add_space("a");
+    w.split("a", "b", Dir::kRight);
+    w.split("b", "c", Dir::kRight);  // same axis: one row [a, b, c]
+    const Node& root = w.active_tab()->root;
+    ASSERT_EQ(root.children.size(), 3u);
+    EXPECT_FLOAT_EQ(root.weights[0], 1.0f);
+    EXPECT_FLOAT_EQ(root.weights[1], 0.5f);
+    EXPECT_FLOAT_EQ(root.weights[2], 0.5f);
+    w.focus("a");
+    w.focus("c");
+    w.remove("c");  // back to a, the pane focused before c
+    EXPECT_EQ(w.focused_session(), "a");
+    ASSERT_EQ(w.active_tab()->root.children.size(), 2u);
+
+    // Round trip keeps the n-ary tree.
+    w.split("a", "d", Dir::kDown);
+    const auto back = Workspace::from_json(w.to_json());
+    EXPECT_EQ(back.spaces[0].tabs[0].root.children.size(), 2u);
+    EXPECT_TRUE(back.spaces[0].tabs[0].root.children[0].vertical);
+
+    Workspace t;
+    t.add_space("x");
+    t.add_tab("y");
+    t.select_tab(0);
+    t.add_tab("z");  // after the shown tab x
+    EXPECT_EQ(t.spaces[0].tabs[1].root.session, "z");
+    EXPECT_EQ(t.spaces[0].active_tab, 1);
+    t.close_tab(0, 1);  // y slides into the slot
+    EXPECT_EQ(t.spaces[0].tabs[t.spaces[0].active_tab].root.session, "y");
+    t.select_tab(0);
+    ASSERT_TRUE(t.move_tab(0, 1, 0));  // move y; x stays shown
+    EXPECT_EQ(t.spaces[0].tabs[t.spaces[0].active_tab].root.session, "x");
+}
+
+// herdr: focusing another pane of a zoomed tab moves the zoom; pane.go works while zoomed.
+TEST(Workspace, ZoomFollowsFocus) {
+    Workspace w;
+    w.add_space("a");
+    w.split("a", "b", Dir::kRight);
+    w.toggle_zoom("b");
+    EXPECT_EQ(w.active_tab()->zoomed, "b");
+    ASSERT_TRUE(w.focus_dir(Dir::kLeft, kArea));
+    EXPECT_EQ(w.focused_session(), "a");
+    EXPECT_EQ(w.active_tab()->zoomed, "a");
+}
+
+// herdr model.rs 271-279: the first terminal's checkout top, else the space's own folder; home is "~".
+TEST(Workspace, SpaceTitleUsesCheckoutTopThenCreationFolder) {
+    Workspace w;
+    w.add_space("a");
+    w.add_tab("b", 0);
+    // Only the first terminal names it: a known folder of a later one does not.
+    EXPECT_EQ(w.space_title(0, {{"b", "C:\\work\\other"}}), "~");
+    w.remember_folders({{"a", "C:\\work\\made-here"}, {"b", "C:\\work\\other"}});
+    EXPECT_EQ(w.spaces[0].folder, "C:\\work\\made-here");
+    w.remember_folders({{"a", "C:\\elsewhere"}});  // kept once known
+    EXPECT_EQ(w.spaces[0].folder, "C:\\work\\made-here");
+    EXPECT_EQ(w.space_title(0, {}), "made-here");
+    EXPECT_EQ(w.space_title(0, {{"a", "C:\\work\\repo-wt\\"}}), "repo-wt");
+    const auto back = Workspace::from_json(w.to_json());
+    EXPECT_EQ(back.spaces[0].folder, "C:\\work\\made-here");
+}
+
+TEST(Workspace, HomeSpaceGetsNoColourUntilNamed) {
+    Workspace w;
+    w.add_space("a");
+    w.add_space("b");
+    const std::map<std::string, std::string> tops{{"b", "C:\\work\\api"}};
+    w.assign_colors(&tops);
+    EXPECT_TRUE(w.spaces[0].color.empty());  // "~"
+    EXPECT_EQ(w.spaces[1].color, "ansi6");
+    w.spaces[0].name = "home";
+    w.assign_colors(&tops);
+    EXPECT_EQ(w.spaces[0].color, "ansi3");
+}
+
+// herdr spaces.js 298-334: worktrees go right after their repo's main checkout, and the model
+// order follows so numbers and keys match what is drawn.
+TEST(Workspace, WorktreesNestUnderMainCheckoutAndModelFollows) {
+    const std::vector<SpaceRepo> info = {
+            {true, true, "r1"},   // 0: worktree of r1, before its main checkout
+            {true, false, "r2"},  // 1
+            {false, false, ""},   // 2: not a repo
+            {true, false, "r1"},  // 3: main checkout of r1
+            {true, true, "r9"},   // 4: worktree whose repo has no main checkout here
+            {true, true, "r1"},   // 5
+            {true, false, "r1"},  // 6: a second main checkout of r1 gets no worktrees
+    };
+    std::vector<bool> tree;
+    const auto order = nest_worktrees(info, &tree);
+    EXPECT_EQ(order, (std::vector<int>{1, 2, 3, 0, 5, 4, 6}));
+    EXPECT_EQ(tree, (std::vector<bool>{false, false, false, true, true, false, false}));
+
+    Workspace w;
+    for (const char* id : {"a", "b", "c"})
+        w.add_space(id);
+    w.select_space(0);
+    EXPECT_TRUE(w.reorder_spaces({2, 0, 1}));
+    EXPECT_EQ(w.spaces[0].tabs[0].focused, "c");
+    EXPECT_EQ(w.active_space, 1);  // "a" stays active
+    EXPECT_FALSE(w.reorder_spaces({0, 1, 2}));
+    EXPECT_FALSE(w.reorder_spaces({0, 0, 1}));
+}
+
+TEST(Agents, CleanTitleAndTabLabel) {
+    EXPECT_EQ(clean_agent_title("\xE2\x9C\xA6  Working"), "Working");     // "✦  Working"
+    EXPECT_EQ(clean_agent_title("\xE2\xA0\x8B - Thinking"), "Thinking");  // "⠋ - Thinking"
+    EXPECT_EQ(clean_agent_title("[ ! ] Fix login"), "Fix login");
+    EXPECT_EQ(clean_agent_title("[web] login"), "[web] login");
+    EXPECT_EQ(clean_agent_title("* \xE6\x96\xB0\xE5\x8A\x9F\xE8\x83\xBD "), "\xE6\x96\xB0\xE5\x8A\x9F\xE8\x83\xBD");
+    TabLabel in{"1", false, "\xE2\x9C\xB3 Refactor parser", "Claude Code", "claude", "s1"};
+    EXPECT_EQ(agent_tab_label(in), "Refactor parser");
+    in.tab_name = "api work";
+    in.tab_named = true;
+    EXPECT_EQ(agent_tab_label(in), "api work");  // a named tab wins
+    in.tab_name = "Claude Code";
+    EXPECT_EQ(agent_tab_label(in), "Refactor parser");  // unless it is the program's name
+    in = {"2", false, "~/src/api", "Claude Code", "claude", "s1"};
+    EXPECT_EQ(agent_tab_label(in), "2");  // a path says nothing
+    in.title = "claude";
+    EXPECT_EQ(agent_tab_label(in), "2");
+    in.title = "me@box";
+    EXPECT_EQ(agent_tab_label(in), "2");
+}
+
+TEST(Agents, DetailsTreeAndPriority) {
+    // Numbers say nothing unless two rows of a space would read the same.
+    const auto d = agent_details({{"api", "1"}, {"api", "Fix"}, {"web", "1"}, {"web", "2"}});
+    EXPECT_EQ(d, (std::vector<std::string>{"", "Fix", "1", "2"}));
+
+    const std::map<std::string, std::vector<std::string>> kids{
+            {"p", {"a", "b"}}, {"a", {"a1", "a2"}}, {"a2", {"p"}}};
+    const auto t = agent_tree(kids, "p");
+    ASSERT_EQ(t.size(), 4u);  // the loop back to p is cut
+    EXPECT_EQ(t[0].id, "a");
+    EXPECT_EQ(t[0].lines, (std::vector<TreeLine>{TreeLine::kTee}));
+    EXPECT_EQ(t[1].id, "a1");
+    EXPECT_EQ(t[1].lines, (std::vector<TreeLine>{TreeLine::kBar, TreeLine::kTee}));
+    EXPECT_EQ(t[2].id, "a2");
+    EXPECT_EQ(t[2].lines, (std::vector<TreeLine>{TreeLine::kBar, TreeLine::kElbow}));
+    EXPECT_EQ(t[3].id, "b");
+    EXPECT_EQ(t[3].lines, (std::vector<TreeLine>{TreeLine::kElbow}));
+
+    EXPECT_EQ(kid_status(Attention::kDone), Attention::kIdle);
+    EXPECT_EQ(kid_status(Attention::kBlocked), Attention::kBlocked);
+    EXPECT_TRUE(priority_before({4, 0, 0}, {3, 100, 9}));
+    EXPECT_TRUE(priority_before({2, 100, 0}, {2, 50, 9}));
+    EXPECT_TRUE(priority_before({2, 50, 9}, {2, 50, 3}));
+    EXPECT_FALSE(priority_before({2, 50, 3}, {2, 50, 9}));
 }

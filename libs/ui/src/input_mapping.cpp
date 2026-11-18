@@ -1,7 +1,9 @@
 #include "agentdesk/ui/input_mapping.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <string_view>
 
 namespace agentdesk::ui {
 
@@ -132,22 +134,60 @@ CellPos cell_at(float x, float y, float origin_x, float origin_y, float cell_w, 
     return p;
 }
 
-std::string selection_text(const terminal::ScreenSnapshot& snap, CellPos a, CellPos b) {
-    if (snap.rows <= 0 || snap.cols <= 0)
+bool is_wide_codepoint(char32_t cp) {
+    return (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0x303E) ||
+           (cp >= 0x3041 && cp <= 0x33FF) || (cp >= 0x3400 && cp <= 0x4DBF) ||
+           (cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0xA000 && cp <= 0xA4CF) ||
+           (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0xF900 && cp <= 0xFAFF) ||
+           (cp >= 0xFE30 && cp <= 0xFE4F) || (cp >= 0xFF00 && cp <= 0xFF60) ||
+           (cp >= 0xFFE0 && cp <= 0xFFE6) || (cp >= 0x1F300 && cp <= 0x1F64F) ||
+           (cp >= 0x1F900 && cp <= 0x1F9FF) || (cp >= 0x20000 && cp <= 0x3FFFD);
+}
+
+LineCells cells_from_text(const std::string& s, bool wrapped) {
+    LineCells out;
+    out.wrapped = wrapped;
+    for (std::size_t i = 0; i < s.size();) {
+        const auto b0 = static_cast<unsigned char>(s[i]);
+        const std::size_t len = b0 < 0x80 ? 1 : (b0 & 0xE0) == 0xC0 ? 2 : (b0 & 0xF0) == 0xE0 ? 3 : 4;
+        char32_t cp = len == 1 ? b0 : len == 2 ? (b0 & 0x1Fu) : len == 3 ? (b0 & 0x0Fu) : (b0 & 0x07u);
+        for (std::size_t m = 1; m < len && i + m < s.size(); ++m)
+            cp = (cp << 6) | (static_cast<unsigned char>(s[i + m]) & 0x3Fu);
+        i += len;
+        terminal::Cell c;
+        c.chars[0] = cp;
+        const bool wide = is_wide_codepoint(cp);
+        c.width = wide ? 2 : 1;
+        out.cells.push_back(c);
+        if (wide) {
+            terminal::Cell cont;
+            cont.width = 0;
+            out.cells.push_back(cont);
+        }
+    }
+    return out;
+}
+
+std::string selection_text(const std::vector<LineCells>& lines, CellPos a, CellPos b) {
+    if (lines.empty())
         return {};
     if (b.row < a.row || (b.row == a.row && b.col < a.col))
         std::swap(a, b);
+    const int last = static_cast<int>(lines.size()) - 1;
     std::string out;
-    for (int row = std::max(a.row, 0); row <= std::min(b.row, snap.rows - 1); ++row) {
+    std::size_t content_end = 0;  // end of the last non-blank text: trailing blank lines are trimmed
+    for (int row = std::max(a.row, 0); row <= std::min(b.row, last); ++row) {
+        const auto& line = lines[static_cast<std::size_t>(row)];
+        const int cols = static_cast<int>(line.cells.size());
         const int c0 = row == a.row ? a.col : 0;
-        const int c1 = row == b.row ? b.col : snap.cols - 1;
-        std::string line;
-        for (int col = std::max(c0, 0); col <= std::min(c1, snap.cols - 1); ++col) {
-            const auto& cell = snap.at(row, col);
+        const int c1 = row == b.row ? b.col : cols - 1;
+        std::string text;
+        for (int col = std::max(c0, 0); col <= std::min(c1, cols - 1); ++col) {
+            const auto& cell = line.cells[static_cast<std::size_t>(col)];
             if (cell.width == 0)
                 continue;
             if (cell.chars[0] == 0) {
-                line.push_back(' ');
+                text.push_back(' ');
                 continue;
             }
             for (const char32_t cp : cell.chars) {
@@ -155,14 +195,81 @@ std::string selection_text(const terminal::ScreenSnapshot& snap, CellPos a, Cell
                     break;
                 if (cp < 0x20 || cp == 0x7F)
                     continue;
-                terminal::append_utf8(line, cp);
+                terminal::append_utf8(text, cp);
             }
         }
-        while (!line.empty() && line.back() == ' ')
-            line.pop_back();
-        out += line;
-        if (row != b.row)
+        // A soft-wrapped line runs on into the next: no break, its blanks are inside the line.
+        const bool joins = line.wrapped && row != b.row;
+        if (!joins) {
+            while (!text.empty() && text.back() == ' ')
+                text.pop_back();
+        }
+        out += text;
+        if (text.find_first_not_of(' ') != std::string::npos)
+            content_end = out.size();
+        if (row != b.row && !joins)
             out += "\r\n";
+    }
+    out.resize(content_end);
+    return out;
+}
+
+std::string selection_text(const terminal::ScreenSnapshot& snap, CellPos a, CellPos b) {
+    if (snap.rows <= 0 || snap.cols <= 0)
+        return {};
+    std::vector<LineCells> lines(static_cast<std::size_t>(snap.rows));
+    for (int r = 0; r < snap.rows; ++r) {
+        auto& l = lines[static_cast<std::size_t>(r)];
+        const auto first = snap.cells.begin() + static_cast<std::ptrdiff_t>(r) * snap.cols;
+        l.cells.assign(first, first + snap.cols);
+        l.wrapped = snap.row_wrapped(r);
+    }
+    return selection_text(lines, a, b);
+}
+
+int selection_scroll_lines(float y, float cell_h, int rows) {
+    if (cell_h <= 0.0f)
+        return 0;
+    const float height = cell_h * static_cast<float>(rows);
+    float outside = 0.0f;
+    if (y < 0.0f)
+        outside = y;
+    else if (y >= height)
+        outside = y - height + 1.0f;
+    else
+        return 0;
+    const int n = static_cast<int>(std::clamp(std::ceil(std::abs(outside / cell_h)), 1.0f, 5.0f));
+    return outside < 0.0f ? -n : n;
+}
+
+std::optional<std::string> quote_paths(const std::vector<std::string>& paths) {
+    if (paths.empty())
+        return std::nullopt;
+    static constexpr std::string_view kPlain = "/._-+=:@%~";
+    std::string out;
+    for (const auto& p : paths) {
+        // Even inside quotes, a newline becomes Enter in an unbracketed paste.
+        if (p.empty() || std::any_of(p.begin(), p.end(), [](char c) {
+                const auto u = static_cast<unsigned char>(c);
+                return u < 0x20 || u == 0x7F;
+            }))
+            return std::nullopt;
+        const bool plain = std::all_of(p.begin(), p.end(), [](char c) {
+            const auto u = static_cast<unsigned char>(c);
+            return u < 0x80 && (std::isalnum(u) != 0 || kPlain.find(c) != std::string_view::npos);
+        });
+        if (plain) {
+            out += p;
+        } else {
+            out += '\'';
+            for (const char c : p) {
+                out += c;
+                if (c == '\'')
+                    out += '\'';
+            }
+            out += '\'';
+        }
+        out += ' ';
     }
     return out;
 }

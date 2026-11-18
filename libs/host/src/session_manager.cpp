@@ -148,6 +148,11 @@ bool has_control_chars(const std::string& s) {
     });
 }
 
+// herdr defaults/mods/worktree/main.js:205-207, 243: worktree add/remove may take minutes.
+constexpr auto kWorktreeTimeout = std::chrono::seconds(600);
+// A reply must fit one IPC frame (kMaxFrameBytes, 4 MiB) after JSON escaping.
+constexpr std::size_t kMaxGitRunBytes = 3u * 1024u * 1024u;
+
 std::string line_text(const terminal::HistoryLine& line) {
     std::string text;
     for (const auto& cell : line.cells) {
@@ -488,7 +493,7 @@ Response SessionManager::do_git_run(const Request& req) {
         args.push_back(win::to_wide(x.get<std::string>()));
     }
     // The Changes panel, branch tails and the worktree dialogs (list, remove, submodule status).
-    static const std::set<std::wstring> kCommands = {L"status", L"diff", L"rev-parse", L"rev-list", L"add",
+    static const std::set<std::wstring> kCommands = {L"status", L"diff", L"rev-parse", L"rev-list", L"add", L"for-each-ref",
                                                       L"commit", L"log", L"worktree", L"submodule"};
     if (!kCommands.contains(args.front()))
         return bad(req, "git command not allowed");
@@ -507,15 +512,21 @@ Response SessionManager::do_git_run(const Request& req) {
     std::error_code ec;
     if (!std::filesystem::is_directory(*cwd, ec))
         return protocol::fail(req.id, ErrorCode::kNotFound, "not a folder");
-    const auto r = run_tool(args, *cwd, std::chrono::seconds(60));
+    // worktree remove may take minutes (herdr worktree/main.js:243).
+    const bool long_running = args.size() > 8 && args[8] == L"worktree";
+    const auto r = run_tool(args, *cwd, long_running ? kWorktreeTimeout : std::chrono::seconds(60));
     if (!r.started)
         return protocol::fail(req.id, ErrorCode::kSpawnFailed, "git was not found on PATH");
     if (r.timed_out)
         return protocol::fail(req.id, ErrorCode::kInternal, "git timed out");
+    // stdout and stderr apart: callers parse only stdout and show stderr when it failed.
     std::string out = r.output;
-    if (out.size() > 8 * 1024 * 1024)
-        out.resize(8 * 1024 * 1024);
-    return protocol::ok(req.id, {{"exit_code", r.exit_code}, {"output", valid_utf8(out)}});
+    std::string err = r.error;
+    if (out.size() > kMaxGitRunBytes)
+        out.resize(kMaxGitRunBytes);
+    if (err.size() > 64 * 1024)
+        err.resize(64 * 1024);
+    return protocol::ok(req.id, {{"exit_code", r.exit_code}, {"output", valid_utf8(out)}, {"error", valid_utf8(err)}});
 }
 
 Response SessionManager::do_worktree_add(const Request& req) {
@@ -537,21 +548,28 @@ Response SessionManager::do_worktree_add(const Request& req) {
     }
     const std::wstring wbranch = win::to_wide(branch);
     const std::wstring wpath = win::to_wide(path);
-    // New branch first; if it already exists, check the existing branch out.
-    auto r = run_tool({L"git", L"-C", repo_path.native(), L"worktree", L"add", L"-b", wbranch, wpath},
-                      repo_path, std::chrono::seconds(60));
-    if (r.started && !r.timed_out && r.exit_code != 0 &&
-        r.output.find("already exists") != std::string::npos &&
-        r.output.find("branch") != std::string::npos) {
-        r = run_tool({L"git", L"-C", repo_path.native(), L"worktree", L"add", wpath, wbranch}, repo_path,
-                     std::chrono::seconds(60));
-    }
+    // herdr defaults/mods/worktree/main.js create(): a branch that exists is checked out, a new
+    // one starts from HEAD. Existence is asked of git, never read from its (translated) messages.
+    const auto known = run_tool({L"git", L"-C", repo_path.native(), L"show-ref", L"--verify", L"--quiet",
+                                 L"refs/heads/" + wbranch},
+                                repo_path, std::chrono::seconds(60));
+    if (!known.started)
+        return protocol::fail(req.id, ErrorCode::kSpawnFailed, "git was not found on PATH");
+    const bool exists = !known.timed_out && known.exit_code == 0;
+    std::vector<std::wstring> add = {L"git", L"-C", repo_path.native(), L"worktree", L"add"};
+    if (exists)
+        add.insert(add.end(), {wpath, wbranch});
+    else
+        add.insert(add.end(), {L"-b", wbranch, wpath, L"HEAD"});
+    const auto r = run_tool(add, repo_path, kWorktreeTimeout);
     if (!r.started)
         return protocol::fail(req.id, ErrorCode::kSpawnFailed, "git was not found on PATH");
     if (r.timed_out)
         return protocol::fail(req.id, ErrorCode::kInternal, "git worktree add timed out");
-    if (r.exit_code != 0)
-        return protocol::fail(req.id, ErrorCode::kBadRequest, "git worktree add failed: " + r.output);
+    if (r.exit_code != 0) {
+        const std::string why = r.message();
+        return protocol::fail(req.id, ErrorCode::kBadRequest, why.empty() ? "git worktree add failed." : why);
+    }
     return protocol::ok(req.id, {{"path", path}, {"branch", branch}, {"output", r.output}});
 }
 
@@ -1109,7 +1127,7 @@ Response SessionManager::do_history(const Request& req) {
     const auto info = m->session->info();
     Json out = Json::array();
     for (const auto& line : lines)
-        out.push_back({{"line_id", line.line_id}, {"text", line_text(line)}});
+        out.push_back({{"line_id", line.line_id}, {"text", line_text(line)}, {"wrapped", line.wrapped}});
     return protocol::ok(req.id, {{"lines", out},
                                  {"first_available_line_id", info.first_history_line_id},
                                  {"truncated", info.history_truncated}});
@@ -1213,7 +1231,15 @@ void SessionManager::fanout(const std::string& id, std::shared_ptr<const termina
             for (int r = 0; r < snap->rows; ++r) {
                 const auto a = sub.last->cells.begin() + static_cast<std::ptrdiff_t>(r) * snap->cols;
                 const auto b = snap->cells.begin() + static_cast<std::ptrdiff_t>(r) * snap->cols;
-                if (!std::equal(a, a + snap->cols, b))
+                auto row_links = [r](const terminal::ScreenSnapshot& s) {
+                    std::vector<terminal::Hyperlink> out;
+                    for (const auto& l : s.links)
+                        if (l.row == r)
+                            out.push_back(l);
+                    return out;
+                };
+                if (!std::equal(a, a + snap->cols, b) || snap->row_wrapped(r) != sub.last->row_wrapped(r) ||
+                    ((!snap->links.empty() || !sub.last->links.empty()) && row_links(*snap) != row_links(*sub.last)))
                     changed.push_back(r);
             }
             Json rows = Json::array();

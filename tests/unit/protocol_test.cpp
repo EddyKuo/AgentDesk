@@ -103,3 +103,23 @@ TEST(Messages, ScreenRowsRoundTrip) {
     decode_rows_into(encode_rows(snap, 0, snap.rows), copy);
     EXPECT_EQ(copy.cells, snap.cells);
 }
+
+// Soft-wrap flags and OSC 8 links travel with their rows (copy joins wrapped rows in the UI).
+TEST(Messages, ScreenRowsCarryWrapAndLinks) {
+    agentdesk::terminal::VtEngineOptions o;
+    o.rows = 4;
+    o.cols = 10;
+    agentdesk::terminal::VtEngine e(o);
+    e.feed("0123456789abc\r\n\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\ tail");
+    const auto snap = e.snapshot();
+    ASSERT_TRUE(snap.row_wrapped(0));
+    ASSERT_FALSE(snap.row_wrapped(1));
+    ASSERT_EQ(snap.links.size(), 1u);
+    agentdesk::terminal::ScreenSnapshot copy;
+    copy.rows = snap.rows;
+    copy.cols = snap.cols;
+    copy.cells.resize(snap.cells.size());
+    decode_rows_into(encode_rows(snap, 0, snap.rows), copy);
+    EXPECT_EQ(copy.wrapped, snap.wrapped);
+    EXPECT_EQ(copy.links, snap.links);
+}

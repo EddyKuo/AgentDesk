@@ -56,6 +56,7 @@ HANDLE g_wake = nullptr;  // set by IPC threads; the UI loop wakes and redraws
 float g_pending_dpi = 0.0f;
 std::atomic<bool> g_close_requested{false};
 std::atomic<int> g_focus_change{-1};  // -1 none, 0 lost, 1 gained
+std::vector<std::string> g_dropped;    // files dropped on the window (UTF-8), for the app
 
 void create_rtv() {
     ID3D11Texture2D* back = nullptr;
@@ -178,6 +179,23 @@ LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
             if ((wparam & 0xfff0) == SC_KEYMENU)
                 return 0;  // Alt must reach the terminal
             break;
+        case WM_DROPFILES: {
+            // Files dropped from Explorer: the terminal under the pointer types their paths in
+            // (herdr src/terminal.rs:717-723).
+            auto* drop = reinterpret_cast<HDROP>(wparam);  // Win32 contract for this message
+            const UINT n = ::DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+            for (UINT i = 0; i < n; ++i) {
+                std::wstring path(::DragQueryFileW(drop, i, nullptr, 0), L'\0');
+                ::DragQueryFileW(drop, i, path.data(), static_cast<UINT>(path.size() + 1));
+                try {
+                    if (!path.empty())
+                        g_dropped.push_back(agentdesk::platform::win::to_utf8(path));
+                } catch (const std::exception&) {
+                }
+            }
+            ::DragFinish(drop);
+            return 0;
+        }
         case WM_CLOSE:
             g_close_requested = true;  // window X = detach; the app decides (first-run notice)
             return 0;
@@ -307,6 +325,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         ::DwmExtendFrameIntoClientArea(hwnd, &m);
         ::SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
     }
+    ::DragAcceptFiles(hwnd, TRUE);
     ::ShowWindow(hwnd, SW_SHOWDEFAULT);
     ::UpdateWindow(hwnd);
 
@@ -343,6 +362,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             app.on_close_requested();
         if (const int f = g_focus_change.exchange(-1); f >= 0)
             app.on_focus_changed(f == 1);
+        if (!g_dropped.empty())
+            app.on_files_dropped(std::exchange(g_dropped, {}));
         if (exit_now || app.exit_requested())
             break;
 

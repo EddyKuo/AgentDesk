@@ -4,7 +4,8 @@
 //
 //   Workspace -> Space (a place to work, usually one repo/folder)
 //             -> Tab   (a piece of work: terminals split right/down)
-//             -> Node  (binary split tree; leaves are session ids)
+//             -> Node  (split tree like herdr's layout.rs: a row or column holds any number of
+//                       children with weights; leaves are session ids)
 #include <map>
 #include <optional>
 #include <set>
@@ -23,9 +24,9 @@ struct Rect {
 
 struct Node {
     std::string session;         // leaf when non-empty
-    bool vertical = false;       // split: false = side by side (right), true = stacked (down)
-    float ratio = 0.5f;          // share of the first child
-    std::vector<Node> children;  // 0 (leaf) or 2
+    bool vertical = false;       // container: false = a row (side by side), true = a column
+    std::vector<Node> children;  // 0 (leaf) or 2+
+    std::vector<float> weights;  // one per child; shares of the container
 
     [[nodiscard]] bool leaf() const { return children.empty(); }
 };
@@ -37,6 +38,7 @@ struct Tab {
     std::string focused;                            // session id
     std::string zoomed;                             // session id shown alone, or empty
     std::map<std::string, std::string> pane_names;  // session id -> name
+    std::vector<std::string> focus_history;          // panes focused before, oldest first (herdr Tab::focus)
     bool settled = false;  // herdr tab.settle: put away (not in the tab bar), still running
 };
 
@@ -48,6 +50,7 @@ struct Space {
     std::string machine;  // empty: this computer
     std::string color;    // avatar colour name (herdr: ansi6, ansi3, ansi4, ansi5, ansi2, ansi1)
     std::string panel;    // right panel shown for this space: "", "files" or "changes"
+    std::string folder;   // where it was made: names it when its first terminal says nothing (herdr)
 };
 
 struct PaneLoc {
@@ -92,7 +95,14 @@ public:
     // Moves a space within its machine's block (herdr space.move); keeps the active one active.
     bool move_space(int from, int to);
     // Gives spaces without a colour the least-used avatar colour (ties: earlier in the order).
-    void assign_colors();
+    // With `session_top` (see space_title), a space named "~" (the home folder) gets none yet
+    // (herdr spaces.js 526).
+    void assign_colors(const std::map<std::string, std::string>* session_top = nullptr);
+    // Puts the spaces in `order` (old indexes, new order; a permutation); the active one stays
+    // active (herdr spaces.js 316-334: space.move so the model follows the drawn tree).
+    bool reorder_spaces(const std::vector<int>& order);
+    // Spaces without a creation folder take their first terminal's start folder.
+    void remember_folders(const std::map<std::string, std::string>& session_start);
 
     // ---- focus and selection
     void focus(const std::string& session);  // selects its space and tab too
@@ -114,11 +124,14 @@ public:
     bool swap_dir(Dir dir, Rect area);
     // Moves the nearest border of the focused pane in `dir` by `px` (tab layout inside `area`).
     bool resize(Dir dir, float px, Rect area);
-    void toggle_zoom();
+    void toggle_zoom(const std::string& pane = {});  // herdr pane.zoom {pane}: zooms and focuses it
 
     // ---- naming
+    // herdr model.rs 271-279: its name; else its first terminal's checkout top (a worktree's own
+    // folder) or, outside git, that terminal's folder (`session_top`: session id -> either); else
+    // the folder it was made in. The home folder (or nothing) reads "~".
     [[nodiscard]] std::string space_title(int index,
-                                          const std::map<std::string, std::string>& session_cwd) const;
+                                          const std::map<std::string, std::string>& session_top) const;
     [[nodiscard]] static std::string tab_title(const Tab& tab, int index);
 
     // ---- persistence (ui.state document)
@@ -136,11 +149,14 @@ std::map<std::string, Rect> layout_tree(const Node& root, Rect area, float gap);
 
 // One draggable border of a split: the node path to the split and its hit rectangle.
 struct Divider {
-    std::vector<int> path;  // child indices from the root to the split node
+    std::vector<int> path;  // child indices from the root to the container
+    int index = 0;          // the border between children `index` and `index + 1`
     bool vertical = false;  // true: horizontal bar between stacked panes
     Rect bar;
-    Rect parent;  // the split node's area (to turn a drag into a ratio)
+    Rect parent;  // the container's area (to turn a drag into weights)
 };
+// Moves the border `d` so that it sits at `pos` (x for a row, y for a column) inside d.parent.
+void drag_divider(Node& root, const Divider& d, float pos, float gap);
 std::vector<Divider> dividers(const Node& root, Rect area, float gap);
 Node* node_at(Node& root, const std::vector<int>& path);
 
@@ -170,5 +186,57 @@ private:
 int attention_rank(Attention a);
 Attention most_urgent(const std::vector<Attention>& list);
 const char* attention_label(Attention a);
+
+// ---- spaces list (herdr mods/spaces, Apache-2.0)
+// One space's checkout: `key` names its repo (machine + common git dir); `linked` = a linked
+// worktree (its top is not the repo's main checkout).
+struct SpaceRepo {
+    bool repo = false;
+    bool linked = false;
+    std::string key;
+};
+// spaces.js 298-315: the order the list draws, each linked worktree right after the first main
+// checkout of its repo (worktrees of a repo without one stay where they are). `tree[i]` (by new
+// position) marks a worktree row.
+std::vector<int> nest_worktrees(const std::vector<SpaceRepo>& info, std::vector<bool>* tree = nullptr);
+
+// ---- agents list (herdr mods/agents, Apache-2.0)
+// agents.js 28-31: drops what an agent puts before its title (a status glyph or spinner and the
+// separator after it), Codex's "[ ! ] " / "[ . ] " mark, and the spaces around.
+std::string clean_agent_title(const std::string& title);
+
+// agents.js 44-51: what a tab says about the agent in it. `tab_name` is the tab's name or number.
+struct TabLabel {
+    std::string tab_name;
+    bool tab_named = false;
+    std::string title;         // the lead terminal's live title
+    std::string program_name;  // "Claude Code"
+    std::string program_key;   // "claude"
+    std::string address;       // the terminal's id
+};
+std::string agent_tab_label(const TabLabel& in);
+
+// agents.js 279-296: the detail after a row's space ("" = none): an automatic tab number says
+// nothing unless two rows in a space would otherwise read the same. In: (space name, label).
+std::vector<std::string> agent_details(const std::vector<std::pair<std::string, std::string>>& rows);
+
+// agents.js 53-58: a sub-agent's status. It never shows done (it reports to its parent): idle.
+Attention kid_status(Attention a);
+
+// agents.js 170-180: the live sub-agents under `root`, depth first, each with its tree lines.
+enum class TreeLine { kNone, kBar, kTee, kElbow };  // "", "│", "├", "└"
+struct TreeRow {
+    std::string id;
+    std::vector<TreeLine> lines;
+};
+std::vector<TreeRow> agent_tree(const std::map<std::string, std::vector<std::string>>& kids, const std::string& root);
+
+// agents.js 240: priority order: most urgent first, then latest change, then newest.
+struct AgentSortKey {
+    int rank = 0;
+    long long since = 0;  // ms of the last change
+    long long seq = 0;    // creation order
+};
+bool priority_before(const AgentSortKey& a, const AgentSortKey& b);
 
 }  // namespace agentdesk::ui

@@ -188,7 +188,17 @@ Json encode_rows(const terminal::ScreenSnapshot& s, int first_row, int last_row)
         Json cells = Json::array();
         for (int c = 0; c < s.cols; ++c)
             cells.push_back(encode_cell(s.at(r, c)));
-        rows.push_back({{"row", r}, {"cells", std::move(cells)}});
+        Json row{{"row", r}, {"cells", std::move(cells)}};
+        if (s.row_wrapped(r))
+            row["wrap"] = true;  // soft-wrapped: continues on the next row
+        Json links = Json::array();
+        for (const auto& l : s.links) {
+            if (l.row == r)
+                links.push_back(Json::array({l.col0, l.col1, l.uri}));
+        }
+        if (!links.empty())
+            row["links"] = std::move(links);
+        rows.push_back(std::move(row));
     }
     return rows;
 }
@@ -213,6 +223,17 @@ void decode_rows_into(const Json& rows, terminal::ScreenSnapshot& s) {
         for (int c = 0; c < s.cols && c < static_cast<int>(cells.size()); ++c) {
             s.cells[static_cast<std::size_t>(r) * static_cast<std::size_t>(s.cols) +
                     static_cast<std::size_t>(c)] = decode_cell(cells[static_cast<std::size_t>(c)]);
+        }
+        if (s.wrapped.size() != static_cast<std::size_t>(s.rows))
+            s.wrapped.resize(static_cast<std::size_t>(s.rows), 0);
+        s.wrapped[static_cast<std::size_t>(r)] = row.value("wrap", false) ? 1 : 0;
+        std::erase_if(s.links, [r](const terminal::Hyperlink& l) { return l.row == r; });
+        if (const auto it = row.find("links"); it != row.end() && it->is_array()) {
+            for (const auto& l : *it) {
+                if (l.is_array() && l.size() == 3 && l[0].is_number_integer() && l[1].is_number_integer() &&
+                    l[2].is_string())
+                    s.links.push_back({r, l[0].get<int>(), l[1].get<int>(), l[2].get<std::string>()});
+            }
         }
     }
 }
