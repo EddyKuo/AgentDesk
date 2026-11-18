@@ -2259,6 +2259,7 @@ struct App::State {
     std::string worktree_machine;  // machine the listed worktrees are on
     char wt_filter[128] = {};
     int wt_sel = 0;
+    std::vector<std::string> chord_commands;  // window chords Windows reserves (main.cpp), run next frame
     ui::ImageCache program_images;  // herdr's program icons (programs\icons), as textures
     // Herdr 98 (win98_*.inl): its menus, dialogs, games and shared values.
     std::unique_ptr<w98state::W98> win98 = std::make_unique<w98state::W98>();
@@ -2622,6 +2623,15 @@ void start_remotes(App::State& s) {
     old.clear();  // removed machines disconnect here, outside the lock
 }
 }  // namespace
+
+bool App::binds_chord(int chord) const {
+    return s_->keymap.global(static_cast<ImGuiKeyChord>(chord)).has_value();
+}
+
+void App::run_chord(int chord) {
+    if (const auto cmd = s_->keymap.global(static_cast<ImGuiKeyChord>(chord)))
+        s_->chord_commands.push_back(*cmd);
+}
 
 App::~App() {
     g_program_images = nullptr;
@@ -10959,6 +10969,8 @@ void App::before_new_frame() {
 
 void App::frame() {
     State& s = *s_;
+    for (const auto& cmd : std::exchange(s.chord_commands, {}))
+        run_command(s, cmd);
     g_scale = s.dpi * ui_scale(s.settings);
     s.fonts.mono_size = s.layout().font_size.value_or(s.settings.font_size) / ui_text_factor(s.settings);
     const bool win98 = s.layout().style == "win98";
