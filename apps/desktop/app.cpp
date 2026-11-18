@@ -237,7 +237,7 @@ struct MachineConfig {
 
 struct Settings {
     std::vector<MachineConfig> machines;
-    std::set<std::string> mods_enabled = {"tab-timer"};
+    std::set<std::string> mods_enabled;  // the examples stay off until turned on (Settings > Mods)
     std::string layout = "workspace";
     bool close_notice_shown = false;
     std::string last_cwd;
@@ -3305,6 +3305,8 @@ std::string agent_detail(App::State& s, const std::string& id, const ui::Session
         if (!t.name.empty())
             return t.name;
     }
+    if (!v.name.empty())
+        return v.name;  // the name it was started with (agentctl run --name, sub-agent name)
     std::string title;
     if (const auto it = s.by_id.find(id); it != s.by_id.end())
         title = it->second->snapshot()->title;
