@@ -25,6 +25,8 @@ struct TerminalTheme {
     ImU32 match = IM_COL32(230, 182, 84, 110);
     ImU32 match_current = IM_COL32(240, 140, 60, 190);
     ImU32 scrollbar = IM_COL32(120, 120, 135, 120);
+    // A theme's own 16 ANSI colours (herdr themes "ansi"); null: the standard ones.
+    const std::array<ImU32, 16>* ansi = nullptr;
 };
 
 // Most history lines a view fetches for scrolling and search (paged, 200 per request).

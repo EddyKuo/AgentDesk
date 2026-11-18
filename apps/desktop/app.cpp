@@ -68,7 +68,17 @@ struct Palette {
     ImU32 needs_you, done, working, idle, info;
     ImU32 term_bg, term_fg, cursor, selection;
     bool layout_only = false;  // a layout's own theme (herdr: offered only there)
+    const std::array<ImU32, 16>* ansi = nullptr;  // the theme's "ansi" table (herdr themes/*.json)
 };
+
+// herdr themes/win98.json "ansi" (0-7, then the bright 8-15).
+constexpr std::array<ImU32, 16> kWin98Ansi = {
+    IM_COL32(0x55, 0x55, 0x55, 255), IM_COL32(0xaa, 0x00, 0x00, 255), IM_COL32(0x00, 0xaa, 0x00, 255),
+    IM_COL32(0xaa, 0x55, 0x00, 255), IM_COL32(0x00, 0x00, 0xbb, 255), IM_COL32(0xaa, 0x00, 0xaa, 255),
+    IM_COL32(0x00, 0xaa, 0xaa, 255), IM_COL32(0xaa, 0xaa, 0xaa, 255), IM_COL32(0x55, 0x55, 0x55, 255),
+    IM_COL32(0xff, 0x55, 0x55, 255), IM_COL32(0x55, 0xff, 0x55, 255), IM_COL32(0xff, 0xff, 0x55, 255),
+    IM_COL32(0x55, 0x55, 0xff, 255), IM_COL32(0xff, 0x55, 0xff, 255), IM_COL32(0x55, 0xff, 0xff, 255),
+    IM_COL32(0xff, 0xff, 0xff, 255)};
 
 constexpr Palette kPalettes[] = {
     {"midnight",
@@ -187,7 +197,8 @@ constexpr Palette kPalettes[] = {
      IM_COL32(0xc0, 0xc0, 0xc0, 255),
      IM_COL32(0xc0, 0xc0, 0xc0, 255),
      IM_COL32(0x00, 0x00, 0x80, 0x80),  // drawn over the text here, so not opaque
-     true},
+     true,
+     &kWin98Ansi},
 };
 
 const Palette* g_pal = &kPalettes[0];
@@ -6291,6 +6302,7 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
         vs.view.theme.default_fg = g_pal->term_fg;
         vs.view.theme.cursor = g_pal->cursor;
         vs.view.theme.selection = g_pal->selection;
+        vs.view.theme.ansi = g_pal->ansi;
         vs.view.theme.scrollbar = alpha(g_pal->dim, 120);
         const bool active = vs.view.draw("grid", *sit->second, s.fonts, vs.focus_next);
         vs.focus_next = false;
@@ -8279,6 +8291,7 @@ void draw_peek(App::State& s) {
     vs.view.theme.default_fg = g_pal->term_fg;
     vs.view.theme.cursor = g_pal->cursor;
     vs.view.theme.selection = g_pal->selection;
+    vs.view.theme.ansi = g_pal->ansi;
     vs.view.draw("peek", *session, s.fonts, vs.focus_next || ImGui::IsWindowAppearing());
     vs.focus_next = false;
     std::vector<std::string> commands = vs.view.take_commands();

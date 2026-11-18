@@ -379,3 +379,17 @@ TEST(VtEngine, MouseIsReportedOnlyInTheModeTheProgramAsked) {
     e.mouse(1, 1, 1, MouseAction::kPress);
     EXPECT_EQ(e.take_pty_input(), "");
 }
+
+// A theme's own 16 ANSI colours (herdr themes "ansi", Herdr 98) need the index, not just the RGB.
+TEST(VtEngine, CellsRememberWhichOfTheSixteenAnsiColoursTheyUse) {
+    VtEngine e(small_options());
+    e.feed("\x1b[31mR\x1b[0m\x1b[44mB\x1b[0m\x1b[91mr\x1b[0m\x1b[38;5;200mx\x1b[0m\x1b[38;2;1;2;3my\x1b[0mz");
+    const auto s = e.snapshot();
+    EXPECT_EQ(s.at(0, 0).fg_ansi, 1);
+    EXPECT_EQ(s.at(0, 0).bg_ansi, -1);
+    EXPECT_EQ(s.at(0, 1).bg_ansi, 4);
+    EXPECT_EQ(s.at(0, 2).fg_ansi, 9);
+    EXPECT_EQ(s.at(0, 3).fg_ansi, -1);  // 256-colour index past 15
+    EXPECT_EQ(s.at(0, 4).fg_ansi, -1);  // RGB
+    EXPECT_EQ(s.at(0, 5).fg_ansi, -1);  // default
+}

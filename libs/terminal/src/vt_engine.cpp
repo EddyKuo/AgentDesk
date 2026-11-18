@@ -487,6 +487,10 @@ Cell VtEngine::convert(const void* vterm_cell) const {
         out.attrs |= kAttrConceal;
     out.default_fg = VTERM_COLOR_IS_DEFAULT_FG(&c.fg);
     out.default_bg = VTERM_COLOR_IS_DEFAULT_BG(&c.bg);
+    if (!out.default_fg && VTERM_COLOR_IS_INDEXED(&c.fg) && c.fg.indexed.idx < 16)
+        out.fg_ansi = static_cast<std::int8_t>(c.fg.indexed.idx);
+    if (!out.default_bg && VTERM_COLOR_IS_INDEXED(&c.bg) && c.bg.indexed.idx < 16)
+        out.bg_ansi = static_cast<std::int8_t>(c.bg.indexed.idx);
     vterm_screen_convert_color_to_rgb(screen_, &c.fg);
     vterm_screen_convert_color_to_rgb(screen_, &c.bg);
     // Canonical form: default colours carry no RGB (the renderer uses the theme), so snapshots

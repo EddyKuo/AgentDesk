@@ -76,3 +76,4 @@ plan: docs/design/AgentDesk_Design.md 5.6
 | 2026-11-19 | 疊放順序 | Herdr 98 的視窗、選單、Clippy 每個 frame 依順序提到最上層，但 AgentDesk 自己的設定、命令面板（ImGui popup）開著時不提 | herdr.d.ts 405 | fd3740e |
 | 2026-11-19 | 細節對應 | 提示框用 AgentDesk 的 ImGui tooltip；選單超出視窗時夾回視窗內；`toLocaleTimeString` 的 AM／PM 前用一般空白（像素字型沒有 U+202F）；Mines 數字的 Arial Bold 用 Windows 內建的 Arial | taskbar.js 322；dialog.js 687；mines.js 157 | 585481d |
 | 2026-11-19 | 開發用 `--input` 拖曳 | 加 `press:x,y`、`release:x,y`，用來驗證 Clippy 與視窗拖曳；不出貨 | 驗證工具，herdr 沒有對應 | e309fb4 |
+| 2026-11-19 | Herdr 98 終端機的 16 色表 | 照 herdr：格子記住它用的是 16 個 ANSI 色中的哪一個（0-15，協定多帶兩欄，舊格式仍可讀），版面主題有自己的色表時就用它畫；Herdr 98 用 themes/win98.json 的 ansi | defaults/themes/win98.json ansi | — |
