@@ -523,13 +523,12 @@ void save_settings(const Settings& s) {
 // ------------------------------------------------------------------ layouts
 // A layout is one whole window: which chrome is shown and what fills the main area. Built-ins
 // below; <data>\layouts\<name>.json adds or overrides by name:
-//   {"name": "...", "main": "panes|board|grid", "sidebar": true, "details": false,
+//   {"name": "...", "sidebar": true, "details": false,
 //    "tab_bar": true, "status_bar": true, "theme": "ember", "style": "terminals", "font_size": 15}
 // "style": "terminals" draws herdr's Terminals chrome (terminals-bar, terminals-pane); "font_size"
 // sets the terminals' font size while the layout shows (herdr layout.rs 160-164).
 struct LayoutSpec {
     std::string name;
-    std::string main = "panes";
     bool sidebar = true;
     std::optional<bool> details;  // unset: the person's toggle
     bool tab_bar = true;
@@ -540,13 +539,12 @@ struct LayoutSpec {
 };
 
 std::vector<LayoutSpec> load_layouts() {
+    // herdr ships main and terminals (src/window.rs LAYOUTS; win98 is its own mod). Board, Grid
+    // and Focus were ours and are gone (2026-11-19, the person's call: only what herdr has).
     std::vector<LayoutSpec> list = {
-        {"workspace", "panes", true, std::nullopt, true, true, ""},
-        {"board", "board", true, false, false, true, ""},
-        {"grid", "grid", false, false, true, true, ""},
+        {"workspace", true, std::nullopt, true, true, ""},
         // herdr's second shipped layout (layouts/terminals.json): no sidebar, the terminal tabs.
-        {"terminals", "panes", false, false, true, false, "", "terminals", 15.0f},
-        {"focus", "panes", false, false, false, false, ""},
+        {"terminals", false, false, true, false, "", "terminals", 15.0f},
     };
     std::error_code ec;
     for (const auto& e : std::filesystem::directory_iterator(data_dir() / L"layouts", ec)) {
@@ -561,9 +559,6 @@ std::vector<LayoutSpec> load_layouts() {
         LayoutSpec l;
         const auto stem = e.path().stem().u8string();
         l.name = j.value("name", std::string(stem.begin(), stem.end()));
-        l.main = j.value("main", "panes");
-        if (l.main != "panes" && l.main != "board" && l.main != "grid")
-            l.main = "panes";
         l.sidebar = j.value("sidebar", true);
         if (j.contains("details") && j["details"].is_boolean())
             l.details = j["details"].get<bool>();
@@ -3572,7 +3567,6 @@ std::string exec_command(App::State& s, const std::string& cmd) {
             for (int n = 2; taken(to); ++n)
                 to = from + "-copy-" + std::to_string(n);
             Json j{{"name", to},
-                   {"main", it->main},
                    {"sidebar", it->sidebar},
                    {"tab_bar", it->tab_bar},
                    {"status_bar", it->status_bar}};
@@ -3618,7 +3612,7 @@ std::string exec_command(App::State& s, const std::string& cmd) {
             std::filesystem::rename(f, to, ec);
             aside += ec ? 0 : 1;
         }
-        if (which == "workspace" || which == "terminals" || which == "board" || which == "grid" || which == "focus") {
+        if (which == "workspace" || which == "terminals") {
             const Settings d;
             s.settings.sidebar_width = d.sidebar_width;
             s.settings.panel_width = d.panel_width;
@@ -6166,135 +6160,6 @@ void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
     }
 }
 
-// Board layout: agents as cards in columns by what they need from you.
-void draw_board(App::State& s, ImVec2 pos, ImVec2 size) {
-    struct Column {
-        const char* title;
-        Attention att;
-        std::vector<std::string> ids;
-    };
-    std::vector<Column> cols = {{"Needs you", Attention::kBlocked, {}},
-                                {"Done", Attention::kDone, {}},
-                                {"Working", Attention::kWorking, {}},
-                                {"Idle & shells", Attention::kIdle, {}}};
-    for (const auto& sess : s.sessions) {
-        const auto& v = s.views_by_id[sess->id()];
-        if (v.lost || v.process_state != "Running")
-            continue;
-        const Attention a = s.attention_of(sess->id());
-        auto& col = a == Attention::kBlocked   ? cols[0]
-                    : a == Attention::kDone    ? cols[1]
-                    : a == Attention::kWorking ? cols[2]
-                                               : cols[3];
-        col.ids.push_back(sess->id());
-    }
-    const float gap = px(10);
-    const float cw = (size.x - gap * 3) / 4;
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float fs = ImGui::GetFontSize();
-    for (int c = 0; c < 4; ++c) {
-        auto& col = cols[static_cast<std::size_t>(c)];
-        const ImVec2 cp(pos.x + static_cast<float>(c) * (cw + gap), pos.y);
-        dl->AddRectFilled(cp, ImVec2(cp.x + cw, cp.y + size.y), alpha(g_pal->card, 200), px(12));
-        attention_mark(dl, ImVec2(cp.x + px(16), cp.y + px(20)), px(5), col.att);
-        char head[64];
-        std::snprintf(head, sizeof head, "%s  %d", col.title, static_cast<int>(col.ids.size()));
-        dl->AddText(s.fonts.ui_bold, fs, ImVec2(cp.x + px(30), cp.y + px(20) - fs * 0.5f),
-                    attention_color(col.att), head);
-        ImGui::SetCursorScreenPos(ImVec2(cp.x + px(8), cp.y + px(40)));
-        ImGui::PushID(c);
-        ImGui::BeginChild("##col", ImVec2(cw - px(16), size.y - px(48)), ImGuiChildFlags_None);
-        for (const auto& id : col.ids) {
-            const auto& v = s.views_by_id[id];
-            ImGui::PushID(id.c_str());
-            const ImVec2 a = ImGui::GetCursorScreenPos();
-            const float w = ImGui::GetContentRegionAvail().x;
-            const float h = px(92);
-            const bool clicked = ImGui::InvisibleButton("##card", ImVec2(w, h));
-            const bool hovered = ImGui::IsItemHovered();
-            ImDrawList* d = ImGui::GetWindowDrawList();
-            d->AddRectFilled(a, ImVec2(a.x + w, a.y + h), hovered ? g_pal->hover : g_pal->bg, px(10));
-            d->AddRect(a, ImVec2(a.x + w, a.y + h),
-                       col.att == Attention::kBlocked ? g_pal->needs_you : g_pal->border, px(10));
-            program_badge(d, s.fonts.ui_bold, fs, ImVec2(a.x + px(10), a.y + px(10)), px(20),
-                          program_info(v.program, v.profile_id));
-            text_clipped(d, s.fonts.ui_bold, fs, ImVec2(a.x + px(38), a.y + px(12)), g_pal->text,
-                         s.pane_title(id), w - px(90));
-            const std::string age = elapsed_since(v.created_at);
-            d->AddText(s.fonts.ui, fs * 0.9f,
-                       ImVec2(a.x + w - px(10) - ImGui::CalcTextSize(age.c_str()).x, a.y + px(13)),
-                       g_pal->faint, age.c_str());
-            text_clipped(d, s.fonts.ui, fs * 0.9f, ImVec2(a.x + px(38), a.y + px(34)), g_pal->dim,
-                         display_path(v.cwd), w - px(48));
-            // Last words on its screen: what it is doing or asking.
-            std::string last = v.agent_message;
-            if (last.empty()) {
-                if (const auto it = s.by_id.find(id); it != s.by_id.end()) {
-                    const auto snap = it->second->snapshot();
-                    for (int r = snap->rows - 1; r >= 0 && last.empty(); --r) {
-                        auto t = snap->row_text(r);
-                        while (!t.empty() && t.front() == ' ')
-                            t.erase(t.begin());
-                        last = t;
-                    }
-                }
-            }
-            text_clipped(d, s.fonts.mono, fs * 0.9f, ImVec2(a.x + px(12), a.y + px(60)), g_pal->text, last,
-                         w - px(24));
-            if (clicked)
-                run_command(s, "agent.peek:" + id);
-            if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                s.peek.clear();
-                run_command(s, "layout:workspace");
-                s.focus(id);
-            }
-            if (hovered)
-                ImGui::SetTooltip("Click: peek   Double-click: open in the workspace layout");
-            ImGui::Dummy(ImVec2(0, px(6)));
-            ImGui::PopID();
-        }
-        if (col.ids.empty())
-            ImGui::TextDisabled("Nothing here");
-        ImGui::EndChild();
-        ImGui::PopID();
-    }
-}
-
-// Grid layout: every running session of the active space (all of them when the space has
-// none) as equal tiles, each a live terminal.
-void draw_grid(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
-    s.pane_area = {pos.x, pos.y, size.x, size.y};
-    std::vector<std::string> ids;
-    if (auto* sp = s.ws.active())
-        for (const auto& t : sp->tabs)
-            for (const auto& id : s.ws.sessions_in(t))
-                ids.push_back(id);
-    if (ids.empty())
-        for (const auto& sess : s.sessions)
-            if (s.views_by_id[sess->id()].process_state == "Running")
-                ids.push_back(sess->id());
-    if (ids.empty()) {
-        draw_panes(s, pos, size, connected);  // empty state
-        return;
-    }
-    const int n = static_cast<int>(ids.size());
-    const int cols = static_cast<int>(
-        std::ceil(std::sqrt(static_cast<double>(n) * size.x / std::max(1.0f, size.y) / 1.6)));
-    const int c = std::clamp(cols, 1, n);
-    const int rows = (n + c - 1) / c;
-    const float gap = px(8);
-    const float tw = (size.x - gap * static_cast<float>(c - 1)) / static_cast<float>(c);
-    const float th = (size.y - gap * static_cast<float>(rows - 1)) / static_cast<float>(rows);
-    for (int i = 0; i < n; ++i) {
-        const int r = i / c;
-        const int k = i % c;
-        draw_pane(s, ids[static_cast<std::size_t>(i)],
-                  {std::round(pos.x + static_cast<float>(k) * (tw + gap)),
-                   std::round(pos.y + static_cast<float>(r) * (th + gap)), std::floor(tw), std::floor(th)},
-                  connected);
-    }
-}
-
 // Folder the panels follow: the focused pane's live folder (herdr files.js 6-12), on the machine
 // that pane runs on ("" = this computer).
 std::string panel_folder(App::State& s, std::string* machine = nullptr) {
@@ -8802,6 +8667,68 @@ bool segmented(App::State& s, const char* id, std::string& value,
     return changed;
 }
 
+// herdr frame/settings/main.js 242-270: a small drawing of each layout in the theme's colors.
+// main: a 42 px sidebar of lines, a tab strip (accent + two raised), two terminals side by side.
+// terminals: its own dark look, a bar with one tab and two cards. Anything else: a plain frame.
+void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 size) {
+    const ImVec2 b(a.x + size.x, a.y + size.y);
+    auto line = [&](float x, float y, float w, ImU32 c) {
+        d->AddRectFilled(ImVec2(x, y), ImVec2(x + px(w), y + px(3)), c, px(2));
+    };
+    auto lines = [&](float x, float y, int n, ImU32 c) {
+        for (int i = 0; i < n; ++i)
+            line(x + px(5), y + px(5) + static_cast<float>(i) * px(7), i % 2 ? 22.0f : 32.0f, c);
+    };
+    auto term = [&](ImVec2 p, ImVec2 q) {
+        d->AddRectFilled(p, q, g_pal->bg, px(2));
+        d->AddRect(p, q, g_pal->border, px(2));
+    };
+    if (name == "terminals") {
+        const ImU32 bg = IM_COL32(0x13, 0x16, 0x19, 255);
+        d->AddRectFilled(a, b, bg, px(6));
+        d->AddRect(a, b, g_pal->border, px(6));
+        const ImVec2 in(a.x + px(4), a.y + px(4));
+        const float iw = size.x - px(8);
+        d->AddRectFilled(in, ImVec2(in.x + iw, in.y + px(10)), IM_COL32(0x1d, 0x1f, 0x22, 255), px(4));
+        d->AddRectFilled(ImVec2(in.x + px(1), in.y + px(1)), ImVec2(in.x + px(31), in.y + px(9)),
+                         IM_COL32(0x34, 0x37, 0x3c, 255), px(3));
+        d->AddRect(ImVec2(in.x + px(1), in.y + px(1)), ImVec2(in.x + px(31), in.y + px(9)),
+                   IM_COL32(0x4a, 0x4d, 0x53, 255), px(3));
+        const float top = in.y + px(14);
+        const float cw = (iw - px(4)) * 0.5f;
+        for (int i = 0; i < 2; ++i) {
+            const ImVec2 p(in.x + static_cast<float>(i) * (cw + px(4)), top);
+            const ImVec2 q(p.x + cw, b.y - px(4));
+            d->AddRectFilled(p, q, IM_COL32(0x17, 0x19, 0x1c, 255), px(4));
+            d->AddRect(p, q, IM_COL32(0x2c, 0x2f, 0x34, 255), px(4));
+            d->AddLine(ImVec2(p.x, p.y + px(7)), ImVec2(q.x, p.y + px(7)), IM_COL32(0x25, 0x28, 0x2c, 255));
+            line(p.x + px(3), p.y + px(2), 14, IM_COL32(0x5d, 0x61, 0x68, 255));
+        }
+        return;
+    }
+    d->AddRectFilled(a, b, g_pal->sidebar, px(6));
+    if (name == "workspace") {
+        const float sx = a.x + px(42);
+        d->AddLine(ImVec2(sx, a.y), ImVec2(sx, b.y), g_pal->border);
+        lines(a.x, a.y, 4, g_pal->dim);
+        const float ty = a.y + px(11);
+        d->AddLine(ImVec2(sx, ty), ImVec2(b.x, ty), g_pal->border);
+        float x = sx + px(2);
+        d->AddRectFilled(ImVec2(x, a.y + px(2)), ImVec2(x + px(20), ty - px(2)), g_pal->focus, px(2));
+        x += px(22);
+        for (int i = 0; i < 2; ++i, x += px(18))
+            d->AddRectFilled(ImVec2(x, a.y + px(2)), ImVec2(x + px(16), ty - px(2)), raised_color(), px(2));
+        const float tw = (b.x - sx - px(8) - px(3)) * 0.5f;
+        term(ImVec2(sx + px(4), ty + px(4)), ImVec2(sx + px(4) + tw, b.y - px(4)));
+        term(ImVec2(sx + px(4) + tw + px(3), ty + px(4)), ImVec2(b.x - px(4), b.y - px(4)));
+    } else {
+        const float ty = a.y + px(11);
+        d->AddLine(ImVec2(a.x, ty), ImVec2(b.x, ty), g_pal->border);
+        term(ImVec2(a.x + px(4), ty + px(4)), ImVec2(b.x - px(4), b.y - px(4)));
+    }
+    d->AddRect(a, b, g_pal->border, px(6));
+}
+
 void draw_settings(App::State& s) {
     if (s.show_settings) {
         ImGui::OpenPopup("##settings");
@@ -8880,20 +8807,35 @@ void draw_settings(App::State& s) {
     const std::string& sec = s.settings_section;
     if (sec == "Look") {
         settings_section(s, "Layout");
+        // herdr frame/settings/main.js 272-320: cards 124 wide, p 6, rounded 10, a 2 px accent
+        // border and raised fill when chosen (raised on hover), a 62 px preview, then the name
+        // (12.5, muted; foreground and a check when chosen). Shipped ones first.
         for (const auto& l : s.layouts) {
             const bool on = l.name == s.settings.layout;
             const ImVec2 a = ImGui::GetCursorScreenPos();
-            const float cw = px(120), ch = px(56);
+            const float cw = px(124), pad = px(6), ph = px(62), lh = px(16);
+            const float ch = pad + ph + px(6) + lh + pad;
             ImGui::PushID(l.name.c_str());
             if (ImGui::InvisibleButton("##lay", ImVec2(cw, ch)))
                 run_command(s, "layout:" + l.name);
+            const bool hov = ImGui::IsItemHovered();
             ImGui::PopID();
             ImDrawList* d = ImGui::GetWindowDrawList();
-            d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), raised_color(), px(8));
-            d->AddRect(a, ImVec2(a.x + cw, a.y + ch), on ? g_pal->focus : g_pal->border, px(8), 0, on ? 2.0f : 1.0f);
-            std::string label = l.name == "workspace" ? std::string("AgentDesk") : l.name;
-            label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[0])));
-            d->AddText(s.fonts.ui_medium, fpx(12.5f), ImVec2(a.x + px(10), a.y + ch - px(22)), g_pal->text, label.c_str());
+            if (on || hov)
+                d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), raised_color(), px(10));
+            if (on)
+                d->AddRect(a, ImVec2(a.x + cw, a.y + ch), g_pal->focus, px(10), 0, px(2));
+            layout_preview(d, l.name, ImVec2(a.x + pad, a.y + pad), ImVec2(cw - pad * 2, ph));
+            // herdr LOOKS: main -> "Herdr" (ours is AgentDesk), terminals -> "Terminals".
+            std::string label = l.name == "workspace" ? std::string("AgentDesk")
+                                : l.name == "terminals" ? std::string("Terminals")
+                                                        : l.name;
+            const ImVec2 lp(a.x + pad, a.y + pad + ph + px(6));
+            const float tw = text_clipped(d, s.fonts.ui, fpx(12.5f), lp, on ? g_pal->text : g_pal->dim, label,
+                                          cw - pad * 2 - (on ? px(17) : 0.0f));
+            if (on)
+                draw_icon(s, d, ui::icon::kCheck, fpx(12), ImVec2(lp.x + tw + px(5) + px(6), lp.y + fpx(12.5f) * 0.55f),
+                          g_pal->focus);
             ImGui::SameLine(0, px(8));
             if (ImGui::GetContentRegionAvail().x < cw)
                 ImGui::NewLine();
@@ -10312,19 +10254,14 @@ void App::frame() {
         draw_tab_bar(s, main_pos, main_w, tabbar_h);
     const auto* active_space = s.ws.active();
     const bool show_panel =
-        layout.main != "board" && !terminals && active_space != nullptr && !active_space->panel.empty();
+        !terminals && active_space != nullptr && !active_space->panel.empty();
     const float panel_w = show_panel ? std::min(px(s.settings.panel_width), main_w * 0.6f) : 0.0f;
     const float details_w = show_details ? std::min(px(320), main_w * 0.3f) : 0.0f;
     const ImVec2 content_pos(main_pos.x + inset, main_pos.y + tabbar_h + gap);
     const ImVec2 content_size(main_w - inset * 2 - (details_w > 0 ? details_w + gap : 0.0f) -
                                   (panel_w > 0 ? panel_w + gap : 0.0f),
                               full.y - pad * 2 - status_h - tabbar_h - gap - inset);
-    if (layout.main == "board")
-        draw_board(s, content_pos, content_size);
-    else if (layout.main == "grid")
-        draw_grid(s, content_pos, content_size, connected);
-    else
-        draw_panes(s, content_pos, content_size, connected);
+    draw_panes(s, content_pos, content_size, connected);
     float right_x = content_pos.x + content_size.x + gap;
     if (panel_w > 0) {
         // The boundary between the panes and the panel drags (280..900 px).
