@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <condition_variable>
 #include <vector>
 
 #include "agentdesk/platform/win/conpty_api.hpp"
@@ -83,6 +84,10 @@ private:
     HPCON pcon_ = nullptr;
     DWORD pid_ = 0;
     std::thread reader_;
+    // Set by the reader thread when it leaves (EOF or error); close() waits on it with a bound.
+    std::mutex reader_mutex_;
+    std::condition_variable reader_cv_;
+    bool reader_done_ = false;
     std::mutex close_mutex_;  // lock order: close_mutex_ before write_mutex_
     std::mutex write_mutex_;
     bool closed_ = false;
