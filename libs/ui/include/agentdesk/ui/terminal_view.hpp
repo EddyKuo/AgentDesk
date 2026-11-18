@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -49,6 +50,8 @@ public:
     [[nodiscard]] int scroll_offset() const noexcept { return scroll_offset_; }
     // App commands typed into this view (global key chords, context menu), oldest first.
     std::vector<std::string> take_commands() { return std::exchange(commands_, {}); }
+    // A terminal.* command to run on the next draw (from the palette or a window key).
+    void request(std::string command) { requested_.push_back(std::move(command)); }
     void open_search() {
         search_open_ = true;
         search_focus_ = true;
@@ -64,6 +67,9 @@ public:
     // herdr terminal.right_click: when the program reads the mouse, right-clicks go to it instead
     // of opening the menu. Shift+right-click always opens the menu.
     bool right_click_to_program = false;
+    // Draws the right-click menu's rows inside the open popup (the app's herdr menu); empty uses
+    // a plain built-in menu. Return true to close the menu.
+    std::function<bool()> menu_rows;
 
 private:
     void handle_resize(TerminalSource& source, GridSize wanted, const terminal::ScreenSnapshot& snap);
@@ -93,6 +99,7 @@ private:
     bool open_context_menu_ = false;
     std::string notice_;
     std::vector<std::string> commands_;
+    std::vector<std::string> requested_;
     // Scrollback: lines of history above the live screen (0 = live). While scrolled, selection
     // works on whole lines keyed by history line_id (or a screen-row key).
     int scroll_offset_ = 0;

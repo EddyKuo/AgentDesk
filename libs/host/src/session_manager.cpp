@@ -487,7 +487,8 @@ Response SessionManager::do_git_run(const Request& req) {
             return bad(req, "args must be plain strings");
         args.push_back(win::to_wide(x.get<std::string>()));
     }
-    static const std::set<std::wstring> kCommands = {L"status", L"diff", L"rev-parse", L"add", L"commit"};
+    static const std::set<std::wstring> kCommands = {L"status", L"diff", L"rev-parse", L"rev-list", L"add",
+                                                      L"commit"};
     if (!kCommands.contains(args.front()))
         return bad(req, "git command not allowed");
     for (const auto& x : args) {

@@ -14,6 +14,7 @@
 #include <ctime>
 #include <deque>
 #include <filesystem>
+#include <array>
 #include <future>
 #include <fstream>
 #include <iomanip>
@@ -175,6 +176,32 @@ const Palette* palette_by_id(const std::string& id) {
     return &kPalettes[0];
 }
 
+// Windows' app mode (Settings > Personalization > Colors), checked at most every 2 s.
+bool system_light() {
+    static auto checked = std::chrono::steady_clock::time_point{};
+    static bool light = false;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - checked > std::chrono::seconds(2)) {
+        checked = now;
+        DWORD v = 0;
+        DWORD size = sizeof v;
+        light = ::RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                               L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &v, &size) == ERROR_SUCCESS &&
+                v != 0;
+    }
+    return light;
+}
+
+// herdr Appearance: System follows Windows; Light and Dark use the chosen theme of that kind. A
+// layout file with a "theme" overrides it.
+const Palette* effective_palette(const std::string& appearance, const std::string& dark, const std::string& light,
+                                 const std::string& layout_theme) {
+    if (!layout_theme.empty())
+        return palette_by_id(layout_theme);
+    const bool use_light = appearance == "light" || (appearance == "system" && system_light());
+    return palette_by_id(use_light ? light : dark);
+}
+
 void apply_style(float dpi, float zoom) {
     ImGuiStyle& s = ImGui::GetStyle();
     s = ImGuiStyle();
@@ -266,13 +293,19 @@ struct Settings {
     float panel_width = 368;     // right panel (Files / Changes), 280..900
     std::string agents_sort = "priority";  // or "space"
     std::vector<std::string> palette_recent;  // last 20 palette commands, newest first
-    std::string terminal_font;   // "" = JetBrains Mono (bundled)
+    std::string terminal_font;   // font family; "" = JetBrains Mono (bundled)
+    int terminal_weight = 500;   // herdr terminal font weight (JetBrains Mono Medium)
+    std::string ui_font;         // interface font family; "" = Geist (bundled)
+    std::string appearance = "system";  // "system", "light" or "dark" (herdr Appearance)
+    std::string theme_dark = "midnight";
+    std::string theme_light = "paper";
     float line_height = 1.0f;    // terminal cell height multiplier
     float cell_width = 1.0f;     // terminal cell width multiplier
     std::string sound_done;      // MP3 replacing the bundled sounds
     std::string sound_blocked;
     std::string welcomed;        // "", "finished" or "skipped"
     std::string seen_version;    // What's new was shown for this version (herdr: once after an update)
+    std::vector<std::string> folded_machines;  // machine headers folded in the sidebar
     std::vector<std::string> panels = {"files", "changes"};  // panel buttons in the tab bar
 };
 
@@ -319,6 +352,15 @@ Settings load_settings() {
     s.close_notice_shown = j.value("close_notice_shown", false);
     s.last_cwd = j.value("last_cwd", "");
     s.theme = j.value("theme", s.theme);
+    s.terminal_weight = std::clamp(j.value("terminal_weight", s.terminal_weight), 100, 900);
+    s.ui_font = j.value("ui_font", "");
+    // Appearance: files from before it existed keep their one theme as the fixed choice.
+    {
+        const bool light = std::string(palette_by_id(s.theme)->id) == s.theme && palette_by_id(s.theme)->light;
+        s.appearance = j.value("appearance", j.contains("theme") ? (light ? "light" : "dark") : "system");
+        s.theme_dark = j.value("theme_dark", light ? std::string("midnight") : s.theme);
+        s.theme_light = j.value("theme_light", light ? s.theme : std::string("paper"));
+    }
     s.zoom = std::clamp(j.value("zoom", 1.0f), 0.6f, 2.5f);
     s.font_size = std::clamp(j.value("font_size", 14.0f), 9.0f, 28.0f);
     s.sounds = j.value("sounds", true);
@@ -342,6 +384,9 @@ Settings load_settings() {
     s.sound_blocked = j.value("sound_blocked", "");
     s.welcomed = j.value("welcomed", "");
     s.seen_version = j.value("seen_version", "");
+    for (const auto& m : j.value("folded_machines", Json::array()))
+        if (m.is_string())
+            s.folded_machines.push_back(m.get<std::string>());
     if (const auto it = j.find("panels"); it != j.end() && it->is_array()) {
         s.panels.clear();
         for (const auto& p : *it)
@@ -383,6 +428,11 @@ void save_settings(const Settings& s) {
             {"close_notice_shown", s.close_notice_shown},
             {"last_cwd", s.last_cwd},
             {"theme", s.theme},
+            {"terminal_weight", s.terminal_weight},
+            {"ui_font", s.ui_font},
+            {"appearance", s.appearance},
+            {"theme_dark", s.theme_dark},
+            {"theme_light", s.theme_light},
             {"zoom", s.zoom},
             {"font_size", s.font_size},
             {"sounds", s.sounds},
@@ -407,6 +457,7 @@ void save_settings(const Settings& s) {
             {"sound_blocked", s.sound_blocked},
             {"welcomed", s.welcomed},
             {"seen_version", s.seen_version},
+            {"folded_machines", s.folded_machines},
             {"panels", s.panels},
             {"mods_enabled", std::vector<std::string>(s.mods_enabled.begin(), s.mods_enabled.end())},
             {"layout", s.layout},
@@ -799,6 +850,31 @@ constexpr CommandInfo kCommands[] = {
     {"app.exit_all", "Exit and stop all sessions"},
 };
 
+// Command names keys.json may bind (herdr validates actions and reports unknown ones). A
+// "<mod>.<command>" action is accepted when that mod folder exists.
+bool known_command(std::string_view name) {
+    static const std::set<std::string, std::less<>> kNames = {
+        "agent.focus", "agent.keep", "agent.new", "agent.next", "agent.peek", "agent.prev", "app.exit_all",
+        "app.feedback", "app.help", "app.keys", "app.palette", "app.picker", "app.reset", "app.settings",
+        "app.welcome", "app.whats_new", "app.zoom_in", "app.zoom_out", "app.zoom_reset", "details.toggle",
+        "launch", "layout", "layout.clone", "layout.reset", "layout.switch", "layout.toggle", "machine.add",
+        "mod", "mod.clone", "mod.open", "mods.folder", "mods.reload", "pane.close", "pane.go", "pane.park",
+        "pane.rename", "pane.resize", "pane.split", "pane.swap", "pane.zoom", "panel", "session.focus",
+        "session.force_stop", "session.interrupt", "session.restart", "session.stop", "sidebar.rail",
+        "sidebar.toggle", "space.close", "space.move", "space.new", "space.next", "space.prev", "space.rename",
+        "space.select", "tab.close", "tab.move", "tab.new", "tab.next", "tab.prev", "tab.rename", "tab.select",
+        "tab.settle", "tab.unsettle", "terminal.copy", "terminal.kill", "terminal.open", "terminal.park",
+        "terminal.paste", "terminal.paste_image", "terminal.peek", "terminal.pin", "terminal.right_click",
+        "terminal.scroll", "terminal.search", "terminal.select_all", "theme", "window.close", "window.maximize",
+        "window.minimize", "worktree.new", "worktree.open", "worktree.remove", "app.quit", "overlay.close"};
+    if (kNames.contains(name))
+        return true;
+    const auto dot = name.find('.');
+    std::error_code ec;
+    return dot != std::string_view::npos &&
+           std::filesystem::is_directory(data_dir() / L"mods" / win::to_wide(std::string(name.substr(0, dot))), ec);
+}
+
 const char* command_label(const std::string& id) {
     for (const auto& c : kCommands)
         if (id == c.id)
@@ -833,16 +909,21 @@ public:
     GitCache(const GitCache&) = delete;
     GitCache& operator=(const GitCache&) = delete;
 
-    // Cached facts for `dir` (empty until the first answer); schedules a refresh when stale.
-    GitInfo get(const std::string& dir) {
+    // Another machine's folders: git through its agent-host (git.run), set by the app.
+    std::function<std::optional<Json>(const std::string& machine, const std::string& method, const Json& params)> remote;
+
+    // Cached facts for `dir` on `machine` ("" = here; empty until the first answer); schedules a
+    // refresh when stale.
+    GitInfo get(const std::string& dir, const std::string& machine = {}) {
         if (dir.empty())
             return {};
+        const std::string key = machine.empty() ? dir : machine + "|" + dir;
         std::lock_guard lock(mutex_);
-        auto& e = entries_[dir];
+        auto& e = entries_[key];
         const auto now = Clock::now();
         if (!e.queued && (e.at == Clock::time_point{} || now - e.at > std::chrono::seconds(60))) {
             e.queued = true;
-            queue_.push_back(dir);
+            queue_.push_back(key);
             cv_.notify_one();
         }
         return e.info;
@@ -875,13 +956,28 @@ private:
         return p;
     }
 
-    static GitInfo query(const std::string& dir) {
+    GitInfo query(const std::string& key) {
         GitInfo g;
+        const auto bar = key.find('|');
+        const std::string machine = bar == std::string::npos ? std::string() : key.substr(0, bar);
+        const std::string dir = bar == std::string::npos ? key : key.substr(bar + 1);
         const std::filesystem::path cwd(win::to_wide(dir));
         std::error_code ec;
-        if (!std::filesystem::is_directory(cwd, ec))
+        if (machine.empty() && !std::filesystem::is_directory(cwd, ec))
             return g;
         auto git = [&](std::vector<std::wstring> args) {
+            if (!machine.empty()) {  // the remote host adds its own safety switches and -C
+                host::ToolResult r;
+                Json a = Json::array();
+                for (const auto& x : args)
+                    a.push_back(win::to_utf8(x));
+                if (const auto res = remote ? remote(machine, "git.run", Json{{"cwd", dir}, {"args", a}}) : std::nullopt) {
+                    r.started = true;
+                    r.exit_code = res->value("exit_code", 1ul);
+                    r.output = res->value("output", "");
+                }
+                return r;
+            }
             args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-C", cwd.native()});
             return host::run_tool(args, cwd, std::chrono::seconds(10));
         };
@@ -899,7 +995,7 @@ private:
         std::filesystem::path common(win::to_wide(lines[1]));
         if (common.is_relative())
             common = cwd / common;
-        common = std::filesystem::weakly_canonical(common, ec);
+        common = machine.empty() ? std::filesystem::weakly_canonical(common, ec) : common.lexically_normal();
         g.common_top = norm(win::to_utf8(common.parent_path().native()));
         g.worktree = _stricmp(g.common_top.c_str(), g.top.c_str()) != 0;
         g.branch = lines[2];
@@ -1777,6 +1873,14 @@ struct App::State {
     GitCache git;
     std::unique_ptr<SidePanels> panels = std::make_unique<SidePanels>();
     std::set<std::string> folded_machines;
+    ImFont* base_ui = nullptr;  // the bundled interface fonts (Geist), restored when ui_font is cleared
+    ImFont* base_ui_medium = nullptr;
+    ImFont* base_ui_bold = nullptr;
+    struct TabWheel {
+        float acc = 0;
+        int steps = 0;
+        Clock::time_point last{}, switched{};
+    } tab_wheel;
     std::set<std::string> folded_groups;
     std::set<std::string> folded_agents;
     std::map<std::string, Attention> last_att;
@@ -1797,6 +1901,8 @@ struct App::State {
     std::string settings_section;
     float settings_row_end = 0;
     bool show_welcome = false;
+    bool welcome_panels_seen = false;
+    bool welcome_copied = false;
     bool show_notes = false;  // What's new / Send feedback dialog
     std::string notes_kind;   // "whats_new" or "feedback"
     char feedback_buf[4096] = {};
@@ -1929,7 +2035,8 @@ struct App::State {
 // ------------------------------------------------------------------ construction
 namespace {
 void start_remotes(App::State& s);
-std::vector<std::pair<std::string, std::wstring>> terminal_fonts();
+void apply_terminal_font(App::State& s);
+void apply_ui_font(App::State& s);
 }  // namespace
 
 App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_unique<State>()) {
@@ -1937,6 +2044,7 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     s_->host = std::move(host);
     s_->settings = load_settings();
     g_pal = palette_by_id(s_->settings.theme);
+    s_->folded_machines.insert(s_->settings.folded_machines.begin(), s_->settings.folded_machines.end());
     s_->keymap = ui::Keymap::defaults();
     {
         std::ifstream in(data_dir() / L"keys.json", std::ios::binary);
@@ -1947,7 +2055,7 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
             if (j.is_discarded())
                 s_->keymap_errors.emplace_back("keys.json is not valid JSON");
             else
-                s_->keymap_errors = s_->keymap.apply(j);
+                s_->keymap_errors = s_->keymap.apply(j, known_command);
         }
     }
     std::string cwd = s_->settings.last_cwd;
@@ -1983,6 +2091,7 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
             return std::nullopt;
         return result.get();
     };
+    s_->git.remote = s_->panels->remote;
     s_->mods = std::make_unique<ui::ModHost>(data_dir() / L"mods");
     s_->mods->load(s_->settings.mods_enabled);
     // herdr: the welcome opens on the first run (until it is finished or skipped).
@@ -2043,10 +2152,8 @@ ui::HostClient& App::host() {
 void App::load_fonts() {
     s_->fonts = ui::load_fonts(s_->settings.font_size, 13.0f);  // herdr UI base 13, scaled by ui_scale()
     ImGui::GetIO().FontDefault = s_->fonts.ui;
-    if (!s_->settings.terminal_font.empty())
-        for (const auto& [name, file] : terminal_fonts())
-            if (name == s_->settings.terminal_font)
-                s_->fonts.mono = ui::load_terminal_font(file, s_->settings.font_size);
+    apply_terminal_font(*s_);
+    apply_ui_font(*s_);
 }
 
 void App::apply_scale(float dpi) {
@@ -2407,7 +2514,7 @@ void update_attention(App::State& s) {
                             (t.name.empty() ? std::to_string(loc.tab + 1) : t.name);
                 }
                 s.toast(blocked ? title + " needs you" : title + " finished",
-                        v.agent_message.empty() ? where : v.agent_message, id, blocked ? g_pal->needs_you : g_pal->focus);
+                        where, id, blocked ? g_pal->needs_you : g_pal->focus);  // herdr: "<space> / <tab>"
             }
         }
         // A program that ends with an error right after it was started here: say why.
@@ -2462,6 +2569,58 @@ std::string pick_shell(const std::string& wanted, const std::vector<std::pair<st
 }
 
 void open_confirm(App::State& s, std::string title, std::string detail, std::string ok, std::string command);
+
+// What removing a linked worktree would lose (herdr worktree.js): uncommitted changes, and
+// submodules with commits their upstream does not have. Plain git, no shell.
+struct WorktreeRisk {
+    bool dirty = false;
+    bool submodules = false;
+    std::vector<std::string> unpushed;  // submodule paths
+    [[nodiscard]] std::string signature() const {
+        std::string sig = std::string(dirty ? "d" : "-") + (submodules ? "s" : "-");
+        for (const auto& u : unpushed)
+            sig += "," + u;
+        return sig;
+    }
+};
+
+WorktreeRisk worktree_risk(const std::string& top) {
+    WorktreeRisk r;
+    const std::filesystem::path p(win::to_wide(top));
+    const auto st = host::run_tool({L"git", L"-C", p.native(), L"status", L"--porcelain"}, p, std::chrono::seconds(10));
+    r.dirty = st.started && st.exit_code == 0 && !st.output.empty();
+    const auto subs = host::run_tool({L"git", L"-C", p.native(), L"submodule", L"status", L"--recursive"}, p,
+                                     std::chrono::seconds(10));
+    std::stringstream ss(subs.started && subs.exit_code == 0 ? subs.output : std::string());
+    for (std::string line; std::getline(ss, line);) {
+        // " <sha> <path> (<describe>)"
+        std::stringstream ls(line.size() > 1 ? line.substr(1) : std::string());
+        std::string sha, path;
+        ls >> sha >> path;
+        if (path.empty())
+            continue;
+        r.submodules = true;
+        const auto sp = p / win::to_wide(path);
+        const auto ahead = host::run_tool({L"git", L"-C", sp.native(), L"rev-list", L"--count", L"@{u}..HEAD"}, sp,
+                                          std::chrono::seconds(10));
+        if (ahead.started && (ahead.exit_code != 0 || std::atoi(ahead.output.c_str()) > 0))
+            r.unpushed.push_back(path);  // no upstream counts as unpushed
+    }
+    return r;
+}
+
+std::string worktree_remove_text(const std::string& top, const WorktreeRisk& r) {
+    std::string t = "Closes the space and deletes " + display_path(top) + ". The branch stays.";
+    if (r.dirty)
+        t += "\n\nIt has uncommitted changes: they will be lost.";
+    if (!r.unpushed.empty()) {
+        t += "\n\nSubmodules with commits that are not pushed: ";
+        for (std::size_t i = 0; i < r.unpushed.size(); ++i)
+            t += (i ? ", " : "") + r.unpushed[i];
+        t += ". They will be lost.";
+    }
+    return t;
+}
 void confirm_close_space(App::State& s, int index);
 
 void open_launcher(App::State& s, LaunchTarget target) {
@@ -2501,7 +2660,12 @@ void run_command(App::State& s, const std::string& cmd) {
     };
     // herdr command names (keys.json written for herdr keeps working).
     static const std::map<std::string, std::string> kHerdrNames = {
-        {"terminal.park", "pane.park"}, {"terminal.peek", "agent.peek"}, {"terminal.open", "tab.new"}};
+        {"terminal.park", "pane.park"}, {"terminal.peek", "agent.peek"}, {"terminal.open", "tab.new"},
+        {"app.quit", "window.close"}};  // herdr Quit: the window closes, agents keep running
+    if (name == "layout.toggle" && arg == "sidebar") {  // herdr ctrl-shift-b
+        run_command(s, "sidebar.toggle");
+        return;
+    }
     if (const auto al = kHerdrNames.find(name); al != kHerdrNames.end()) {
         run_command(s, arg.empty() ? al->second : al->second + ":" + arg);
         return;
@@ -2799,15 +2963,26 @@ void run_command(App::State& s, const std::string& cmd) {
         if (g.repo && !g.worktree) {
             s.toast("Not a worktree", "This is the repository's main checkout, not a worktree.", "", g_pal->working);
         } else if (g.repo) {
-            const std::filesystem::path p(win::to_wide(g.top));
-            const auto st = host::run_tool({L"git", L"-C", p.native(), L"status", L"--porcelain"}, p, std::chrono::seconds(10));
-            const bool dirty = st.started && !st.output.empty();
-            std::string detail = "Closes the space and deletes " + display_path(g.top) + ". The branch stays.";
-            if (dirty)
-                detail += "\n\nIt has uncommitted changes: they will be lost.";
+            const auto risk = worktree_risk(g.top);
             const auto loc = s.ws.find(s.ws.focused_session());
             open_confirm(s, "Remove worktree " + (loc.space >= 0 ? s.ws.space_title(loc.space, s.session_cwds()) : g.top) + "?",
-                         detail, "Remove", std::string(dirty ? "worktree.remove_force:" : "worktree.remove_now:") + g.top);
+                         worktree_remove_text(g.top, risk), "Remove",
+                         "worktree.remove_checked:" + risk.signature() + "|" + g.top);
+        }
+    } else if (name == "worktree.remove_checked") {
+        // herdr worktree.js 228-245: Enter re-checks; a risk that appeared since the dialog
+        // opened asks once more ("Enter again removes it anyway").
+        const auto bar = arg.find('|');
+        const std::string seen = arg.substr(0, bar);
+        const std::string top = bar == std::string::npos ? std::string() : arg.substr(bar + 1);
+        const auto risk = worktree_risk(top);
+        const std::string force = risk.dirty || risk.submodules ? "worktree.remove_force:" : "worktree.remove_now:";
+        if (risk.signature() != seen) {
+            open_confirm(s, "Remove worktree?",
+                         worktree_remove_text(top, risk) + "\n\nIt changed since this opened. Enter again removes it anyway.",
+                         "Remove", force + top);
+        } else {
+            run_command(s, force + top);
         }
     } else if (name == "worktree.remove_now" || name == "worktree.remove_force") {
         const auto g = s.git.get(arg);
@@ -2895,6 +3070,11 @@ void run_command(App::State& s, const std::string& cmd) {
     } else if (name == "terminal.search") {
         if (!focused.empty())
             s.views[focused].view.open_search();
+    } else if (name == "terminal.copy" || name == "terminal.paste" || name == "terminal.paste_image" ||
+               name == "terminal.select_all" || name == "terminal.scroll") {
+        // Run by the focused terminal on its next frame (palette, keys.json in global).
+        if (!focused.empty())
+            s.views[focused].view.request(name == "terminal.paste_image" ? std::string("terminal.paste") : cmd);
     } else if (name == "worktree.new") {
         s.show_worktree = true;
         s.wt_error.clear();
@@ -2954,10 +3134,12 @@ void run_command(App::State& s, const std::string& cmd) {
         s.show_exit = true;
         s.exit_error.clear();
     } else if (name == "theme") {
-        g_pal = palette_by_id(arg);
-        s.settings.theme = g_pal->id;
+        const Palette* p = palette_by_id(arg);
+        (p->light ? s.settings.theme_light : s.settings.theme_dark) = p->id;
+        if (s.settings.appearance != "system")
+            s.settings.appearance = p->light ? "light" : "dark";
+        s.settings.theme = p->id;
         save_settings(s.settings);
-        apply_style(s.dpi, ui_scale(s.settings));
     } else if (name == "layout.switch" || name == "layout") {
         std::string next = arg;
         if (next.empty()) {  // cycle
@@ -2968,10 +3150,6 @@ void run_command(App::State& s, const std::string& cmd) {
         if (next.empty() && !s.layouts.empty())
             next = s.layouts.front().name;
         s.settings.layout = next;
-        if (const auto& l = s.layout(); !l.theme.empty()) {
-            g_pal = palette_by_id(l.theme);
-            apply_style(s.dpi, ui_scale(s.settings));
-        }
         save_settings(s.settings);
         s.toast("Layout: " + next, "", "", g_pal->info, 2);
         s.focus_view(s.ws.focused_session());
@@ -3182,6 +3360,9 @@ void draw_mod_panels(App::State& s, const std::string& where) {
         ImGui::Dummy(ImVec2(0, px(4)));
     }
 }
+
+// herdr tabs.js 25-29: a tab is shown by its lead pane: the first agent, else the first pane.
+std::string lead_pane(App::State& s, const std::vector<std::string>& ids);
 
 // ------------------------------------------------------------------ herdr window chrome
 // Layout, sizes and behaviour follow herdr-app's default layout and mods (layouts/main.json,
@@ -3448,14 +3629,12 @@ std::vector<SpaceRow> space_rows(App::State& s, const std::map<std::string, std:
     std::vector<GitInfo> info(s.ws.spaces.size());
     for (std::size_t i = 0; i < s.ws.spaces.size(); ++i) {
         const auto& sp = s.ws.spaces[i];
-        if (!sp.machine.empty())
-            continue;
         for (const auto& t : sp.tabs) {
             const auto ids = s.ws.sessions_in(t);
             if (!ids.empty()) {
                 const auto it = s.views_by_id.find(ids.front());
                 if (it != s.views_by_id.end())
-                    info[i] = s.git.get(it->second.cwd);
+                    info[i] = s.git.get(it->second.cwd, sp.machine);
                 break;
             }
         }
@@ -3510,7 +3689,7 @@ void space_menu(App::State& s, int i) {
     for (const auto& t : sp.tabs) {
         const auto ids = s.ws.sessions_in(t);
         if (!ids.empty() && s.views_by_id.count(ids.front())) {
-            g = s.git.get(s.views_by_id[ids.front()].cwd);
+            g = s.git.get(s.views_by_id[ids.front()].cwd, sp.machine);
             break;
         }
     }
@@ -3573,17 +3752,25 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             // Machine header (26 px): icon, name, state, "+", dot, chevron; click folds.
             ImGui::PushID(("m:" + row.machine).c_str());
             const float hh = px(26);
+            const bool on = s.machine_connected(row.machine);
+            // herdr: a small "+" link (space.new {machine}) when connected, left of the dot.
+            const float plus_x = a.x + rw - px(8) - px(11) - px(7) - px(6) - px(7) - px(16);
+            const bool over_plus = on && !rail && ImGui::IsMouseHoveringRect(ImVec2(plus_x, a.y), ImVec2(plus_x + px(16), a.y + hh));
             ImGui::SetCursorScreenPos(a);
-            if (ImGui::InvisibleButton("##mh", ImVec2(rw, hh))) {
+            const bool header_clicked = ImGui::InvisibleButton("##mh", ImVec2(rw, hh));
+            if (header_clicked && over_plus) {
+                run_command(s, "space.new_on:" + row.machine);
+            } else if (header_clicked) {
                 if (s.folded_machines.contains(row.machine))
                     s.folded_machines.erase(row.machine);
                 else
                     s.folded_machines.insert(row.machine);
+                s.settings.folded_machines.assign(s.folded_machines.begin(), s.folded_machines.end());
+                save_settings(s.settings);
             }
             const bool hov = ImGui::IsItemHovered();
             if (hov)
                 d->AddRectFilled(a, ImVec2(a.x + rw, a.y + hh), g_pal->hover, px(6));
-            const bool on = s.machine_connected(row.machine);
             const float cy = a.y + hh * 0.5f;
             if (rail) {
                 draw_icon(s, d, row.machine.empty() ? ui::icon::kMonitor : ui::icon::kServer, fpx(13),
@@ -3597,12 +3784,16 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
                           ImVec2(x + px(6.5f), cy), g_pal->faint);
                 x += px(13) + px(7);
                 const std::string label = row.machine.empty() ? std::string("This computer") : row.machine;
-                const float right = a.x + rw - px(8) - px(11) - px(7) - px(6) - px(7);
+                const float right = a.x + rw - px(8) - px(11) - px(7) - px(6) - px(7) - (on ? px(18) : 0.0f);
                 float nw = text_clipped(d, s.fonts.ui, fpx(11), ImVec2(x, cy - fpx(11) * 0.6f), g_pal->faint, label,
                                         right - x);
                 if (!on && !row.machine.empty())
                     text_clipped(d, s.fonts.ui, fpx(11), ImVec2(x + nw + px(7), cy - fpx(11) * 0.6f), g_pal->faint,
                                  "unreachable", right - x - nw - px(7));
+                if (on)
+                    draw_icon(s, d, ui::icon::kPlus, fpx(12), ImVec2(plus_x + px(8), cy), over_plus ? g_pal->text : g_pal->faint);
+                if (over_plus)
+                    ImGui::SetTooltip("New space on %s", s.machine_label(row.machine).c_str());
                 d->AddCircleFilled(ImVec2(a.x + rw - px(8) - px(11) - px(7) - px(3), cy), px(3),
                                    on ? g_pal->done : g_pal->faint);
                 draw_icon(s, d,
@@ -3616,6 +3807,24 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             }
             ImGui::PopID();
             ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + hh));
+            // herdr: an empty, unfolded machine shows "+ New space there" (or "Loading..." while
+            // it connects).
+            const bool empty = ri + 1 >= rows.size() || rows[ri + 1].index < 0;
+            if (empty && !rail && !s.folded_machines.contains(row.machine)) {
+                const ImVec2 e(a0.x + pad, a.y + hh);
+                ImGui::SetCursorScreenPos(e);
+                ImGui::PushID(("e:" + row.machine).c_str());
+                const bool clicked = ImGui::InvisibleButton("##empty", ImVec2(rw, px(28)));
+                const bool eh = on && ImGui::IsItemHovered();
+                ImGui::PopID();
+                if (eh)
+                    d->AddRectFilled(e, ImVec2(e.x + rw, e.y + px(28)), g_pal->hover, px(6));
+                const std::string text = on ? std::string("+ New space there") : std::string("Loading\xE2\x80\xA6");
+                d->AddText(s.fonts.ui, fpx(12), ImVec2(e.x + px(28), e.y + px(14) - fpx(12) * 0.6f), g_pal->dim, text.c_str());
+                if (clicked && on)
+                    run_command(s, "space.new_on:" + row.machine);
+                ImGui::SetCursorScreenPos(ImVec2(a0.x, e.y + px(28)));
+            }
             continue;
         }
         const int i = row.index;
@@ -3713,8 +3922,7 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         for (const auto& t2 : sp.tabs) {
             const auto ids = s.ws.sessions_in(t2);
             if (!ids.empty() && s.views_by_id.count(ids.front())) {
-                if (sp.machine.empty())
-                    g = s.git.get(s.views_by_id[ids.front()].cwd);
+                g = s.git.get(s.views_by_id[ids.front()].cwd, sp.machine);
                 break;
             }
         }
@@ -3776,6 +3984,13 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
 // for them now or had one before.
 bool is_agent(const ui::SessionView& v) {
     return !v.agent_source.empty() || v.agent_state != "Unknown" || v.last_agent_state != "Unknown";
+}
+
+std::string lead_pane(App::State& s, const std::vector<std::string>& ids) {
+    for (const auto& id : ids)
+        if (const auto it = s.views_by_id.find(id); it != s.views_by_id.end() && is_agent(it->second))
+            return id;
+    return ids.empty() ? std::string() : ids.front();
 }
 
 int urgency(Attention a) {
@@ -4094,16 +4309,6 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         }
         if (hov && !v.agent_message.empty())
             ImGui::SetTooltip("%s", v.agent_message.c_str());
-        if (begin_menu("##agentctx")) {
-            if (menu_row(s, ui::icon::kZoom, "Peek"))
-                run_command(s, "agent.peek:" + id);
-            if (s.ws.find(id).space < 0 && menu_row(s, ui::icon::kSplitRight, "Open as pane"))
-                run_command(s, "agent.keep:" + id);
-            menu_separator();
-            if (menu_row(s, ui::icon::kClose, "End", {}, v.process_state == "Running"))
-                run_command(s, "terminal.kill:" + id);
-            ImGui::EndPopup();
-        }
         ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + rh));
         ImGui::PopID();
     };
@@ -4297,30 +4502,50 @@ void draw_new_menu(App::State& s) {
         }
     };
     row(ui::icon::kTerminal, "Terminal", s.keymap.chord_for("tab.new"), "tab.new");
-    const auto profiles = s.host->profiles();
+    // The agents of the active space's machine (herdr knownAgents({on: machine})).
+    const std::string machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
+    ui::HostClient* mh = s.host_for(machine);
+    const auto profiles = mh->profiles();
     // Other shells (WSL distributions): a tab in the focused folder, like Terminal.
     for (const auto& [id, name] : profiles)
         if (id.starts_with("wsl-") && id != pick_shell(s.settings.shell_profile, profiles))
             row(ui::icon::kTerminal, name, "", "launch:tab:" + id);
-    // Installed agents: every profile that is not a shell, numbered 1-9.
+    ImGui::Dummy(ImVec2(0, px(2)));
+    ImGui::PushFont(s.fonts.ui_medium, fpx(11));
+    ImGui::TextDisabled("Start an agent");
+    ImGui::PopFont();
+    // Installed agents (profiles that are not shells), numbered 1-9; then up to two known
+    // agents that are not installed, disabled.
     int n = 0;
-    bool header = false;
+    std::string have;
     for (const auto& [id, name] : profiles) {
         if (is_shell_profile(id))
             continue;
-        if (!header) {
-            ImGui::Dummy(ImVec2(0, px(2)));
-            ImGui::PushFont(s.fonts.ui_medium, fpx(11));
-            ImGui::TextDisabled("Start an agent");
-            ImGui::PopFont();
-            header = true;
-        }
+        for (const char ch : id + " " + name + " ")
+            have += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
         ++n;
         const std::string key = n <= 9 ? std::to_string(n) : std::string();
         row(nullptr, name, key, "launch:tab:" + id);
         if (n <= 9 && ImGui::IsKeyPressed(static_cast<ImGuiKey>(ImGuiKey_1 + n - 1), false)) {
             ImGui::CloseCurrentPopup();
             run_command(s, "launch:tab:" + id);
+        }
+    }
+    if (profiles.empty()) {
+        ImGui::PushFont(s.fonts.ui, fpx(12));
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(9));
+        ImGui::TextDisabled("%s", mh->connected() ? "Checking installed agents\xE2\x80\xA6"
+                                                  : "Could not check installed agents");
+        ImGui::PopFont();
+    } else {
+        static constexpr std::array<std::pair<const char*, const char*>, 4> kKnown = {
+            {{"claude", "Claude Code"}, {"codex", "Codex"}, {"gemini", "Gemini CLI"}, {"opencode", "OpenCode"}}};
+        int missing = 0;
+        for (const auto& [key, label] : kKnown) {
+            if (missing >= 2 || have.find(key) != std::string::npos)
+                continue;
+            ++missing;
+            menu_row(s, nullptr, label, "not installed", false);
         }
     }
     ImGui::Separator();
@@ -4349,9 +4574,8 @@ void draw_window_buttons(App::State& s, float right, float top, float h) {
     const bool hov = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     if (hov)
-        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + b, y + b), IM_COL32(0xe8, 0x11, 0x23, 255), px(6));
-    draw_icon(s, dl, ui::icon::kWinClose, fpx(16), ImVec2(x + b * 0.5f, y + b * 0.5f),
-              hov ? IM_COL32(255, 255, 255, 255) : g_pal->dim);
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + b, y + b), g_pal->hover, px(6));
+    draw_icon(s, dl, ui::icon::kWinClose, fpx(16), ImVec2(x + b * 0.5f, y + b * 0.5f), hov ? g_pal->text : g_pal->dim);
     if (close)
         ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
 }
@@ -4419,7 +4643,7 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
             // herdr: an unnamed tab follows its agent's live title; a shell shows its program.
             std::string label = tab.name;
             if (label.empty() && !ids.empty()) {
-                const std::string shown_id = tab.focused.empty() ? ids.front() : tab.focused;
+                const std::string shown_id = lead_pane(s, ids);
                 if (const auto vi = s.views_by_id.find(shown_id); vi != s.views_by_id.end() && is_agent(vi->second))
                     label = agent_detail(s, shown_id, vi->second);
                 if (label.empty())
@@ -4487,8 +4711,6 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
             }
             if (hov && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                 open_rename(s, "tab", tab.id, tab.name);
-            if (hov && ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
-                close_tab = it.i;
             if (begin_menu("##tabctx")) {
                 if (menu_row(s, ui::icon::kCommand, "Rename", s.keymap.chord_for("tab.rename"))) {
                     s.ws.select_tab(it.i);
@@ -4510,7 +4732,7 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
             const float cy = a.y + th * 0.5f;
             float cx = a.x + px(10);
             const auto ids = s.ws.sessions_in(tab);
-            const std::string shown = tab.focused.empty() && !ids.empty() ? ids.front() : tab.focused;
+            const std::string shown = ids.empty() ? std::string() : lead_pane(s, ids);
             if (s.views_by_id.count(shown)) {
                 const auto& v = s.views_by_id[shown];
                 program_badge(dl, s.fonts.ui_bold, fpx(10.5f), ImVec2(cx, cy - px(7)), px(14),
@@ -4548,11 +4770,34 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
                 s.ws.move_tab(s.ws.active_space, s.drag_tab, drop);
             s.drag_tab = -1;
         }
-        // The wheel over the bar switches tabs, one per notch.
-        if (ImGui::IsMouseHoveringRect(ImVec2(x, pos.y), ImVec2(tabs_right, pos.y + height)) &&
-            ImGui::GetIO().MouseWheel != 0 && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) {
-            s.ws.cycle_tab(ImGui::GetIO().MouseWheel < 0 ? 1 : -1);
-            s.focus_view(s.ws.focused_session());
+        // The wheel over the bar switches tabs (herdr tabs.js wheel handling).
+        const float wheel = ImGui::GetIO().MouseWheel;
+        if (ImGui::IsMouseHoveringRect(ImVec2(x, pos.y), ImVec2(tabs_right, pos.y + height)) && wheel != 0 &&
+            !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) {
+            const auto now = Clock::now();
+            auto& w = s.tab_wheel;
+            int step = 0;
+            if (std::abs(wheel) >= 1.0f) {  // a mouse notch: one tab
+                step = wheel < 0 ? 1 : -1;
+                w = {};
+            } else {
+                const float px_delta = -wheel * 120.0f;
+                if (now - w.last > std::chrono::milliseconds(250) || (w.acc != 0 && (w.acc > 0) != (px_delta > 0)))
+                    w = {};
+                w.acc += px_delta;
+                w.last = now;
+                const float need = w.steps == 0 ? 20.0f : 60.0f;
+                if (std::abs(w.acc) >= need && now - w.switched >= std::chrono::milliseconds(100)) {
+                    step = w.acc > 0 ? 1 : -1;
+                    w.acc -= static_cast<float>(step) * need;
+                    ++w.steps;
+                    w.switched = now;
+                }
+            }
+            if (step != 0) {
+                s.ws.cycle_tab(step);
+                s.focus_view(s.ws.focused_session());
+            }
         }
         x = std::min(tx, tabs_right) + px(3);
     }
@@ -4598,7 +4843,7 @@ void draw_status_bar(App::State& s, ImVec2 pos, float width, float height) {
     x += px(16);
     const std::string fid = s.ws.focused_session();
     if (s.views_by_id.count(fid)) {
-        const auto g = machine.empty() ? s.git.get(s.views_by_id[fid].cwd) : GitInfo{};
+        const auto g = s.git.get(s.views_by_id[fid].cwd, machine);
         if (g.repo && !g.branch.empty()) {
             draw_icon(s, dl, ui::icon::kBranch, fpx(13), ImVec2(x + px(6.5f), cy), g_pal->dim);
             x += px(13) + px(6);
@@ -4656,7 +4901,8 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
     const float fs = ImGui::GetFontSize();
     const float header_h = px(30);
     const float cy = pos.y + header_h * 0.5f;
-    const bool pane_hovered = ImGui::IsMouseHoveringRect(pos, max, false) && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
+    const bool pane_hovered = ImGui::IsMouseHoveringRect(pos, ImVec2(max.x, pos.y + header_h), false) &&
+                              ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
     float hx = pos.x + px(10);
     program_badge(dl, s.fonts.ui_bold, fpx(10.5f), ImVec2(hx, cy - px(7)), px(14), program_info(v.program, v.profile_id));
     hx += px(14) + px(8);
@@ -4669,7 +4915,7 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
     float rx = max.x - px(8);
     if (pane_hovered) {
         auto hbtn = [&](const char* bid, const char* glyph, const char* cmd, const char* tip) {
-            const float b = px(22);
+            const float b = px(20);  // 14 px icon, 3 px padding
             rx -= b;
             const std::string t = std::string(tip) + "  " + s.keymap.chord_for(cmd);
             if (icon_button(s, bid, glyph, ImVec2(rx, cy - b * 0.5f), b, fpx(14), t.c_str(), g_pal->dim)) {
@@ -4694,19 +4940,8 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
             rx -= mw + px(8);
         }
     }
-    // Folder (~ for home) and branch, dim.
-    const std::string where = display_path(v.cwd);
-    const float ww = text_clipped(dl, s.fonts.ui, fpx(11.5f), ImVec2(hx, cy - fpx(11.5f) * 0.6f), g_pal->faint, where,
-                                  rx - hx);
-    if (s.machine_of[id].empty()) {
-        const auto g = s.git.get(v.cwd);
-        const float bx = hx + ww + px(10);
-        if (g.repo && !g.branch.empty() && bx + px(40) < rx) {
-            draw_icon(s, dl, ui::icon::kBranch, fpx(12), ImVec2(bx + px(6), cy), g_pal->faint);
-            text_clipped(dl, s.fonts.ui, fpx(11.5f), ImVec2(bx + px(16), cy - fpx(11.5f) * 0.6f), g_pal->faint,
-                         g.branch == "HEAD" ? std::string("(detached)") : g.branch, rx - bx - px(16));
-        }
-    }
+    // Folder (~ for home), dim, the rest of the width.
+    text_clipped(dl, s.fonts.ui, fpx(11.5f), ImVec2(hx, cy - fpx(11.5f) * 0.6f), g_pal->faint, display_path(v.cwd), rx - hx);
     // Grip (herdr pane_drag.rs): 28x18 in the middle of the header, two rows of three dots;
     // only with two or more panes and not zoomed. Dragging it moves the pane.
     {
@@ -4791,6 +5026,51 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
         vs.view.scroll_speed = s.settings.scroll_speed;
         vs.view.line_height = s.settings.line_height;
         vs.view.right_click_to_program = s.ws.right_click_program.contains(id);
+        // herdr pane menu (menu/main.js 24-81): Split right, Split down, Zoom, Rename, where
+        // right-clicks go, Send back to <parent>, Close pane.
+        vs.view.menu_rows = [&s, id, parent = v.parent] {
+            auto pick = [&](const char* glyph, const char* label, const char* cmd) {
+                if (!menu_row(s, glyph, label, cmd != nullptr ? s.keymap.chord_for(cmd) : std::string()))
+                    return false;
+                s.ws.focus(id);
+                return true;
+            };
+            if (pick(ui::icon::kSplitRight, "Split right", "pane.split:right")) {
+                run_command(s, "pane.split:right");
+                return true;
+            }
+            if (pick(ui::icon::kSplitDown, "Split down", "pane.split:down")) {
+                run_command(s, "pane.split:down");
+                return true;
+            }
+            if (pick(ui::icon::kZoom, "Zoom", "pane.zoom")) {
+                run_command(s, "pane.zoom");
+                return true;
+            }
+            if (pick(ui::icon::kCommand, "Rename", "pane.rename")) {
+                run_command(s, "pane.rename");
+                return true;
+            }
+            const bool to_program = s.ws.right_click_program.contains(id);
+            if (pick(ui::icon::kTerminal, to_program ? "Use AgentDesk right-click menu" : "Send right-clicks to pane",
+                     nullptr)) {
+                run_command(s, to_program ? "terminal.right_click:menu" : "terminal.right_click:program");
+                return true;
+            }
+            if (!parent.empty() && s.views_by_id.count(parent)) {
+                const std::string label = "Send back to " + s.pane_title(parent);
+                if (pick(ui::icon::kArrowLeft, label.c_str(), nullptr)) {
+                    run_command(s, "pane.park");
+                    return true;
+                }
+            }
+            menu_separator();
+            if (pick(ui::icon::kClose, "Close pane", "pane.close")) {
+                run_command(s, "pane.close");
+                return true;
+            }
+            return false;
+        };
         vs.view.parent_name = !v.parent.empty() && s.views_by_id.count(v.parent) ? s.pane_title(v.parent) : std::string();
         vs.view.cell_width = s.settings.cell_width;
         vs.view.theme.default_bg = g_pal->term_bg;
@@ -5673,7 +5953,7 @@ const char* command_group(const std::string& id) {
         return "Space";
     if (starts("layout") || starts("sidebar.") || starts("details.") || starts("panel"))
         return "Layout";
-    if (starts("terminal.") || starts("session.") || id == "agent.new")
+    if (starts("terminal.") || starts("session."))
         return "Terminal";
     if (starts("agent."))
         return "Agent";
@@ -5694,17 +5974,69 @@ void draw_palette(App::State& s) {
     auto add = [&](std::string title, std::string cmd, std::string group) {
         all.push_back({std::move(title), cmd, std::move(group), s.keymap.chord_for(cmd)});
     };
-    add("Go to space or tab\xE2\x80\xA6", "app.picker", "Tab");
-    for (const auto& c : kCommands)
-        if (std::string(c.id) != "app.picker")
-            add(c.label, c.id, command_group(c.id));
-    add("Minimize window", "window.minimize", "Window");
-    add("Maximize window", "window.maximize", "Window");
-    add("Close window", "window.close", "Window");
-    for (const auto& p : kPalettes)
-        add(std::string("Theme: ") + p.label, std::string("theme:") + p.id, "App");
+    // herdr palette.js 22-97: the named entries, titles and order first.
+    static constexpr std::array<std::array<const char*, 3>, 45> kNamed = {{
+        {"tab.new", "New tab", "Tab"},
+        {"app.picker", "Go to space or tab\xE2\x80\xA6", "Tab"},
+        {"tab.rename", "Rename tab", "Tab"},
+        {"tab.close", "Close tab", "Tab"},
+        {"tab.next", "Next tab", "Tab"},
+        {"tab.prev", "Previous tab", "Tab"},
+        {"pane.split:right", "Split right", "Pane"},
+        {"pane.split:down", "Split down", "Pane"},
+        {"pane.close", "Close pane", "Pane"},
+        {"pane.zoom", "Zoom pane", "Pane"},
+        {"pane.go:left", "Focus pane left", "Pane"},
+        {"pane.go:right", "Focus pane right", "Pane"},
+        {"pane.go:up", "Focus pane up", "Pane"},
+        {"pane.go:down", "Focus pane down", "Pane"},
+        {"pane.swap:left", "Swap pane left", "Pane"},
+        {"pane.swap:right", "Swap pane right", "Pane"},
+        {"pane.swap:up", "Swap pane up", "Pane"},
+        {"pane.swap:down", "Swap pane down", "Pane"},
+        {"space.new", "New space", "Space"},
+        {"space.rename", "Rename space", "Space"},
+        {"space.close", "Close space", "Space"},
+        {"space.next", "Next space", "Space"},
+        {"space.prev", "Previous space", "Space"},
+        {"layout.switch", "Next layout", "Layout"},
+        {"layout.reset", "Reset layout", "Layout"},
+        {"layout.clone", "Duplicate layout", "Layout"},
+        {"mod.clone", "Duplicate mod", "Layout"},
+        {"terminal.open", "New terminal", "Terminal"},
+        {"terminal.copy", "Copy", "Terminal"},
+        {"terminal.paste", "Paste", "Terminal"},
+        {"agent.next", "Next agent", "Agent"},
+        {"agent.prev", "Previous agent", "Agent"},
+        {"window.minimize", "Minimize window", "Window"},
+        {"window.maximize", "Maximize window", "Window"},
+        {"window.close", "Close window", "Window"},
+        {"app.settings", "Settings", "App"},
+        {"app.help", "Keys", "App"},
+        {"app.welcome", "Welcome", "App"},
+        {"app.whats_new", "What's new", "App"},
+        {"app.reset", "Reset to the default screen", "App"},
+        {"app.zoom_in", "Zoom in", "App"},
+        {"app.zoom_out", "Zoom out", "App"},
+        {"app.zoom_reset", "Reset zoom", "App"},
+        {"app.quit", "Quit AgentDesk", "App"},
+        {"app.palette", "", ""},  // not listed (the palette itself)
+    }};
+    std::set<std::string> named;
+    for (const auto& [cmd, title, group] : kNamed) {
+        named.insert(cmd);
+        if (*title != '\0')
+            add(title, cmd, group);
+        if (std::string_view(cmd) == "app.quit")
+            for (const auto& p : kPalettes)
+                add(std::string("Theme: ") + p.label, std::string("theme:") + p.id, "App");
+    }
     for (const auto& l : s.layouts)
         add("Layout: " + l.name, "layout:" + l.name, "Layout");
+    // Then every other command, in its group (herdr adds the app's other commands the same way).
+    for (const auto& c : kCommands)
+        if (!named.contains(c.id))
+            add(c.label, c.id, command_group(c.id));
     for (const auto& c : s.mods->commands())
         add(c.mod + ": " + c.label, "mod:" + c.mod + ":" + c.id, "Mods");
     std::string q;
@@ -6147,12 +6479,12 @@ void draw_toasts(App::State& s) {
     while (!s.toasts.empty() && s.toasts.front().until < now)
         s.toasts.pop_front();
     const ImGuiViewport* vp = ImGui::GetMainViewport();
-    float y = vp->WorkPos.y + vp->WorkSize.y - px(16) - px(28);
+    float y = vp->WorkPos.y + vp->WorkSize.y - px(16);
     const float w = px(340);
     int n = 0;
     for (auto it = s.toasts.rbegin(); it != s.toasts.rend(); ++it, ++n) {
         const auto& t = *it;
-        const float h = t.body.empty() ? px(44) : px(62);
+        const float h = px(72);
         y -= h;
         ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - w - px(16), y));
         ImGui::SetNextWindowSize(ImVec2(w, h));
@@ -6164,7 +6496,7 @@ void draw_toasts(App::State& s) {
                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const ImVec2 wp = ImGui::GetWindowPos();
-        const float ty = wp.y + (t.body.empty() ? h * 0.5f - fpx(13) * 0.6f : px(14));
+        const float ty = wp.y + (t.body.empty() ? h * 0.5f - fpx(13) * 0.6f : h * 0.5f - px(17));
         dl->AddCircleFilled(ImVec2(wp.x + px(18), ty + fpx(13) * 0.55f), px(4), t.color);
         text_clipped(dl, s.fonts.ui_bold, fpx(13), ImVec2(wp.x + px(32), ty), g_pal->text, t.title, w - px(46));
         if (!t.body.empty()) {
@@ -6510,7 +6842,7 @@ void draw_rename(App::State& s) {
     ImGui::TextDisabled("%s", mod_clone                  ? "its folder name in the mods folder"
                               : s.rename_kind == "space" ? "empty: named after its folder"
                               : s.rename_kind == "tab" ? "empty: its number"
-                                                       : "empty: its program");
+                                                       : "empty: unnamed");
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, px(6)));
     const float bw = px(80);
@@ -6856,21 +7188,126 @@ bool stepper(App::State& s, const char* id, float& v, float step, float lo, floa
 }
 
 // Terminal fonts offered in Settings: the bundled default, then monospace faces Windows ships.
-std::vector<std::pair<std::string, std::wstring>> terminal_fonts() {
-    std::vector<std::pair<std::string, std::wstring>> out = {{"Default (JetBrains Mono)", L""}};
-    wchar_t buf[MAX_PATH]{};
-    const UINT n = ::GetWindowsDirectoryW(buf, MAX_PATH);
-    const std::filesystem::path dir = std::filesystem::path(std::wstring(buf, n)) / L"Fonts";
-    std::error_code ec;
-    for (const auto& [name, file] : std::vector<std::pair<std::string, std::wstring>>{
-             {"Cascadia Mono", L"CascadiaMono.ttf"}, {"Cascadia Code", L"CascadiaCode.ttf"},
-             {"Consolas", L"consola.ttf"}, {"Lucida Console", L"lucon.ttf"}, {"Courier New", L"cour.ttf"}})
-        if (std::filesystem::is_regular_file(dir / file, ec))
-            out.emplace_back(name, (dir / file).native());
-    return out;
+// ---- fonts (herdr: every installed family, filterable; weight; interface font)
+const std::vector<ui::FontFamily>& font_families() {
+    static const std::vector<ui::FontFamily> families = ui::installed_font_families();
+    return families;
+}
+
+const ui::FontFamily* find_family(const std::string& name) {
+    for (const auto& f : font_families())
+        if (_stricmp(f.name.c_str(), name.c_str()) == 0)
+            return &f;
+    return nullptr;
+}
+
+// Terminal font: family (empty: bundled JetBrains Mono) at the chosen weight, bold from the
+// family's 700 face.
+void apply_terminal_font(App::State& s) {
+    const auto* f = find_family(s.settings.terminal_font.empty() ? std::string("JetBrains Mono") : s.settings.terminal_font);
+    ImFont* mono = f != nullptr ? ui::load_font_file(f->file_for(s.settings.terminal_weight), s.settings.font_size, true) : nullptr;
+    s.fonts.mono = mono != nullptr ? mono : ui::load_terminal_font(L"", s.settings.font_size);
+    ImFont* bold = f != nullptr ? ui::load_font_file(f->file_for(700), s.settings.font_size, true) : nullptr;
+    s.fonts.mono_bold = bold != nullptr ? bold : s.fonts.mono;
+}
+
+// Interface font: family (empty: bundled Geist, kept from startup) at 400 / 500 / 600.
+void apply_ui_font(App::State& s) {
+    if (s.base_ui == nullptr) {  // the bundled set, loaded once at startup
+        s.base_ui = s.fonts.ui;
+        s.base_ui_medium = s.fonts.ui_medium;
+        s.base_ui_bold = s.fonts.ui_bold;
+    }
+    const auto* f = s.settings.ui_font.empty() ? nullptr : find_family(s.settings.ui_font);
+    ImFont* r = f != nullptr ? ui::load_font_file(f->file_for(400), 13.0f, false) : nullptr;
+    if (r == nullptr) {
+        s.fonts.ui = s.base_ui;
+        s.fonts.ui_medium = s.base_ui_medium;
+        s.fonts.ui_bold = s.base_ui_bold;
+    } else {
+        ImFont* m = ui::load_font_file(f->file_for(500), 13.0f, false);
+        ImFont* b = ui::load_font_file(f->file_for(600), 13.0f, false);
+        s.fonts.ui = r;
+        s.fonts.ui_medium = m != nullptr ? m : r;
+        s.fonts.ui_bold = b != nullptr ? b : s.fonts.ui_medium;
+    }
+    ImGui::GetIO().FontDefault = s.fonts.ui;
+}
+
+// herdr font list: a filter box and up to 200 matching families.
+bool font_picker(App::State& /*s*/, const char* id, std::string& family, const char* default_label, float width) {
+    bool changed = false;
+    ImGui::SetNextItemWidth(width);
+    const std::string current = family.empty() ? std::string(default_label) : family;
+    if (ImGui::BeginCombo(id, current.c_str(), ImGuiComboFlags_HeightLarge)) {
+        static char filter[64] = {};
+        if (ImGui::IsWindowAppearing()) {
+            filter[0] = '\0';
+            ImGui::SetKeyboardFocusHere();
+        }
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##filter", "Search fonts", filter, sizeof filter);
+        if (ImGui::Selectable(default_label, family.empty())) {
+            family.clear();
+            changed = true;
+        }
+        int shown = 0;
+        for (const auto& f : font_families()) {
+            if (filter[0] != '\0') {
+                std::string a = f.name, q = filter;
+                for (auto& c : a)
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (auto& c : q)
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (a.find(q) == std::string::npos)
+                    continue;
+            }
+            if (++shown > 200) {
+                ImGui::TextDisabled("Showing 200: type to narrow the list");
+                break;
+            }
+            if (ImGui::Selectable(f.name.c_str(), _stricmp(f.name.c_str(), family.c_str()) == 0)) {
+                family = f.name;
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
 }
 
 void play_alert(App::State& s, bool blocked);
+
+// A row of choices, one selected (herdr's segment control).
+bool segmented(App::State& s, const char* id, std::string& value,
+               std::initializer_list<std::pair<const char*, const char*>> options) {
+    bool changed = false;
+    ImGui::PushID(id);
+    const float bw = px(78), bh = px(28);
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(a, ImVec2(a.x + bw * static_cast<float>(options.size()) + px(4), a.y + bh + px(4)), raised_color(), px(7));
+    float x = a.x + px(2);
+    for (const auto& [key, label] : options) {
+        ImGui::SetCursorScreenPos(ImVec2(x, a.y + px(2)));
+        if (ImGui::InvisibleButton(key, ImVec2(bw, bh)) && value != key) {
+            value = key;
+            changed = true;
+        }
+        const bool on = value == key;
+        const bool hov = ImGui::IsItemHovered();
+        if (on || hov)
+            dl->AddRectFilled(ImVec2(x, a.y + px(2)), ImVec2(x + bw, a.y + px(2) + bh), on ? g_pal->selected : g_pal->hover, px(6));
+        const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(12), FLT_MAX, 0, label);
+        dl->AddText(s.fonts.ui, fpx(12), ImVec2(x + (bw - t.x) * 0.5f, a.y + px(2) + (bh - t.y) * 0.5f),
+                    on ? g_pal->text : g_pal->dim, label);
+        x += bw;
+    }
+    ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + bh + px(6)));
+    ImGui::Dummy(ImVec2(0, 0));
+    ImGui::PopID();
+    return changed;
+}
 
 void draw_settings(App::State& s) {
     if (s.show_settings) {
@@ -6970,15 +7407,29 @@ void draw_settings(App::State& s) {
         }
         ImGui::NewLine();
         settings_section(s, "Theme");
+        settings_row(s, "Appearance", "Light or dark, or as your system is now.", px(240));
+        if (segmented(s, "##appearance", s.settings.appearance, {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}}))
+            changed = true;
+        settings_row_done(s);
+        ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
+        ImGui::PushFont(s.fonts.ui, fpx(11.5f));
+        ImGui::TextWrapped("A layout file with its own \"theme\" uses that one instead.");
+        ImGui::PopFont();
+        ImGui::PopStyleColor();
+        for (const bool light_cards : {false, true}) {
+        ImGui::Dummy(ImVec2(0, px(4)));
+        ImGui::PushFont(s.fonts.ui_medium, fpx(12));
+        ImGui::TextDisabled("%s", light_cards ? "Light" : "Dark");
+        ImGui::PopFont();
         for (const auto& p : kPalettes) {
-            const bool on = g_pal == &p;
+            if (p.light != light_cards)
+                continue;
+            const bool on = (light_cards ? s.settings.theme_light : s.settings.theme_dark) == p.id;
             const ImVec2 a = ImGui::GetCursorScreenPos();
             const float cw = px(120), ch = px(64);
             ImGui::PushID(p.id);
             if (ImGui::InvisibleButton("##theme", ImVec2(cw, ch))) {
-                g_pal = &p;
-                s.settings.theme = p.id;
-                apply_style(s.dpi, ui_scale(s.settings));
+                run_command(s, std::string("theme:") + p.id);
                 changed = true;
             }
             ImGui::PopID();
@@ -6995,6 +7446,7 @@ void draw_settings(App::State& s) {
                 ImGui::NewLine();
         }
         ImGui::NewLine();
+        }
         settings_section(s, "Size and fonts");
         settings_row(s, "Zoom", "Everything: terminals, panels, text.", px(180));
         if (stepper(s, "zoom", s.settings.zoom, 0.1f, 0.5f, 3.0f, "%.0f%%", 100.0f)) {
@@ -7011,26 +7463,39 @@ void draw_settings(App::State& s) {
         }
         settings_row_done(s);
         {
-            const auto fonts = terminal_fonts();
-            std::string current = fonts.front().first;
-            for (const auto& [name, file] : fonts)
-                if (name == s.settings.terminal_font)
-                    current = name;
             settings_row(s, "Terminal font", nullptr, px(200) + px(10) + px(120));
-            ImGui::SetNextItemWidth(px(200));
-            if (ImGui::BeginCombo("##tfont", current.c_str())) {
-                for (const auto& [name, file] : fonts) {
-                    if (ImGui::Selectable(name.c_str(), name == current)) {
-                        s.settings.terminal_font = file.empty() ? std::string() : name;
-                        s.fonts.mono = ui::load_terminal_font(file, s.settings.font_size);
-                        changed = true;
-                    }
-                }
-                ImGui::EndCombo();
+            if (font_picker(s, "##tfont", s.settings.terminal_font, "JetBrains Mono (default)", px(200))) {
+                apply_terminal_font(s);
+                changed = true;
             }
             ImGui::SameLine(0, px(10));
             if (stepper(s, "tsize", s.settings.font_size, 1.0f, 8.0f, 32.0f, "%.0f px"))
                 changed = true;
+            settings_row_done(s);
+            // Terminal font weight: the weights the family has.
+            settings_row(s, "Terminal font weight", nullptr, px(200));
+            const auto* fam =
+                find_family(s.settings.terminal_font.empty() ? std::string("JetBrains Mono") : s.settings.terminal_font);
+            static constexpr std::pair<int, const char*> kWeightNames[] = {
+                {100, "Thin"}, {200, "Extra light"}, {300, "Light"}, {400, "Regular"}, {500, "Medium"},
+                {600, "Semibold"}, {700, "Bold"}, {800, "Extra bold"}, {900, "Black"}};
+            auto weight_label = [&](int w) {
+                for (const auto& [v, n] : kWeightNames)
+                    if (v == w)
+                        return std::string(n) + " " + std::to_string(w);
+                return std::to_string(w);
+            };
+            ImGui::SetNextItemWidth(px(200));
+            if (ImGui::BeginCombo("##tweight", weight_label(s.settings.terminal_weight).c_str())) {
+                if (fam != nullptr)
+                    for (const auto& [fw, file] : fam->weights)
+                        if (ImGui::Selectable(weight_label(fw).c_str(), fw == s.settings.terminal_weight)) {
+                            s.settings.terminal_weight = fw;
+                            apply_terminal_font(s);
+                            changed = true;
+                        }
+                ImGui::EndCombo();
+            }
             settings_row_done(s);
         }
         settings_row(s, "Terminal line height", nullptr, px(180));
@@ -7041,6 +7506,12 @@ void draw_settings(App::State& s) {
         settings_row_done(s);
         settings_row(s, "Terminal scroll speed", nullptr, px(180));
         changed |= stepper(s, "ss", s.settings.scroll_speed, 0.1f, 0.1f, 5.0f, "%.0f%%", 100.0f);
+        settings_row_done(s);
+        settings_row(s, "Interface font", nullptr, px(200));
+        if (font_picker(s, "##uifont", s.settings.ui_font, "Geist (default)", px(200))) {
+            apply_ui_font(s);
+            changed = true;
+        }
         settings_row_done(s);
         settings_section(s, "Terminals");
         {
@@ -7291,18 +7762,12 @@ void draw_welcome(App::State& s) {
             apply_style(s.dpi, ui_scale(s.settings));
             changed = true;
         }
-        ImGui::TextDisabled("Theme");
+        // herdr welcome page 1: Appearance System / Light / Dark.
+        ImGui::TextDisabled("Appearance");
         ImGui::SameLine(px(120));
-        for (const auto& p : kPalettes) {
-            if (ImGui::RadioButton(p.label, g_pal == &p)) {
-                g_pal = &p;
-                s.settings.theme = p.id;
-                apply_style(s.dpi, ui_scale(s.settings));
-                changed = true;
-            }
-            ImGui::SameLine();
-        }
-        ImGui::NewLine();
+        if (segmented(s, "##wappearance", s.settings.appearance,
+                      {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}}))
+            changed = true;
     } else if (page == 1) {
         title("Add your other machines",
               "A desktop at home, a server: AgentDesk reaches them over ssh, and agents there keep running while "
@@ -7315,6 +7780,13 @@ void draw_welcome(App::State& s) {
         primary_button_style(false);
     } else if (page == 2) {
         title("Choose your panels", "Buttons at the right of the tab bar open them beside your terminals.");
+        // herdr welcome.js 396-413: the first visit to this page starts with both off; skipping
+        // the welcome leaves both on.
+        if (!s.welcome_panels_seen) {
+            s.welcome_panels_seen = true;
+            s.settings.panels.clear();
+            changed = true;
+        }
         auto toggle = [&](const char* id, const char* label, const char* text) {
             bool on = std::find(s.settings.panels.begin(), s.settings.panels.end(), id) != s.settings.panels.end();
             if (ImGui::Checkbox(label, &on)) {
@@ -7338,6 +7810,24 @@ void draw_welcome(App::State& s) {
         ImGui::TextWrapped("Change any shortcut in keys.json, the look in Settings (%s), and add C++ mods in the mods "
                            "folder. agentctl drives AgentDesk from a terminal or from your agents.",
                            s.keymap.chord_for("app.settings").c_str());
+        // herdr page 4: a line to give your agent so it learns to drive the app.
+        ImGui::Dummy(ImVec2(0, px(8)));
+        ImGui::TextDisabled("Tell your agent:");
+        static constexpr const char* kAsk =
+            "Run `agentctl --skill` and read it, then use agentctl to start, watch and report to other agents here.";
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, v4(raised_color()));
+        ImGui::BeginChild("##ask", ImVec2(-1, px(52)), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+        ImGui::SetCursorPos(ImVec2(px(10), px(8)));
+        ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x - px(80));
+        ImGui::TextUnformatted(kAsk);
+        ImGui::PopTextWrapPos();
+        ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - px(72), px(12)));
+        if (ImGui::Button(s.welcome_copied ? "Copied" : "Copy", ImVec2(px(62), px(26)))) {
+            ImGui::SetClipboardText(kAsk);
+            s.welcome_copied = true;
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
     }
     // Footer: dots, Back / Next.
     const float fy = ImGui::GetWindowPos().y + h - px(56);
@@ -7750,6 +8240,13 @@ void App::frame() {
     State& s = *s_;
     g_scale = s.dpi * ui_scale(s.settings);
     s.fonts.mono_size = s.settings.font_size / ui_text_factor(s.settings);
+    s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
+    if (const Palette* want = effective_palette(s.settings.appearance, s.settings.theme_dark, s.settings.theme_light,
+                                                s.layout().theme);
+        want != g_pal) {
+        g_pal = want;
+        apply_style(s.dpi, ui_scale(s.settings));
+    }
     const bool connected = s.host->connected();
 
     if (auto doc = s.host->take_ui_state()) {

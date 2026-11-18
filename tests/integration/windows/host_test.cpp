@@ -966,6 +966,7 @@ TEST_F(HostFixture, FilesAndChangesRequestsForRemoteClients) {
     EXPECT_EQ(st->result->value("exit_code", 1), 0);
     EXPECT_NE(st->result->value("output", "").find("?? a.txt"), std::string::npos);
     // Only the panel's commands; no config overrides or external diff programs.
+    EXPECT_FALSE(c->call("git.run", {{"cwd", root}, {"args", {"rev-list", "--all"}}})->error.has_value());  // branch tail
     EXPECT_TRUE(c->call("git.run", {{"cwd", root}, {"args", {"config", "--list"}}})->error.has_value());
     EXPECT_TRUE(c->call("git.run", {{"cwd", root}, {"args", {"diff", "--ext-diff"}}})->error.has_value());
     EXPECT_TRUE(c->call("git.run", {{"cwd", root}, {"args", {"status", "-c", "x=y"}}})->error.has_value());
