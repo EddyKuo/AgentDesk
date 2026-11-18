@@ -21,6 +21,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace agentdesk::ui::updates {
 
@@ -115,5 +116,38 @@ bool apply(std::string* error);
 void relaunch();
 // update.rs 581-621: the first start after an update.
 void after_update();
+
+// ---- agent-host's own update (design doc 7.4 OQ-09)
+// The pipe this window talks to ("" = the default one): `agentctl update` (agentctl.exe beside
+// agent-ui; herdr core_bin.rs 242-265 runs `hc update`) updates that agent-host.
+void set_pipe(std::wstring pipe);
+// update.rs 235-262: `agentctl update` in the background; the terminals keep running (agent-host
+// hands them to the new one) and the window reconnects.
+void update_core();
+// core_bin.rs 247-265: runs `agentctl update --json [extra]`. Ok: what agent-host is now
+// ("agent-host 0.2.0"); else the error ("message (hint)").
+bool run_core_update(const std::vector<std::wstring>& extra, std::string* now, std::string* error);
+
+// What `agentctl update` (herdr: `hc update`) does before it asks the running agent-host to
+// hand over: find the release and put it in place.
+struct CoreStageRequest {
+    std::string have;                              // the running agent-host's version
+    std::filesystem::path host_exe;                // where it runs from (hello "host_exe")
+    std::optional<std::string> at_least;           // `--version X` (core_bin.rs 246)
+    std::optional<std::filesystem::path> from;      // `--exe`: an agent-host already on disk
+};
+struct CoreStaged {
+    bool ok = false;
+    std::string error;
+    std::string hint;
+    std::optional<std::filesystem::path> exe;  // hand over to this; nullopt: already up to date
+    std::string version;                       // what that is (or `have`)
+    bool swapped = false;                      // agent-host.exe moved to .old: unstage_core undoes it
+};
+CoreStaged stage_core(const CoreStageRequest& request);
+// Puts the agent-host.exe that was moved aside back (a handover that failed).
+bool unstage_core(const std::filesystem::path& host_exe);
+// What `<exe> --version` says ("agent-host 0.2.0" -> "0.2.0").
+std::optional<std::string> host_version_of(const std::filesystem::path& exe);
 
 }  // namespace agentdesk::ui::updates

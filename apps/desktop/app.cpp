@@ -3792,13 +3792,13 @@ std::string exec_command(App::State& s, const std::string& cmd) {
     } else if (name == "app.check_updates") {
         ui::updates::check_now();  // window.rs 3603
     } else if (name == "app.update_core") {
-        // window.rs 3604-3609: nothing waiting is an error. herdr then runs `hc update`, which
-        // replaces herdr-core and keeps the terminals; agent-host has no updater of its own (its
-        // terminals end with it) and comes in the AgentDesk zip, so it is not updated here.
+        // window.rs 3604-3609: nothing waiting (and nothing failed) is an error; else
+        // `agentctl update` (herdr: `hc update`) in the background. agent-host hands its
+        // terminals to the new one; they keep running (design doc 7.4 OQ-09).
         const auto c = ui::updates::core();
         if (!c.ready && !c.error)
             return "agent-host is up to date";
-        return "agent-host updates with AgentDesk: restart to update";
+        ui::updates::update_core();
     } else if (name == "app.update") {
         // window.rs 3645-3657
         std::string error;

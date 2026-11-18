@@ -45,6 +45,7 @@ struct Shared {
     std::atomic<bool> running{false};
     std::atomic<bool> checking{false};
     bool cleanup_old = false;  // after_update: .old goes once agent-host is the new one
+    std::wstring pipe;         // set_pipe: the agent-host this window updates
 };
 Shared& g() {
     static Shared* shared = new Shared();
@@ -169,6 +170,10 @@ bool unpack(const std::string& url, const std::string& sha, const fs::path& work
 struct CoreRelease {
     std::string version;
     std::optional<std::uint64_t> generation;
+    // AgentDesk: where `agentctl update` downloads agent-host.exe for this machine, the same
+    // shape as app/latest.json's targets (herdr-core's own download is not in herdr-app).
+    std::string url;
+    std::string sha256;
 };
 bool latest_core(CoreRelease* out, std::string* error) {
     const auto base = releases();
@@ -187,6 +192,13 @@ bool latest_core(CoreRelease* out, std::string* error) {
     out->version = j["version"].get<std::string>();
     if (const auto it = j.find("generation"); it != j.end() && it->is_number_unsigned())
         out->generation = it->get<std::uint64_t>();
+    if (const auto t = j.find("targets"); t != j.end() && t->is_object())
+        if (const auto e = t->find(target()); e != t->end() && e->is_object()) {
+            if (const auto u = e->find("url"); u != e->end() && u->is_string())
+                out->url = u->get<std::string>();
+            if (const auto s = e->find("sha256"); s != e->end() && s->is_string())
+                out->sha256 = s->get<std::string>();
+        }
     return true;
 }
 
@@ -699,19 +711,241 @@ void after_update() {
     std::error_code ec;
     if (!fs::remove(marker(), ec))
         return;
-    // 591-621: herdr brings herdr-core up to date (`hc update`), then removes .old. agent-host
-    // came in the same zip: it is up to date once the running one is this version (set_core).
-    bool now = false;
+    const auto r = root();
+    if (!r)
+        return;
+    // 591-621: herdr brings herdr-core to the latest release of this generation
+    // (`hc update --version <target>`, terminals kept), then removes .old. AgentDesk's zip
+    // brought its agent-host along: the running one hands its terminals to that one
+    // (`agentctl update --exe`). set_core also removes .old once agent-host is this version.
     {
         std::lock_guard lock(g().mutex);
-        if (g().core.version == g().config.version)
-            now = true;
-        else
-            g().cleanup_old = true;
+        g().cleanup_old = true;
+        g().core.updating = true;
     }
-    if (now)
-        if (const auto r = root())
-            fs::remove_all(beside(*r, L".old"), ec);
+    std::thread([root = *r] {
+        std::string now;
+        std::string error;
+        const bool ok = run_core_update({L"--exe", (root / L"agent-host.exe").native()}, &now, &error);
+        {
+            std::lock_guard lock(g().mutex);
+            auto& core = g().core;
+            core.updating = false;
+            if (ok) {
+                std::error_code ec2;
+                fs::remove_all(beside(root, L".old"), ec2);
+                core.version = now.rfind("agent-host ", 0) == 0 ? now.substr(11) : now;
+                core.error.reset();
+            } else {
+                core.error = error;  // herdr: tracing::warn!("herdr-core update: {e}")
+            }
+        }
+        wake_ui();
+    }).detach();
+}
+
+// ---- agent-host's own update (design doc 7.4 OQ-09)
+
+void set_pipe(std::wstring pipe) {
+    std::lock_guard lock(g().mutex);
+    g().pipe = std::move(pipe);
+}
+
+bool run_core_update(const std::vector<std::wstring>& extra, std::string* now, std::string* error) {
+    // core_bin.rs 247-265: `hc update --json [--version X]`, stdin closed.
+    std::vector<std::wstring> args = {L"update", L"--json"};
+    {
+        std::lock_guard lock(g().mutex);
+        if (!g().pipe.empty())
+            args.insert(args.end(), {L"--pipe", g().pipe});
+    }
+    args.insert(args.end(), extra.begin(), extra.end());
+    const fs::path ctl = g().config.exe.parent_path() / L"agentctl.exe";
+    const auto r = detail::run_process(ctl, args);
+    if (!r.started) {
+        *error = "cannot run agentctl update";  // 253: "cannot run hc update: {e}"
+        return false;
+    }
+    const Json reply = Json::parse(r.out, nullptr, false);
+    if (r.exit_code == 0) {
+        // 256: the "now" field, else "the latest".
+        *now = reply.is_object() && reply.contains("now") && reply["now"].is_string() ? reply["now"].get<std::string>()
+                                                                                      : std::string("the latest");
+        return true;
+    }
+    // 261-264: stderr's error.message (and " (hint)"), else stderr as text.
+    const Json err = Json::parse(r.err, nullptr, false);
+    const Json* e = err.is_object() && err.contains("error") && err["error"].is_object() ? &err["error"] : nullptr;
+    if (e != nullptr && e->contains("message") && (*e)["message"].is_string()) {
+        *error = (*e)["message"].get<std::string>();
+        if (e->contains("hint") && (*e)["hint"].is_string())
+            *error += " (" + (*e)["hint"].get<std::string>() + ")";
+    } else {
+        *error = trim(r.err);
+    }
+    return false;
+}
+
+void update_core() {
+    // 237-245
+    {
+        std::lock_guard lock(g().mutex);
+        auto& c = g().core;
+        if (c.updating || c.managed)
+            return;
+        c.updating = true;
+        c.error.reset();
+    }
+    wake_ui();
+    std::thread([] {
+        std::string now;
+        std::string error;
+        const bool ok = run_core_update({}, &now, &error);
+        {
+            std::lock_guard lock(g().mutex);
+            auto& c = g().core;
+            c.updating = false;
+            if (ok) {
+                // 251-254: hc's "hc 0.2.0" -> "0.2.0"; ours "agent-host 0.2.0".
+                c.version = now.rfind("agent-host ", 0) == 0 ? now.substr(11) : now;
+                c.ready.reset();
+            } else {
+                c.error = error;
+            }
+        }
+        telemetry::count(ok ? "core_update_ok" : "core_update_failed");
+        wake_ui();
+    }).detach();
+}
+
+std::optional<std::string> host_version_of(const fs::path& exe) {
+    const auto r = detail::run_process(exe, {L"--version"});
+    if (!r.success())
+        return std::nullopt;
+    const std::string text = trim(r.out);
+    const std::string prefix = "agent-host ";
+    if (text.rfind(prefix, 0) != 0)
+        return std::nullopt;
+    return text.substr(prefix.size());
+}
+
+CoreStaged stage_core(const CoreStageRequest& req) {
+    CoreStaged s;
+    // `--exe`: an agent-host already on disk (the one AgentDesk's zip brought; after_update).
+    if (req.from) {
+        const auto v = host_version_of(*req.from);
+        if (!v) {
+            s.error = u8(*req.from) + " is not an agent-host";
+            return s;
+        }
+        s.ok = true;
+        s.version = req.have;
+        if (newer(*v, req.have) || (req.at_least && newer(*req.at_least, req.have))) {
+            if (req.at_least && newer(*req.at_least, *v)) {
+                s.ok = false;
+                s.error = u8(*req.from) + " is agent-host " + *v + ", older than " + *req.at_least;
+                return s;
+            }
+            s.exe = *req.from;
+            s.version = *v;
+        }
+        return s;
+    }
+    const auto base = releases();
+    if (!base) {
+        // update.rs 9-11, 122-129: a build from source looks for no updates without a server.
+        s.error = "no release server";
+        s.hint = "set AGENTDESK_RELEASES_URL";
+        return s;
+    }
+    CoreRelease latest;
+    if (!latest_core(&latest, &s.error))
+        return s;
+    if (latest.generation != kGeneration) {
+        s.error = "core/latest.json offers agent-host for another AgentDesk";
+        return s;
+    }
+    s.ok = true;
+    s.version = req.have;
+    const std::string wanted = req.at_least.value_or(latest.version);
+    if (!newer(latest.version, req.have) && !newer(wanted, req.have))
+        return s;  // up to date
+    if (newer(wanted, latest.version)) {
+        s.ok = false;
+        s.error = "agent-host " + wanted + " is not released";
+        return s;
+    }
+    if (latest.url.empty() || latest.sha256.empty()) {
+        s.ok = false;
+        s.error = "core/latest.json has no agent-host for " + target();
+        return s;
+    }
+    // Downloaded beside the running one, checked (sha256, `--version`), then put in its place;
+    // the running program file can be renamed, not replaced (it goes as agent-host.exe.old).
+    const fs::path staged = beside(req.host_exe, L".new");
+    const fs::path old = beside(req.host_exe, L".old");
+    std::error_code ec;
+    fs::remove(staged, ec);
+    s.ok = false;
+    if (!run(system(L"curl"), {L"-fsSL", L"--max-time", L"600", L"-o", staged.native(), detail::to_wide(latest.url)},
+             &s.error))
+        return s;
+    bool read_ok = false;
+    std::string want = latest.sha256;
+    for (auto& c : want)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (sha256(read_file(staged, &read_ok)) != want || !read_ok) {
+        fs::remove(staged, ec);
+        s.error = "the download is damaged (checksum mismatch)";
+        return s;
+    }
+    if (host_version_of(staged) != latest.version) {
+        fs::remove(staged, ec);
+        s.error = "the download doesn't run as " + latest.version;
+        return s;
+    }
+    fs::remove(old, ec);
+    if (fs::exists(old, ec)) {
+        fs::remove(staged, ec);
+        s.error = "an earlier agent-host still runs from " + u8(old);
+        return s;
+    }
+    fs::rename(req.host_exe, old, ec);
+    if (ec) {
+        fs::remove(staged, ec);
+        s.error = u8(req.host_exe) + ": " + os_error(ec);
+        return s;
+    }
+    fs::rename(staged, req.host_exe, ec);
+    if (ec) {
+        s.error = u8(req.host_exe) + ": " + os_error(ec);
+        std::error_code rollback;
+        fs::rename(old, req.host_exe, rollback);
+        return s;
+    }
+    s.ok = true;
+    s.swapped = true;
+    s.exe = req.host_exe;
+    s.version = latest.version;
+    return s;
+}
+
+bool unstage_core(const fs::path& host_exe) {
+    const fs::path old = beside(host_exe, L".old");
+    std::error_code ec;
+    if (!fs::exists(old, ec))
+        return false;
+    // The new program may still be closing (its process was just ended): try for a moment.
+    for (int i = 0; i < 20; ++i) {
+        ec.clear();
+        fs::remove(host_exe, ec);
+        if (!ec || !fs::exists(host_exe))
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    ec.clear();
+    fs::rename(old, host_exe, ec);
+    return !ec;
 }
 
 }  // namespace agentdesk::ui::updates

@@ -18,7 +18,12 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
+#include "agentdesk/ipc/pipe.hpp"
+#include "agentdesk/platform/win/command_line.hpp"
+#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/win/job.hpp"
 #include "agentdesk/ui/updates.hpp"
 
 namespace fs = std::filesystem;
@@ -242,4 +247,232 @@ TEST(Updates, AChecksumMismatchStagesNothing) {
     EXPECT_FALSE(fs::exists(up::beside(root, L".new")));
     EXPECT_FALSE(fs::exists(up::beside(root, L".download")));
     fs::remove_all(work);
+}
+
+// ---------------------------------------------------------------- agent-host's own update
+// herdr: `hc update` / Settings > Updates "Update herdr-core" (update.rs 236-262, core_bin.rs
+// 242-265, frame/settings/main.js 794-805); here `agentctl update` and updates::update_core
+// (design doc 7.4 OQ-09). The release server is local; agent-host runs from a folder of its own.
+
+namespace {
+
+namespace win = agentdesk::platform::win;
+using Json = nlohmann::json;
+
+struct Run {
+    DWORD exit_code = 9999;
+    std::string out;
+    std::string err;
+};
+
+Run run(const fs::path& exe, const std::vector<std::wstring>& args) {
+    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+    HANDLE out_r = nullptr, out_w = nullptr, err_r = nullptr, err_w = nullptr;
+    ::CreatePipe(&out_r, &out_w, &sa, 0);
+    ::CreatePipe(&err_r, &err_w, &sa, 0);
+    ::SetHandleInformation(out_r, HANDLE_FLAG_INHERIT, 0);
+    ::SetHandleInformation(err_r, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = out_w;
+    si.hStdError = err_w;
+    std::wstring cmd = win::build_command_line(exe.native(), args);
+    PROCESS_INFORMATION pi{};
+    Run r;
+    const BOOL ok = ::CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr,
+                                     nullptr, &si, &pi);
+    ::CloseHandle(out_w);
+    ::CloseHandle(err_w);
+    if (ok) {
+        std::thread err_reader([&] {
+            char buf[4096];
+            DWORD n = 0;
+            while (::ReadFile(err_r, buf, sizeof buf, &n, nullptr) && n > 0)
+                r.err.append(buf, n);
+        });
+        char buf[4096];
+        DWORD n = 0;
+        while (::ReadFile(out_r, buf, sizeof buf, &n, nullptr) && n > 0)
+            r.out.append(buf, n);
+        err_reader.join();
+        ::WaitForSingleObject(pi.hProcess, 120000);
+        ::GetExitCodeProcess(pi.hProcess, &r.exit_code);
+        ::CloseHandle(pi.hThread);
+        ::CloseHandle(pi.hProcess);
+    }
+    ::CloseHandle(out_r);
+    ::CloseHandle(err_r);
+    return r;
+}
+
+// agent-host + agentctl + conpty\ copied into a folder of their own, running on a private pipe
+// with a private data folder, one counting terminal open.
+class HostInstall {
+public:
+    explicit HostInstall(const std::wstring& tag) {
+        dir = temp_dir(L"agentdesk-hostinstall-" + tag);
+        data = temp_dir(L"agentdesk-hostdata-" + tag);
+        pipe = L"\\\\.\\pipe\\AgentDeskHostInstall-" + tag + L"-" + std::to_wstring(::GetCurrentProcessId());
+        fs::remove_all(dir);
+        fs::remove_all(data);
+        fs::create_directories(dir);
+        fs::create_directories(data);
+        fs::copy_file(AGENTDESK_HOST_EXE, dir / L"agent-host.exe");
+        fs::copy_file(AGENTDESK_CTL_EXE, dir / L"agentctl.exe");
+        fs::copy(fs::path(AGENTDESK_BUNDLED_CONPTY_DIR) / L"conpty", dir / L"conpty", fs::copy_options::recursive);
+        const Json profiles = Json::array({{{"id", "counter"},
+                                            {"name", "probe counter"},
+                                            {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
+                                            {"args", {"counter"}}}});
+        write(data / L"profiles.json", Json{{"schema_version", 1}, {"profiles", profiles}}.dump());
+        const fs::path host = dir / L"agent-host.exe";
+        std::wstring cmd = win::build_command_line(host.native(), {L"--pipe", pipe, L"--data-dir", data.native()});
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        if (::CreateProcessW(host.c_str(), cmd.data(), nullptr, nullptr, FALSE, DETACHED_PROCESS, nullptr, nullptr,
+                             &si, &pi)) {
+            job.assign(pi.hProcess);  // every host and terminal of this test ends with it
+            ::CloseHandle(pi.hThread);
+            ::CloseHandle(pi.hProcess);
+        }
+        client = agentdesk::ipc::PipeClient::connect(pipe, std::chrono::seconds(10));
+        if (!client)
+            return;
+        client->call("hello", {{"version", 1}});
+        const auto r = client->call("session.create", {{"profile_id", "counter"},
+                                                       {"cwd", win::to_utf8(fs::temp_directory_path().native())},
+                                                       {"rows", 8},
+                                                       {"cols", 60}});
+        if (r && r->result)
+            session = r->result->value("session_id", "");
+    }
+    ~HostInstall() {
+        if (auto c = agentdesk::ipc::PipeClient::connect(pipe, std::chrono::seconds(2)))
+            c->call("host.shutdown", {{"stop_sessions", true}}, std::chrono::seconds(5));
+        client.reset();
+        ::Sleep(500);
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+        fs::remove_all(data, ec);
+    }
+    Json hello() {
+        auto c = agentdesk::ipc::PipeClient::connect(pipe, std::chrono::seconds(10));
+        if (!c)
+            return {};
+        const auto r = c->call("hello", {{"version", 1}});
+        return r && r->result ? *r->result : Json();
+    }
+    Json get() {
+        auto c = agentdesk::ipc::PipeClient::connect(pipe, std::chrono::seconds(10));
+        if (!c)
+            return {};
+        c->call("hello", {{"version", 1}});
+        const auto r = c->call("session.get", {{"session", session}});
+        return r && r->result ? *r->result : Json();
+    }
+    fs::path dir;
+    fs::path data;
+    std::wstring pipe;
+    std::string session;
+    win::KillOnCloseJob job;
+    std::unique_ptr<agentdesk::ipc::PipeClient> client;
+};
+
+std::string manifest_for(const std::string& base, const std::string& sha) {
+    return Json{{"version", "99.0.0"},
+                {"generation", 1},
+                {"targets", {{"windows-x86_64", {{"url", base + "/core/99.0.0/agent-host.exe"}, {"sha256", sha}}}}}}
+        .dump();
+}
+
+struct ReleasesUrl {
+    explicit ReleasesUrl(const std::string& url) {
+        ::SetEnvironmentVariableW(L"AGENTDESK_RELEASES_URL", std::wstring(url.begin(), url.end()).c_str());
+    }
+    ~ReleasesUrl() { ::SetEnvironmentVariableW(L"AGENTDESK_RELEASES_URL", nullptr); }
+};
+
+}  // namespace
+
+// `agentctl update --json` (herdr `hc update --json`): finds the release, puts it in place, the
+// running agent-host hands its terminals over, and it answers {"now": "agent-host 99.0.0"}.
+TEST(CoreUpdate, AgentctlUpdateHandsTheTerminalsToTheRelease) {
+    HostInstall install(L"ctl");
+    ASSERT_FALSE(install.session.empty()) << "host did not start";
+    const std::string have = up::host_version_of(AGENTDESK_HOST_EXE).value_or("");
+    ASSERT_FALSE(have.empty());
+    const auto pid = install.get().value("pid", 0u);
+    ASSERT_NE(pid, 0u);
+    const std::string next = read(AGENTDESK_HOST_NEXT_EXE);
+    Server server({{"/core/99.0.0/agent-host.exe", next}});
+    Server release({{"/core/latest.json", manifest_for(server.url(), up::sha256(next))}});
+    // The binary comes from `server`, the manifest from `release`.
+    ReleasesUrl env(release.url());
+    const std::wstring pipe = install.pipe;
+    const auto r = run(install.dir / L"agentctl.exe", {L"update", L"--json", L"--pipe", pipe});
+    ASSERT_EQ(r.exit_code, 0u) << r.out << r.err;
+    EXPECT_EQ(Json::parse(r.out, nullptr, false), Json({{"now", "agent-host 99.0.0"}})) << r.out;
+    const Json h = install.hello();
+    EXPECT_EQ(h.value("host_version", ""), "99.0.0");
+    const Json got = install.get();
+    EXPECT_EQ(got.value("process_state", ""), "Running");
+    EXPECT_EQ(got.value("pid", 0u), pid) << "the same program, still running";
+    EXPECT_EQ(up::host_version_of(install.dir / L"agent-host.exe"), std::optional<std::string>("99.0.0"));
+    // The old program file goes once the old host has exited.
+    for (int i = 0; i < 100 && fs::exists(install.dir / L"agent-host.exe.old"); ++i)
+        ::Sleep(100);
+    EXPECT_FALSE(fs::exists(install.dir / L"agent-host.exe.old"));
+    EXPECT_FALSE(fs::exists(install.dir / L"agent-host.exe.new"));
+
+    // Already the latest: nothing moves.
+    const auto again = run(install.dir / L"agentctl.exe", {L"update", L"--json", L"--pipe", pipe});
+    EXPECT_EQ(again.exit_code, 0u) << again.err;
+    EXPECT_EQ(Json::parse(again.out, nullptr, false), Json({{"now", "agent-host 99.0.0"}}));
+    EXPECT_EQ(install.hello().value("host_instance_id", ""), h.value("host_instance_id", ""));
+}
+
+// Settings > Updates: "Update agent-host" runs update_core: Updating... then the new version, or
+// "The update failed: <why>" (main.js 794-805) with everything left as it was.
+TEST(CoreUpdate, UpdateCoreGoesFromUpdatingToDoneOrError) {
+    HostInstall install(L"ui");
+    ASSERT_FALSE(install.session.empty()) << "host did not start";
+    const std::string have = up::host_version_of(AGENTDESK_HOST_EXE).value_or("");
+    // agentctl update runs from agent-ui's folder: here, the install folder.
+    up::configure({have, install.dir / L"agent-ui.exe", install.data, {}});
+    up::set_pipe(install.pipe);
+    up::set_core(have, std::nullopt);
+    const std::string next = read(AGENTDESK_HOST_NEXT_EXE);
+    const auto wait_done = [] {
+        for (int i = 0; i < 1200 && up::core().updating; ++i)
+            ::Sleep(100);
+        return !up::core().updating;
+    };
+    {
+        Server binary({{"/core/99.0.0/agent-host.exe", next}});
+        Server release({{"/core/latest.json", manifest_for(binary.url(), std::string(64, '0'))}});
+        ReleasesUrl env(release.url());
+        up::update_core();
+        EXPECT_TRUE(up::core().updating);  // "Updating... your terminals keep running."
+        ASSERT_TRUE(wait_done());
+        EXPECT_EQ(up::core().error, std::optional<std::string>("the download is damaged (checksum mismatch)"));
+        EXPECT_EQ(up::core().version, std::optional<std::string>(have));
+        EXPECT_EQ(up::host_version_of(install.dir / L"agent-host.exe"), std::optional<std::string>(have));
+        EXPECT_FALSE(fs::exists(install.dir / L"agent-host.exe.new"));
+        EXPECT_EQ(install.get().value("process_state", ""), "Running");
+    }
+    {
+        Server binary({{"/core/99.0.0/agent-host.exe", next}});
+        Server release({{"/core/latest.json", manifest_for(binary.url(), up::sha256(next))}});
+        ReleasesUrl env(release.url());
+        up::update_core();  // "Try again"
+        ASSERT_TRUE(wait_done());
+        EXPECT_EQ(up::core().error, std::nullopt);
+        EXPECT_EQ(up::core().version, std::optional<std::string>("99.0.0"));
+        EXPECT_EQ(up::core().ready, std::nullopt);
+        EXPECT_EQ(install.hello().value("host_version", ""), "99.0.0");
+        EXPECT_EQ(install.get().value("process_state", ""), "Running");
+    }
+    up::set_pipe(L"");
 }
