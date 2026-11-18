@@ -1,4 +1,6 @@
-# libvterm 0.3.3 (MIT), vendored unmodified. See README.agentdesk.md for provenance.
+# libvterm 0.3.3 (MIT), vendored with one AgentDesk addition (state handover for agent-host's
+# self-update: include/vterm_agentdesk.h, src/agentdesk_handover.*, the end of src/screen.c).
+# See README.agentdesk.md for provenance.
 file(GLOB VTERM_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c)
 add_library(vterm STATIC ${VTERM_SRC})
 add_library(agentdesk::vterm ALIAS vterm)

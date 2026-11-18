@@ -375,6 +375,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     ui::HostClientOptions hopts;
     hopts.host_exe = ipc::sibling_executable(L"agent-host.exe");
     hopts.pipe_name = dev.pipe.empty() ? ipc::default_pipe_name() : dev.pipe;
+    ui::updates::set_pipe(dev.pipe);  // agent-host's update goes to the host this window uses
     hopts.wake = [] { ::SetEvent(g_wake); };
     agentdesk::desktop::AppConfig cfg;
     cfg.hwnd = hwnd;

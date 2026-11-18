@@ -68,6 +68,13 @@ public:
     // `app` of a record, inherited from the nearest ancestor when absent.
     [[nodiscard]] std::string effective_app(const std::string& id) const;
 
+    // agent-host's handover (design doc 7.4 OQ-09): the records and their order, as they are.
+    [[nodiscard]] std::uint64_t counter() const noexcept { return counter_; }
+    void restore(std::map<std::string, StatusRecord> records, std::uint64_t counter) {
+        records_ = std::move(records);
+        counter_ = counter;
+    }
+
 private:
     void drop_transient();
 

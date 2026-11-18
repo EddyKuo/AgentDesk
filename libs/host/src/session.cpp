@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/terminal/bytes.hpp"
 
 namespace agentdesk::host {
 
@@ -176,7 +177,8 @@ void Session::force_stop() {
         info_.process_state = ProcessState::kStopping;
         info_.stop_requested = true;
     }
-    process_->terminate(1);
+    if (process_)
+        process_->terminate(1);
     ::SetEvent(queue_event_.get());
 }
 
@@ -251,6 +253,7 @@ void Session::writer_loop() {
             return;
         std::string chunk = std::move(write_queue_.front());
         write_queue_.pop_front();
+        writer_busy_ = true;
         lock.unlock();
         try {
             process_->write(chunk);
@@ -258,6 +261,9 @@ void Session::writer_loop() {
             // The pseudoconsole is closed or the child exited; input has nowhere to go.
         }
         lock.lock();
+        writer_busy_ = false;
+        if (write_queue_.empty())
+            writer_idle_cv_.notify_all();
     }
 }
 
@@ -272,7 +278,8 @@ void Session::queue_pty_bytes(std::string bytes) {
 }
 
 void Session::actor_loop() {
-    bool root_exited = false;
+    // An adopted session whose program had already exited has no process (handover).
+    bool root_exited = process_ == nullptr;
     for (;;) {
         // Wait for commands, root process exit, the next publish slot or the interrupt deadline.
         DWORD timeout = INFINITE;
@@ -282,14 +289,17 @@ void Session::actor_loop() {
         if (interrupt_deadline_) {
             timeout = std::min(timeout, millis_until(*interrupt_deadline_));
         }
-        HANDLE handles[2] = {queue_event_.get(), process_->process_handle()};
-        const DWORD count = root_exited ? 1 : 2;
+        // Frozen for a handover: the program's exit is the new host's to see (design doc 7.4 OQ-09).
+        const bool watch = !root_exited && !frozen_;
+        HANDLE handles[2] = {queue_event_.get(), watch ? process_->process_handle() : nullptr};
+        const DWORD count = watch ? 2 : 1;
         const DWORD r = ::WaitForMultipleObjects(count, handles, FALSE, timeout);
 
         drain_queue();
 
-        if (!root_exited && (r == WAIT_OBJECT_0 + 1 ||
-                             ::WaitForSingleObject(process_->process_handle(), 0) == WAIT_OBJECT_0)) {
+        if (!root_exited && !frozen_ &&
+            ((watch && r == WAIT_OBJECT_0 + 1) ||
+             ::WaitForSingleObject(process_->process_handle(), 0) == WAIT_OBJECT_0)) {
             root_exited = true;
             on_root_exit();
         }
@@ -381,6 +391,8 @@ void Session::handle(InputEvent& c) {
 void Session::handle(ResizeCmd& c) {
     engine_->resize(c.rows, c.cols);
     const auto snap = engine_->snapshot();
+    if (!process_)
+        return;  // adopted after its program exited: nothing to resize
     try {
         process_->resize({static_cast<short>(snap.cols), static_cast<short>(snap.rows)});
     } catch (const std::exception&) {
@@ -509,6 +521,244 @@ void Session::publish_info() {
     if (!listener_.on_info)
         return;
     listener_.on_info(info());
+}
+
+// ---- agent-host's self-update (design doc 7.4 OQ-09)
+
+namespace {
+
+constexpr std::uint32_t kSessionMagic = 0x53534441u;  // "ADSS"
+constexpr std::uint32_t kSessionFormat = 1;
+
+std::int64_t to_ticks(std::chrono::system_clock::time_point t) {
+    return static_cast<std::int64_t>(t.time_since_epoch().count());
+}
+std::chrono::system_clock::time_point from_ticks(std::int64_t v) {
+    return std::chrono::system_clock::time_point(std::chrono::system_clock::duration(v));
+}
+
+}  // namespace
+
+bool Session::can_hand_over(std::string* why) const {
+    if (!process_ || process_->closed())
+        return true;  // the program exited: only its screen and history move
+    return process_->handover_handles(why).has_value();
+}
+
+std::optional<Session::Frozen> Session::freeze(std::chrono::milliseconds timeout, std::string* why) {
+    const auto deadline = Clock::now() + timeout;
+    if (process_) {
+        // The reader must not wait for queue space while it is being stopped.
+        {
+            std::lock_guard lock(queue_mutex_);
+            no_backpressure_ = true;
+        }
+        queue_space_cv_.notify_all();
+        const bool paused = process_->pause_reader(timeout);
+        {
+            std::lock_guard lock(queue_mutex_);
+            no_backpressure_ = stopping_.load();
+        }
+        if (!paused) {
+            *why = "the terminal's output did not pause";
+            return std::nullopt;
+        }
+    }
+    // Every chunk the reader delivered is queued before this command: FIFO keeps byte order.
+    FreezeCmd cmd{deadline, std::make_shared<std::promise<std::string>>(), std::make_shared<std::string>()};
+    auto future = cmd.result->get_future();
+    auto error = cmd.error;
+    post(std::move(cmd));
+    if (future.wait_until(deadline + std::chrono::seconds(2)) != std::future_status::ready) {
+        *why = "the terminal did not answer";
+        return std::nullopt;
+    }
+    Frozen frozen;
+    frozen.state = future.get();
+    if (frozen.state.empty()) {
+        if (error->empty())
+            return frozen;  // exited mid-sequence: the record only (handle(FreezeCmd))
+        *why = *error;
+        return std::nullopt;
+    }
+    if (process_ && !process_->closed()) {
+        frozen.handles = process_->handover_handles(why);
+        if (!frozen.handles)
+            return std::nullopt;
+    }
+    return frozen;
+}
+
+void Session::handle(FreezeCmd& c) {
+    frozen_ = true;
+    // Finish an escape sequence the program is in the middle of: the reader is paused, so the
+    // actor reads on, byte by byte, until the parser is back in its ground state.
+    while (!engine_->at_handover_point()) {
+        const bool live = process_ && !process_->closed();
+        if (!live) {
+            // Exited mid-sequence: no more bytes will come. Its record moves, not its screen.
+            c.error->clear();
+            c.result->set_value({});
+            return;
+        }
+        std::string byte = process_->read_available(1);
+        if (byte.empty()) {
+            if (Clock::now() >= c.deadline) {
+                *c.error = "a program stopped in the middle of an escape sequence";
+                c.result->set_value({});
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            continue;
+        }
+        OutputChunk chunk{std::move(byte)};
+        handle(chunk);
+    }
+    queue_pty_bytes(engine_->take_pty_input());
+    // Every input byte reaches the program before the new host owns the pipe.
+    {
+        std::unique_lock lock(write_mutex_);
+        const bool idle = writer_idle_cv_.wait_until(lock, c.deadline, [&] {
+            return (write_queue_.empty() && !writer_busy_) || !process_ || process_->closed();
+        });
+        if (!idle) {
+            *c.error = "a program is not reading its input";
+            c.result->set_value({});
+            return;
+        }
+    }
+    publish(true);
+    c.result->set_value(save_session_state());
+}
+
+void Session::handle(UnfreezeCmd&) {
+    frozen_ = false;
+}
+
+void Session::resume() {
+    post(UnfreezeCmd{});
+    if (process_)
+        process_->resume_reader();  // no-op once closed
+}
+
+void Session::release_after_handover() {
+    if (process_)
+        process_->release_after_handover();
+}
+
+std::string Session::save_session_state() const {
+    terminal::ByteWriter w;
+    w.u32(kSessionMagic);
+    w.u32(kSessionFormat);
+    w.str(engine_->save_state());
+    const SessionInfo i = info();
+    w.u8(static_cast<std::uint8_t>(i.process_state));
+    w.boolean(i.exit_code.has_value());
+    w.u32(i.exit_code.value_or(0));
+    w.u32(i.pid);
+    w.boolean(i.stop_requested);
+    w.boolean(i.still_running_after_interrupt);
+    w.u32(i.remaining_processes);
+    w.u8(static_cast<std::uint8_t>(i.agent.state));
+    w.str(i.agent.source);
+    w.i64(to_ticks(i.agent.updated_at));
+    w.u8(static_cast<std::uint8_t>(i.agent.kind));
+    w.str(i.agent.message);
+    w.u8(static_cast<std::uint8_t>(i.agent.last_state));
+    w.str(i.agent.app);
+    w.u64(i.bytes_from_program);
+    w.u64(i.backpressure_waits);
+    w.str(i.cwd_uri);
+    w.u64(report_seq_.size());
+    for (const auto& [source, seq] : report_seq_) {
+        w.str(source);
+        w.u64(seq);
+    }
+    w.boolean(interrupt_deadline_.has_value());
+    w.i64(interrupt_deadline_ ? std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    *interrupt_deadline_ - Clock::now())
+                                    .count()
+                              : 0);
+    w.u32(kSessionMagic);
+    return w.take();
+}
+
+std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener listener, std::string_view state,
+                                        const std::optional<platform::win::PtyHandles>& handles) {
+    std::unique_ptr<Session> self(new Session(std::move(config), std::move(listener)));
+    terminal::ByteReader r(state);
+    const auto bad = [] { return std::runtime_error("not a session state this agent-host reads"); };
+    if (r.u32() != kSessionMagic || r.u32() != kSessionFormat)
+        throw bad();
+    const std::string engine_state = r.str();
+    if (!r.ok())
+        throw bad();
+    terminal::EngineEvents events;
+    events.on_status = [raw = self.get()](const terminal::StatusReport& rep) { raw->on_engine_status(rep); };
+    self->engine_ = terminal::VtEngine::restore(self->config_.engine, std::move(events), engine_state);
+    SessionInfo& i = self->info_;
+    const auto ps = r.u8();
+    if (ps > static_cast<std::uint8_t>(ProcessState::kLost))
+        throw bad();
+    i.process_state = static_cast<ProcessState>(ps);
+    const bool has_code = r.boolean();
+    const auto code = r.u32();
+    if (has_code)
+        i.exit_code = code;
+    i.pid = r.u32();
+    i.stop_requested = r.boolean();
+    i.still_running_after_interrupt = r.boolean();
+    i.remaining_processes = r.u32();
+    const auto as = r.u8();
+    i.agent.source = r.str();
+    i.agent.updated_at = from_ticks(r.i64());
+    const auto kind = r.u8();
+    i.agent.message = r.str();
+    const auto last = r.u8();
+    i.agent.app = r.str();
+    if (as > static_cast<std::uint8_t>(AgentState::kError) || last > static_cast<std::uint8_t>(AgentState::kError) ||
+        kind > static_cast<std::uint8_t>(terminal::StatusKind::kAuth))
+        throw bad();
+    i.agent.state = static_cast<AgentState>(as);
+    i.agent.kind = static_cast<terminal::StatusKind>(kind);
+    i.agent.last_state = static_cast<AgentState>(last);
+    i.bytes_from_program = r.u64();
+    i.backpressure_waits = r.u64();
+    i.cwd_uri = r.str();
+    const auto sources = r.count(16);
+    for (std::uint64_t k = 0; k < sources && r.ok(); ++k) {
+        std::string source = r.str();
+        self->report_seq_[std::move(source)] = r.u64();
+    }
+    const bool has_deadline = r.boolean();
+    const auto remaining = r.i64();
+    if (has_deadline)
+        self->interrupt_deadline_ = Clock::now() + std::chrono::milliseconds(std::max<std::int64_t>(remaining, 0));
+    if (r.u32() != kSessionMagic || !r.ok() || !r.at_end())
+        throw bad();
+    self->backpressure_waits_ = i.backpressure_waits;
+    if (handles) {
+        if (handles->pid != i.pid)
+            throw std::runtime_error("handed over process is not this session's");
+        // Last step that can throw: once adopted, the process must be released, never closed.
+        self->process_ = win::PtyProcess::adopt(self->config_.api, *handles,
+                                                [raw = self.get()](std::span<const char> b) {
+                                                    raw->post_output(std::string(b.data(), b.size()));
+                                                });
+    } else if (i.process_state != ProcessState::kExited && i.process_state != ProcessState::kFailed) {
+        throw std::runtime_error("a running session came without its terminal");
+    }
+    self->snapshot_ = std::make_shared<const terminal::ScreenSnapshot>(self->engine_->snapshot());
+    self->published_seq_ = self->engine_->seq();
+    return self;
+}
+
+void Session::start_adopted() {
+    writer_ = std::thread([this] { writer_loop(); });
+    actor_ = std::thread([this] { actor_loop(); });
+    if (process_)
+        process_->resume_reader();
+    publish_info();
 }
 
 }  // namespace agentdesk::host

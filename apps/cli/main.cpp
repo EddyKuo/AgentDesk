@@ -22,6 +22,7 @@
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/protocol/messages.hpp"
+#include "agentdesk/ui/updates.hpp"
 
 namespace {
 
@@ -61,7 +62,7 @@ struct Args {
 const std::vector<std::string> kValueOptions = {
     "--profile", "--name",   "--cwd",     "--lines", "--file", "--text",       "--source",
     "--state",   "--kind",   "--message", "--seq",   "--pipe", "--timeout-ms", "--key",
-    "--task",    "--parent", "--until",   "--to",    "--from"};
+    "--task",    "--parent", "--until",   "--to",    "--from",         "--version", "--exe"};
 
 Args parse_args(int argc, wchar_t** argv) {
     Args a;
@@ -557,6 +558,78 @@ int run_bridge(const std::wstring& pipe, bool may_start) {
     ::ExitProcess(kOk);
 }
 
+// herdr `hc update` (herdr-app src/core_bin.rs 242-265, docs/commands.md 547): agent-host to its
+// latest release; terminals keep running (agent-host hands them to the new one, design doc 7.4
+// OQ-09). --json: {"now": "agent-host X"} on stdout, or {"error": {"message", "hint"}} on stderr.
+int update_failed(const Ctx& ctx, const std::string& message, const std::string& hint = {}) {
+    if (ctx.json) {
+        Json e = {{"message", message}};
+        if (!hint.empty())
+            e["hint"] = hint;
+        std::cerr << Json{{"error", e}}.dump() << '\n';
+    } else {
+        diag(message + (hint.empty() ? std::string() : " (" + hint + ")"));
+    }
+    return kRefused;
+}
+
+int update_done(const Ctx& ctx, const std::string& now) {
+    out(ctx.json ? Json{{"now", now}}.dump() + "\n" : now + "\n");
+    return kOk;
+}
+
+int cmd_update(Ctx& ctx, const std::wstring& pipe) {
+    namespace updates = agentdesk::ui::updates;
+    updates::CoreStageRequest req;
+    req.at_least = ctx.args.opt("--version");
+    if (const auto exe = ctx.args.opt("--exe"))
+        req.from = std::filesystem::path(win::to_wide(*exe));
+    // Never starts agent-host just to update it.
+    auto client = ipc::PipeClient::connect(pipe, std::chrono::milliseconds(300));
+    std::optional<protocol::Response> hello;
+    if (client)
+        hello = client->call("hello", {{"version", protocol::kProtocolVersion}, {"client", "agentctl"}}, ctx.timeout);
+    if (!hello || hello->error || !hello->result) {
+        // Nothing runs: the update is in place for agent-host's next start.
+        req.host_exe = ipc::sibling_executable(L"agent-host.exe");
+        req.have = updates::host_version_of(req.host_exe).value_or("0.0.0");
+        const auto staged = updates::stage_core(req);
+        if (!staged.ok)
+            return update_failed(ctx, staged.error, staged.hint);
+        return update_done(ctx, "agent-host " + staged.version);
+    }
+    const Json& h = *hello->result;
+    req.have = h.value("host_version", "");
+    req.host_exe = std::filesystem::path(win::to_wide(h.value("host_exe", "")));
+    if (req.have.empty() || req.host_exe.empty())
+        return update_failed(ctx, "this agent-host cannot update itself", "restart AgentDesk to update it");
+    const auto staged = updates::stage_core(req);
+    if (!staged.ok)
+        return update_failed(ctx, staged.error, staged.hint);
+    if (!staged.exe)
+        return update_done(ctx, "agent-host " + staged.version);  // already the latest
+    const auto r = client->call("host.update", {{"exe", win::to_utf8(staged.exe->native())}}, 120s);
+    if (!r || r->error || !r->result) {
+        if (staged.swapped)
+            updates::unstage_core(req.host_exe);
+        return update_failed(ctx, r && r->error ? r->error_message : std::string("agent-host did not answer"));
+    }
+    const std::string now = r->result->value("now", "agent-host " + staged.version);
+    const std::string instance = r->result->value("host_instance_id", "");
+    // The new agent-host serves the pipe once the old one let go (herdr: the app reconnects
+    // when the core restarts).
+    const auto deadline = std::chrono::steady_clock::now() + 15s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (auto c = ipc::PipeClient::connect(pipe, std::chrono::milliseconds(500))) {
+            const auto again = c->call("hello", {{"version", protocol::kProtocolVersion}, {"client", "agentctl"}});
+            if (again && again->result && again->result->value("host_instance_id", "") == instance)
+                return update_done(ctx, now);
+        }
+        std::this_thread::sleep_for(100ms);
+    }
+    return update_failed(ctx, "the new agent-host did not start serving");
+}
+
 const char* kUsage =
     "usage: agentctl <command> [options]\n"
     "  run --profile ID [--name N] [--cwd DIR] [-- extra args]\n"
@@ -573,6 +646,9 @@ const char* kUsage =
     "  label <session> k=v...\n"
     "  --skill   how agents use agentctl to run helper agents\n"
     "  bridge    relay stdin/stdout to this machine's agent-host (used through ssh)\n"
+    "  update [--version V] [--exe PATH]\n"
+    "            update agent-host to its latest release (AGENTDESK_RELEASES_URL), or to the\n"
+    "            agent-host.exe at PATH; terminals keep running\n"
     "global: --json  --pipe NAME  --no-start  --timeout-ms N\n";
 
 }  // namespace
@@ -615,6 +691,8 @@ int wmain(int argc, wchar_t** argv) {
     } else if (wchar_t buf[512]{}; ::GetEnvironmentVariableW(L"AGENTDESK_PIPE", buf, 512) > 0) {
         pipe = buf;
     }
+    if (ctx.args.command == "update")
+        return cmd_update(ctx, pipe);
     const bool may_start = !ctx.args.has("--no-start") && ctx.args.command != "report-state" &&
                            ctx.args.command != "shutdown" && ctx.args.command != "report";
     auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);

@@ -40,6 +40,9 @@ HostConnection connect_or_start_host(const std::filesystem::path& host_exe, cons
     }
     out.host_instance_id = hello->result->value("host_instance_id", "");
     out.host_version = hello->result->value("host_version", "");
+    for (const auto& s : hello->result->value("succeeds", protocol::Json::array()))
+        if (s.is_string())
+            out.host_succeeds.push_back(s.get<std::string>());
     return out;
 }
 
@@ -165,6 +168,9 @@ HostConnection connect_over_command(const std::vector<std::wstring>& argv,
     }
     out.host_instance_id = hello->result->value("host_instance_id", "");
     out.host_version = hello->result->value("host_version", "");
+    for (const auto& s : hello->result->value("succeeds", protocol::Json::array()))
+        if (s.is_string())
+            out.host_succeeds.push_back(s.get<std::string>());
     out.transport = t;
     return out;
 }

@@ -23,6 +23,10 @@ ConPtyApi from_module(HMODULE module, bool bundled, std::wstring source) {
     api.create = get_proc<CreatePseudoConsoleFn>(module, "CreatePseudoConsole");
     api.resize = get_proc<ResizePseudoConsoleFn>(module, "ResizePseudoConsole");
     api.close = get_proc<ClosePseudoConsoleFn>(module, "ClosePseudoConsole");
+    if (bundled) {
+        if (FARPROC p = ::GetProcAddress(module, "ConptyPackPseudoConsole"); p != nullptr)
+            api.pack = reinterpret_cast<PackPseudoConsoleFn>(reinterpret_cast<void*>(p));
+    }
     api.bundled = bundled;
     api.source = std::move(source);
     return api;

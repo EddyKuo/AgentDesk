@@ -3,6 +3,7 @@ agentdesk_library(agentdesk_host
     src/session.cpp
     src/store.cpp
     src/session_manager.cpp
+    src/handover.cpp
     src/git_tools.cpp)
 add_library(agentdesk::host ALIAS agentdesk_host)
 target_include_directories(agentdesk_host PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

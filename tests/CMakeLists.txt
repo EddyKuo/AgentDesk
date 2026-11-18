@@ -9,6 +9,7 @@ agentdesk_executable(unit_tests
     unit/program_status_test.cpp
     unit/cwd_uri_test.cpp
     unit/vt_engine_test.cpp
+    unit/vt_handover_test.cpp
     unit/command_line_test.cpp
     unit/input_mapping_test.cpp
     unit/protocol_test.cpp
@@ -44,17 +45,28 @@ agentdesk_executable(win_integration_tests
     integration/windows/session_test.cpp
     integration/windows/pipe_test.cpp
     integration/windows/host_test.cpp
+    integration/windows/handover_test.cpp
     integration/windows/updates_test.cpp)
 target_link_libraries(win_integration_tests PRIVATE psapi advapi32 ws2_32 agentdesk::ui
     agentdesk::host agentdesk::ipc agentdesk::platform_win agentdesk::terminal nlohmann_json::nlohmann_json GTest::gtest_main)
 # A stand-in agent-ui.exe for the update tests (tests/fixtures/fake_agent_ui.cpp).
 add_executable(fake_agent_ui fixtures/fake_agent_ui.cpp)
 agentdesk_target_defaults(fake_agent_ui)
-add_dependencies(win_integration_tests vt_probe agent-host agentctl agent-ui fake_agent_ui)
+# agent-host built as a later release (99.0.0), for agent-host's own update (design doc 7.4 OQ-09).
+add_executable(agent_host_next WIN32 ${PROJECT_SOURCE_DIR}/apps/host/main.cpp)
+agentdesk_target_defaults(agent_host_next)
+target_link_libraries(agent_host_next PRIVATE agentdesk::host agentdesk::ipc shell32)
+target_compile_definitions(agent_host_next PRIVATE AGENTDESK_VERSION_STRING="99.0.0")
+set(_host_next "${CMAKE_CURRENT_BINARY_DIR}/host_next")
+set_target_properties(agent_host_next PROPERTIES OUTPUT_NAME agent-host RUNTIME_OUTPUT_DIRECTORY "${_host_next}"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${_host_next}" RUNTIME_OUTPUT_DIRECTORY_RELEASE "${_host_next}"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${_host_next}")
+add_dependencies(win_integration_tests vt_probe agent-host agentctl agent-ui fake_agent_ui agent_host_next)
 target_compile_definitions(win_integration_tests PRIVATE
     AGENTDESK_VT_PROBE=L"$<TARGET_FILE:vt_probe>"
     AGENTDESK_FAKE_UI_EXE=L"$<TARGET_FILE:fake_agent_ui>"
     AGENTDESK_HOST_EXE=L"$<TARGET_FILE:agent-host>"
+    AGENTDESK_HOST_NEXT_EXE=L"$<TARGET_FILE:agent_host_next>"
     AGENTDESK_CTL_EXE=L"$<TARGET_FILE:agentctl>"
     AGENTDESK_UI_DIR_CTL_EXE=L"$<TARGET_FILE_DIR:agent-ui>/agentctl.exe"
     AGENTDESK_BUNDLED_CONPTY_DIR=L"${PROJECT_SOURCE_DIR}/third_party/conpty/bin")

@@ -208,6 +208,19 @@ public:
     // The root program exited: apply OSC 7501 lifetime rules.
     void on_process_exit();
 
+    // agent-host's self-update (design doc 7.4 OQ-09; herdr update.rs 236: "terminals keep
+    // running"): the old host saves the engine, the new host restores it and feeds the next byte.
+    // Only between two bytes where no escape sequence is half read: the parser is in its ground
+    // state (the UTF-8 carry and pending replies travel along).
+    [[nodiscard]] bool at_handover_point() const;
+    // Everything this engine holds (screens, modes, pen, history, links, OSC 7501 records, seq),
+    // or empty when not at a handover point.
+    [[nodiscard]] std::string save_state() const;
+    // An engine that continues exactly where `state` stopped. `options` gives the limits; the size
+    // comes from the state. Throws std::runtime_error when the data is not a state this build reads.
+    static std::unique_ptr<VtEngine> restore(const VtEngineOptions& options, EngineEvents events,
+                                             std::string_view state);
+
 private:
     struct Callbacks;
     friend struct Callbacks;
