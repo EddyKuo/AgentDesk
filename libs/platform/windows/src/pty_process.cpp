@@ -165,6 +165,16 @@ PtyProcess::~PtyProcess() {
 }
 
 void PtyProcess::reader_loop() noexcept {
+    struct Done {  // tells close() the reader has left, however it leaves
+        PtyProcess* p;
+        ~Done() {
+            {
+                std::lock_guard lock(p->reader_mutex_);
+                p->reader_done_ = true;
+            }
+            p->reader_cv_.notify_all();
+        }
+    } done{this};
     std::array<char, kReadChunk> buffer{};
     for (;;) {
         DWORD read = 0;
@@ -251,7 +261,21 @@ void PtyProcess::close() {
         pcon_ = nullptr;
     }
     // 2) The output pipe now reaches EOF; let the reader deliver the final bytes and exit.
+    //    A client that is still starting up can keep the console host, and so the pipe, alive
+    //    after ClosePseudoConsole (seen under load with cmd.exe). Give the reader 3 s, then end
+    //    the job's processes, which releases the pipe, and wait for it.
     if (reader_.joinable()) {
+        bool drained = false;
+        {
+            std::unique_lock reader_lock(reader_mutex_);
+            drained = reader_cv_.wait_for(reader_lock, std::chrono::seconds(3), [&] { return reader_done_; });
+        }
+        if (!drained) {
+            try {
+                job_.terminate(1);
+            } catch (const std::system_error&) {
+            }
+        }
         reader_.join();
     }
     // 3) Release pipes (input only once no write is in flight). 4) Kill whatever is left in
