@@ -1,6 +1,6 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.5  
+產品需求與系統設計文件 v2.6  
 日期：2026-11-18｜狀態：MVP 已實作（M0～M4），補齊 herdr 的主要功能（5.5），介面與行為依 herdr-app 原始碼移植（5.6、ADR-15），WSL 發行版可作為本機 shell（ADR-16）；待人工驗收項目見 5.4  
 技術基線：C++20、Windows 11 x64、Dear ImGui、Win32、DirectX 11、ConPTY
 
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.6 | 2026-11-18 | 依 herdr 規格逐項比對（約 150 項）補齊缺漏與差異，見 5.6 最後一列與「刻意保留的差異」 |
 | 2.5 | 2026-11-18 | 使用者要求全部用 C++：新增 ADR-17（mod 改為 C++ DLL，取代 ADR-14）；Codex 狀態 hook 改為 `agentctl hook` |
 | 2.4 | 2026-11-18 | 補齊 herdr 移植的剩餘項目（5.6）：滑鼠回報、右鍵設定、分頁收起、複製與重設版面、複製 mod、What's new、Send feedback、遠端機器的 Files／Changes；ADR-15 的代價更新 |
 | 2.3 | 2026-11-18 | 使用者要求接入 WSL：新增 ADR-16；1.3 的 P3「WSL 專用 adapter」改為「WSL 作為遠端機器（Linux 版 agent-host）」 |
@@ -234,7 +235,7 @@ libvterm 0.3.3 已知限制（M0 實測）：UTF-8 序列被切在兩次寫入�
 - 面板寬高換算 cols/rows，拖曳縮放以約 50 ms debounce 合併；字型與 DPI 改變也觸發 resize。
 - 正式文字輸入接收 Unicode text events；方向鍵與控制鍵另行編碼，避免 IME 組字與 keydown 重複送字。
 - 只有 focused terminal 接收輸入；ImGui 全域快捷鍵不得吞掉終端機必要按鍵。
-- Ctrl+C 在有選取時複製、無選取時送中斷；Ctrl+Shift+C 固定複製、Ctrl+Shift+V 貼上。選單提供明確「送出 Ctrl+C」。
+- Ctrl+C 在有選取時複製、無選取時送中斷；Ctrl+Shift+C 固定複製、Ctrl+V 或 Ctrl+Shift+V 貼上。選單提供明確「送出 Ctrl+C」。
 - 貼上檢查 NUL、限制單次 1 MiB；依終端機模式加 bracketed paste。多行文字預設先預覽，使用者確認後才送出。
 - MVP 選取採可見畫面與有限歷史的 line_id；若歷史淘汰，取消受影響的選取，避免錯誤複製。
 - 先支援 docking，multi-viewports 延後，降低 IME、DPI、焦點與多 HWND 的複雜度。
@@ -543,6 +544,9 @@ M0～M4 已實作，驗收矩陣結果見 `contracts/inbox/TestReport_sprint5.md
 | 分頁收起（`tab.settle`／`tab.unsettle`），需要你時自動回來 | src/model.rs | ✅ |
 | 複製、重設版面（`layout.clone`／`layout.reset`），複製 mod（`mod.clone`） | frame/palette | ✅ |
 | What's new（更新後顯示一次）、Send feedback（複製或存檔，不自動送出） | frame/settings、window.rs | ✅ |
+| 逐項比對後補齊（2026-11-18）：keys.json 的 layout／mod 區段、物件動作、`terminal` 與錯誤檢查；預設按鍵；命令面板標題與順序；面板右鍵選單與標題列；Appearance 與深淺主題；所有已安裝字型、終端機字重、介面字型；歡迎頁；機器標頭與空機器列；新增選單的未安裝 Agent；移除 worktree 的子模組與重新檢查；遠端 space 的分支 | 四份規格（docs/research/herdr-app/） | ✅ |
+
+刻意保留的差異：配色用我們自己的四個主題；介面文字預設 15 px；有選取時 Ctrl+C 複製（3.5，herdr 一律交給程式）；mod 是 C++ DLL（ADR-17）；沒有 Herdr 98 版面、使用統計與線上更新檢查。
 
 ## 6. 測試計畫與驗收（QA）
 

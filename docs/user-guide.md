@@ -35,7 +35,7 @@ Agent 需要你時一定會播放提示音；你沒在看的 Agent 完成時也�
 - 新分頁：Ctrl+Shift+T，或分頁列「+」選單的 Terminal
 - 新 space：Ctrl+Shift+N，或 Spaces 標題旁的「+」
 - 往右或往下分割：Ctrl+Shift+O、Ctrl+Shift+E，或面板標題列的按鈕
-- 直接啟動 Agent：分頁列「+」選單的「Start an agent」，可按 1～9；或 Ctrl+Shift+R 開啟程式選單
+- 直接啟動 Agent：分頁列「+」選單的「Start an agent」，可按 1～9；或命令面板的「Start a program…」
 - git worktree：「+」選單或 space 右鍵選單的 New worktree。只要輸入分支名稱，AgentDesk 會在 `%USERPROFILE%\.agentdesk\worktrees\<repo>\<分支>` 建立 checkout（可在設定中更改），開成新的 space 並開一個 shell。已存在的分支直接 checkout，新分支從目前位置建立。Open worktree 列出 repo 的所有 checkout；Remove worktree 會關閉該 space 並刪除 checkout 資料夾，分支保留，有未提交的變更時會先警告。
 
 第一次啟動會開歡迎頁，可以選大小與主題、加入遠端機器、選擇要顯示的面板。之後可從命令面板的「Welcome」再打開。
@@ -48,7 +48,6 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 |---|---|
 | Ctrl+Shift+K | 前往：搜尋 space、分頁或 Agent（Ctrl+D 關閉選到的分頁） |
 | Ctrl+Shift+T／Ctrl+Shift+N | 新分頁／新 space（開 shell） |
-| Ctrl+Shift+R | 選擇要啟動的程式 |
 | Ctrl+Shift+O／Ctrl+Shift+E | 往右／往下分割 |
 | Ctrl+Shift+Z | 放大或還原面板 |
 | Ctrl+Shift+X／Ctrl+Shift+W | 關閉面板／分頁（結束裡面的程式） |
@@ -56,7 +55,6 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 | Alt+1～9、Ctrl+Shift+PgUp/PgDn | 切換 space |
 | Alt+H/J/K/L 或 Alt+方向鍵 | 移到左下上右的面板 |
 | Alt+Shift+H/J/K/L | 與該方向的面板交換位置 |
-| Ctrl+Alt+方向鍵 | 調整面板大小 |
 | Alt+↑／Alt+↓ | 上一個／下一個 Agent |
 | F2／Shift+F2 | 分頁／space 改名 |
 | Ctrl+Shift+F | 在終端機裡搜尋 |
@@ -71,17 +69,23 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 { "global": { "ctrl-shift-t": "", "ctrl-alt-n": "tab.new" } }
 ```
 
-值為空字串表示取消綁定。重新啟動 AgentDesk 後生效。
+值為空字串表示取消綁定。格式與 herdr 的 keys.json 相同：
+
+- 區段：`global`（整個視窗）、`terminal`（終端機有焦點時）、`layout:<版面名稱>`（顯示該版面時）。同一個鍵在多個區段都有設定時，依 terminal、layout、global 的順序取用。
+- 動作可以是命令名稱、`命令:值`、`{"command": "layout.switch", "args": {"name": "grid"}}`、`send:<文字>`（送進終端機），或 `terminal`（這個鍵交給程式）。
+- 檔案有錯（無法讀的按鍵、未知的區段或命令）時，整個檔案都不套用，按鍵維持預設，錯誤會顯示在設定頁。
+
+重新啟動 AgentDesk 後生效。
 
 ## 終端機操作
 
 - 輸入：一般按鍵、方向鍵、F1～F12、注音等輸入法組字後的文字。
-- Ctrl+C：有選取時複製，沒有選取時送中斷。Ctrl+Shift+C 固定複製，Ctrl+Shift+V 貼上。
+- Ctrl+C：有選取時複製，沒有選取時送中斷。Ctrl+Shift+C 固定複製，Ctrl+V 或 Ctrl+Shift+V 貼上。
 - 滑鼠：拖曳選取、雙擊選字、三擊選整行，放開就複製（可在設定關閉）；右鍵選單有複製、貼上、全選、搜尋、分割、放大、改名、關閉。
 - 會讀滑鼠的程式（例如 vim、less、htop）：點擊、拖曳和滾輪直接交給程式；按住 Shift 可以照常選取文字。
 - 右鍵預設開選單。在右鍵選單選「Send right-clicks to pane」後，這個面板的右鍵改交給程式；Shift＋右鍵一定開選單。
 - 全螢幕程式沒有開啟滑鼠功能時，滾輪會改送上下方向鍵。
-- 捲動：滑鼠滾輪或 Shift+PgUp/PgDn 捲進歷史（最多 5000 行），右側有捲軸可以拖曳。一開始打字就回到即時畫面。
+- 捲動：滑鼠滾輪捲進歷史（最多 5000 行），右側有捲軸可以拖曳。一開始打字就回到即時畫面。
 - 搜尋：Ctrl+Shift+F，搜尋畫面與歷史，Enter 往前找，Shift+Enter 往後找，Esc 關閉。
 - 貼上多行文字前會先顯示預覽，確認後才送出；含 NUL 或超過 1 MiB 的內容會被拒絕。
 - 同一個工作同時只有一個視窗能輸入。其他視窗顯示 Read-only，按「Take control」可明確接手。
