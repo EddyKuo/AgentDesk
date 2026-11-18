@@ -407,6 +407,8 @@ void TerminalView::draw_context_menu(TerminalSource& source, const terminal::Scr
         commands_.emplace_back("pane.zoom");
     if (ImGui::MenuItem("Rename pane..."))
         commands_.emplace_back("pane.rename");
+    if (!parent_name.empty() && ImGui::MenuItem(("Send back to " + parent_name).c_str()))
+        commands_.emplace_back("pane.park");
     ImGui::Separator();
     if (ImGui::MenuItem("Close pane", chord("pane.close")))
         commands_.emplace_back("pane.close");
@@ -515,8 +517,13 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     ImFontBaked* baked = ImGui::GetFontBaked();
     // The real advance, not CalcTextSize (which rounds widths up: 12.09 px became 13 px and the
     // cursor drifted right of the text). The mono font uses PixelSnapH, so this is integral.
-    const float cell_w = std::max(1.0f, std::round(baked->GetCharAdvance(static_cast<ImWchar>('M'))));
-    const float cell_h = std::round(ImGui::GetTextLineHeight());
+    // herdr terminal_cell_width / terminal_line_height multipliers (0.8..2); text sits centred
+    // vertically in a taller cell.
+    const float cell_w =
+        std::max(1.0f, std::round(baked->GetCharAdvance(static_cast<ImWchar>('M')) * std::clamp(cell_width, 0.8f, 2.0f)));
+    const float text_h = std::round(ImGui::GetTextLineHeight());
+    const float cell_h = std::max(1.0f, std::round(text_h * std::clamp(line_height, 0.8f, 2.0f)));
+    const float text_dy = std::floor((cell_h - text_h) * 0.5f);
 
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     handle_resize(source, grid_for_area(avail.x, avail.y, cell_w, cell_h), snap);
@@ -662,7 +669,7 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     std::string run;
     for (int view_row = 0; view_row < offset && view_row < snap.rows; ++view_row) {
         const float y = origin.y + static_cast<float>(view_row) * cell_h;
-        draw_text_line(dl, font, font_size, baked, origin.x, y, cell_w, snap.cols, theme.default_fg,
+        draw_text_line(dl, font, font_size, baked, origin.x, y + text_dy, cell_w, snap.cols, theme.default_fg,
                        (*hist)[static_cast<std::size_t>(top + view_row)].text, run);
     }
     const int first_row =
@@ -694,7 +701,7 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
             if (cell.width != 0 && cell.chars[0] != 0) {
                 const ImU32 fg = colors_of(cell, theme).fg;
                 if (cell.chars[0] != U' ')
-                    draw_cell_text(dl, font, font_size, baked, x, y, cell_w * static_cast<float>(span), fg,
+                    draw_cell_text(dl, font, font_size, baked, x, y + text_dy, cell_w * static_cast<float>(span), fg,
                                    cell, run);
                 if (cell.attrs & terminal::kAttrUnderline) {
                     dl->AddLine(ImVec2(x, y + cell_h - 1),

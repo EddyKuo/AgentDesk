@@ -58,6 +58,9 @@ public:
     const Keymap* keymap = nullptr;  // global chords are reported, terminal chords run here
     bool copy_on_select = true;
     float scroll_speed = 1.0f;
+    std::string parent_name;   // sub-agent: its parent's name ("Send back to ..." in the menu)
+    float line_height = 1.0f;  // cell height multiplier (herdr terminal_line_height)
+    float cell_width = 1.0f;   // cell width multiplier (herdr terminal_cell_width)
 
 private:
     void handle_resize(TerminalSource& source, GridSize wanted, const terminal::ScreenSnapshot& snap);

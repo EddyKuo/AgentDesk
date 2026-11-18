@@ -11,86 +11,115 @@ namespace agentdesk::ui {
 
 namespace {
 
-std::filesystem::path fonts_dir() {
+std::string utf8(const std::filesystem::path& p) {
+    const auto u8 = p.u8string();  // ImGui opens files from UTF-8 paths
+    return {u8.begin(), u8.end()};
+}
+
+std::filesystem::path system_fonts_dir() {
     wchar_t buf[MAX_PATH]{};
     const UINT n = ::GetWindowsDirectoryW(buf, MAX_PATH);
     return std::filesystem::path(std::wstring(buf, n)) / L"Fonts";
 }
 
-std::string first_existing(std::initializer_list<const wchar_t*> names) {
-    const auto dir = fonts_dir();
-    for (const wchar_t* name : names) {
-        const auto p = dir / name;
-        std::error_code ec;
-        if (std::filesystem::is_regular_file(p, ec)) {
-            const auto u8 = p.u8string();  // ImGui opens files from UTF-8 paths
-            return std::string(u8.begin(), u8.end());
-        }
+std::filesystem::path bundled_fonts_dir() {
+    wchar_t buf[MAX_PATH]{};
+    const DWORD n = ::GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    return std::filesystem::path(std::wstring(buf, n)).parent_path() / L"fonts";
+}
+
+// First existing file: bundled names are looked up in fonts\ next to the exe, system names in
+// %WINDIR%\Fonts.
+std::string find_font(std::initializer_list<const wchar_t*> bundled, std::initializer_list<const wchar_t*> system) {
+    std::error_code ec;
+    for (const wchar_t* name : bundled) {
+        const auto p = bundled_fonts_dir() / name;
+        if (std::filesystem::is_regular_file(p, ec))
+            return utf8(p);
+    }
+    for (const wchar_t* name : system) {
+        const auto p = system_fonts_dir() / name;
+        if (std::filesystem::is_regular_file(p, ec))
+            return utf8(p);
     }
     return {};
 }
 
-// Merges the CJK face into the font added just before. 1.92+: glyphs load on demand, no ranges.
-void merge_cjk(const std::string& cjk, float extra_scale) {
-    if (cjk.empty())
+void merge(const std::string& path, float extra_scale = 1.0f, float y_offset = 0.0f) {
+    if (path.empty())
         return;
     ImFontConfig c;
     c.MergeMode = true;
-    // JhengHei's ideographs sit small next to Latin faces of the same size; scale them up a bit
-    // so they fill their two-cell slot (terminal) or match the cap height (interface).
     c.ExtraSizeScale = extra_scale;
-    ImGui::GetIO().Fonts->AddFontFromFileTTF(cjk.c_str(), 0.0f, &c);
+    c.GlyphOffset.y = y_offset;
+    ImGui::GetIO().Fonts->AddFontFromFileTTF(path.c_str(), 0.0f, &c);
 }
 
-// Symbols agents print that neither the Latin nor the CJK face has (warning sign, branch, check
-// marks, media arrows, emoji drawn monochrome). Merged last so they only fill gaps.
-void merge_symbols() {
-    for (const wchar_t* name : {L"seguisym.ttf", L"seguiemj.ttf"}) {
-        const std::string path = first_existing({name});
-        if (path.empty())
-            continue;
-        ImFontConfig c;
-        c.MergeMode = true;
-        ImGui::GetIO().Fonts->AddFontFromFileTTF(path.c_str(), 0.0f, &c);
-    }
+// Fills gaps after the main face: CJK (JhengHei, scaled so ideographs fill their slot), Nerd
+// Font icons, then Segoe UI Symbol / Emoji for anything else agents print.
+void merge_fallbacks(const std::string& cjk, const std::string& nerd) {
+    merge(cjk);
+    merge(nerd, 0.95f);
+    merge(find_font({}, {L"seguisym.ttf"}));
+    merge(find_font({}, {L"seguiemj.ttf"}));
+}
+
+ImFont* add(const std::string& path, float size, bool pixel_snap, const std::string& cjk, const std::string& nerd) {
+    if (path.empty())
+        return nullptr;
+    ImFontConfig c;
+    c.PixelSnapH = pixel_snap;  // terminal: integer advance, every cell on a pixel boundary
+    ImFont* f = ImGui::GetIO().Fonts->AddFontFromFileTTF(path.c_str(), size, &c);
+    if (f != nullptr)
+        merge_fallbacks(cjk, nerd);
+    return f;
 }
 
 }  // namespace
+
+ImFont* load_terminal_font(const std::wstring& file, float size_px) {
+    std::string path = file.empty() ? find_font({L"JetBrainsMono-Medium.ttf"}, {L"CascadiaMono.ttf", L"consola.ttf"})
+                                    : utf8(std::filesystem::path(file));
+    const std::string nerd = find_font({L"SymbolsNerdFont-Regular.ttf"}, {});
+    const std::string cjk = find_font({}, {L"msjh.ttc", L"mingliu.ttc"});
+    ImFont* f = add(path, size_px, true, cjk, nerd);
+    return f != nullptr ? f : ImGui::GetIO().Fonts->Fonts.front();
+}
 
 FontSet load_fonts(float mono_size_px, float ui_size_px) {
     FontSet set;
     set.mono_size = mono_size_px;
     set.ui_size = ui_size_px;
     ImGuiIO& io = ImGui::GetIO();
-    set.mono_source = first_existing({L"CascadiaMono.ttf", L"consola.ttf"});
-    set.ui_source = first_existing({L"segoeui.ttf"});
-    const std::string ui_bold_source = first_existing({L"seguisb.ttf", L"segoeuib.ttf"});
-    set.cjk_source = first_existing({L"msjh.ttc", L"mingliu.ttc"});
+    set.ui_source = find_font({L"Geist-Regular.ttf"}, {L"segoeui.ttf"});
+    const std::string ui_medium = find_font({L"Geist-Medium.ttf"}, {L"seguisb.ttf", L"segoeui.ttf"});
+    const std::string ui_bold = find_font({L"Geist-SemiBold.ttf"}, {L"seguisb.ttf", L"segoeuib.ttf"});
+    set.mono_source = find_font({L"JetBrainsMono-Medium.ttf"}, {L"CascadiaMono.ttf", L"consola.ttf"});
+    const std::string mono_bold = find_font({L"JetBrainsMono-Bold.ttf"}, {L"consolab.ttf"});
+    const std::string nerd = find_font({L"SymbolsNerdFont-Regular.ttf"}, {});
+    set.cjk_source = find_font({}, {L"msjh.ttc", L"mingliu.ttc"});
 
     // Interface font first: the first font added is ImGui's default.
-    if (!set.ui_source.empty()) {
-        set.ui = io.Fonts->AddFontFromFileTTF(set.ui_source.c_str(), ui_size_px);
-        merge_cjk(set.cjk_source, 1.0f);
-        merge_symbols();
-    }
-    if (!ui_bold_source.empty()) {
-        set.ui_bold = io.Fonts->AddFontFromFileTTF(ui_bold_source.c_str(), ui_size_px);
-        merge_cjk(set.cjk_source, 1.0f);
-        merge_symbols();
-    }
-    if (!set.mono_source.empty()) {
-        ImFontConfig mono;
-        mono.PixelSnapH = true;  // integer advance: every cell lands on a pixel boundary
-        set.mono = io.Fonts->AddFontFromFileTTF(set.mono_source.c_str(), mono_size_px, &mono);
-        merge_cjk(set.cjk_source, 1.0f);
-        merge_symbols();
-    }
+    set.ui = add(set.ui_source, ui_size_px, false, set.cjk_source, nerd);
+    set.ui_medium = add(ui_medium, ui_size_px, false, set.cjk_source, nerd);
+    set.ui_bold = add(ui_bold, ui_size_px, false, set.cjk_source, nerd);
+    set.mono = add(set.mono_source, mono_size_px, true, set.cjk_source, nerd);
+    set.mono_bold = add(mono_bold, mono_size_px, true, set.cjk_source, nerd);
+    if (!nerd.empty())
+        set.icons = io.Fonts->AddFontFromFileTTF(nerd.c_str(), ui_size_px);
+
     if (set.ui == nullptr)
         set.ui = io.Fonts->AddFontDefault();
+    if (set.ui_medium == nullptr)
+        set.ui_medium = set.ui;
     if (set.ui_bold == nullptr)
-        set.ui_bold = set.ui;
+        set.ui_bold = set.ui_medium;
     if (set.mono == nullptr)
         set.mono = set.ui;
+    if (set.mono_bold == nullptr)
+        set.mono_bold = set.mono;
+    if (set.icons == nullptr)
+        set.icons = set.ui;
     return set;
 }
 

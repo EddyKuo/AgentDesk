@@ -112,6 +112,52 @@ LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam))
         return 1;
     switch (msg) {
+        case WM_NCCALCSIZE:
+            // herdr's layout hides the system title bar and draws its own (window buttons in the
+            // tab bar). The whole window is client area; when maximized, keep it inside the
+            // monitor (a maximized window extends past the screen by the frame thickness).
+            if (wparam == TRUE) {
+                auto* p = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);  // Win32 contract
+                if (::IsZoomed(hwnd)) {
+                    const UINT dpi = ::GetDpiForWindow(hwnd);
+                    const int f = ::GetSystemMetricsForDpi(SM_CXFRAME, dpi) +
+                                  ::GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+                    p->rgrc[0].left += f;
+                    p->rgrc[0].top += f;
+                    p->rgrc[0].right -= f;
+                    p->rgrc[0].bottom -= f;
+                }
+                return 0;
+            }
+            break;
+        case WM_NCHITTEST: {
+            // Resize edges stay native (snap, Aero shake); everything else is ours.
+            if (::IsZoomed(hwnd))
+                return HTCLIENT;
+            POINT pt{static_cast<short>(LOWORD(lparam)), static_cast<short>(HIWORD(lparam))};
+            RECT wr{};
+            ::GetWindowRect(hwnd, &wr);
+            const int e = ::MulDiv(6, static_cast<int>(::GetDpiForWindow(hwnd)), 96);
+            const bool l = pt.x < wr.left + e, r = pt.x >= wr.right - e;
+            const bool t = pt.y < wr.top + e, b = pt.y >= wr.bottom - e;
+            if (t && l)
+                return HTTOPLEFT;
+            if (t && r)
+                return HTTOPRIGHT;
+            if (b && l)
+                return HTBOTTOMLEFT;
+            if (b && r)
+                return HTBOTTOMRIGHT;
+            if (l)
+                return HTLEFT;
+            if (r)
+                return HTRIGHT;
+            if (t)
+                return HTTOP;
+            if (b)
+                return HTBOTTOM;
+            return HTCLIENT;
+        }
         case WM_SIZE:
             if (wparam != SIZE_MINIMIZED) {
                 g_gfx.pending_w = LOWORD(lparam);
@@ -256,6 +302,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     {
         const BOOL dark = TRUE;  // dark title bar to match the chrome (DWMWA_USE_IMMERSIVE_DARK_MODE)
         ::DwmSetWindowAttribute(hwnd, 20, &dark, sizeof(dark));
+        // No system caption (WM_NCCALCSIZE); a 1 px DWM frame keeps the shadow and rounded corners.
+        const MARGINS m{0, 0, 1, 0};
+        ::DwmExtendFrameIntoClientArea(hwnd, &m);
+        ::SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
     }
     ::ShowWindow(hwnd, SW_SHOWDEFAULT);
     ::UpdateWindow(hwnd);

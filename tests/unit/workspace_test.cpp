@@ -143,6 +143,7 @@ TEST(Workspace, DividersMatchSplits) {
 
 TEST(Attention, DoneOnlyWhenFinishedUnseenAndClearsWhenSeen) {
     AttentionTracker t;
+    EXPECT_FALSE(t.update("a", "Idle", false));  // first listing: never alerts
     EXPECT_FALSE(t.update("a", "Working", false));
     EXPECT_EQ(t.get("a"), Attention::kWorking);
     EXPECT_TRUE(t.update("a", "Idle", false));  // finished while not looking
@@ -182,4 +183,63 @@ TEST(Keymap, ParsesChordsAndAppliesOverrides) {
     EXPECT_EQ(bad, std::vector<std::string>{"??x"});
     EXPECT_FALSE(k.global(*Keymap::parse("ctrl-shift-t")).has_value());
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-alt-n")), "space.new");
+}
+
+// herdr spaces: colours go to the least-used name, spaces move only within their machine.
+TEST(Workspace, SpaceColorsAndMoves) {
+    Workspace w;
+    w.add_space("a");
+    w.add_space("b");
+    w.add_space("c");
+    w.spaces[2].machine = "box";
+    w.assign_colors();
+    EXPECT_EQ(w.spaces[0].color, "ansi6");
+    EXPECT_EQ(w.spaces[1].color, "ansi3");
+    EXPECT_EQ(w.spaces[2].color, "ansi4");
+    w.select_space(0);
+    EXPECT_TRUE(w.move_space(0, 1));
+    EXPECT_EQ(w.spaces[1].tabs[0].focused, "a");
+    EXPECT_EQ(w.active_space, 1);
+    EXPECT_FALSE(w.move_space(1, 2));  // other machine
+    w.pinned.insert("b");
+    w.spaces[0].panel = "changes";
+    const auto back = Workspace::from_json(w.to_json());
+    EXPECT_EQ(back.spaces[0].panel, "changes");
+    EXPECT_EQ(back.spaces[0].color, "ansi3");
+    EXPECT_TRUE(back.pinned.contains("b"));
+}
+
+// herdr pane drag: drop on an edge moves the pane there; in the middle the two swap.
+TEST(Workspace, MovePaneToEdgeOrSwap) {
+    Workspace w;
+    w.add_space("a");
+    ASSERT_TRUE(w.split("a", "b", Dir::kRight));
+    ASSERT_TRUE(w.split("b", "c", Dir::kDown));
+    const Rect area{0, 0, 300, 200};
+    // c (bottom right) onto the left edge of a: c | a | b-ish layout, c leftmost.
+    ASSERT_TRUE(w.move_pane("c", "a", Dir::kLeft));
+    auto r = layout_tree(w.active_tab()->root, area, 0);
+    EXPECT_LT(r["c"].x, r["a"].x);
+    EXPECT_EQ(w.focused_session(), "c");
+    // swap a and b
+    const float ax = r["a"].x, bx = r["b"].x;
+    ASSERT_TRUE(w.move_pane("a", "b", std::nullopt));
+    r = layout_tree(w.active_tab()->root, area, 0);
+    EXPECT_EQ(r["a"].x, bx);
+    EXPECT_EQ(r["b"].x, ax);
+    EXPECT_FALSE(w.move_pane("a", "a", std::nullopt));
+}
+
+// herdr: needs-you alerts even while looking; error counts as needs you; a first listing that
+// is already done shows done without alerting.
+TEST(Attention, HerdrAlertRules) {
+    AttentionTracker t;
+    t.update("a", "Working", true);
+    EXPECT_TRUE(t.update("a", "Blocked", true));
+    EXPECT_FALSE(t.update("a", "Error", true));  // still needs you: no second alert
+    EXPECT_EQ(t.get("a"), Attention::kBlocked);
+    EXPECT_FALSE(t.update("b", "Done", false));
+    EXPECT_EQ(t.get("b"), Attention::kDone);
+    t.seen("b");
+    EXPECT_EQ(t.get("b"), Attention::kIdle);
 }

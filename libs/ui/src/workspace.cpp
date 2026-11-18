@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <functional>
 
@@ -543,10 +544,15 @@ Json Workspace::to_json() const {
         sp.push_back({{"id", s.id},
                       {"name", s.name},
                       {"machine", s.machine},
+                      {"color", s.color},
+                      {"panel", s.panel},
                       {"active_tab", s.active_tab},
                       {"tabs", std::move(tabs)}});
     }
-    return {{"version", 1}, {"active_space", active_space}, {"spaces", std::move(sp)}};
+    return {{"version", 1},
+            {"active_space", active_space},
+            {"spaces", std::move(sp)},
+            {"pinned", std::vector<std::string>(pinned.begin(), pinned.end())}};
 }
 
 Workspace Workspace::from_json(const Json& j) {
@@ -558,6 +564,8 @@ Workspace Workspace::from_json(const Json& j) {
         sp.id = s.value("id", "");
         sp.name = s.value("name", "");
         sp.machine = s.value("machine", "");
+        sp.color = s.value("color", "");
+        sp.panel = s.value("panel", "");
         sp.active_tab = s.value("active_tab", 0);
         for (const auto& t : s.value("tabs", Json::array())) {
             Tab tab;
@@ -574,9 +582,73 @@ Workspace Workspace::from_json(const Json& j) {
         if (!sp.tabs.empty())
             w.spaces.push_back(std::move(sp));
     }
+    for (const auto& p : j.value("pinned", Json::array()))
+        if (p.is_string())
+            w.pinned.insert(p.get<std::string>());
     w.active_space =
         std::clamp(j.value("active_space", 0), 0, std::max(0, static_cast<int>(w.spaces.size()) - 1));
     return w;
+}
+
+bool Workspace::move_pane(const std::string& moving, const std::string& target, std::optional<Dir> edge) {
+    if (moving == target)
+        return false;
+    const auto a = find(moving);
+    const auto b = find(target);
+    if (a.space < 0 || a.space != b.space || a.tab != b.tab)
+        return false;
+    Tab& tab = spaces[static_cast<std::size_t>(a.space)].tabs[static_cast<std::size_t>(a.tab)];
+    if (!edge) {
+        Node* x = find_leaf(tab.root, moving);
+        Node* y = find_leaf(tab.root, target);
+        if (x == nullptr || y == nullptr)
+            return false;
+        std::swap(x->session, y->session);
+        tab.focused = moving;
+        return true;
+    }
+    if (tab.root.leaf() || !remove_leaf(tab.root, moving))
+        return false;
+    tab.zoomed.clear();
+    return split(target, moving, *edge);
+}
+
+bool Workspace::move_space(int from, int to) {
+    const int n = static_cast<int>(spaces.size());
+    if (from < 0 || from >= n || to < 0 || to >= n || from == to)
+        return false;
+    if (spaces[static_cast<std::size_t>(from)].machine != spaces[static_cast<std::size_t>(to)].machine)
+        return false;  // herdr: a space moves only inside its machine's block
+    const std::string active_id = spaces[static_cast<std::size_t>(active_space)].id;
+    Space moved = std::move(spaces[static_cast<std::size_t>(from)]);
+    spaces.erase(spaces.begin() + from);
+    spaces.insert(spaces.begin() + to, std::move(moved));
+    for (int i = 0; i < n; ++i)
+        if (spaces[static_cast<std::size_t>(i)].id == active_id)
+            active_space = i;
+    return true;
+}
+
+void Workspace::assign_colors() {
+    static const char* const kOrder[] = {"ansi6", "ansi3", "ansi4", "ansi5", "ansi2", "ansi1"};
+    for (auto& sp : spaces) {
+        if (!sp.color.empty())
+            continue;
+        std::map<std::string, int> used;
+        for (const auto& o : spaces)
+            if (!o.color.empty())
+                ++used[o.color];
+        const char* best = kOrder[0];
+        int best_n = INT_MAX;
+        for (const char* c : kOrder) {
+            const int u = used.count(c) ? used[c] : 0;
+            if (u < best_n) {
+                best_n = u;
+                best = c;
+            }
+        }
+        sp.color = best;
+    }
 }
 
 // ------------------------------------------------------------------ geometry
@@ -605,26 +677,34 @@ Node* node_at(Node& root, const std::vector<int>& path) {
 
 // ------------------------------------------------------------------ attention
 bool AttentionTracker::update(const std::string& session, const std::string& agent_state, bool looking) {
+    // herdr model.rs 529-572: to blocked/error from anything else always alerts (also while
+    // looking: the caller then plays the sound but shows no note); from busy (working/blocked/
+    // error) to anything else alerts only when not looking, and that agent is "done" until seen.
+    // States in the first listing never alert; one already done shows as done.
     auto& e = entries_[session];
     const std::string prev = e.last;
+    const bool first = !e.known;
+    e.known = true;
     e.last = agent_state;
-    if (looking) {
+    const auto needs = [](const std::string& st) { return st == "Blocked" || st == "Error"; };
+    const auto busy = [&](const std::string& st) { return st == "Working" || needs(st); };
+    if (first) {
+        e.unseen_done = agent_state == "Done" && !looking;
+        return false;
+    }
+    if (prev == agent_state) {
+        if (looking)
+            e.unseen_done = false;
+        return false;
+    }
+    if (needs(agent_state))
+        return !needs(prev);
+    if (busy(prev)) {
+        e.unseen_done = !looking;
+        return !looking;
+    }
+    if (looking)
         e.unseen_done = false;
-        return false;
-    }
-    if (prev == agent_state)
-        return false;
-    if (agent_state == "Blocked")
-        return true;
-    // Finished while the user was elsewhere: working -> idle/done.
-    if (prev == "Working" && (agent_state == "Idle" || agent_state == "Done")) {
-        e.unseen_done = true;
-        return true;
-    }
-    if (agent_state == "Done" && !prev.empty()) {
-        e.unseen_done = true;
-        return true;
-    }
     return false;
 }
 
@@ -633,7 +713,7 @@ Attention AttentionTracker::get(const std::string& session) const {
     if (it == entries_.end())
         return Attention::kNone;
     const auto& e = it->second;
-    if (e.last == "Blocked")
+    if (e.last == "Blocked" || e.last == "Error")
         return Attention::kBlocked;
     if (e.unseen_done)
         return Attention::kDone;
