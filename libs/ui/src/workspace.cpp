@@ -1,5 +1,7 @@
 #include "agentdesk/ui/workspace.hpp"
 
+#include <windows.h>
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -173,6 +175,10 @@ Node node_from_json(const Json& j, int depth = 0) {
 
 std::string folder_of(const std::string& cwd) {
     std::string s = cwd;
+    char home[MAX_PATH]{};
+    const DWORD n = ::GetEnvironmentVariableA("USERPROFILE", home, MAX_PATH);
+    if (n > 0 && n < MAX_PATH && _stricmp(home, s.c_str()) == 0)
+        return "~";
     while (!s.empty() && (s.back() == '\\' || s.back() == '/'))
         s.pop_back();
     const auto p = s.find_last_of("\\/");

@@ -19,6 +19,7 @@
 #include "agentdesk/host/input.hpp"
 #include "agentdesk/host/states.hpp"
 #include "agentdesk/platform/win/conpty_api.hpp"
+#include "agentdesk/platform/win/process_tree.hpp"
 #include "agentdesk/platform/win/pty_process.hpp"
 #include "agentdesk/terminal/vt_engine.hpp"
 
@@ -85,6 +86,7 @@ public:
     [[nodiscard]] std::shared_ptr<const terminal::ScreenSnapshot> snapshot() const;
     [[nodiscard]] SessionInfo info() const;
     // Program running in the terminal now ("claude", "pwsh", ...); empty once exited.
+    [[nodiscard]] platform::win::Foreground foreground() const;
     [[nodiscard]] std::string foreground_program() const;
     // Lines from history (oldest first) with line_id >= from, at most `max_lines`.
     [[nodiscard]] std::vector<terminal::HistoryLine> history(std::uint64_t from, std::size_t max_lines) const;

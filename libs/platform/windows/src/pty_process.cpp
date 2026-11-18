@@ -234,6 +234,10 @@ std::string PtyProcess::foreground_program() const {
     return agentdesk::platform::win::foreground_program(job_.get(), pid_);
 }
 
+Foreground PtyProcess::foreground() const {
+    return agentdesk::platform::win::foreground(job_.get(), pid_);
+}
+
 void PtyProcess::close() {
     std::lock_guard lock(close_mutex_);
     if (closed_) {
