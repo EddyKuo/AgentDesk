@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cwctype>
+#include <fstream>
+#include <iterator>
+#include <set>
 
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/platform/win/error.hpp"
@@ -28,6 +31,30 @@ Response bad(const Request& r, std::string msg) {
     return protocol::fail(r.id, ErrorCode::kBadRequest, std::move(msg));
 }
 
+// WSL: a Linux cd never reaches wsl.exe's Windows current folder. bash runs PROMPT_COMMAND
+// before each prompt; set it (passed into Linux through WSLENV) to send OSC 7 with the distro
+// as the host, which the session maps to \\wsl.localhost\<distro>\... or C:\... for /mnt/c.
+// Only for an interactive shell: a profile that runs a command (-e, --exec, --) is left alone.
+// A ~/.bashrc that assigns PROMPT_COMMAND, or zsh/fish, replaces it; then the folder is unknown.
+void add_wsl_folder_hook(platform::win::PtySpawnSpec& spec) {
+    for (const auto& a : spec.args)
+        if (a == L"-e" || a == L"--exec" || a == L"--")
+            return;
+    spec.env_overrides[L"PROMPT_COMMAND"] = L"printf '\\033]7;file://%s%s\\007' \"$WSL_DISTRO_NAME\" \"$PWD\"";
+    std::wstring wslenv;
+    if (const auto it = spec.env_overrides.find(L"WSLENV"); it != spec.env_overrides.end()) {
+        wslenv = it->second;
+    } else {
+        wchar_t buf[4096]{};
+        const DWORD n = ::GetEnvironmentVariableW(L"WSLENV", buf, 4096);
+        if (n > 0 && n < 4096)
+            wslenv.assign(buf, n);
+    }
+    if (wslenv.find(L"PROMPT_COMMAND") == std::wstring::npos)
+        wslenv += (wslenv.empty() ? L"" : L":") + std::wstring(L"PROMPT_COMMAND/u");
+    spec.env_overrides[L"WSLENV"] = wslenv;
+}
+
 // PowerShell's cd (Set-Location) does not change the process's Windows current folder, which is
 // what the host reads to follow the shell. Like herdr, wrap the prompt: after the person's own
 // prompt runs, copy the location into [Environment]::CurrentDirectory. Only for an interactive
@@ -36,6 +63,10 @@ void add_folder_hook(platform::win::PtySpawnSpec& spec) {
     std::wstring exe = spec.executable.filename().native();
     for (auto& c : exe)
         c = static_cast<wchar_t>(std::towlower(c));
+    if (exe == L"wsl.exe") {
+        add_wsl_folder_hook(spec);
+        return;
+    }
     if (exe != L"pwsh.exe" && exe != L"powershell.exe")
         return;
     for (const auto& a : spec.args) {
@@ -184,13 +215,25 @@ void SessionManager::load_profiles() {
     if (const auto doc = read_json_with_backup(file)) {
         for (const auto& j : doc->value("profiles", Json::array()))
             profiles_.push_back(profile_from_json(j));
+        // Files written before WSL profiles existed get them once; a profile the person removes
+        // afterwards stays removed ("wsl_detected").
+        if (doc->value("wsl_detected", false))
+            return;
+        for (auto& p : detect_wsl_profiles())
+            if (std::none_of(profiles_.begin(), profiles_.end(), [&](const Profile& q) { return q.id == p.id; }))
+                profiles_.push_back(std::move(p));
+        save_profiles(file);
         return;
     }
     profiles_ = detect_default_profiles();
+    save_profiles(file);
+}
+
+void SessionManager::save_profiles(const std::filesystem::path& file) {
     Json list = Json::array();
     for (const auto& p : profiles_)
         list.push_back(to_json(p));
-    write_json_atomic(file, {{"schema_version", kSchemaVersion}, {"profiles", list}});
+    write_json_atomic(file, {{"schema_version", kSchemaVersion}, {"wsl_detected", true}, {"profiles", list}});
 }
 
 void SessionManager::persist_locked() {
@@ -285,6 +328,12 @@ Response SessionManager::dispatch(const ipc::ConnectionPtr& conn, const Request&
         return do_ui_state_set(conn, req);
     if (m == "worktree.add")
         return do_worktree_add(req);
+    if (m == "fs.list")
+        return do_fs_list(req);
+    if (m == "fs.read")
+        return do_fs_read(req);
+    if (m == "git.run")
+        return do_git_run(req);
     if (m == "session.wait")
         return do_wait(req);
     if (m == "session.label")
@@ -339,6 +388,129 @@ Response SessionManager::do_ui_state_set(const ipc::ConnectionPtr& conn, const R
         ++w;
     }
     return protocol::ok(req.id, {{"rev", ui_state_rev_}});
+}
+
+// ---- Files / Changes for a client on another machine (herdr mods/files, mods/changes). The
+// pipe only admits this Windows user, so these read what that user can read; the UI on this
+// machine reads the same folders directly.
+namespace {
+
+// JSON strings must be UTF-8: invalid bytes become U+FFFD.
+std::string valid_utf8(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    std::size_t i = 0;
+    while (i < in.size()) {
+        const auto c = static_cast<unsigned char>(in[i]);
+        std::size_t n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
+        bool ok = n > 0 && i + n <= in.size();
+        for (std::size_t k = 1; ok && k < n; ++k)
+            ok = (static_cast<unsigned char>(in[i + k]) & 0xC0) == 0x80;
+        if (ok) {
+            out.append(in, i, n);
+            i += n;
+        } else {
+            out += "\xEF\xBF\xBD";
+            ++i;
+        }
+    }
+    return out;
+}
+
+std::optional<std::filesystem::path> absolute_folder_param(const Request& req, const char* key) {
+    const std::string p = req.params.value(key, "");
+    if (p.empty() || has_control_chars(p))
+        return std::nullopt;
+    std::filesystem::path path(win::to_wide(p));
+    if (!path.is_absolute())
+        return std::nullopt;
+    return path;
+}
+
+}  // namespace
+
+Response SessionManager::do_fs_list(const Request& req) {
+    const auto dir = absolute_folder_param(req, "path");
+    if (!dir)
+        return bad(req, "path must be an absolute folder");
+    const std::size_t max = static_cast<std::size_t>(std::clamp(req.params.value("max", 500), 1, 5000));
+    std::error_code ec;
+    if (!std::filesystem::is_directory(*dir, ec))
+        return protocol::fail(req.id, ErrorCode::kNotFound, "not a folder");
+    Json entries = Json::array();
+    bool more = false;
+    std::filesystem::directory_iterator it(*dir, std::filesystem::directory_options::skip_permission_denied, ec);
+    for (; !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+        const std::string name = win::to_utf8(it->path().filename().native());
+        if (name == ".git")
+            continue;
+        if (entries.size() >= max) {
+            more = true;
+            break;
+        }
+        std::error_code e2;
+        entries.push_back({{"name", name}, {"dir", it->is_directory(e2)}});
+    }
+    return protocol::ok(req.id, {{"entries", std::move(entries)}, {"more", more}});
+}
+
+Response SessionManager::do_fs_read(const Request& req) {
+    const auto file = absolute_folder_param(req, "path");
+    if (!file)
+        return bad(req, "path must be absolute");
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(*file, ec);
+    if (ec)
+        return protocol::ok(req.id, {{"missing", true}});
+    constexpr std::uintmax_t kMax = 1024 * 1024;
+    if (size > kMax)
+        return protocol::ok(req.id, {{"too_large", true}, {"size", size}});
+    std::ifstream in(*file, std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (text.find('\0') != std::string::npos)
+        return protocol::ok(req.id, {{"binary", true}});
+    return protocol::ok(req.id, {{"text", valid_utf8(text)}});
+}
+
+// git for the Changes panel: only the read and commit commands it uses, with the same safety
+// switches as the local panel (no index refresh, no fsmonitor, no external diff or textconv).
+Response SessionManager::do_git_run(const Request& req) {
+    const auto cwd = absolute_folder_param(req, "cwd");
+    if (!cwd)
+        return bad(req, "cwd must be an absolute folder");
+    const auto& a = req.params.value("args", Json::array());
+    if (!a.is_array() || a.empty() || a.size() > 32)
+        return bad(req, "args must be a non-empty array");
+    std::vector<std::wstring> args;
+    for (const auto& x : a) {
+        if (!x.is_string() || has_control_chars(x.get<std::string>()))
+            return bad(req, "args must be plain strings");
+        args.push_back(win::to_wide(x.get<std::string>()));
+    }
+    static const std::set<std::wstring> kCommands = {L"status", L"diff", L"rev-parse", L"add", L"commit"};
+    if (!kCommands.contains(args.front()))
+        return bad(req, "git command not allowed");
+    for (const auto& x : args) {
+        if (x == L"--")
+            break;
+        if (x.starts_with(L"--ext-diff") || x.starts_with(L"--textconv") || x.starts_with(L"--output") ||
+            x.starts_with(L"--exec") || x == L"-c" || x.starts_with(L"--config"))
+            return bad(req, "git option not allowed");
+    }
+    args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-c", L"core.fsmonitor=false", L"-c",
+                               L"diff.autoRefreshIndex=false", L"-C", cwd->native()});
+    std::error_code ec;
+    if (!std::filesystem::is_directory(*cwd, ec))
+        return protocol::fail(req.id, ErrorCode::kNotFound, "not a folder");
+    const auto r = run_tool(args, *cwd, std::chrono::seconds(60));
+    if (!r.started)
+        return protocol::fail(req.id, ErrorCode::kSpawnFailed, "git was not found on PATH");
+    if (r.timed_out)
+        return protocol::fail(req.id, ErrorCode::kInternal, "git timed out");
+    std::string out = r.output;
+    if (out.size() > 8 * 1024 * 1024)
+        out.resize(8 * 1024 * 1024);
+    return protocol::ok(req.id, {{"exit_code", r.exit_code}, {"output", valid_utf8(out)}});
 }
 
 Response SessionManager::do_worktree_add(const Request& req) {
@@ -846,6 +1018,16 @@ Response SessionManager::do_input(const ipc::ConnectionPtr& conn, const Request&
         session->send(PasteInput{text});
     } else if (kind == "raw") {
         session->send(RawInput{p.value("bytes", "")});
+    } else if (kind == "mouse") {
+        const std::string action = p.value("action", "press");
+        const int button = p.value("button", 0);
+        if (button < 0 || button > 5 || (action != "press" && action != "release" && action != "move"))
+            return bad(req, "bad mouse event");
+        session->send(MouseInput{std::clamp(p.value("row", 0), 0, 10000), std::clamp(p.value("col", 0), 0, 10000), button,
+                                 action == "press"     ? terminal::MouseAction::kPress
+                                 : action == "release" ? terminal::MouseAction::kRelease
+                                                       : terminal::MouseAction::kMove,
+                                 mods_from_json(p.value("mods", Json::object()))});
     } else {
         return bad(req, "unknown input kind");
     }

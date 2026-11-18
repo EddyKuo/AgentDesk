@@ -1,0 +1,2899 @@
+{
+  "attach_cycles": 5679,
+  "create_stop_cycles": 1420,
+  "flood_restarts": 1418,
+  "last_third": {
+    "handles": 205.2,
+    "private_mb": 154.038037109375,
+    "threads": 33.46875
+  },
+  "middle_third": {
+    "handles": 205.51875,
+    "private_mb": 153.793896484375,
+    "threads": 33.51875
+  },
+  "minutes": 480.0,
+  "pass": true,
+  "samples": [
+    {
+      "handles": 162,
+      "minute": 3.3333333333333334e-09,
+      "private_mb": 6.37109375,
+      "threads": 20
+    },
+    {
+      "handles": 193,
+      "minute": 1.0001111283333333,
+      "private_mb": 81.37890625,
+      "threads": 29
+    },
+    {
+      "handles": 201,
+      "minute": 2.002442036666667,
+      "private_mb": 103.7734375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 3.002780218333333,
+      "private_mb": 107.53125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 4.003586216666666,
+      "private_mb": 112.26953125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 5.004455481666667,
+      "private_mb": 143.15625,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 6.010402545,
+      "private_mb": 137.0625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 7.011493443333333,
+      "private_mb": 155.8671875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 8.013436093333333,
+      "private_mb": 162.203125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 9.015632093333334,
+      "private_mb": 164.96875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 10.018657036666667,
+      "private_mb": 165.0390625,
+      "threads": 34
+    },
+    {
+      "handles": 206,
+      "minute": 11.019085543333333,
+      "private_mb": 167.1328125,
+      "threads": 34
+    },
+    {
+      "handles": 199,
+      "minute": 12.019248003333333,
+      "private_mb": 167.75390625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 13.020982163333333,
+      "private_mb": 157.95703125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 14.022900713333334,
+      "private_mb": 176.44140625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 15.026026848333334,
+      "private_mb": 159.78125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 16.026301348333334,
+      "private_mb": 167.87890625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 17.02735526,
+      "private_mb": 145.96875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 18.030732861666667,
+      "private_mb": 146.046875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 19.031191525,
+      "private_mb": 165.31640625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 20.035932255,
+      "private_mb": 166.4453125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 21.038187863333334,
+      "private_mb": 145.37890625,
+      "threads": 34
+    },
+    {
+      "handles": 211,
+      "minute": 22.038471928333333,
+      "private_mb": 146.3125,
+      "threads": 36
+    },
+    {
+      "handles": 206,
+      "minute": 23.039351488333335,
+      "private_mb": 144.9296875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 24.03948395,
+      "private_mb": 162.6484375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 25.039703118333332,
+      "private_mb": 165.38671875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 26.042073341666665,
+      "private_mb": 142.1796875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 27.052520566666665,
+      "private_mb": 164.68359375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 28.053149646666668,
+      "private_mb": 147.57421875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 29.053189036666666,
+      "private_mb": 139.35546875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 30.053675933333334,
+      "private_mb": 145.4609375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 31.056329586666667,
+      "private_mb": 161.53515625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 32.058984976666665,
+      "private_mb": 165.578125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 33.06097965166666,
+      "private_mb": 134.359375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 34.06374279166667,
+      "private_mb": 141.43359375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 35.06412462,
+      "private_mb": 161.07421875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 36.064606313333336,
+      "private_mb": 162.21484375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 37.06534875333333,
+      "private_mb": 147.03125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 38.06599885833333,
+      "private_mb": 143.7421875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 39.067012245,
+      "private_mb": 143.64453125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 40.067418085,
+      "private_mb": 143.35546875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 41.07812062666667,
+      "private_mb": 144.0390625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 42.079560925,
+      "private_mb": 160.09765625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 43.080663496666666,
+      "private_mb": 147.1796875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 44.081440986666664,
+      "private_mb": 144.02734375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 45.08156665833334,
+      "private_mb": 149.4140625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 46.084839816666666,
+      "private_mb": 143.2265625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 47.086139511666666,
+      "private_mb": 163.625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 48.09262402833333,
+      "private_mb": 147.75390625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 49.093477443333335,
+      "private_mb": 147.48046875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 50.093853165,
+      "private_mb": 144.91015625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 51.09551438166667,
+      "private_mb": 163.25,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 52.095774125,
+      "private_mb": 145.6796875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 53.09895566666667,
+      "private_mb": 143.2734375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 54.09986318333333,
+      "private_mb": 143.65625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 55.107438905,
+      "private_mb": 145.3359375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 56.10867105333333,
+      "private_mb": 161.46875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 57.11168711333333,
+      "private_mb": 145.50390625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 58.113845428333335,
+      "private_mb": 144.25,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 59.114174033333335,
+      "private_mb": 146.4453125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 60.11452272,
+      "private_mb": 142.38671875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 61.11565847,
+      "private_mb": 144.6796875,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 62.12109935,
+      "private_mb": 161.50390625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 63.12353520833334,
+      "private_mb": 146.4921875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 64.12507105166667,
+      "private_mb": 163.5234375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 65.12809474166667,
+      "private_mb": 143.296875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 66.13065482666667,
+      "private_mb": 150.26953125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 67.13370481333334,
+      "private_mb": 165.203125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 68.13399347833334,
+      "private_mb": 167.30859375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 69.13785949,
+      "private_mb": 148.8046875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 70.13919226833333,
+      "private_mb": 145.40625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 71.14101113666666,
+      "private_mb": 144.7265625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 72.14440325166666,
+      "private_mb": 164.0234375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 73.14484617333333,
+      "private_mb": 143.6015625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 74.14800734,
+      "private_mb": 162.984375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 75.14953787666667,
+      "private_mb": 149.69140625,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 76.154205285,
+      "private_mb": 145.28125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 77.15609437166667,
+      "private_mb": 146.2890625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 78.15726435333333,
+      "private_mb": 148.4140625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 79.16037131166667,
+      "private_mb": 163.34765625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 80.16075580833333,
+      "private_mb": 158.65625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 81.16087928833333,
+      "private_mb": 163.37109375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 82.161006065,
+      "private_mb": 148.28125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 83.17252678666667,
+      "private_mb": 145.67578125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 84.17525424666667,
+      "private_mb": 149.7109375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 85.17576282166667,
+      "private_mb": 159.05078125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 86.17680083666667,
+      "private_mb": 149.484375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 87.17695631333333,
+      "private_mb": 145.74609375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 88.17806998666667,
+      "private_mb": 165.6328125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 89.17908716833334,
+      "private_mb": 127.48828125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 90.18881430833333,
+      "private_mb": 145.921875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 91.19032413,
+      "private_mb": 146.4296875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 92.19068342666667,
+      "private_mb": 149.76171875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 93.193857315,
+      "private_mb": 161.99609375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 94.19451274333333,
+      "private_mb": 161.4609375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 95.19582993333333,
+      "private_mb": 146.8828125,
+      "threads": 34
+    },
+    {
+      "handles": 206,
+      "minute": 96.196411705,
+      "private_mb": 161.82421875,
+      "threads": 34
+    },
+    {
+      "handles": 199,
+      "minute": 97.20411366,
+      "private_mb": 159.43359375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 98.206807295,
+      "private_mb": 144.71875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 99.20802891666666,
+      "private_mb": 146.3671875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 100.20897022666666,
+      "private_mb": 143.48828125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 101.21224906,
+      "private_mb": 145.2265625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 102.21358814333334,
+      "private_mb": 144.7734375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 103.21405951,
+      "private_mb": 143.796875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 104.22099118666667,
+      "private_mb": 141.98828125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 105.22246952166667,
+      "private_mb": 146.6015625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 106.22451741666667,
+      "private_mb": 142.68359375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 107.22705087,
+      "private_mb": 144.40234375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 108.22844298,
+      "private_mb": 158.3828125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 109.229109015,
+      "private_mb": 159.23828125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 110.23064741833333,
+      "private_mb": 161.6484375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 111.24229533333333,
+      "private_mb": 158.83203125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 112.24397304833333,
+      "private_mb": 160.70703125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 113.24517057166666,
+      "private_mb": 159.47265625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 114.247795055,
+      "private_mb": 157.36328125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 115.24899738333333,
+      "private_mb": 150.94921875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 116.25135238666667,
+      "private_mb": 145.1953125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 117.25156334833333,
+      "private_mb": 147.30078125,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 118.25760297666666,
+      "private_mb": 163.015625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 119.25997183166666,
+      "private_mb": 150.77734375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 120.25997700833334,
+      "private_mb": 165.171875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 121.26165660666666,
+      "private_mb": 149.58203125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 122.26190256333334,
+      "private_mb": 146.02734375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 123.263858225,
+      "private_mb": 162.0,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 124.26988555166666,
+      "private_mb": 158.62890625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 125.27008178666667,
+      "private_mb": 145.6328125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 126.27228828333334,
+      "private_mb": 147.42578125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 127.27424146833333,
+      "private_mb": 146.328125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 128.27514369166667,
+      "private_mb": 164.4453125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 129.27723542333334,
+      "private_mb": 147.3203125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 130.2786625,
+      "private_mb": 162.3828125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 131.27950003833334,
+      "private_mb": 163.0,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 132.28102276,
+      "private_mb": 147.1484375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 133.28157242166668,
+      "private_mb": 162.84375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 134.283595845,
+      "private_mb": 149.22265625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 135.28517016833334,
+      "private_mb": 147.87109375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 136.28574947166666,
+      "private_mb": 149.0703125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 137.29232930833334,
+      "private_mb": 147.2578125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 138.29274565166668,
+      "private_mb": 165.90625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 139.29295783833334,
+      "private_mb": 145.69140625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 140.29402938,
+      "private_mb": 151.70703125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 141.29639981833333,
+      "private_mb": 146.578125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 142.29966052666666,
+      "private_mb": 145.22265625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 143.301028375,
+      "private_mb": 134.78515625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 144.30776630833333,
+      "private_mb": 163.95703125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 145.31984098166666,
+      "private_mb": 149.765625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 146.332297845,
+      "private_mb": 147.046875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 147.33278318666666,
+      "private_mb": 164.21484375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 148.33394949666666,
+      "private_mb": 160.84375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 149.33688619333333,
+      "private_mb": 146.6640625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 150.33875067666668,
+      "private_mb": 144.41015625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 151.33993194166666,
+      "private_mb": 146.21484375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 152.34287852333333,
+      "private_mb": 147.78125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 153.348657665,
+      "private_mb": 164.1328125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 154.34981739666668,
+      "private_mb": 166.0546875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 155.3520563,
+      "private_mb": 149.2734375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 156.353575035,
+      "private_mb": 145.6796875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 157.35628228666667,
+      "private_mb": 147.69140625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 158.35640930833333,
+      "private_mb": 166.1328125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 159.35888013833335,
+      "private_mb": 148.76953125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 160.36481598333333,
+      "private_mb": 145.953125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 161.37708952,
+      "private_mb": 164.4296875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 162.37739335166665,
+      "private_mb": 149.359375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 163.37773091666668,
+      "private_mb": 164.87890625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 164.37943865333332,
+      "private_mb": 147.5703125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 165.38108564,
+      "private_mb": 165.73046875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 166.38348970833334,
+      "private_mb": 148.4609375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 167.38602801333334,
+      "private_mb": 147.234375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 168.39167230833334,
+      "private_mb": 146.03515625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 169.39231111166666,
+      "private_mb": 146.96484375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 170.393710285,
+      "private_mb": 146.63671875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 171.39518648,
+      "private_mb": 148.87890625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 172.39838840333334,
+      "private_mb": 143.73828125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 173.39850263333332,
+      "private_mb": 151.51171875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 174.39915271166666,
+      "private_mb": 136.50390625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 175.40534225833332,
+      "private_mb": 144.67578125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 176.417218405,
+      "private_mb": 165.46484375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 177.429251435,
+      "private_mb": 169.1796875,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 178.43117959666668,
+      "private_mb": 170.66015625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 179.43211317666666,
+      "private_mb": 160.2890625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 180.43499987666667,
+      "private_mb": 147.36328125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 181.43610611833333,
+      "private_mb": 165.875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 182.43922251833334,
+      "private_mb": 145.8359375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 183.43941438,
+      "private_mb": 166.05078125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 184.44233371333334,
+      "private_mb": 147.69921875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 185.44292826833333,
+      "private_mb": 147.984375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 186.44485919166667,
+      "private_mb": 148.671875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 187.44562614,
+      "private_mb": 158.90234375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 188.44636814833333,
+      "private_mb": 147.87109375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 189.44694613166666,
+      "private_mb": 146.80078125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 190.44733504166666,
+      "private_mb": 146.796875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 191.45424230166665,
+      "private_mb": 148.2421875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 192.45618047333335,
+      "private_mb": 151.9921875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 193.45679306166667,
+      "private_mb": 145.97265625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 194.45935160333335,
+      "private_mb": 146.8359375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 195.46200578333332,
+      "private_mb": 145.984375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 196.46208829333332,
+      "private_mb": 164.23046875,
+      "threads": 35
+    },
+    {
+      "handles": 211,
+      "minute": 197.46956161666665,
+      "private_mb": 161.96875,
+      "threads": 35
+    },
+    {
+      "handles": 211,
+      "minute": 198.47243921666666,
+      "private_mb": 147.94140625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 199.47417466,
+      "private_mb": 166.41015625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 200.47665806666666,
+      "private_mb": 145.94140625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 201.47753188666667,
+      "private_mb": 160.24609375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 202.478181925,
+      "private_mb": 146.84375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 203.47946305666667,
+      "private_mb": 136.69921875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 204.49074033833332,
+      "private_mb": 148.140625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 205.492914415,
+      "private_mb": 148.32421875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 206.49501259666667,
+      "private_mb": 144.875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 207.49741722333334,
+      "private_mb": 147.5234375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 208.500268835,
+      "private_mb": 147.9765625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 209.50097248166668,
+      "private_mb": 152.6875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 210.5024149,
+      "private_mb": 147.453125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 211.51276596,
+      "private_mb": 166.0234375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 212.52601997166667,
+      "private_mb": 151.828125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 213.52803692333333,
+      "private_mb": 167.5859375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 214.52975683333332,
+      "private_mb": 153.8125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 215.53180944666667,
+      "private_mb": 169.359375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 216.53401601666667,
+      "private_mb": 151.26171875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 217.53590119,
+      "private_mb": 148.62109375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 218.53703453666665,
+      "private_mb": 149.671875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 219.546404835,
+      "private_mb": 151.703125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 220.54806242166666,
+      "private_mb": 147.80078125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 221.54935406333334,
+      "private_mb": 164.26171875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 222.55009915833332,
+      "private_mb": 149.21875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 223.55103511833335,
+      "private_mb": 148.4609375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 224.55173183,
+      "private_mb": 144.50390625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 225.55403414333333,
+      "private_mb": 149.92578125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 226.560271655,
+      "private_mb": 160.0859375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 227.56182181,
+      "private_mb": 162.3984375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 228.56420701333334,
+      "private_mb": 150.01953125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 229.56581700166666,
+      "private_mb": 147.0390625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 230.56760345333333,
+      "private_mb": 146.9453125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 231.57101942166668,
+      "private_mb": 147.67578125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 232.57241376833332,
+      "private_mb": 145.71484375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 233.57253422166667,
+      "private_mb": 147.8359375,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 234.58009892833334,
+      "private_mb": 165.71484375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 235.580905075,
+      "private_mb": 148.65234375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 236.58159591166665,
+      "private_mb": 166.2109375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 237.58261848333333,
+      "private_mb": 160.6328125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 238.583449885,
+      "private_mb": 165.46875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 239.58495208666668,
+      "private_mb": 148.18359375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 240.59101643833333,
+      "private_mb": 169.4453125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 241.59437149833335,
+      "private_mb": 151.6640625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 242.59676936833333,
+      "private_mb": 148.44140625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 243.60008197333335,
+      "private_mb": 169.5,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 244.60242111833333,
+      "private_mb": 148.6796875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 245.604297735,
+      "private_mb": 148.1328125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 246.60895823166666,
+      "private_mb": 150.09765625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 247.61008736333332,
+      "private_mb": 148.296875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 248.610130425,
+      "private_mb": 166.65625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 249.61287884,
+      "private_mb": 164.93359375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 250.61394195666668,
+      "private_mb": 168.203125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 251.61725402166667,
+      "private_mb": 165.55859375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 252.61800647833334,
+      "private_mb": 151.08984375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 253.61882423833333,
+      "private_mb": 161.91015625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 254.61987527,
+      "private_mb": 161.15625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 255.62092361333333,
+      "private_mb": 148.59765625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 256.6230456033333,
+      "private_mb": 166.89453125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 257.62620527666667,
+      "private_mb": 169.79296875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 258.6307917766667,
+      "private_mb": 150.83203125,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 259.64097716,
+      "private_mb": 167.21875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 260.6440634616667,
+      "private_mb": 149.74609375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 261.6461472866667,
+      "private_mb": 152.0546875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 262.64714073333334,
+      "private_mb": 147.0078125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 263.6489599583333,
+      "private_mb": 153.5078125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 264.64941638666664,
+      "private_mb": 163.875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 265.6561330316667,
+      "private_mb": 149.15234375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 266.65758261,
+      "private_mb": 149.26953125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 267.658354575,
+      "private_mb": 149.64453125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 268.66066569833333,
+      "private_mb": 146.375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 269.66300983166667,
+      "private_mb": 147.55078125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 270.6636198416667,
+      "private_mb": 145.765625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 271.66529335166666,
+      "private_mb": 145.74609375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 272.66734549333336,
+      "private_mb": 145.87890625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 273.66967365333335,
+      "private_mb": 166.80078125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 274.67128326,
+      "private_mb": 150.1015625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 275.672677395,
+      "private_mb": 167.796875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 276.68199389,
+      "private_mb": 165.8515625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 277.6831894416667,
+      "private_mb": 149.23046875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 278.68472234666666,
+      "private_mb": 159.8828125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 279.685434445,
+      "private_mb": 149.3125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 280.687968085,
+      "private_mb": 165.8203125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 281.69118358833333,
+      "private_mb": 147.94921875,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 282.6936818533333,
+      "private_mb": 166.0703125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 283.695479285,
+      "private_mb": 160.546875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 284.6965590816667,
+      "private_mb": 152.28125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 285.69927918,
+      "private_mb": 148.12890625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 286.70263655166667,
+      "private_mb": 146.01953125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 287.705458535,
+      "private_mb": 164.09765625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 288.706394975,
+      "private_mb": 161.0625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 289.71302462,
+      "private_mb": 148.9453125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 290.71537679,
+      "private_mb": 165.5703125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 291.71646878166666,
+      "private_mb": 146.765625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 292.7170654766667,
+      "private_mb": 149.05859375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 293.71765204166667,
+      "private_mb": 164.3984375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 294.718614595,
+      "private_mb": 148.93359375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 295.72200917,
+      "private_mb": 150.30859375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 296.730630305,
+      "private_mb": 167.6640625,
+      "threads": 34
+    },
+    {
+      "handles": 206,
+      "minute": 297.74207943,
+      "private_mb": 149.640625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 298.74211685833336,
+      "private_mb": 151.6796875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 299.7423625933333,
+      "private_mb": 161.30078125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 300.7435271383333,
+      "private_mb": 149.9921875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 301.7435299283333,
+      "private_mb": 147.03515625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 302.7436042433333,
+      "private_mb": 147.66015625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 303.7454801283333,
+      "private_mb": 147.875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 304.7507616666667,
+      "private_mb": 165.984375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 305.7511157366667,
+      "private_mb": 150.765625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 306.75221623333334,
+      "private_mb": 147.1953125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 307.75260827833335,
+      "private_mb": 144.08203125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 308.7533902266667,
+      "private_mb": 164.4765625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 309.75505381666665,
+      "private_mb": 165.515625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 310.75815794166664,
+      "private_mb": 162.18359375,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 311.76062028,
+      "private_mb": 148.65234375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 312.7618869016667,
+      "private_mb": 145.625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 313.76336137,
+      "private_mb": 150.01953125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 314.7645121566667,
+      "private_mb": 145.0234375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 315.76484834666667,
+      "private_mb": 145.7890625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 316.76720058166666,
+      "private_mb": 146.19921875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 317.7679441216667,
+      "private_mb": 153.08984375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 318.77963442,
+      "private_mb": 149.23046875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 319.781172285,
+      "private_mb": 165.8203125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 320.7821090666667,
+      "private_mb": 160.30078125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 321.7828120716667,
+      "private_mb": 150.3984375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 322.78533791666666,
+      "private_mb": 166.9453125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 323.786197905,
+      "private_mb": 149.890625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 324.786767315,
+      "private_mb": 146.6953125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 325.79645906666667,
+      "private_mb": 148.91015625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 326.79946826,
+      "private_mb": 160.19140625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 327.799974895,
+      "private_mb": 150.4921875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 328.80300142833335,
+      "private_mb": 145.1953125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 329.80351284833336,
+      "private_mb": 148.2109375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 330.80487536333334,
+      "private_mb": 163.33984375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 331.80504552166667,
+      "private_mb": 162.19140625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 332.81683416833334,
+      "private_mb": 147.57421875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 333.81699175833336,
+      "private_mb": 148.70703125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 334.82030612166665,
+      "private_mb": 144.53125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 335.82141552166667,
+      "private_mb": 166.0625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 336.82339421166665,
+      "private_mb": 164.8984375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 337.82469224833335,
+      "private_mb": 148.0234375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 338.8274394933333,
+      "private_mb": 139.0078125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 339.83006443166664,
+      "private_mb": 150.55078125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 340.8309044733333,
+      "private_mb": 166.69921875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 341.8336007666667,
+      "private_mb": 151.9765625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 342.83560549833334,
+      "private_mb": 146.44921875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 343.83788904333335,
+      "private_mb": 146.0078125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 344.8407680116667,
+      "private_mb": 149.0,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 345.84111141666665,
+      "private_mb": 146.5546875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 346.844454695,
+      "private_mb": 149.43359375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 347.85549482,
+      "private_mb": 163.54296875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 348.85655556,
+      "private_mb": 162.06640625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 349.8579341266667,
+      "private_mb": 163.546875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 350.85829197,
+      "private_mb": 147.91015625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 351.85890026,
+      "private_mb": 166.95703125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 352.8605620366667,
+      "private_mb": 148.75,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 353.8638761966667,
+      "private_mb": 144.34765625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 354.864852155,
+      "private_mb": 164.38671875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 355.86747314666667,
+      "private_mb": 167.19140625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 356.870254705,
+      "private_mb": 150.3515625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 357.87166602166667,
+      "private_mb": 160.953125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 358.874773555,
+      "private_mb": 164.0546875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 359.8769170466667,
+      "private_mb": 165.5625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 360.8788781466667,
+      "private_mb": 146.3671875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 361.87939884166667,
+      "private_mb": 150.0078125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 362.889330175,
+      "private_mb": 165.390625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 363.89001164166666,
+      "private_mb": 168.19140625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 364.89122540166665,
+      "private_mb": 169.421875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 365.89140487,
+      "private_mb": 148.01171875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 366.893358155,
+      "private_mb": 167.48828125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 367.89660103333335,
+      "private_mb": 167.08984375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 368.8967043216667,
+      "private_mb": 153.48828125,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 369.9006533716667,
+      "private_mb": 148.3125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 370.902169545,
+      "private_mb": 150.30078125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 371.90321035833335,
+      "private_mb": 167.02734375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 372.904394115,
+      "private_mb": 170.2421875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 373.90570899833335,
+      "private_mb": 152.94921875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 374.907620895,
+      "private_mb": 146.66796875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 375.90807006,
+      "private_mb": 166.0859375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 376.9155496966667,
+      "private_mb": 148.85546875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 377.91669098166665,
+      "private_mb": 150.04296875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 378.91917262833334,
+      "private_mb": 147.2265625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 379.922180615,
+      "private_mb": 166.20703125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 380.92356044166667,
+      "private_mb": 149.38671875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 381.9238459883333,
+      "private_mb": 152.02734375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 382.9270131966667,
+      "private_mb": 165.08984375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 383.92960095166666,
+      "private_mb": 148.6640625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 384.939401145,
+      "private_mb": 147.8984375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 385.9407647566667,
+      "private_mb": 146.6484375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 386.94265105333335,
+      "private_mb": 144.62109375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 387.9451887733333,
+      "private_mb": 164.90234375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 388.94852173833334,
+      "private_mb": 149.33984375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 389.951623445,
+      "private_mb": 154.02734375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 390.95478237833333,
+      "private_mb": 149.28515625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 391.95727066333336,
+      "private_mb": 144.42578125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 392.9627093766667,
+      "private_mb": 148.80078125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 393.96469957333335,
+      "private_mb": 153.73828125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 394.96592683166665,
+      "private_mb": 164.2265625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 395.9664093366667,
+      "private_mb": 163.8828125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 396.96853245,
+      "private_mb": 164.703125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 397.97078805666666,
+      "private_mb": 161.30078125,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 398.9722332966667,
+      "private_mb": 149.3359375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 399.97370044666667,
+      "private_mb": 149.6953125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 400.9754805183333,
+      "private_mb": 153.29296875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 401.977774025,
+      "private_mb": 148.09375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 402.97982635833336,
+      "private_mb": 147.17578125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 403.98217882,
+      "private_mb": 147.8125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 404.984258355,
+      "private_mb": 166.41796875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 405.98508512666666,
+      "private_mb": 151.28125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 406.98644507666666,
+      "private_mb": 168.828125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 407.9897058066667,
+      "private_mb": 148.72265625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 408.9910635183333,
+      "private_mb": 147.41015625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 409.9939794383333,
+      "private_mb": 146.33984375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 410.9955802366667,
+      "private_mb": 146.6796875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 411.99628678333335,
+      "private_mb": 160.51171875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 412.999569285,
+      "private_mb": 148.24609375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 413.99977380166666,
+      "private_mb": 146.18359375,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 415.00093246666665,
+      "private_mb": 146.54296875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 416.0014505633333,
+      "private_mb": 144.9453125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 417.00422891166664,
+      "private_mb": 165.32421875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 418.0049641466667,
+      "private_mb": 160.2421875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 419.0069705033333,
+      "private_mb": 150.50390625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 420.00871172166666,
+      "private_mb": 147.76953125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 421.008883985,
+      "private_mb": 150.52734375,
+      "threads": 35
+    },
+    {
+      "handles": 214,
+      "minute": 422.0098348216667,
+      "private_mb": 152.68359375,
+      "threads": 36
+    },
+    {
+      "handles": 211,
+      "minute": 423.02289741,
+      "private_mb": 162.69921875,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 424.03247790666666,
+      "private_mb": 162.78515625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 425.0347710483333,
+      "private_mb": 148.2109375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 426.03572642,
+      "private_mb": 147.140625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 427.03581476666665,
+      "private_mb": 147.28125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 428.0373458583333,
+      "private_mb": 147.6640625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 429.03983191,
+      "private_mb": 165.8984375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 430.0405122833333,
+      "private_mb": 163.17578125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 431.0423374783333,
+      "private_mb": 166.52734375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 432.0430195933333,
+      "private_mb": 149.39453125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 433.0449358066667,
+      "private_mb": 149.6171875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 434.0464978516667,
+      "private_mb": 149.38671875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 435.0478352033333,
+      "private_mb": 145.25390625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 436.051143275,
+      "private_mb": 146.23828125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 437.05219652833335,
+      "private_mb": 147.3984375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 438.0548706833333,
+      "private_mb": 151.875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 439.0595198533333,
+      "private_mb": 147.1015625,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 440.07128242,
+      "private_mb": 167.08203125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 441.08291559833333,
+      "private_mb": 148.66796875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 442.08357016,
+      "private_mb": 151.3046875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 443.08582750166664,
+      "private_mb": 148.6640625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 444.0866945266667,
+      "private_mb": 166.19140625,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 445.086978195,
+      "private_mb": 161.1953125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 446.088934215,
+      "private_mb": 149.484375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 447.0894095333333,
+      "private_mb": 148.36328125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 448.09099305666666,
+      "private_mb": 167.7734375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 449.1011939433333,
+      "private_mb": 165.125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 450.10145767666666,
+      "private_mb": 148.08203125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 451.10402638,
+      "private_mb": 146.0390625,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 452.10516779333335,
+      "private_mb": 149.77734375,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 453.10834198833334,
+      "private_mb": 146.41796875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 454.10855407,
+      "private_mb": 150.3046875,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 455.10904105,
+      "private_mb": 166.0,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 456.11141728166666,
+      "private_mb": 160.98828125,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 457.11697889333334,
+      "private_mb": 150.3515625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 458.1176431466667,
+      "private_mb": 150.453125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 459.11865364333335,
+      "private_mb": 167.16015625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 460.12077012333333,
+      "private_mb": 148.80859375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 461.12329552666665,
+      "private_mb": 148.9375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 462.1260363,
+      "private_mb": 146.08203125,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 463.1289948616667,
+      "private_mb": 165.20703125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 464.12903268,
+      "private_mb": 149.15234375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 465.13462545833335,
+      "private_mb": 152.5390625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 466.14599949166666,
+      "private_mb": 147.7734375,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 467.1584633416667,
+      "private_mb": 165.4375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 468.15863277333335,
+      "private_mb": 149.57421875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 469.161566205,
+      "private_mb": 147.68359375,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 470.16269533,
+      "private_mb": 145.35546875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 471.1629140233333,
+      "private_mb": 148.78515625,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 472.165159615,
+      "private_mb": 146.921875,
+      "threads": 33
+    },
+    {
+      "handles": 199,
+      "minute": 473.1665758066667,
+      "private_mb": 147.51171875,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 474.16839713166667,
+      "private_mb": 164.5078125,
+      "threads": 33
+    },
+    {
+      "handles": 205,
+      "minute": 475.17776202833335,
+      "private_mb": 160.92578125,
+      "threads": 33
+    },
+    {
+      "handles": 206,
+      "minute": 476.1789431,
+      "private_mb": 159.89453125,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 477.1815367066667,
+      "private_mb": 148.578125,
+      "threads": 35
+    },
+    {
+      "handles": 206,
+      "minute": 478.18439106166664,
+      "private_mb": 145.19921875,
+      "threads": 33
+    },
+    {
+      "handles": 211,
+      "minute": 479.18630315166666,
+      "private_mb": 146.99609375,
+      "threads": 35
+    },
+    {
+      "handles": 199,
+      "minute": 480.0,
+      "private_mb": 148.37109375,
+      "threads": 33
+    }
+  ]
+}

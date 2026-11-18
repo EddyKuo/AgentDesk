@@ -55,6 +55,7 @@ struct SessionInfo {
     bool history_truncated = false;
     std::uint64_t backpressure_waits = 0;  // times the reader paused because the queue was full
     std::uint64_t first_history_line_id = 0;
+    std::string cwd_uri;  // last OSC 7 the shell sent ("" until one arrives)
 };
 
 // Callbacks run on the session actor thread; keep them short and never call back into the

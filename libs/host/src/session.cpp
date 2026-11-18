@@ -1,5 +1,9 @@
 #include "agentdesk/host/session.hpp"
 
+#include <windows.h>
+
+#include "agentdesk/terminal/cwd_uri.hpp"
+
 #include <algorithm>
 #include <stdexcept>
 
@@ -187,13 +191,27 @@ std::shared_ptr<const terminal::ScreenSnapshot> Session::snapshot() const {
 }
 
 platform::win::Foreground Session::foreground() const {
-    if (!process_ || info().process_state != ProcessState::kRunning)
+    const SessionInfo i = info();
+    if (!process_ || i.process_state != ProcessState::kRunning)
         return {};
+    platform::win::Foreground fg;
     try {
-        return process_->foreground();
+        fg = process_->foreground();
     } catch (const std::exception&) {
         return {};
     }
+    // A folder the shell reported itself (OSC 7) beats the Windows process's current directory:
+    // WSL and MSYS shells cd without changing it.
+    if (!i.cwd_uri.empty()) {
+        static const std::string local = [] {
+            char buf[MAX_COMPUTERNAME_LENGTH + 1]{};
+            DWORD n = MAX_COMPUTERNAME_LENGTH + 1;
+            return ::GetComputerNameA(buf, &n) ? std::string(buf, n) : std::string();
+        }();
+        if (auto p = terminal::windows_path_from_cwd_uri(i.cwd_uri, local); !p.empty())
+            fg.cwd = std::move(p);
+    }
+    return fg;
 }
 
 std::string Session::foreground_program() const {
@@ -335,6 +353,8 @@ void Session::handle(OutputChunk& c) {
     queue_pty_bytes(engine_->take_pty_input());  // query replies, in parse order
     std::lock_guard lock(state_mutex_);
     info_.bytes_from_program += c.bytes.size();
+    if (engine_->cwd_uri() != info_.cwd_uri)
+        info_.cwd_uri = engine_->cwd_uri();
 }
 
 void Session::handle(InputEvent& c) {
@@ -352,6 +372,7 @@ void Session::handle(InputEvent& c) {
                        }
                    },
                    [&](RawInput& raw) { queue_pty_bytes(std::move(raw.bytes)); },
+                   [&](MouseInput& m) { engine_->mouse(m.row, m.col, m.button, m.action, m.mods); },
                },
                c);
     queue_pty_bytes(engine_->take_pty_input());

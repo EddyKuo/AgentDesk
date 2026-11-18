@@ -243,3 +243,35 @@ TEST(Attention, HerdrAlertRules) {
     t.seen("b");
     EXPECT_EQ(t.get("b"), Attention::kIdle);
 }
+
+// herdr tab.settle: a settled tab leaves the bar and tab cycling, keeps its terminals, and comes
+// back when shown (focus, select) — the last shown tab of a space cannot be put away.
+TEST(Workspace, SettledTabsAreSkippedUntilShown) {
+    Workspace w;
+    w.add_space("a");
+    w.add_tab("b");
+    w.add_tab("c");
+    w.select_tab(1);
+    ASSERT_TRUE(w.settle_tab(0, 1));
+    EXPECT_EQ(w.spaces[0].active_tab, 2);  // the next tab still shown
+    EXPECT_EQ(w.find("b").space, 0);       // still there, still running
+    w.cycle_tab(1);
+    EXPECT_EQ(w.spaces[0].active_tab, 0);
+    w.cycle_tab(1);
+    EXPECT_EQ(w.spaces[0].active_tab, 2);  // skips the settled tab
+    w.select_shown_tab(2);
+    EXPECT_EQ(w.spaces[0].active_tab, 2);  // Ctrl+2 counts shown tabs only
+
+    ASSERT_TRUE(w.settle_tab(0, 0));
+    EXPECT_FALSE(w.settle_tab(0, 2));  // last one shown
+    EXPECT_TRUE(w.unsettle_session("a"));
+    EXPECT_FALSE(w.spaces[0].tabs[0].settled);
+    w.focus("b");
+    EXPECT_FALSE(w.spaces[0].tabs[1].settled);
+    EXPECT_EQ(w.spaces[0].active_tab, 1);
+
+    ASSERT_TRUE(w.settle_tab(0, 0));
+    const auto back = Workspace::from_json(w.to_json());
+    EXPECT_TRUE(back.spaces[0].tabs[0].settled);
+    EXPECT_FALSE(back.spaces[0].tabs[1].settled);
+}

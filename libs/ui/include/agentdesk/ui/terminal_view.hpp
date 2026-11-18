@@ -61,6 +61,9 @@ public:
     std::string parent_name;   // sub-agent: its parent's name ("Send back to ..." in the menu)
     float line_height = 1.0f;  // cell height multiplier (herdr terminal_line_height)
     float cell_width = 1.0f;   // cell width multiplier (herdr terminal_cell_width)
+    // herdr terminal.right_click: when the program reads the mouse, right-clicks go to it instead
+    // of opening the menu. Shift+right-click always opens the menu.
+    bool right_click_to_program = false;
 
 private:
     void handle_resize(TerminalSource& source, GridSize wanted, const terminal::ScreenSnapshot& snap);
@@ -74,6 +77,10 @@ private:
     void draw_search_bar(ImVec2 area_min, ImVec2 area_max);
     void update_search(const std::vector<HistoryLineText>* hist, const terminal::ScreenSnapshot& snap);
     void clear_selection();
+    // Program mouse reporting (DECSET 1000/1002/1003): returns true when the event went to it.
+    void forward_mouse(TerminalSource& source, const terminal::ScreenSnapshot& snap, bool hovered, CellPos cell);
+    std::uint8_t mouse_buttons_ = 0;  // bit per button 1..3 pressed inside and not yet released
+    std::optional<CellPos> last_mouse_cell_;
 
     std::optional<CellPos> sel_anchor_;
     std::optional<CellPos> sel_end_;

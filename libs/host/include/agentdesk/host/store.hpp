@@ -34,8 +34,10 @@ struct Profile {
 nlohmann::json to_json(const Profile& p);
 Profile profile_from_json(const nlohmann::json& j);
 
-// Profiles found on PATH (claude, codex, pwsh, powershell, cmd), used when profiles.json is missing.
+// Profiles found on PATH (claude, codex, pwsh, powershell, cmd) and WSL distributions, used when profiles.json is missing.
 std::vector<Profile> detect_default_profiles();
+// One profile per installed WSL distribution ("wsl-<name>", wsl.exe -d <name>).
+std::vector<Profile> detect_wsl_profiles();
 
 // Validates a profile before spawning (design doc 1.4): executable exists, not a batch file.
 std::optional<std::string> validate_profile(const Profile& p);

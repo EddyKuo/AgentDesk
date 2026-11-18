@@ -1,5 +1,7 @@
 #include "agentdesk/ui/remote_screen.hpp"
 
+#include <algorithm>
+
 #include "agentdesk/protocol/messages.hpp"
 
 namespace agentdesk::ui {
@@ -8,6 +10,7 @@ void RemoteScreen::apply_meta(const nlohmann::json& meta, terminal::ScreenSnapsh
     s.generation = meta.value("generation", static_cast<std::uint64_t>(0));
     s.seq = meta.value("seq", static_cast<std::uint64_t>(0));
     s.alt_screen = meta.value("alt_screen", false);
+    s.mouse = static_cast<terminal::MouseMode>(std::clamp(meta.value("mouse", 0), 0, 3));
     s.title = meta.value("title", "");
     if (const auto it = meta.find("cursor"); it != meta.end()) {
         s.cursor.row = it->value("row", 0);

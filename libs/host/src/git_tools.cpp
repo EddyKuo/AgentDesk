@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cwctype>
 #include <thread>
 
 #include "agentdesk/platform/win/command_line.hpp"
@@ -11,6 +12,13 @@
 namespace agentdesk::host {
 
 namespace win = agentdesk::platform::win;
+
+bool is_wsl_path(const std::wstring& path) {
+    std::wstring p = path.substr(0, 16);
+    for (auto& c : p)
+        c = static_cast<wchar_t>(std::towlower(c == L'/' ? L'\\' : c));
+    return p.starts_with(L"\\\\wsl.localhost\\") || p.starts_with(L"\\\\wsl$\\");
+}
 
 ToolResult run_tool(const std::vector<std::wstring>& argv, const std::filesystem::path& cwd,
                     std::chrono::milliseconds timeout) {
@@ -30,6 +38,15 @@ ToolResult run_tool(const std::vector<std::wstring>& argv, const std::filesystem
     ::SetHandleInformation(out_read.get(), HANDLE_FLAG_INHERIT, 0);
 
     std::vector<std::wstring> args(argv.begin() + 1, argv.end());
+    // Files inside WSL belong to the Linux user, so Git for Windows refuses the repository as
+    // "dubious ownership". They are the person's own distribution: trust it for this one call.
+    if (is_wsl_path(cwd.native())) {
+        std::wstring tool = std::filesystem::path(argv[0]).stem().native();
+        for (auto& c : tool)
+            c = static_cast<wchar_t>(std::towlower(c));
+        if (tool == L"git")
+            args.insert(args.begin(), {L"-c", L"safe.directory=*"});
+    }
     std::wstring cmdline = win::build_command_line(found, args);
     STARTUPINFOW si{};
     si.cb = sizeof(si);

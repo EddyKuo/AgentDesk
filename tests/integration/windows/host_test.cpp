@@ -10,6 +10,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <set>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -114,6 +115,10 @@ protected:
              {"name", "probe echo"},
              {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
              {"args", {"echo"}}},
+            {{"id", "mouse"},
+             {"name", "probe mouse"},
+             {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
+             {"args", {"mouse"}}},
             {{"id", "flood"},
              {"name", "probe flood"},
              {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
@@ -884,4 +889,67 @@ TEST(RemoteTransport, FailingCommandExplainsWhy) {
     EXPECT_EQ(argv.front(), L"ssh");
     EXPECT_EQ(argv[argv.size() - 3], L"dev@build-box");
     EXPECT_EQ(argv.back(), L"bridge");
+}
+
+// Mouse reporting end to end: the program turns on click reporting (DECSET 1000 + SGR 1006), the
+// client sends an abstract mouse event, the host encodes it and the program reads the bytes.
+TEST_F(HostFixture, MouseEventsReachAProgramThatAskedForThem) {
+    const auto id = create("mouse", "mouse");
+    auto c = connect();
+    ASSERT_TRUE(c);
+    ASSERT_TRUE(wait_until(
+        [&] {
+            const auto r = c->call("session.list", Json::object());
+            for (const auto& sjson : r->result->value("sessions", Json::array()))
+                if (sjson.value("id", "") == id && sjson.value("process_state", "") == "Running")
+                    return true;
+            return false;
+        },
+        10s));
+    std::this_thread::sleep_for(500ms);  // the DECSET has been parsed
+    const auto r = c->call("session.input", {{"session", id}, {"kind", "mouse"}, {"row", 1}, {"col", 2},
+                                             {"button", 1}, {"action", "press"}});
+    ASSERT_TRUE(r && !r->error);
+    // ESC [ < 0 ; 3 ; 2 M  (1-based col 3, row 2)
+    EXPECT_TRUE(wait_until([&] { return read(id).find("1b5b3c303b333b324d") != std::string::npos; }, 10s))
+        << read(id);
+    const auto bad = c->call("session.input", {{"session", id}, {"kind", "mouse"}, {"button", 9}});
+    EXPECT_TRUE(bad && bad->error);
+}
+
+// Files / Changes for a client on another machine: fs.list, fs.read and an allow-listed git.run.
+TEST_F(HostFixture, FilesAndChangesRequestsForRemoteClients) {
+    auto c = connect();
+    ASSERT_TRUE(c);
+    const fs::path repo = data_dir_ / L"repo";
+    fs::create_directories(repo / L"src");
+    std::ofstream(repo / L"a.txt", std::ios::binary) << "hello\n";
+    std::ofstream(repo / L"bin.dat", std::ios::binary) << std::string("x\0y", 3);
+    const std::string root = win::to_utf8(repo.native());
+
+    const auto list = c->call("fs.list", {{"path", root}});
+    ASSERT_TRUE(list && !list->error);
+    std::set<std::string> names;
+    for (const auto& e : list->result->at("entries"))
+        names.insert(e.value("name", "") + (e.value("dir", false) ? "/" : ""));
+    EXPECT_EQ(names, (std::set<std::string>{"a.txt", "bin.dat", "src/"}));
+
+    const auto text = c->call("fs.read", {{"path", root + "\\a.txt"}});
+    ASSERT_TRUE(text && !text->error);
+    EXPECT_EQ(text->result->value("text", ""), "hello\n");
+    EXPECT_TRUE(c->call("fs.read", {{"path", root + "\\bin.dat"}})->result->value("binary", false));
+    EXPECT_TRUE(c->call("fs.read", {{"path", root + "\\nope"}})->result->value("missing", false));
+    EXPECT_TRUE(c->call("fs.list", {{"path", "relative"}})->error.has_value());
+
+    const auto init = agentdesk::host::run_tool({L"git", L"-C", repo.native(), L"init", L"-q"}, repo, 30s);
+    if (!init.started || init.exit_code != 0)
+        GTEST_SKIP() << "git not available";
+    const auto st = c->call("git.run", {{"cwd", root}, {"args", {"status", "--porcelain=v1"}}});
+    ASSERT_TRUE(st && !st->error);
+    EXPECT_EQ(st->result->value("exit_code", 1), 0);
+    EXPECT_NE(st->result->value("output", "").find("?? a.txt"), std::string::npos);
+    // Only the panel's commands; no config overrides or external diff programs.
+    EXPECT_TRUE(c->call("git.run", {{"cwd", root}, {"args", {"config", "--list"}}})->error.has_value());
+    EXPECT_TRUE(c->call("git.run", {{"cwd", root}, {"args", {"diff", "--ext-diff"}}})->error.has_value());
+    EXPECT_TRUE(c->call("git.run", {{"cwd", root}, {"args", {"status", "-c", "x=y"}}})->error.has_value());
 }
