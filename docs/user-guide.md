@@ -36,7 +36,7 @@ Agent 需要你時一定會播放提示音；你沒在看的 Agent 完成時也�
 - 新 space：Ctrl+Shift+N，或 Spaces 標題旁的「+」
 - 往右或往下分割：Ctrl+Shift+O、Ctrl+Shift+E，或面板標題列的按鈕
 - 直接啟動 Agent：分頁列「+」選單的「Start an agent」，可按 1～9；或命令面板的「Start a program…」
-- git worktree：「+」選單或 space 右鍵選單的 New worktree。只要輸入分支名稱，AgentDesk 會在 `%USERPROFILE%\.agentdesk\worktrees\<repo>\<分支>` 建立 checkout（可在設定中更改），開成新的 space 並開一個 shell。已存在的分支直接 checkout，新分支從目前位置建立。Open worktree 列出 repo 的所有 checkout；Remove worktree 會關閉該 space 並刪除 checkout 資料夾，分支保留，有未提交的變更時會先警告。
+- git worktree：「+」選單或 space 右鍵選單的 New worktree。只要輸入分支名稱，AgentDesk 會在 `%USERPROFILE%\.agentdesk\worktrees\<repo>\<分支>` 建立 checkout（可在設定中更改），開成新的 space 並開一個 shell。已存在的分支直接 checkout，新分支從目前位置建立。遠端機器的 space 也可以用，checkout 建在那台電腦上。Open worktree 列出 repo 的所有 checkout；Remove worktree 會關閉該 space 並刪除 checkout 資料夾，分支保留，有未提交的變更時會先警告。
 
 第一次啟動會開歡迎頁，可以選大小與主題、加入遠端機器、選擇要顯示的面板。之後可從命令面板的「Welcome」再打開。
 
@@ -75,7 +75,7 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 - 動作可以是命令名稱、`命令:值`、`{"command": "layout.switch", "args": {"name": "grid"}}`、`send:<文字>`（送進終端機），或 `terminal`（這個鍵交給程式）。
 - 檔案有錯（無法讀的按鍵、未知的區段或命令）時，整個檔案都不套用，按鍵維持預設，錯誤會顯示在設定頁。
 
-重新啟動 AgentDesk 後生效。
+存檔後立刻生效，不必重新啟動。檔案不存在時，AgentDesk 會寫入預設的按鍵；檔案有錯時，原因會寫在同一個資料夾的 `keys.error`。
 
 ## 終端機操作
 
