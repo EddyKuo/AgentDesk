@@ -90,6 +90,8 @@ int wmain(int argc, wchar_t** argv) {
             copy_into(bin / f, stage);
         dk::copy_tree(bin / L"fonts", stage / L"fonts");
         dk::copy_tree(bin / L"sounds", stage / L"sounds");
+        // Herdr 98 (herdr-app defaults/mods/win98): fonts, icons, images, sounds, the layout file.
+        dk::copy_tree(bin / L"win98", stage / L"win98");
         // Example mods (C++ DLLs) and the SDK to build your own: headers and the examples' sources.
         for (const auto& m : fs::directory_iterator(bin / L"mods")) {
             if (!m.is_directory())
@@ -148,6 +150,16 @@ int wmain(int argc, wchar_t** argv) {
              root / L"third_party/fonts/OFL-JetBrainsMono.txt"},
             {"Symbols Nerd Font", "https://github.com/ryanoasis/nerd-fonts",
              root / L"third_party/fonts/LICENSE-SymbolsNerdFont.txt"},
+            {"lunasvg 3.5.0 (SVG rendering)", "https://github.com/sammycage/lunasvg", share / L"lunasvg/copyright"},
+            {"plutovg 1.3.3 (used by lunasvg)", "https://github.com/sammycage/plutovg", share / L"plutovg/copyright"},
+            {"Pixelated MS Sans Serif fonts (Herdr 98, win98\\fonts)", "https://github.com/jdan/98.css",
+             root / L"third_party/herdr/win98/fonts/LICENSE-MSSansSerif.txt"},
+            {"Creative Commons Attribution-ShareAlike 3.0 (the Pixelated MS Sans Serif fonts)",
+             "https://creativecommons.org/licenses/by-sa/3.0/", root / L"third_party/herdr/win98/fonts/CC-BY-SA-3.0.txt"},
+            {"PxPlus IBM VGA 8x16 font (Herdr 98, win98\\fonts)", "https://int10h.org/oldschool-pc-fonts/",
+             root / L"third_party/herdr/win98/fonts/LICENSE-PxPlus.txt"},
+            {"LobeHub icons (Herdr 98 program icons, win98\\programs)", "https://github.com/lobehub/lobe-icons",
+             root / L"third_party/herdr/win98/programs/LICENSE-LobeHub.txt"},
         };
         std::string notices;
         auto line = [&notices](const std::string& text = {}) { notices += text + "\r\n"; };
