@@ -23,11 +23,23 @@ std::string status_word(Attention a) {
     }
 }
 
+std::string status_badge(const std::string& status) {
+    return status == "blocked"   ? "warn-badge"
+           : status == "working" ? "hourglass"
+           : status == "done"    ? "check-badge"
+                                 : "";
+}
+
 namespace {
+void add_attention(App::State& s, const ui::Tab& t, std::vector<Attention>& out) {
+    for (const auto& id : s.ws.sessions_in(t))
+        out.push_back(s.attention_of(id));
+}
+
+// The most urgent status of the tab's sessions.
 std::string tab_status(App::State& s, const ui::Tab& t) {
     std::vector<Attention> atts;
-    for (const auto& id : s.ws.sessions_in(t))
-        atts.push_back(s.attention_of(id));
+    add_attention(s, t, atts);
     return status_word(ui::most_urgent(atts));
 }
 
@@ -36,9 +48,21 @@ std::string tab_status(App::State& s, const ui::Tab& t) {
 std::string space_status(App::State& s, const ui::Space& sp) {
     std::vector<Attention> atts;
     for (const auto& t : sp.tabs)
-        for (const auto& id : s.ws.sessions_in(t))
-            atts.push_back(s.attention_of(id));
+        add_attention(s, t, atts);
     return status_word(ui::most_urgent(atts));
+}
+
+std::string session_place(App::State& s, const std::string& id,
+                          const std::map<std::string, std::string>& cwds) {
+    const auto loc = s.ws.find(id);
+    std::string sname, tname;
+    if (loc.space >= 0) {
+        sname = s.ws.space_title(loc.space, cwds);
+        tname = ui::Workspace::tab_title(
+            s.ws.spaces[static_cast<std::size_t>(loc.space)].tabs[static_cast<std::size_t>(loc.tab)],
+            loc.tab);
+    }
+    return sname + " \\ " + tname;
 }
 
 std::string user_name_now() {
@@ -169,6 +193,29 @@ Dialog kind_dialog(const std::string& kind) {
     return d;
 }
 
+Dialog new_space_prompt(App::State& s) {
+    return prompt(
+        "New Space", "Type a name for the new space:", "folder",
+        [&s](const std::string& n, const std::string& m) { new_space(s, n, m); }, std::nullopt, true);
+}
+
+Dialog new_tab_prompt(App::State& s) {
+    return prompt("New Tab", "Type a name for the new tab:", "dos",
+                  [&s](const std::string& n, const std::string&) { new_tab(s, n); });
+}
+
+Dialog rename_tab_prompt(App::State& s, const std::string& id, const std::string& current) {
+    return prompt(
+        "Rename", "Type a new name for this tab:", "rename",
+        [&s, id](const std::string& n, const std::string&) { rename_tab_id(s, id, n); }, current);
+}
+
+Dialog rename_space_prompt(App::State& s, const std::string& id, const std::string& current) {
+    return prompt(
+        "Rename", "Type a new name for this space:", "folder",
+        [&s, id](const std::string& n, const std::string&) { rename_space_id(s, id, n); }, current);
+}
+
 namespace {
 // Asks before closing a tab.
 Dialog close_tab_ask(App::State& s, const ui::Tab& tab, int index) {
@@ -240,15 +287,38 @@ std::string pane_title_98(App::State& s, const std::string& id) {
     const std::string pname = prog.name;
     std::string t;
     if (const auto si = s.by_id.find(id); si != s.by_id.end())
-        t = si->second->snapshot()->title;
-    while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back())))
-        t.pop_back();
-    while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front())))
-        t.erase(t.begin());
+        t = trim_space(si->second->snapshot()->title);
     return !t.empty() && t != pname ? pname + " - " + t : pname + " - " + where;
 }
 
 // ---------------------------------------------------------------- pane title bars
+
+// Runs a pane command on pane `id` (it gets the focus first).
+void pane_command(App::State& s, const std::string& id, const std::string& command) {
+    s.ws.focus(id);
+    run_command(s, command);
+}
+
+// A pane's window menu (right-click on its title bar).
+MenuItems pane_menu(App::State& s, const std::string& id, bool zoomed, const std::string& tab_id) {
+    return {
+        {.label = "&Restore", .act = [&s, id] { s.ws.toggle_zoom(id); }, .disabled = !zoomed},
+        {.label = "Mi&nimize", .act = [&s, tab_id] { settle_tab_id(s, tab_id); }},
+        {.label = "Ma&ximize", .act = [&s, id] { s.ws.toggle_zoom(id); }, .disabled = zoomed},
+        {.sep = true},
+        {.label = "Split &Right",
+         .shortcut = "Ctrl+Shift+O",
+         .act = [&s, id] { pane_command(s, id, "pane.split:right"); }},
+        {.label = "Split &Down",
+         .shortcut = "Ctrl+Shift+E",
+         .act = [&s, id] { pane_command(s, id, "pane.split:down"); }},
+        {.sep = true},
+        {.label = "&Close",
+         .shortcut = "Alt+F4",
+         .act = [&s, id] { pane_command(s, id, "pane.close"); },
+         .bold = true},
+    };
+}
 
 void pane_header(App::State& s, const std::string& id, Box b, bool focused) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -262,37 +332,6 @@ void pane_header(App::State& s, const std::string& id, Box b, bool focused) {
     // The face color around the bar, 1 px below it.
     fill(dl, b, rgb(C::kFace));
     const Box bar{b.x0, b.y0, b.x1, b.y1 - one(s)};
-    std::string act;
-    auto window_menu = [&s, id, zoomed, tab_id] {
-        MenuItems m;
-        m.push_back({"&Restore", "", "", "", [&s, id] { s.ws.toggle_zoom(id); }, {}, !zoomed});
-        m.push_back({"Mi&nimize", "", "", "", [&s, tab_id] { settle_tab_id(s, tab_id); }});
-        m.push_back({"Ma&ximize", "", "", "", [&s, id] { s.ws.toggle_zoom(id); }, {}, zoomed});
-        m.push_back({.sep = true});
-        m.push_back({"Split &Right", "", "", "Ctrl+Shift+O", [&s, id] {
-                         s.ws.focus(id);
-                         run_command(s, "pane.split:right");
-                     }});
-        m.push_back({"Split &Down", "", "", "Ctrl+Shift+E", [&s, id] {
-                         s.ws.focus(id);
-                         run_command(s, "pane.split:down");
-                     }});
-        m.push_back({.sep = true});
-        m.push_back({"&Close",
-                     "",
-                     "",
-                     "Alt+F4",
-                     [&s, id] {
-                         s.ws.focus(id);
-                         run_command(s, "pane.close");
-                     },
-                     {},
-                     false,
-                     false,
-                     false,
-                     true});
-        open_menu(s, std::move(m), std::nullopt);
-    };
     ui::Program program;
     program.shell = true;  // no session: MS-DOS
     if (const auto it = s.views_by_id.find(id); it != s.views_by_id.end())
@@ -302,12 +341,7 @@ void pane_header(App::State& s, const std::string& id, Box b, bool focused) {
         [&s, dl, program](ImVec2 p) { program_icon(s, dl, program, 16, p); }, focused,
         {{"min", [&s, tab_id] { settle_tab_id(s, tab_id); }, "Minimize"},
          {zoomed ? "restore" : "max", [&s, id] { s.ws.toggle_zoom(id); }, zoomed ? "Restore" : "Maximize"},
-         {"close",
-          [&s, id] {
-              s.ws.focus(id);
-              run_command(s, "pane.close");
-          },
-          "Close"}},
+         {"close", [&s, id] { pane_command(s, id, "pane.close"); }, "Close"}},
         true);
     if (ev.click) {
         s.ws.focus(id);
@@ -316,7 +350,7 @@ void pane_header(App::State& s, const std::string& id, Box b, bool focused) {
     if (ev.double_click)
         s.ws.toggle_zoom(id);
     if (ev.right)
-        window_menu();
+        open_menu(s, pane_menu(s, id, zoomed, tab_id), std::nullopt);
 }
 
 }  // namespace
@@ -365,15 +399,6 @@ std::vector<const Agent98*> installed_agents(App::State& s) {
     return out;
 }
 
-MenuItem new_space_item(App::State& s, const std::string& label) {
-    return {label, "folder", "", "", [&s] {
-                open_dialog(s, prompt(
-                                   "New Space", "Type a name for the new space:", "folder",
-                                   [&s](const std::string& n, const std::string& m) { new_space(s, n, m); },
-                                   std::nullopt, true));
-            }};
-}
-
 MenuItems start_items(App::State& s) {
     MenuItems agents;
     for (const auto* a : installed_agents(s)) {
@@ -381,7 +406,7 @@ MenuItems start_items(App::State& s) {
         agents.push_back({name, "", a->icon, "", [&s, cmd, name] { new_tab(s, name, -1, cmd); }});
     }
     if (agents.empty())
-        agents.push_back({"(Empty)", "", "", "", nullptr, {}, true});
+        agents.push_back({.label = "(Empty)", .disabled = true});
     MenuItems spaces;
     const auto cwds = s.session_cwds();
     for (int i = 0; i < static_cast<int>(s.ws.spaces.size()); ++i) {
@@ -393,7 +418,7 @@ MenuItems start_items(App::State& s) {
              [&s, id] { select_space_id(s, id); }});
     }
     if (spaces.empty())
-        spaces.push_back({"(Empty)", "", "", "", nullptr, {}, true});
+        spaces.push_back({.label = "(Empty)", .disabled = true});
     MenuItems layouts;
     for (const auto& l : s.layouts) {
         const std::string name = l.name;
@@ -414,7 +439,7 @@ MenuItems start_items(App::State& s) {
         {"Accessories", "programs", "", "", nullptr, accessories},
         {"Agents", "programs", "", "", nullptr, agents},
         {"DOS Prompt", "dos", "", "", [&s] { new_tab(s, "DOS Prompt"); }},
-        new_space_item(s, "New Space..."),
+        {"New Space...", "folder", "", "", [&s] { open_dialog(s, new_space_prompt(s)); }},
     };
     MenuItems settings = {
         {"&Control Panel", "control", "", "", [&s] { run_command(s, "app.settings"); }},
@@ -454,13 +479,9 @@ void toggle_start(App::State& s, std::optional<Box> bounds) {
     set_shared(s, "win98.start", id);
 }
 
-// ---------------------------------------------------------------- the layout's commands (win98.<name>)
-
-void open_run(App::State& s) {
-    open_dialog(s, kind_dialog("run"));
-}
-
 }  // namespace
+
+// ---------------------------------------------------------------- the layout's commands (win98.<name>)
 
 void command(App::State& s, const std::string& c) {
     auto* sp = s.ws.active();
@@ -474,31 +495,15 @@ void command(App::State& s, const std::string& c) {
         else
             toggle_start(s, std::nullopt);
     } else if (c == "new_tab") {
-        open_dialog(s, prompt("New Tab", "Type a name for the new tab:", "dos",
-                              [&s](const std::string& n, const std::string&) { new_tab(s, n); }));
+        open_dialog(s, new_tab_prompt(s));
     } else if (c == "new_space") {
-        open_dialog(s, prompt(
-                           "New Space", "Type a name for the new space:", "folder",
-                           [&s](const std::string& n, const std::string& m) { new_space(s, n, m); },
-                           std::nullopt, true));
+        open_dialog(s, new_space_prompt(s));
     } else if (c == "rename_tab") {
-        if (tab != nullptr) {
-            const std::string id = tab->id;
-            open_dialog(s,
-                        prompt(
-                            "Rename", "Type a new name for this tab:", "rename",
-                            [&s, id](const std::string& n, const std::string&) { rename_tab_id(s, id, n); },
-                            tab->name));
-        }
+        if (tab != nullptr)
+            open_dialog(s, rename_tab_prompt(s, tab->id, tab->name));
     } else if (c == "rename_space") {
-        if (sp != nullptr) {
-            const std::string id = sp->id;
-            open_dialog(s,
-                        prompt(
-                            "Rename", "Type a new name for this space:", "folder",
-                            [&s, id](const std::string& n, const std::string&) { rename_space_id(s, id, n); },
-                            sp->name));
-        }
+        if (sp != nullptr)
+            open_dialog(s, rename_space_prompt(s, sp->id, sp->name));
     } else if (c == "close_tab") {
         if (tab != nullptr)
             open_dialog(s, close_tab_ask(s, *tab, tab_index));
@@ -509,7 +514,7 @@ void command(App::State& s, const std::string& c) {
                c == "mycomputer" || c == "network" || c == "bin" || c == "datetime" || c == "logoff") {
         open_dialog(s, kind_dialog(c));
     } else if (c == "run") {
-        open_run(s);
+        open_dialog(s, kind_dialog("run"));
     } else if (c == "boot") {
         boot(s, true);
     } else if (c == "small_fonts") {
@@ -557,6 +562,38 @@ long long app_age_seconds() {
 namespace {
 // ---------------------------------------------------------------- the taskbar
 
+// The session a taskbar button stands for: the tab's focused pane, else its first agent, else
+// its first pane ("" for an empty tab).
+std::string lead_session(App::State& s, const ui::Tab& t) {
+    const auto ids = s.ws.sessions_in(t);
+    if (std::find(ids.begin(), ids.end(), t.focused) != ids.end())
+        return t.focused;
+    for (const auto& id : ids)
+        if (const auto it = s.views_by_id.find(id); it != s.views_by_id.end() && is_agent(it->second))
+            return id;
+    return ids.empty() ? std::string() : ids.front();
+}
+
+// A taskbar button's right-click menu for tab `t`.
+MenuItems tab_menu(App::State& s, const ui::Tab& t, bool pressed, bool active) {
+    const std::string id = t.id;
+    const std::string tname = t.name;
+    return {
+        {.label = "&Restore", .act = [&s, id] { select_tab_id(s, id); }, .disabled = pressed},
+        {.label = "Mi&nimize", .act = [&s, id] { settle_tab_id(s, id); }, .disabled = t.settled},
+        {.label = "Ma&ximize", .act = [&s] { s.ws.toggle_zoom(); }, .disabled = !active},
+        {.sep = true},
+        {.label = "Re&name...", .act = [&s, id, tname] { open_dialog(s, rename_tab_prompt(s, id, tname)); }},
+        {.sep = true},
+        {.label = "&Close",
+         .shortcut = "Alt+F4",
+         .act = [&s, id] { run_command(s, "tab.close:" + id); },
+         .bold = true},
+    };
+}
+
+// A tab's taskbar button: pressed (dithered) while shown, highlighted while an agent in it is
+// blocked, with a working or done badge on its icon.
 void tab_button(App::State& s, ImDrawList* dl, int i, const ui::Tab& t, Box b) {
     auto* sp = s.ws.active();
     const bool active = sp != nullptr && i == sp->active_tab;
@@ -564,24 +601,11 @@ void tab_button(App::State& s, ImDrawList* dl, int i, const ui::Tab& t, Box b) {
     const bool flash = status == "blocked";
     const bool pressed = active && !t.settled;
     const ImU32 fg = flash ? rgb(C::kSelectText) : rgb(C::kText);
-    const std::string badge = status == "working" ? "hourglass"
-                              : status == "done"  ? "check-badge"
-                                                  : std::string();
-    const auto ids = s.ws.sessions_in(t);
-    std::string lead_id =
-        std::find(ids.begin(), ids.end(), t.focused) != ids.end() ? t.focused : std::string();
-    if (lead_id.empty())
-        for (const auto& id : ids)
-            if (const auto it = s.views_by_id.find(id); it != s.views_by_id.end() && is_agent(it->second)) {
-                lead_id = id;
-                break;
-            }
-    if (lead_id.empty() && !ids.empty())
-        lead_id = ids.front();
+    const std::string badge = flash ? std::string() : status_badge(status);
     ui::Program program;
     program.shell = true;
     std::string pname;
-    if (const auto it = s.views_by_id.find(lead_id); it != s.views_by_id.end()) {
+    if (const auto it = s.views_by_id.find(lead_session(s, t)); it != s.views_by_id.end()) {
         program = program_of(it->second);
         pname = program.name;
     }
@@ -605,11 +629,9 @@ void tab_button(App::State& s, ImDrawList* dl, int i, const ui::Tab& t, Box b) {
     program_icon(s, dl, program, 16, ImVec2(face.x0, iy));
     if (!badge.empty()) {
         int alpha = 255;
-        if (badge == "hourglass") {  // pulses between 35% and 100% over 1400 ms
-            const double t2 = std::fmod(ImGui::GetTime() * 1000.0, 1400.0) / 1400.0;
-            alpha = static_cast<int>(255.0 * (0.35 + 0.65 * (t2 < 0.5 ? t2 * 2 : 2 - t2 * 2)));
-        }
-        dl->PopClipRect();
+        if (badge == "hourglass")  // pulses between 35% and 100% over 1400 ms
+            alpha = static_cast<int>(255.0 * (0.35 + 0.65 * triangle_wave(1400.0)));
+        dl->PopClipRect();  // the badge may stick out of the face
         icon(s, dl, badge, 9,
              ImVec2(face.x0 + U(s, 16) + U(s, 3) - U(s, 9), iy + U(s, 16) + U(s, 3) - U(s, 9)), alpha);
         dl->PushClipRect(face.a(), face.b(), true);
@@ -617,43 +639,18 @@ void tab_button(App::State& s, ImDrawList* dl, int i, const ui::Tab& t, Box b) {
     const float tx = face.x0 + U(s, 16) + U(s, 3);
     label_clipped(s, dl, tx, face.y0 + (face.h() - U(s, 13)) * 0.5f, name, fg, face.x1 - tx, pressed);
     dl->PopClipRect();
-    const std::string id = t.id;
+    const std::string id = t.id;  // a click may change the workspace under `t`
     if (p.clicked) {
         if (pressed)
             settle_tab_id(s, id);
         else
             select_tab_id(s, id);
     }
-    if (p.right) {
-        MenuItems m;
-        m.push_back({"&Restore", "", "", "", [&s, id] { select_tab_id(s, id); }, {}, pressed});
-        m.push_back({"Mi&nimize", "", "", "", [&s, id] { settle_tab_id(s, id); }, {}, t.settled});
-        m.push_back({"Ma&ximize", "", "", "", [&s] { s.ws.toggle_zoom(); }, {}, !active});
-        m.push_back({.sep = true});
-        const std::string tname = t.name;
-        m.push_back({"Re&name...", "", "", "", [&s, id, tname] {
-                         open_dialog(s, prompt(
-                                            "Rename", "Type a new name for this tab:", "rename",
-                                            [&s, id](const std::string& n, const std::string&) {
-                                                rename_tab_id(s, id, n);
-                                            },
-                                            tname));
-                     }});
-        m.push_back({.sep = true});
-        m.push_back({"&Close",
-                     "",
-                     "",
-                     "Alt+F4",
-                     [&s, id] { run_command(s, "tab.close:" + id); },
-                     {},
-                     false,
-                     false,
-                     false,
-                     true});
-        open_menu(s, std::move(m), std::nullopt);
-    }
+    if (p.right)
+        open_menu(s, tab_menu(s, t, pressed, active), std::nullopt);
 }
 
+// A game's taskbar button: pressed while its window is open.
 void game_button(App::State& s, ImDrawList* dl, const std::string& key, const std::string& state, Box b) {
     const std::string name = key == "mines" ? "Mines" : "Solitaire";
     const bool open = state == "open";
@@ -671,15 +668,13 @@ void game_button(App::State& s, ImDrawList* dl, const std::string& key, const st
     label_clipped(s, dl, tx, face.y0 + (face.h() - U(s, 13)) * 0.5f, name, rgb(C::kText), face.x1 - tx, open);
     if (p.clicked)
         set_app(s, key, open ? "min" : "open");
-    if (p.right) {
-        MenuItems m;
-        m.push_back({"&Restore", "", "", "", [&s, key] { set_app(s, key, "open"); }, {}, open});
-        m.push_back({"Mi&nimize", "", "", "", [&s, key] { set_app(s, key, "min"); }, {}, !open});
-        m.push_back({.sep = true});
-        m.push_back(
-            {"&Close", "", "", "", [&s, key] { set_app(s, key, ""); }, {}, false, false, false, true});
-        open_menu(s, std::move(m), std::nullopt);
-    }
+    if (p.right)
+        open_menu(s,
+                  {{.label = "&Restore", .act = [&s, key] { set_app(s, key, "open"); }, .disabled = open},
+                   {.label = "Mi&nimize", .act = [&s, key] { set_app(s, key, "min"); }, .disabled = !open},
+                   {.sep = true},
+                   {.label = "&Close", .act = [&s, key] { set_app(s, key, ""); }, .bold = true}},
+                  std::nullopt);
 }
 
 // A Quick Launch button: flat until hovered, then a 1 px raised bump.
@@ -717,22 +712,13 @@ std::vector<TrayAgent> tray_agents(App::State& s) {
         if (it == s.views_by_id.end() || !is_agent(it->second) || it->second.process_state != "Running" ||
             it->second.lost)
             continue;
-        const auto loc = s.ws.find(id);
-        std::string sname, tname;
-        if (loc.space >= 0) {
-            sname = s.ws.space_title(loc.space, cwds);
-            tname = ui::Workspace::tab_title(
-                s.ws.spaces[static_cast<std::size_t>(loc.space)].tabs[static_cast<std::size_t>(loc.tab)],
-                loc.tab);
-        }
         TrayAgent a;
         a.id = id;
         a.program = program_of(it->second);
         a.status = status_word(s.attention_of(id));
-        a.tip = a.program.name + ": " + a.status + " - " +
-                sname + " \\ " + tname;
+        a.tip = a.program.name + ": " + a.status + " - " + session_place(s, id, cwds);
         out.push_back(a);
-        if (out.size() == 10)
+        if (out.size() == 10)  // the tray shows at most ten agents
             break;
     }
     return out;
@@ -757,16 +743,11 @@ void tray(App::State& s, ImDrawList* dl, Box b, const std::vector<TrayAgent>& ag
         const Pressed p = area("##tray", box(ImVec2(x, iy), ImVec2(U(s, 16), U(s, 16))));
         ImGui::PopID();
         program_icon(s, dl, a.program, 16, ImVec2(x, iy));
-        const std::string badge = a.status == "working"   ? "hourglass"
-                                  : a.status == "blocked" ? "warn-badge"
-                                  : a.status == "done"    ? "check-badge"
-                                                          : std::string();
+        const std::string badge = status_badge(a.status);
         if (!badge.empty()) {
             int alpha = 255;
-            if (a.status == "blocked") {  // blinks over 900 ms
-                const double t = std::fmod(ImGui::GetTime() * 1000.0, 900.0) / 900.0;
-                alpha = static_cast<int>(255.0 * (t < 0.5 ? t * 2 : 2 - t * 2));
-            }
+            if (a.status == "blocked")  // blinks over 900 ms
+                alpha = static_cast<int>(255.0 * triangle_wave(900.0));
             icon(s, dl, badge, 9, ImVec2(x + U(s, 16) + U(s, 2) - U(s, 9), iy + U(s, 16) + U(s, 2) - U(s, 9)),
                  alpha);
         }
@@ -789,8 +770,7 @@ void tray(App::State& s, ImDrawList* dl, Box b, const std::vector<TrayAgent>& ag
     {
         const float cw = U(s, 4) + text_w(s, clock) + U(s, 2);
         const Pressed p = area("##tray-clock", Box{x, in.y0, x + cw, in.y1});
-        label(s, dl, x + U(s, 4), in.y0 + (in.h() - U(s, 13)) * 0.5f, clock, rgb(C::kText), false, 11, 13,
-              false);
+        plain_label(s, dl, x + U(s, 4), in.y0 + (in.h() - U(s, 13)) * 0.5f, clock, rgb(C::kText));
         if (p.hovered)
             ImGui::SetTooltip("%s", k98::long_date(local_now()).c_str());
         if (p.double_click)
@@ -798,75 +778,66 @@ void tray(App::State& s, ImDrawList* dl, Box b, const std::vector<TrayAgent>& ag
     }
 }
 
-}  // namespace
-
-void taskbar(App::State& s, ImDrawList* dl, Box b) {
-    fill(dl, b, rgb(C::kFace));
+// The Start button at x, centered on cy: pressed while its menu is open; acts on the press.
+// Returns its right edge.
+float start_button(App::State& s, ImDrawList* dl, float x, float cy) {
     const float o = one(s);
-    fill(dl, Box{b.x0, b.y0, b.x1, b.y0 + o}, rgb(C::kLight));
-    fill(dl, Box{b.x0, b.y0 + o, b.x1, b.y0 + 2 * o}, rgb(C::kHi));
-    const Box row{b.x0 + U(s, 2), b.y0 + 2 * o, b.x1 - U(s, 2), b.y1};
-    const float cy = row.y0 + row.h() * 0.5f;
-    float x = row.x0;
-    // Start: pressed while its menu is open; acts on the press.
-    {
-        const float w = 2 * o + U(s, 3) + U(s, 16) + U(s, 3) + text_w(s, "Start", true) + U(s, 3) + 2 * o;
-        const Box sb = box(ImVec2(x, cy - U(s, 11)), ImVec2(w, U(s, 22)));
-        ButtonOpts bo;
-        bo.toggled = !shared(s, "win98.start").is_null();
-        bo.pad_x = 3;
-        bo.on_down = true;
-        const Pressed p = button(s, dl, "##start", sb, bo);
-        icon(s, dl, "start", 16,
-             ImVec2(p.content.x0, snap(p.content.y0 + (p.content.h() - U(s, 16)) * 0.5f)));
-        label(s, dl, p.content.x0 + U(s, 16) + U(s, 3), p.content.y0 + (p.content.h() - U(s, 13)) * 0.5f,
-              "Start", rgb(C::kText), true);
-        st(s).start_bounds = ImVec4(sb.x0, sb.y0, sb.w(), sb.h());
-        if (p.clicked)
-            toggle_start(s, sb);
-        x = sb.x1 + U(s, 2);
-    }
-    auto separator = [&] {
-        etch(s, dl, snap(x), snap(cy - U(s, 10)), U(s, 20), true);
-        x += 2 * o + U(s, 2);
-        // The grip: a 1 px bump, 20 tall.
-        bevel(s, dl, box(ImVec2(x, cy - U(s, 10)), ImVec2(3 * o, U(s, 20))), Bevel::kBump);
-        x += 3 * o + U(s, 2);
-    };
-    separator();
-    // Quick Launch: DOS Prompt, the first two installed agents, Mines.
-    {
-        const float qy = cy - U(s, 11);
+    const float w = 2 * o + U(s, 3) + U(s, 16) + U(s, 3) + text_w(s, "Start", true) + U(s, 3) + 2 * o;
+    const Box sb = box(ImVec2(x, cy - U(s, 11)), ImVec2(w, U(s, 22)));
+    ButtonOpts bo;
+    bo.toggled = !shared(s, "win98.start").is_null();
+    bo.pad_x = 3;
+    bo.on_down = true;
+    const Pressed p = button(s, dl, "##start", sb, bo);
+    icon(s, dl, "start", 16, ImVec2(p.content.x0, snap(p.content.y0 + (p.content.h() - U(s, 16)) * 0.5f)));
+    label(s, dl, p.content.x0 + U(s, 16) + U(s, 3), p.content.y0 + (p.content.h() - U(s, 13)) * 0.5f, "Start",
+          rgb(C::kText), true);
+    st(s).start_bounds = ImVec4(sb.x0, sb.y0, sb.w(), sb.h());
+    if (p.clicked)
+        toggle_start(s, sb);
+    return sb.x1;
+}
+
+// An etched separator and a grip (a 1 px bump, 20 tall) at x. Returns where the next part starts.
+float separator(App::State& s, ImDrawList* dl, float x, float cy) {
+    const float o = one(s);
+    etch(s, dl, snap(x), snap(cy - U(s, 10)), U(s, 20), true);
+    x += 2 * o + U(s, 2);
+    bevel(s, dl, box(ImVec2(x, cy - U(s, 10)), ImVec2(3 * o, U(s, 20))), Bevel::kBump);
+    return x + 3 * o + U(s, 2);
+}
+
+// Quick Launch: DOS Prompt, the first two installed agents, Mines. Returns where the next part
+// starts (2 px after it).
+float quick_launch(App::State& s, ImDrawList* dl, float x, float cy) {
+    const float qy = cy - U(s, 11);
+    const ImVec2 size(U(s, 23), U(s, 22));
+    quick(
+        s, dl, "##ql-dos", box(ImVec2(x, qy), size), [&](ImVec2 p) { icon(s, dl, "dos", 16, p); },
+        "DOS Prompt", [&s] { new_tab(s, "DOS Prompt"); });
+    x += U(s, 23) + U(s, 1);
+    int n = 0;
+    for (const auto* a : installed_agents(s)) {
+        if (n++ == 2)
+            break;
+        const std::string cmd = a->cmd, name = a->name;
         quick(
-            s, dl, "##ql-dos", box(ImVec2(x, qy), ImVec2(U(s, 23), U(s, 22))),
-            [&](ImVec2 p) { icon(s, dl, "dos", 16, p); }, "DOS Prompt", [&s] { new_tab(s, "DOS Prompt"); });
+            s, dl, ("##ql-" + cmd).c_str(), box(ImVec2(x, qy), size),
+            [&](ImVec2 p) {
+                image(s, dl, root_dir() / win::to_wide(a->icon), box(p, ImVec2(U(s, 16), U(s, 16))));
+            },
+            name, [&s, cmd, name] { new_tab(s, name, -1, cmd); });
         x += U(s, 23) + U(s, 1);
-        int n = 0;
-        for (const auto* a : installed_agents(s)) {
-            if (n++ == 2)
-                break;
-            const std::string cmd = a->cmd, name = a->name;
-            quick(
-                s, dl, ("##ql-" + cmd).c_str(), box(ImVec2(x, qy), ImVec2(U(s, 23), U(s, 22))),
-                [&](ImVec2 p) {
-                    image(s, dl, root_dir() / win::to_wide(a->icon), box(p, ImVec2(U(s, 16), U(s, 16))));
-                },
-                name, [&s, cmd, name] { new_tab(s, name, -1, cmd); });
-            x += U(s, 23) + U(s, 1);
-        }
-        quick(
-            s, dl, "##ql-mines", box(ImVec2(x, qy), ImVec2(U(s, 23), U(s, 22))),
-            [&](ImVec2 p) { icon(s, dl, "mines", 16, p); }, "Mines", [&s] { set_app(s, "mines", "open"); });
-        x += U(s, 23) + U(s, 2);
     }
-    separator();
-    // The tray at the end; the windows between.
-    const auto agents = tray_agents(s);
-    const std::string clock = k98::clock_text(local_now());
-    const float tw = tray_width(s, agents, clock);
-    const Box tb = box(ImVec2(row.x1 - tw, cy - U(s, 11)), ImVec2(tw, U(s, 22)));
-    tray(s, dl, tb, agents, clock);
-    const float avail = tb.x0 - U(s, 2) - x;
+    quick(
+        s, dl, "##ql-mines", box(ImVec2(x, qy), size), [&](ImVec2 p) { icon(s, dl, "mines", 16, p); },
+        "Mines", [&s] { set_app(s, "mines", "open"); });
+    return x + (U(s, 23) + U(s, 2));
+}
+
+// The buttons of the shown space's tabs, then of the open games, sharing [x0, x1) of the
+// taskbar `b`: each 40 to 160 Win98 px wide, gap 3.
+void task_buttons(App::State& s, ImDrawList* dl, Box b, float x0, float x1, float cy) {
     std::vector<std::pair<std::string, std::string>> games;
     for (const char* k : {"mines", "sol"}) {
         const std::string state = app_state(s, k);
@@ -876,22 +847,47 @@ void taskbar(App::State& s, ImDrawList* dl, Box b) {
     auto* sp = s.ws.active();
     const int ntabs = sp != nullptr ? static_cast<int>(sp->tabs.size()) : 0;
     const int n = ntabs + static_cast<int>(games.size());
-    if (n > 0 && avail > 0) {
-        const float gap = U(s, 3);
-        const float each = std::clamp((avail - gap * static_cast<float>(n - 1)) / static_cast<float>(n),
-                                      U(s, 40), U(s, 160));
-        dl->PushClipRect(ImVec2(x, b.y0), ImVec2(tb.x0 - U(s, 2), b.y1), true);
-        for (int i = 0; i < n; ++i) {
-            const Box bb = box(ImVec2(x, cy - U(s, 11)), ImVec2(each, U(s, 22)));
-            if (i < ntabs)
-                tab_button(s, dl, i, sp->tabs[static_cast<std::size_t>(i)], bb);
-            else
-                game_button(s, dl, games[static_cast<std::size_t>(i - ntabs)].first,
-                            games[static_cast<std::size_t>(i - ntabs)].second, bb);
-            x += each + gap;
+    const float avail = x1 - x0;
+    if (n <= 0 || avail <= 0)
+        return;
+    const float gap = U(s, 3);
+    const float each =
+        std::clamp((avail - gap * static_cast<float>(n - 1)) / static_cast<float>(n), U(s, 40), U(s, 160));
+    dl->PushClipRect(ImVec2(x0, b.y0), ImVec2(x1, b.y1), true);
+    float x = x0;
+    for (int i = 0; i < n; ++i) {
+        const Box bb = box(ImVec2(x, cy - U(s, 11)), ImVec2(each, U(s, 22)));
+        if (i < ntabs) {
+            tab_button(s, dl, i, sp->tabs[static_cast<std::size_t>(i)], bb);
+        } else {
+            const auto& [key, state] = games[static_cast<std::size_t>(i - ntabs)];
+            game_button(s, dl, key, state, bb);
         }
-        dl->PopClipRect();
+        x += each + gap;
     }
+    dl->PopClipRect();
+}
+
+}  // namespace
+
+// The taskbar: Start, Quick Launch, the task buttons, and the tray at the end.
+void taskbar(App::State& s, ImDrawList* dl, Box b) {
+    fill(dl, b, rgb(C::kFace));
+    const float o = one(s);
+    fill(dl, Box{b.x0, b.y0, b.x1, b.y0 + o}, rgb(C::kLight));
+    fill(dl, Box{b.x0, b.y0 + o, b.x1, b.y0 + 2 * o}, rgb(C::kHi));
+    const Box row{b.x0 + U(s, 2), b.y0 + 2 * o, b.x1 - U(s, 2), b.y1};
+    const float cy = row.y0 + row.h() * 0.5f;
+    float x = start_button(s, dl, row.x0, cy) + U(s, 2);
+    x = separator(s, dl, x, cy);
+    x = quick_launch(s, dl, x, cy);
+    x = separator(s, dl, x, cy);
+    const auto agents = tray_agents(s);
+    const std::string clock = k98::clock_text(local_now());
+    const float tw = tray_width(s, agents, clock);
+    const Box tb = box(ImVec2(row.x1 - tw, cy - U(s, 11)), ImVec2(tw, U(s, 22)));
+    tray(s, dl, tb, agents, clock);
+    task_buttons(s, dl, b, x, tb.x0 - U(s, 2), cy);
     window_drag_area(s, b.a(), b.b());
 }
 }  // namespace detail::w98
