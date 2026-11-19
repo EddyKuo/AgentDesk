@@ -274,7 +274,7 @@ ST = ESC \ 或 BEL
 
 - state：`idle`、`working`、`done`、`blocked`、`error`；`clear` 移除該 id 與其下所有紀錄，沒有 id 時清除全部。kind（只用於 blocked）：`permission`、`question`、`auth`。
 - 每次回報整筆取代該 id 的紀錄。沒有 id 的是根紀錄，AgentDesk 的 agent_state 取根紀錄；子紀錄保留在詳情面板。
-- 生命週期：程序結束或出現新的 shell 提示（OSC 133 A）時，host 必須丟掉 working 與 blocked；done 與 error 保留。紀錄屬於終端機本身，切換 alternate screen 不影響；RIS 清除全部紀錄。
+- 生命週期：程序結束時，host 丟掉 working 與 blocked，done 與 error 保留；出現新的 shell 提示（OSC 133 A）時，表示 Agent 已經結束，丟掉全部紀錄（使用者決定，2026-11-19：Agent 結束就刪除狀態，space 關閉才全部關掉）。PowerShell、CMD、WSL 每次顯示提示都會送出 OSC 133 A（host 啟動 shell 時加上的提示鉤子）。紀錄屬於終端機本身，切換 alternate screen 不影響；RIS 清除全部紀錄。
 - 上限：整段 ≤4096 bytes、msg 解碼後 ≤2048 bytes、title 解碼後 ≤192 bytes、每個 session ≤256 筆紀錄（滿了淘汰最久未更新者）。msg／title 解碼後含控制字元時整筆丟棄；顯示前要中和 bidi 與不可見字元。
 - **功能偵測與回覆順序**：程式送出查詢後會緊接著送 `CSI c`（DA1），若 DA1 回覆先到就判定不支援。host 收到查詢時必須把回覆寫回 PTY 輸入，而且要排在 DA1 回覆之前。這兩種回覆都會經過 ConPTY 的輸入方向，內建 ConPTY 可能吞掉它們（見 3.2），因此 OSC 7501 能否使用要看 ADR-08 的結論。
 - 由 OSC 7501 狀態觸發的外部效果（通知、聲音）要限流。
@@ -589,7 +589,7 @@ M0～M4 已實作，驗收矩陣結果見 `contracts/inbox/TestReport_sprint5.md
 | QA-19 | US-04 | report-state 以舊 seq、錯誤 session、未設定環境變數呼叫，皆不改變狀態；失敗不阻塞呼叫端超過逾時 |
 | QA-20 | US-03 | 從 Windows Terminal 啟動 UI 後關閉該終端機，host 與工作仍存活；breakaway 被拒時 UI 有提示 |
 | QA-21 | US-04 | 合成程式送 `OSC 7501 ; ?` 再送 `CSI c`，收到的 7501 回覆在 DA1 回覆之前；實際 Claude Code 在 AgentDesk 中能回報 working、blocked、done |
-| QA-22 | US-04 | OSC 7501 的 working／blocked 在程序結束或 OSC 133 A 後被清除，done／error 保留；超過上限或 msg 含控制字元的回報整筆丟棄 |
+| QA-22 | US-04 | OSC 7501 的 working／blocked 在程序結束後被清除，done／error 保留；OSC 133 A 後全部清除；超過上限或 msg 含控制字元的回報整筆丟棄 |
 
 ### 6.3 相容性矩陣與交付證據
 

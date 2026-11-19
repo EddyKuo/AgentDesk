@@ -158,6 +158,7 @@ enum Modifier : std::uint8_t {
 struct EngineEvents {
     std::function<void(const StatusReport&)> on_status;  // after the store was updated
     std::function<void()> on_bell;
+    std::function<void()> on_shell_prompt;  // OSC 133 A: the store dropped its records
 };
 
 // Wraps libvterm. Single-threaded: one owner (the session actor) feeds output, encodes input

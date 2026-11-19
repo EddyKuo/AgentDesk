@@ -606,6 +606,8 @@ void VtEngine::handle_osc(int command, std::string body) {
         case 133:
             if (!body.empty() && body.front() == 'A') {
                 status_.on_shell_prompt();
+                if (events_.on_shell_prompt)
+                    events_.on_shell_prompt();
             }
             return;
         case 7:

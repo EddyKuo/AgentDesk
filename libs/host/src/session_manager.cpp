@@ -41,7 +41,9 @@ void add_wsl_folder_hook(platform::win::PtySpawnSpec& spec) {
     for (const auto& a : spec.args)
         if (a == L"-e" || a == L"--exec" || a == L"--")
             return;
-    spec.env_overrides[L"PROMPT_COMMAND"] = L"printf '\\033]7;file://%s%s\\007' \"$WSL_DISTRO_NAME\" \"$PWD\"";
+    // OSC 133 A too: the prompt is back, so the program that ran before it (an agent) has ended.
+    spec.env_overrides[L"PROMPT_COMMAND"] =
+        L"printf '\\033]133;A\\007\\033]7;file://%s%s\\007' \"$WSL_DISTRO_NAME\" \"$PWD\"";
     std::wstring wslenv;
     if (const auto it = spec.env_overrides.find(L"WSLENV"); it != spec.env_overrides.end()) {
         wslenv = it->second;
@@ -68,6 +70,16 @@ void add_folder_hook(platform::win::PtySpawnSpec& spec) {
         add_wsl_folder_hook(spec);
         return;
     }
+    if (exe == L"cmd.exe") {
+        // cmd's PROMPT can send escapes ($E): OSC 133 A before the person's own prompt (or the
+        // default $P$G), so the host knows a program that ran before it (an agent) has ended.
+        wchar_t buf[1024]{};
+        const DWORD n = ::GetEnvironmentVariableW(L"PROMPT", buf, 1024);
+        const std::wstring own = n > 0 && n < 1024 ? std::wstring(buf, n) : std::wstring(L"$P$G");
+        if (own.find(L"]133;A") == std::wstring::npos)
+            spec.env_overrides[L"PROMPT"] = L"$E]133;A$E\\" + own;
+        return;
+    }
     if (exe != L"pwsh.exe" && exe != L"powershell.exe")
         return;
     for (const auto& a : spec.args) {
@@ -82,7 +94,8 @@ void add_folder_hook(platform::win::PtySpawnSpec& spec) {
     spec.args.push_back(L"-Command");
     spec.args.push_back(
         L"$global:__agentdesk_prompt = $function:prompt; "
-        L"function global:prompt { $r = & $global:__agentdesk_prompt; "
+        L"function global:prompt { [Console]::Write([char]27 + ']133;A' + [char]7); "
+        L"$r = & $global:__agentdesk_prompt; "
         L"try { $l = Get-Location; if ($l.Provider.Name -eq 'FileSystem') "
         L"{ [Environment]::CurrentDirectory = $l.ProviderPath } } catch {}; $r }");
 }

@@ -228,6 +228,11 @@ int wmain(int argc, wchar_t** argv) {
                             {"name", "Windows PowerShell"},
                             {"executable", ps},
                             {"args", {"-NoLogo", "-NoProfile"}}});
+        // Command Prompt, for the shell picker and cmd's prompt hook.
+        profiles.push_back({{"id", "cmd"},
+                            {"name", "Command Prompt"},
+                            {"executable", dk::u8(dk::system_dir() / L"cmd.exe")},
+                            {"args", Json::array()}});
         // Shells that report an agent state over OSC 7501 and stay open: "state-working",
         // "state-blocked", "state-idle", "state-done" (sidebar agents list checks).
         for (const char* st : {"working", "blocked", "idle", "done"}) {
