@@ -1,4 +1,6 @@
-// herdr-app src/programs.rs (Apache-2.0), ported to C++ for AgentDesk.
+// The program table: which name, icon and tile a terminal shows for what it runs, read from the
+// shipped programs.json with the person's file on top.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/programs.hpp"
 
 #include <algorithm>
@@ -13,12 +15,13 @@ namespace agentdesk::ui {
 namespace {
 
 using Json = nlohmann::json;
+using Named = std::pair<const std::string, ProgramEntry>;  // a table entry with its key
 
-// herdr programs.rs 64: the agents people pick most, first in menus; the rest by name.
+// The agents people pick most, first in menus; the rest by name.
 constexpr std::array<std::string_view, 9> kAgentsFirst = {"claude", "codex",   "pi",     "opencode", "cursor",
                                                           "copilot", "amp",    "gemini", "grok"};
 
-// herdr remote_shell.rs 19 (a remote fish's wrapper).
+// The wrapper a remote fish shell runs a command through (compared verbatim).
 constexpr std::string_view kFishExec =
     R"(if not command -q -- $argv[2]; printf '\e]2;%s\acannot start "%s": No such file or directory\n' "$AGENTDESK_LAUNCH" $argv[2] >&2; exit 127; end; set -e AGENTDESK_LAUNCH; set -l p $argv[2]; string match -q -- '-*/*' $p; and set p ./$p; exec $p $argv[3..])";
 
@@ -57,7 +60,7 @@ ProgramEntry entry_of(const Json& j) {
     return e;
 }
 
-// herdr programs.rs Entry::over: the person's fields win where given.
+// The person's fields win where given.
 void over(ProgramEntry& e, ProgramEntry mine) {
     if (mine.name)
         e.name = std::move(mine.name);
@@ -80,7 +83,7 @@ struct Parsed {
     std::map<std::string, ProgramEntry> programs;
 };
 
-// Throws nlohmann::json::exception on bad JSON (herdr: serde's error).
+// Throws nlohmann::json::exception on bad JSON, std::runtime_error when it is not an object.
 Parsed parse_table(std::string_view text) {
     const Json j = Json::parse(text);
     if (!j.is_object())
@@ -95,7 +98,7 @@ Parsed parse_table(std::string_view text) {
     return p;
 }
 
-// herdr programs.rs base(): the file name, no leading dashes ("-zsh"), no ".exe".
+// The file name, no leading dashes ("-zsh"), no ".exe".
 std::string_view base(std::string_view s) {
     if (const auto slash = s.find_last_of("/\\"); slash != std::string_view::npos)
         s = s.substr(slash + 1);
@@ -106,7 +109,7 @@ std::string_view base(std::string_view s) {
     return s;
 }
 
-// herdr programs.rs 133: PowerShell's single quotes, which include the curly ones.
+// PowerShell's single quotes, which include the curly ones.
 constexpr std::array<std::string_view, 5> kPsQuotes = {"'", "\xE2\x80\x98", "\xE2\x80\x99", "\xE2\x80\x9A",
                                                        "\xE2\x80\x9B"};
 
@@ -121,7 +124,7 @@ bool is_ps_quote(std::string_view ch) {
     return std::find(kPsQuotes.begin(), kPsQuotes.end(), ch) != kPsQuotes.end();
 }
 
-// herdr programs.rs hash_color: a color for a program nobody listed, the same every time.
+// A color for a program nobody listed, the same every time (FNV-1a of the name).
 const char* hash_color(std::string_view s) {
     static constexpr std::array<const char*, 8> kPalette = {"#6d5bd0", "#2f80ed", "#0f9d8a", "#d9822b",
                                                             "#c2417d", "#3a7d44", "#8a5a44", "#4e5d94"};
@@ -129,6 +132,27 @@ const char* hash_color(std::string_view s) {
     for (const unsigned char b : s)
         h = (h ^ b) * 16777619u;
     return kPalette[h % kPalette.size()];
+}
+
+// A script's name without its extension (`vite.js` -> `vite`); a module path (`http.server`)
+// keeps its dot.
+std::string_view script_name(std::string_view name) {
+    for (const std::string_view x : {".js", ".mjs", ".cjs", ".ts", ".py", ".rb"})
+        if (name.size() > x.size() && name.ends_with(x)) {
+            name.remove_suffix(x.size());
+            break;
+        }
+    return name;
+}
+
+bool read_file(const std::filesystem::path& f, std::string& out) {
+    std::ifstream in(f, std::ios::binary);
+    if (!in)
+        return false;
+    std::stringstream ss;
+    ss << in.rdbuf();
+    out = ss.str();
+    return true;
 }
 
 Program shown(const std::string& key, const ProgramEntry& e, std::optional<std::string_view> name, bool shell,
@@ -207,24 +231,16 @@ Programs Programs::parse(std::string_view json) {
 
 Programs Programs::load(const std::filesystem::path& builtin, const std::filesystem::path& mine,
                         std::string* error) {
-    auto read = [](const std::filesystem::path& f, std::string& out) {
-        std::ifstream in(f, std::ios::binary);
-        if (!in)
-            return false;
-        std::stringstream ss;
-        ss << in.rdbuf();
-        out = ss.str();
-        return true;
-    };
+    // A broken built-in table leaves it empty; a broken personal one is reported and skipped.
     Programs t;
     std::string text;
-    if (read(builtin, text)) {
+    if (read_file(builtin, text)) {
         try {
             t = parse(text);
         } catch (const std::exception&) {
         }
     }
-    if (!mine.empty() && read(mine, text)) {
+    if (!mine.empty() && read_file(mine, text)) {
         try {
             Parsed p = parse_table(text);
             t.shells_.insert(t.shells_.end(), p.shells.begin(), p.shells.end());
@@ -247,12 +263,12 @@ bool Programs::is_interpreter(std::string_view s) const {
     return std::find(interpreters_.begin(), interpreters_.end(), s) != interpreters_.end();
 }
 
-// herdr programs.rs find(): an explicit key wins (including the person's own entry), except the
+// An explicit key wins (including the person's own entry), except the
 // generic `agent` fallback, which yields to a `match` (Cursor's CLI process is named `agent`).
-const std::pair<const std::string, ProgramEntry>* Programs::find(std::string_view name) const {
+const Named* Programs::find(std::string_view name) const {
     const std::string l = lower(name);
-    const std::pair<const std::string, ProgramEntry>* by_key = nullptr;
-    const std::pair<const std::string, ProgramEntry>* by_match = nullptr;
+    const Named* by_key = nullptr;
+    const Named* by_match = nullptr;
     for (const auto& kv : programs_)
         if (by_key == nullptr && (kv.first == name || lower(kv.first) == l))
             by_key = &kv;
@@ -287,8 +303,9 @@ Program Programs::resolve(std::string_view app, const std::vector<std::string>& 
     }
     const std::size_t n = all.size() > from ? all.size() - from : 0;
     auto arg = [&](std::size_t i) -> const std::string& { return all[from + i]; };
-    // The app starts commands in the person's shell: `zsh -ic '"$@"; exec "$0" -i' zsh <cmd>...`,
-    // or fish's `command $argv[2..]; exec $argv[1] -i`; on macOS as login shells (`-lic`, `-li`).
+    // Commands started through the person's shell: `zsh -ic '"$@"; exec "$0" -i' zsh <cmd>...`,
+    // or fish's `command $argv[2..]; exec $argv[1] -i`; login shells use `-lic` and `-li`.
+    // The program is the command after the four wrapper words.
     if (n > 4 && is_shell(base(arg(0))) && arg(1).starts_with('-') && arg(1).ends_with('c') &&
         (arg(2).find("\"$@\"") != std::string::npos || arg(2) == kFishExec ||
          arg(2) == "command $argv[2..]; exec $argv[1] -i" || arg(2) == "command $argv[2..]; exec $argv[1] -li"))
@@ -305,14 +322,7 @@ Program Programs::resolve(std::string_view app, const std::vector<std::string>& 
         for (std::size_t i = 1; i < n; ++i) {
             if (arg(i).starts_with('-'))
                 continue;
-            // A script's name without its extension (`vite.js`), never a module path (`http.server`).
-            std::string_view name = base(arg(i));
-            for (const std::string_view x : {".js", ".mjs", ".cjs", ".ts", ".py", ".rb"})
-                if (name.size() > x.size() && name.ends_with(x)) {
-                    name.remove_suffix(x.size());
-                    break;
-                }
-            if (const auto* f = find(name); f != nullptr && !is_interpreter(f->first))
+            if (const auto* f = find(script_name(base(arg(i)))); f != nullptr && !is_interpreter(f->first))
                 return shown(f->first, f->second, std::nullopt, false, false);
         }
     }
@@ -333,7 +343,7 @@ std::string Programs::name(std::string_view app) const {
 }
 
 std::vector<Program> Programs::startable() const {
-    std::vector<const std::pair<const std::string, ProgramEntry>*> keys;
+    std::vector<const Named*> keys;
     for (const auto& kv : programs_)
         if (!kv.second.run.empty())
             keys.push_back(&kv);

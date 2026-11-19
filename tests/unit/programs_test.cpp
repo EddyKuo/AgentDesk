@@ -1,4 +1,6 @@
-// herdr-app src/programs.rs tests (Apache-2.0), ported.
+// Tests for the program table: names, icons and tiles for what a terminal runs, the person's
+// overrides, and the PowerShell command line round trip.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/programs.hpp"
 
 #include <filesystem>

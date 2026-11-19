@@ -1,6 +1,6 @@
-// Ported from herdr-app src/sprites.rs tests (lines 340-516). herdr's two rendered tests run
-// only on Linux against gpui's headless renderer; here they check the same layout on the
-// geometry that TerminalView hands to ImGui.
+// Tests for the cell sprites: the character tables, and the geometry TerminalView hands to ImGui
+// (checked as shapes, since nothing is rendered here).
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 
 #include "agentdesk/ui/sprites.hpp"
 
@@ -25,7 +25,6 @@ std::optional<Lines> L(std::uint8_t u, std::uint8_t r, std::uint8_t d, std::uint
 
 }  // namespace
 
-// herdr sprites.rs:344-370
 TEST(Sprites, BraillePatternsUseAllEightBitsAndStayInTheCell) {
     EXPECT_FALSE(sprites::is_sprite(U'⟿'));
     EXPECT_FALSE(sprites::is_sprite(U'⤀'));
@@ -62,8 +61,7 @@ TEST(Sprites, BraillePatternsUseAllEightBitsAndStayInTheCell) {
     }
 }
 
-// herdr sprites.rs:372-417 (rendered_braille_matches_device_pixel_layout): the dots land on the
-// device pixels braille() gives for the cell's snapped device bounds, at a 2x scale.
+// The dots land on the device pixels braille() gives for the cell's snapped device bounds, at a 2x scale.
 TEST(Sprites, BrailleMatchesDevicePixelLayout) {
     const float scale = 2.0f;
     const auto snap = [scale](float v) { return static_cast<int>(std::round(v * scale)); };
@@ -91,7 +89,6 @@ TEST(Sprites, BrailleMatchesDevicePixelLayout) {
     }
 }
 
-// herdr sprites.rs:419-439
 TEST(Sprites, TablesCoverTheirRanges) {
     EXPECT_EQ(sprites::lines(U'─'), L(0, 1, 0, 1));
     EXPECT_EQ(sprites::lines(U'┼'), L(1, 1, 1, 1));
@@ -113,9 +110,8 @@ TEST(Sprites, TablesCoverTheirRanges) {
         EXPECT_TRUE(sprites::blocks(c).has_value()) << static_cast<std::uint32_t>(c) << " has no entry";
 }
 
-// herdr sprites.rs:441-503 (rendered_rounded_corners_join_straight_lines): each arc endpoint
-// meets the neighboring solid arm at the same center and thickness, at a 2x scale with the
-// half-sized cells herdr includes.
+// Each arc endpoint meets the neighboring solid arm at the same center and thickness, at a 2x
+// scale, half-sized cells included.
 TEST(Sprites, RoundedCornersJoinStraightLines) {
     const float scale = 2.0f;
     const std::array<std::u32string, 3> rows = {U"╭─╮", U"│ │", U"╰─╯"};
@@ -165,7 +161,6 @@ TEST(Sprites, RoundedCornersJoinStraightLines) {
     }
 }
 
-// herdr sprites.rs:505-515
 TEST(Sprites, RoundedCornersAndDashesHaveTheirOwnShapes) {
     for (const char32_t c : std::u32string_view(U"╭╮╯╰"))
         EXPECT_TRUE(sprites::arc(c).has_value() && sprites::is_sprite(c)) << static_cast<std::uint32_t>(c);
