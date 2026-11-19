@@ -1,3 +1,5 @@
+# Test executables (GoogleTest): unit_tests and win_integration_tests, plus the helper binaries
+# the tests start (a test mod, a fake agent-ui, a newer-version agent-host).
 find_package(GTest CONFIG REQUIRED)
 include(GoogleTest)
 
@@ -38,6 +40,7 @@ set_target_properties(test_mod PROPERTIES OUTPUT_NAME mod RUNTIME_OUTPUT_DIRECTO
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${_test_mods}" RUNTIME_OUTPUT_DIRECTORY_RELEASE "${_test_mods}"
     RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${_test_mods}")
 add_dependencies(unit_tests test_mod)
+# The program table and layout files the tests read straight from the source tree.
 target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}"
     AGENTDESK_HERDR_PROGRAMS="${PROJECT_SOURCE_DIR}/third_party/herdr/programs"
     AGENTDESK_HERDR_LAYOUTS="${PROJECT_SOURCE_DIR}/third_party/herdr/layouts"

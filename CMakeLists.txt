@@ -1,3 +1,5 @@
+# AgentDesk top-level build: libraries, tools, apps, example mods and tests. Use the presets in
+# CMakePresets.json through scripts\build.cmd, which sets up the VS 2022 x64 environment.
 cmake_minimum_required(VERSION 3.25)
 
 project(AgentDesk
@@ -29,6 +31,7 @@ add_subdirectory(third_party/libvterm)
 add_subdirectory(libs)
 add_subdirectory(tools)
 
+# The example mods are built next to agent-ui.exe, so they come with the apps.
 if(AGENTDESK_BUILD_APPS)
     add_subdirectory(apps)
     add_subdirectory(mods)
