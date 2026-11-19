@@ -1118,12 +1118,12 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height);
 
 // ------------------------------------------------------------ terminals_layout.cpp
 // ---------------------------------------------------------------- Terminals layout
-// herdr layouts/terminals.json + mods/terminals-bar + mods/terminals-pane. herdr gives it its own
-// graphite colours; here they are taken from our theme by the same steps from the background
-// toward the text (graphite: background #131619, text #e8e9eb).
+// A layout with its own top bar and pane headers. It was designed in graphite colours
+// (background #131619, text #e8e9eb); here each colour is taken from the active theme by the same
+// step from the background toward the text.
 struct TerminalsLook {
-    ImU32 tray, tab, tab_edge, hover, edge, chip, text, dim, tab_text;  // terminals-bar/main.js 7-17
-    ImU32 pane_border, pane_focus, button, button_hover;                 // terminals.json, terminals-pane
+    ImU32 tray, tab, tab_edge, hover, edge, chip, text, dim, tab_text;  // top bar
+    ImU32 pane_border, pane_focus, button, button_hover;                 // panes and pane headers
 };
 TerminalsLook terminals_look();
 void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height);
