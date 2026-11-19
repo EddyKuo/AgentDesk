@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "agentdesk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "builtin-baseline": "afa249f12f52ed8a3b919f195495ba8b330288d1",
   "dependencies": [
     "gtest",
