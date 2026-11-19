@@ -5289,8 +5289,7 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
                 s.focus(id);
             }
         }
-        if (hov && !on_pin && !v.agent_message.empty())
-            ImGui::SetTooltip("%s", v.agent_message.c_str());
+        // agents/main.js: the row has no tooltip (only the pin, 330, and the sort, 442, do).
         ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + rh));
         ImGui::PopID();
     };
@@ -5482,7 +5481,7 @@ void draw_new_menu(App::State& s) {
         return;
     menu_keys();
     auto row = [&](const char* glyph, const std::string& label, const std::string& hint, const std::string& cmd,
-                   bool enabled = true) {
+                   bool enabled = true, const ui::Program* prog = nullptr) {
         const ImVec2 a = ImGui::GetCursorScreenPos();
         const float w = ImGui::GetContentRegionAvail().x;
         const float h = px(31) - ImGui::GetStyle().ItemSpacing.y;
@@ -5498,7 +5497,9 @@ void draw_new_menu(App::State& s) {
             dl->AddRectFilled(a, ImVec2(a.x + w, a.y + h), g_pal->selected, px(7));
         const float cy = a.y + h * 0.5f;
         const ImU32 col = enabled ? g_pal->text : g_pal->faint;
-        if (glyph != nullptr)
+        if (prog != nullptr)
+            program_icon(dl, *prog, ImVec2(a.x + px(9), cy - px(7)), px(14), col);  // new-menu/main.js 65
+        else if (glyph != nullptr)
             draw_icon(s, dl, glyph, fpx(14), ImVec2(a.x + px(9) + px(7), cy), col);
         dl->AddText(s.fonts.ui, fpx(12.8f), ImVec2(a.x + px(9) + px(14) + px(10), cy - fpx(12.8f) * 0.6f), col,
                     label.c_str());
@@ -5539,7 +5540,8 @@ void draw_new_menu(App::State& s) {
             have += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
         ++n;
         const std::string key = n <= 9 ? std::to_string(n) : std::string();
-        row(nullptr, name, key, "launch:tab:" + id);
+        const ui::Program prog = program_of_profile(mh->profile_executable(id), id);
+        row(nullptr, name, key, "launch:tab:" + id, true, &prog);
         if (n <= 9 && plain && ImGui::IsKeyPressed(static_cast<ImGuiKey>(ImGuiKey_1 + n - 1), false)) {
             ImGui::CloseCurrentPopup();
             run_command(s, "launch:tab:" + id);
@@ -5559,15 +5561,17 @@ void draw_new_menu(App::State& s) {
             if (missing >= 2 || have.find(key) != std::string::npos)
                 continue;
             ++missing;
-            row(nullptr, label, "not installed", "", false);
+            const ui::Program prog = program_of_profile({}, key);
+            row(nullptr, label, "not installed", "", false, &prog);
         }
     }
     ImGui::Separator();
-    // new-menu/main.js 69-71: worktrees need an open space (no hint on these rows).
+    // new-menu/main.js 69-71: worktrees need an open space (no hint on these rows). New space has
+    // a "+"; both worktree rows have branch.svg.
     const bool space = s.ws.active() != nullptr;
-    row(ui::icon::kLayers, "New space", s.keymap.chord_for("space.new"), "space.new");
-    row(ui::icon::kWorktree, "New worktree\xE2\x80\xA6", "", "worktree.new", space);
-    row(ui::icon::kFolderOpen, "Open worktree\xE2\x80\xA6", "", "worktree.open", space);
+    row(ui::icon::kPlus, "New space", s.keymap.chord_for("space.new"), "space.new");
+    row(ui::icon::kBranch, "New worktree\xE2\x80\xA6", "", "worktree.new", space);
+    row(ui::icon::kBranch, "Open worktree\xE2\x80\xA6", "", "worktree.open", space);
     ImGui::EndPopup();
 }
 
@@ -5816,9 +5820,9 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
             }
         }
     }
-    // "+" -> new-menu (tabs/main.js 150), right of the flex_1 tab strip.
+    // "+" -> new-menu (tabs/main.js 150), right of the flex_1 tab strip; no tooltip there.
     if (icon_button(s, "##tab-new", ui::icon::kPlus, ImVec2(plus_x, pos.y + (height - px(26)) * 0.5f), px(26), fpx(14),
-                    "New", g_pal->dim))
+                    nullptr, g_pal->dim))
         ImGui::OpenPopup("##newmenu");
     draw_new_menu(s);
     if (!close_tab.empty())
@@ -6050,12 +6054,12 @@ void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::
         const char* bid;
         const char* glyph;
         const char* cmd;
-        const char* tip;
     };
-    const B buttons[] = {{"##th-x", ui::icon::kClose, "pane.close", "Close"},
-                         {"##th-z", zoomed ? ui::icon::kUnzoom : ui::icon::kZoom, "pane.zoom", zoomed ? "Unzoom" : "Zoom"},
-                         {"##th-d", ui::icon::kSplitDown, "pane.split:down", "Split down"},
-                         {"##th-r", ui::icon::kSplitRight, "pane.split:right", "Split right"}};
+    // terminals-pane/main.js 19-32: no tooltips.
+    const B buttons[] = {{"##th-x", ui::icon::kClose, "pane.close"},
+                         {"##th-z", zoomed ? ui::icon::kUnzoom : ui::icon::kZoom, "pane.zoom"},
+                         {"##th-d", ui::icon::kSplitDown, "pane.split:down"},
+                         {"##th-r", ui::icon::kSplitRight, "pane.split:right"}};
     std::string run;
     for (const auto& b : buttons) {
         const float side = px(15) + px(8);
@@ -6064,11 +6068,8 @@ void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::
         ImGui::SetCursorScreenPos(a);
         const bool hit = ImGui::InvisibleButton(b.bid, ImVec2(side, side));
         const bool hov = ImGui::IsItemHovered();
-        if (hov) {
+        if (hov)
             dl->AddRectFilled(a, ImVec2(a.x + side, a.y + side), alpha(g_pal->text, 0x0d), px(5));
-            const std::string t = std::string(b.tip) + "  " + s.keymap.chord_for(b.cmd);
-            ImGui::SetTooltip("%s", t.c_str());
-        }
         draw_icon(s, dl, b.glyph, fpx(15), ImVec2(a.x + side * 0.5f, cy), hov ? l.button_hover : l.button);
         if (hit)
             run = b.cmd;
@@ -6233,17 +6234,18 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
             }
         if (title.empty())
             title = "shell";
-        const float tw = text_clipped(dl, s.fonts.ui_medium, fpx(12.5f), ImVec2(hx, cy - fpx(12.5f) * 0.6f), g_pal->text, title,
+        // pane/main.js 69, 78-79: the name 12 px medium, the folder 12 px dim.
+        const float tw = text_clipped(dl, s.fonts.ui_medium, fpx(12), ImVec2(hx, cy - fpx(12) * 0.6f), g_pal->text, title,
                                       std::min(px(260), r.w * 0.4f));
         hx += tw + px(8);
 
         float rx = max.x - px(8);
         if (pane_hovered) {
-            auto hbtn = [&](const char* bid, const char* glyph, const char* cmd, const char* tip) {
+            // pane/main.js 44-56: no tooltips on these buttons.
+            auto hbtn = [&](const char* bid, const char* glyph, const char* cmd) {
                 const float b = px(20);  // 14 px icon, 3 px padding
                 rx -= b;
-                const std::string t = std::string(tip) + "  " + s.keymap.chord_for(cmd);
-                if (icon_button(s, bid, glyph, ImVec2(rx, cy - b * 0.5f), b, fpx(14), t.c_str(), g_pal->dim)) {
+                if (icon_button(s, bid, glyph, ImVec2(rx, cy - b * 0.5f), b, fpx(14), nullptr, g_pal->dim)) {
                     s.ws.focus(id);
                     run_command(s, cmd);
                 }
@@ -6251,10 +6253,10 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
             };
             const auto* tab = s.ws.active_tab();
             const bool zoomed = tab != nullptr && tab->zoomed == id;
-            hbtn("##close", ui::icon::kClose, "pane.close", "Close");
-            hbtn("##zoom", zoomed ? ui::icon::kUnzoom : ui::icon::kZoom, "pane.zoom", zoomed ? "Unzoom" : "Zoom");
-            hbtn("##sd", ui::icon::kSplitDown, "pane.split:down", "Split down");
-            hbtn("##sr", ui::icon::kSplitRight, "pane.split:right", "Split right");
+            hbtn("##close", ui::icon::kClose, "pane.close");
+            hbtn("##zoom", zoomed ? ui::icon::kUnzoom : ui::icon::kZoom, "pane.zoom");
+            hbtn("##sd", ui::icon::kSplitDown, "pane.split:down");
+            hbtn("##sr", ui::icon::kSplitRight, "pane.split:right");
             rx -= px(4);
         }
         // Status: spinner / "Needs you" pill / done dot.
@@ -6266,7 +6268,7 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
             }
         }
         // Folder (~ for home), dim, the rest of the width.
-        text_clipped(dl, s.fonts.ui, fpx(11.5f), ImVec2(hx, cy - fpx(11.5f) * 0.6f), g_pal->faint, display_path(v.cwd), rx - hx);
+        text_clipped(dl, s.fonts.ui, fpx(12), ImVec2(hx, cy - fpx(12) * 0.6f), g_pal->faint, display_path(v.cwd), rx - hx);
         // Grip (herdr pane_drag.rs): 28x18 in the middle of the header, two rows of three dots;
         // only with two or more panes and not zoomed. Dragging it moves the pane.
         {
@@ -7489,6 +7491,44 @@ bool overlay_title(App::State& s, const char* title, EscChip esc = EscChip::kBut
     return clicked;
 }
 
+// worktree/main.js 301, 349: the title at the dialog's 13 px, semibold, no Esc; `right` (Open's
+// "N checkouts") at the line's end, 11 px dim. Then the dialog's gap 10.
+void worktree_title(App::State& s, const std::string& title, const std::string& right = {}) {
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float h = std::round(fpx(13) * 1.3f);
+    float rw = 0;
+    if (!right.empty()) {
+        const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, right.c_str());
+        rw = t.x;
+        dl->AddText(s.fonts.ui, fpx(11), ImVec2(p.x + w - t.x, p.y + (h - t.y) * 0.5f), g_pal->faint, right.c_str());
+    }
+    const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fpx(13), FLT_MAX, 0, title.c_str());
+    text_clipped(dl, s.fonts.ui_bold, fpx(13), ImVec2(p.x, p.y + (h - t.y) * 0.5f), g_pal->text, title,
+                 w - rw - (rw > 0 ? px(8) : 0.0f));
+    ImGui::Dummy(ImVec2(w, h));
+    ImGui::Dummy(ImVec2(0, std::max(0.0f, px(10) - 2 * ImGui::GetStyle().ItemSpacing.y)));
+}
+
+// worktree/main.js 305, 353-361: the input, h 32, px 10, rounded 6, a 1 px border (accent while
+// focused, else the input colour), the background.
+bool worktree_input(App::State& s, const char* id, const char* hint, char* buf, std::size_t size,
+                    ImGuiInputTextFlags flags = 0) {
+    ImGui::SetNextItemWidth(-1);
+    ImGui::PushFont(s.fonts.ui, 13);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(10), (px(32) - ImGui::GetFontSize()) * 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, px(6));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, v4(g_pal->bg));
+    const bool r = ImGui::InputTextWithHint(id, hint, buf, size, flags);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
+    ImGui::PopFont();
+    ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+                                        ImGui::IsItemActive() ? g_pal->focus : g_pal->border, px(6));
+    return r;
+}
+
 // Key chips: each part of "Ctrl+Shift+P" in its own bordered chip.
 float key_chips(App::State& s, ImDrawList* dl, float right, float cy, const std::string& chord) {
     if (chord.empty())
@@ -7927,26 +7967,42 @@ void draw_picker(App::State& s) {
             const auto& tab = sp.tabs[static_cast<std::size_t>(t)];
             const auto ids = s.ws.sessions_in(tab);
             std::vector<Attention> atts;
+            // picker/main.js 79-80, 206, 224: the tab's agents only, each by its program's name
+            // ("agent" without one), joined by " · "; then "  +N", the live terminals they
+            // started (and those started, teamOf 71-76). The filter reads agents' program names.
             std::string programs;
-            int subs = 0;
+            std::string names;
+            std::vector<std::string> mine;
             for (const auto& id : ids) {
                 atts.push_back(s.attention_of(id));
-                if (s.views_by_id.count(id)) {
-                    const auto& v = s.views_by_id[id];
-                    const auto pn = program_of(v).name;
-                    if (programs.find(pn) == std::string::npos)
-                        programs += (programs.empty() ? "" : " \xC2\xB7 ") + pn;
+                if (const auto it = s.views_by_id.find(id); it != s.views_by_id.end() && is_agent(it->second)) {
+                    std::string pn = program_of(it->second).name;
+                    if (pn.empty())
+                        pn = "agent";
+                    programs += (programs.empty() ? "" : " \xC2\xB7 ") + pn;
+                    names += " " + program_of(it->second).name;
+                    mine.push_back(id);
                 }
             }
-            for (const auto& [cid, cv] : s.views_by_id)
-                if (!cv.parent.empty() && std::find(ids.begin(), ids.end(), cv.parent) != ids.end() &&
-                    s.ws.find(cid).space < 0)
-                    ++subs;
-            if (subs > 0)
-                programs += " +" + std::to_string(subs);
+            int team = 0;
+            {
+                std::set<std::string> seen(mine.begin(), mine.end());
+                std::vector<std::string> todo = mine;
+                while (!todo.empty()) {
+                    const std::string p = todo.back();
+                    todo.pop_back();
+                    for (const auto& [cid, cv] : s.views_by_id)
+                        if (cv.parent == p && cv.process_state == "Running" && seen.insert(cid).second) {
+                            ++team;
+                            todo.push_back(cid);
+                        }
+                }
+            }
+            if (team > 0)
+                programs += "  +" + std::to_string(team);
             // An unnamed tab is listed by its number (herdr model.rs 282-288 tab_name).
             const std::string tname = ui::Workspace::tab_title(tab, t);
-            std::string hay = sname + " " + tname + " " + programs;
+            std::string hay = sname + " " + tname + names;
             for (auto& c : hay)
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             if (!q.empty() && hay.find(q) == std::string::npos)
@@ -8039,7 +8095,7 @@ void draw_picker(App::State& s) {
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
     float list_h = 0;
     for (const auto& r : rows)
-        list_h += r.kind == Row::kSpace ? px(29) : r.kind == Row::kEarlier ? px(35) : r.kind == Row::kNew ? px(36) : px(32);
+        list_h += r.kind == Row::kSpace ? px(31) : r.kind == Row::kEarlier ? px(35) : r.kind == Row::kNew ? px(36) : px(32);
     ImGui::BeginChild("##plist", ImVec2(fw, std::min(px(320), list_h + px(2))), ImGuiChildFlags_None,
                       ImGuiWindowFlags_NoBackground);
     ImDrawList* d = ImGui::GetWindowDrawList();
@@ -8048,17 +8104,20 @@ void draw_picker(App::State& s) {
         const auto& r = rows[static_cast<std::size_t>(i)];
         const ImVec2 a = ImGui::GetCursorScreenPos();
         if (r.kind == Row::kSpace) {
-            ImGui::Dummy(ImVec2(fw, px(29)));
+            // picker/main.js 157-168: px 10, pt 10, pb 3, gap 8; an 18 px avatar (rounded 5,
+            // 10.5 px bold white letter), the name 11 px semibold dim.
+            ImGui::Dummy(ImVec2(fw, px(31)));
             const auto& spc = s.ws.spaces[static_cast<std::size_t>(r.space)];
-            const float side = px(18), cy = a.y + px(16);
-            d->AddRectFilled(ImVec2(a.x + px(6), cy - side * 0.5f), ImVec2(a.x + px(6) + side, cy + side * 0.5f),
+            const float side = px(18), cy = a.y + px(10) + side * 0.5f;
+            d->AddRectFilled(ImVec2(a.x + px(10), cy - side * 0.5f), ImVec2(a.x + px(10) + side, cy + side * 0.5f),
                              r.label == "~" ? g_pal->faint : avatar_color(spc.color), px(5));
             const std::string letter = r.label.empty() ? std::string("?") : std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(r.label[0]))));
             const ImVec2 lt = s.fonts.ui_bold->CalcTextSizeA(fpx(10.5f), FLT_MAX, 0, letter.c_str());
-            d->AddText(s.fonts.ui_bold, fpx(10.5f), ImVec2(a.x + px(6) + (side - lt.x) * 0.5f, cy - lt.y * 0.5f),
+            d->AddText(s.fonts.ui_bold, fpx(10.5f), ImVec2(a.x + px(10) + (side - lt.x) * 0.5f, cy - lt.y * 0.5f),
                        IM_COL32(255, 255, 255, 255), letter.c_str());
-            d->AddText(s.fonts.ui_medium, fpx(13), ImVec2(a.x + px(6) + side + px(9), cy - fpx(13) * 0.6f), g_pal->text,
-                       r.label.c_str());
+            const ImVec2 nt = s.fonts.ui_bold->CalcTextSizeA(fpx(11), FLT_MAX, 0, r.label.c_str());
+            text_clipped(d, s.fonts.ui_bold, fpx(11), ImVec2(a.x + px(10) + side + px(8), cy - nt.y * 0.5f), g_pal->faint,
+                         r.label, fw - px(20) - side - px(8));
             continue;
         }
         ++k;
@@ -8088,17 +8147,26 @@ void draw_picker(App::State& s) {
             else
                 d->AddCircleFilled(ImVec2(gx + px(4), cy), px(1.2f), g_pal->faint);
             const bool here = s.ws.active_space == r.space && s.ws.active() != nullptr && s.ws.active()->active_tab == r.tab;
-            float x = gx + px(16);
-            const float tw = text_clipped(d, here ? s.fonts.ui_bold : s.fonts.ui, fpx(13), ImVec2(x, cy - fpx(13) * 0.6f),
-                                          g_pal->text, r.label, px(220));
-            x += tw + px(8);
+            // picker/main.js 216-224: the name takes the room (flex_1, truncated); then, gap 10,
+            // "needs you" / "finished" and the agents, both 11 px, at the row's end (px 10).
+            const float x = gx + px(16);
+            float right = a.x + fw - px(4) - px(10);
+            const ImVec2 wt = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, r.detail.c_str());
+            if (!r.detail.empty()) {
+                right -= wt.x;
+                d->AddText(s.fonts.ui, fpx(11), ImVec2(right, cy - wt.y * 0.5f), g_pal->faint, r.detail.c_str());
+                right -= px(10);
+            }
             if (r.att == Attention::kBlocked || r.att == Attention::kDone) {
                 const char* word = r.att == Attention::kBlocked ? "needs you" : "finished";
-                d->AddText(s.fonts.ui, fpx(12), ImVec2(x, cy - fpx(12) * 0.6f), attention_color(r.att), word);
-                x += s.fonts.ui->CalcTextSizeA(fpx(12), FLT_MAX, 0, word).x + px(8);
+                const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, word);
+                right -= t.x;
+                d->AddText(s.fonts.ui, fpx(11), ImVec2(right, cy - t.y * 0.5f), attention_color(r.att), word);
+                right -= px(10);
             }
-            text_clipped(d, s.fonts.ui, fpx(12), ImVec2(x, cy - fpx(12) * 0.6f), g_pal->faint, r.detail,
-                         a.x + fw - px(12) - x);
+            ImFont* nf = here ? s.fonts.ui_bold : s.fonts.ui;
+            const float nh = nf->CalcTextSizeA(fpx(13), FLT_MAX, 0, "Ag").y;
+            text_clipped(d, nf, fpx(13), ImVec2(x, cy - nh * 0.5f), g_pal->text, r.label, std::max(0.0f, right - x));
         } else {
             d->AddText(s.fonts.ui, fpx(r.kind == Row::kEarlier ? 12.0f : 13.0f), ImVec2(a.x + px(12), cy - fpx(13) * 0.6f),
                        r.kind == Row::kEarlier ? g_pal->faint : g_pal->dim, r.label.c_str());
@@ -8118,7 +8186,7 @@ void draw_picker(App::State& s) {
     ImGui::EndChild();
     ImGui::PopStyleVar();
     close = close || ImGui::IsKeyPressed(ImGuiKey_Escape) ||
-            (!ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
+            (!ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
              (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)));
     ImGui::End();
     pop_overlay_style();
@@ -8286,21 +8354,24 @@ void draw_toasts(App::State& s) {
                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const ImVec2 wp = ImGui::GetWindowPos();
+        // toast/main.js 17-37: px 18, gap 12, items centred; the hover background; an 8 px dot,
+        // then the title (13 semibold) over the body (12 muted), both truncated, no tooltip.
+        if (ImGui::IsWindowHovered())
+            dl->AddRectFilled(ImVec2(wp.x + 1, wp.y + 1), ImVec2(wp.x + w - 1, wp.y + h - 1), g_pal->hover, px(7));
         const float ty = wp.y + (t.body.empty() ? h * 0.5f - fpx(13) * 0.6f : h * 0.5f - px(17));
-        dl->AddCircleFilled(ImVec2(wp.x + px(18), ty + fpx(13) * 0.55f), px(4), t.color);
-        text_clipped(dl, s.fonts.ui_bold, fpx(13), ImVec2(wp.x + px(32), ty), g_pal->text, t.title, w - px(46));
+        dl->AddCircleFilled(ImVec2(wp.x + px(18) + px(4), wp.y + h * 0.5f), px(4), t.color);
+        const float tx = wp.x + px(18) + px(8) + px(12);
+        text_clipped(dl, s.fonts.ui_bold, fpx(13), ImVec2(tx, ty), g_pal->text, t.title, wp.x + w - px(18) - tx);
         if (!t.body.empty()) {
             std::string body = t.body;
             std::replace(body.begin(), body.end(), '\n', ' ');
-            text_clipped(dl, s.fonts.ui, fpx(12), ImVec2(wp.x + px(32), ty + px(20)), g_pal->dim, body, w - px(46));
+            text_clipped(dl, s.fonts.ui, fpx(12), ImVec2(tx, ty + px(20)), g_pal->dim, body, wp.x + w - px(18) - tx);
         }
         if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             if (!t.session.empty())
                 s.focus(t.session);
             it->until = now;  // dismiss
         }
-        if (ImGui::IsWindowHovered() && !t.body.empty())
-            ImGui::SetTooltip("%s", t.body.c_str());
         ImGui::End();
         pop_overlay_style();
         y -= px(8);
@@ -8314,8 +8385,10 @@ void draw_toasts(App::State& s) {
 bool dialog_outside_click() {
     // Behind a modal nothing is hoverable, so "no window hovered" is outside the dialog and the
     // popups it opened (a combo list).
+    // A press on one of the dialog's own widgets makes it the active item in that same frame;
+    // without AllowWhenBlockedByActiveItem the dialog would then not count as hovered and close.
     return !ImGui::IsWindowAppearing() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-           !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow);
+           !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
 }
 
 // Peek (window.rs 3949-3960, mods/peek): a dialog 80 % x 80 %, a 34 px bar over the live
@@ -8778,7 +8851,8 @@ void draw_worktree(App::State& s) {
         root = win::to_utf8(home) + "\\.agentdesk\\worktrees";
     }
     const std::string shown_root = root.empty() ? std::string("~\\.agentdesk\\worktrees") : root;
-    bool cancel = overlay_title(s, g.repo ? ("New worktree of " + repo).c_str() : "New worktree");
+    bool cancel = false;
+    worktree_title(s, g.repo ? "New worktree of " + repo : std::string("New worktree"));  // worktree/main.js 349
     ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
     if (!g.repo)
         ImGui::TextWrapped("%s is not in a git repository.", display_path(s.wt_repo).c_str());
@@ -8793,14 +8867,8 @@ void draw_worktree(App::State& s) {
     if (g.repo) {
         if (ImGui::IsWindowAppearing())
             ImGui::SetKeyboardFocusHere();
-        ImGui::SetNextItemWidth(-1);
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(10), (px(36) - ImGui::GetFontSize()) * 0.5f));
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-        ImGui::PushStyleColor(ImGuiCol_Border, v4(g_pal->focus));
-        create = ImGui::InputTextWithHint("##branch", "branch name", s.wt_branch, sizeof s.wt_branch,
-                                          ImGuiInputTextFlags_EnterReturnsTrue);
-        ImGui::PopStyleColor();
-        ImGui::PopStyleVar(2);
+        create = worktree_input(s, "##branch", "branch name", s.wt_branch, sizeof s.wt_branch,
+                                ImGuiInputTextFlags_EnterReturnsTrue);
     }
     {
         std::lock_guard lock(s.placements_mutex);
@@ -8901,7 +8969,10 @@ void draw_worktree_open(App::State& s) {
         std::snprintf(count, sizeof count, "%zu checkouts", s.worktree_list.size());
     else
         std::snprintf(count, sizeof count, "%zu/%zu checkouts", shown.size(), s.worktree_list.size());
-    bool close = overlay_title(s, no_repo ? "Open worktree" : ("Open worktree of " + repo).c_str());
+    // worktree/main.js 301: the title, and "N checkouts" at its right (11 px dim).
+    bool close = false;
+    worktree_title(s, no_repo ? std::string("Open worktree") : "Open worktree of " + repo,
+                   no_repo ? std::string() : std::string(count));
     if (no_repo) {
         ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
         ImGui::TextWrapped("%s is not in a git repository.", s.worktree_not_repo.c_str());
@@ -8912,11 +8983,9 @@ void draw_worktree_open(App::State& s) {
         ImGui::EndPopup();
         return;
     }
-    ImGui::TextDisabled("%s", count);
     if (ImGui::IsWindowAppearing())
         ImGui::SetKeyboardFocusHere();
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::InputTextWithHint("##wf", "filter worktrees", s.wt_filter, sizeof s.wt_filter))
+    if (worktree_input(s, "##wf", "filter worktrees", s.wt_filter, sizeof s.wt_filter))
         s.wt_sel = 0;
     const int n = static_cast<int>(shown.size());
     if (n > 0) {
@@ -10816,24 +10885,39 @@ void draw_machine_add(App::State& s) {
         draw_icon(s, d, ui::icon::kServer, fpx(15), ImVec2(a.x + px(17), cy), g_pal->dim);
         d->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(35), cy - fpx(13) * 0.6f), g_pal->text, label.c_str());
         const float lw = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, label.c_str()).x;
-        const char* right = done ? "\xE2\x9C\x93 Added" : adding ? "Connecting\xE2\x80\xA6" : "Add";
-        const float rtw = s.fonts.ui_medium->CalcTextSizeA(fpx(12), FLT_MAX, 0, right).x;
+        // machine-add/main.js 247-266: "Added" (ansi2), a 12 px working spinner and
+        // "Connecting" (12 px muted), else the bordered "Add" button (px 10, h 26, rounded 7,
+        // raised, 12 px medium) -- also after a failed add, when it is the way to try again.
+        const char* right = done ? "\xE2\x9C\x93 Added" : adding ? "Connecting" : "Add";
+        const bool button = !done && !adding;
+        const float rtw = (button ? s.fonts.ui_medium : s.fonts.ui)->CalcTextSizeA(fpx(12), FLT_MAX, 0, right).x;
+        const float rw_right = button ? rtw + px(20) : adding ? px(12) + px(6) + rtw : rtw;
         text_clipped(d, s.fonts.ui, fpx(12), ImVec2(a.x + px(45) + lw, cy - fpx(12) * 0.6f), g_pal->faint, sub,
-                     std::max(0.0f, rw - px(45) - lw - rtw - px(34)));
-        const ImVec2 ra(a.x + rw - px(10) - rtw - (idle ? px(20) : 0.0f), cy - px(13));
-        if (idle) {
-            d->AddRectFilled(ra, ImVec2(ra.x + rtw + px(20), ra.y + px(26)), raised_color(), px(7));
-            d->AddRect(ra, ImVec2(ra.x + rtw + px(20), ra.y + px(26)), g_pal->border, px(7));
+                     std::max(0.0f, rw - px(45) - lw - rw_right - px(20)));
+        const ImVec2 ra(a.x + rw - px(10) - rw_right, cy - px(13));
+        if (button) {
+            const bool bhov = hov && ImGui::IsMouseHoveringRect(ra, ImVec2(ra.x + rw_right, ra.y + px(26)));
+            d->AddRectFilled(ra, ImVec2(ra.x + rw_right, ra.y + px(26)), bhov ? g_pal->hover : raised_color(), px(7));
+            d->AddRect(ra, ImVec2(ra.x + rw_right, ra.y + px(26)), g_pal->border, px(7));
+            d->AddText(s.fonts.ui_medium, fpx(12), ImVec2(ra.x + px(10), cy - fpx(12) * 0.6f), g_pal->text, right);
+        } else if (adding) {
+            status_mark(s, d, ra.x - px(1), cy, Attention::kWorking, true);
+            d->AddText(s.fonts.ui, fpx(12), ImVec2(ra.x + px(12) + px(6), cy - fpx(12) * 0.6f), g_pal->dim, right);
+        } else {
+            d->AddText(s.fonts.ui, fpx(12), ImVec2(ra.x, cy - fpx(12) * 0.6f), g_pal->done, right);
         }
-        d->AddText(s.fonts.ui_medium, fpx(12), ImVec2(ra.x + (idle ? px(10) : 0.0f), cy - fpx(12) * 0.6f),
-                   done ? g_pal->done : adding ? g_pal->dim : g_pal->text, right);
-        if (clicked && idle)
+        // The row adds while idle; after a failed add only its Add button does (main.js 268, 252).
+        if (clicked && (idle || (button && ImGui::IsMouseHoveringRect(ra, ImVec2(ra.x + rw_right, ra.y + px(26))))))
             add(target);
         ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + px(40)));
         if (st != s.machine_add_state.end() && st->second != "adding") {
+            // main.js 233-243, 287: px 35, pb 6; the message (12 px blocked) and, when it needs
+            // an answer, Copy.
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(35));
-            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + rw - px(45));
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + rw - px(70));
+            ImGui::PushFont(s.fonts.ui, 12);
             ImGui::TextColored(v4(g_pal->needs_you), "%s", st->second.c_str());
+            ImGui::PopFont();
             ImGui::PopTextWrapPos();
             if (s.machine_add_pending.contains(target)) {
                 const std::string command = "ssh " + shell_arg(target);
@@ -10843,13 +10927,20 @@ void draw_machine_add(App::State& s) {
                     s.machine_add_copied = command;
                 }
             }
-            if (ImGui::SmallButton("Try again"))
-                add(target);
             ImGui::Dummy(ImVec2(0, px(6)));
         }
         ImGui::PopID();
     };
-    settings_section(s, s.ssh_hosts.empty() ? "Your ssh config lists no hosts" : "From your ssh config");
+    // machine-add/main.js 320, 335: the section titles, 11.5 px medium dim, as written (pt 16 /
+    // pt 14, pb 6).
+    auto section = [&](const char* text, float pt) {
+        ImGui::Dummy(ImVec2(0, std::max(0.0f, pt - ImGui::GetStyle().ItemSpacing.y)));
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const ImVec2 t = s.fonts.ui_medium->CalcTextSizeA(fpx(11.5f), FLT_MAX, 0, text);
+        ImGui::GetWindowDrawList()->AddText(s.fonts.ui_medium, fpx(11.5f), p, g_pal->faint, text);
+        ImGui::Dummy(ImVec2(t.x, t.y + px(6) - ImGui::GetStyle().ItemSpacing.y));
+    };
+    section(s.ssh_hosts.empty() ? "Your ssh config lists no hosts" : "From your ssh config", px(16) - px(6));
     // herdr ma-hosts: at most 280 px, then it scrolls.
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, px(280)));
     ImGui::BeginChild("##ma-hosts", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY, ImGuiWindowFlags_NoBackground);
@@ -10860,7 +10951,7 @@ void draw_machine_add(App::State& s) {
     for (const auto& m : s.settings.machines)
         if (added(m.target))
             row(m.target, m.name, m.target);
-    settings_section(s, "Or type how ssh reaches it");
+    section("Or type how ssh reaches it", px(14));
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - px(90));
     if (ImGui::IsWindowAppearing())
         ImGui::SetKeyboardFocusHere();  // herdr machine-add/main.js 73: the field has focus on open
@@ -10878,9 +10969,17 @@ void draw_machine_add(App::State& s) {
     // The typed target's state under the box (herdr: Connecting, why not, or what to answer).
     if (const auto st = s.machine_add_state.find(typed); !typed.empty() && st != s.machine_add_state.end()) {
         ImGui::PushTextWrapPos(0.0f);
-        if (st->second == "adding")
-            ImGui::TextDisabled("Connecting\xE2\x80\xA6");
-        else
+        if (st->second == "adding") {
+            // As the rows show it (machine-add/main.js 251): a spinner and "Connecting".
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            ImDrawList* d = ImGui::GetWindowDrawList();
+            const float h = std::round(fpx(12) * 1.3f);
+            status_mark(s, d, p.x - px(1), p.y + h * 0.5f, Attention::kWorking, true);
+            d->AddText(s.fonts.ui, fpx(12), ImVec2(p.x + px(12) + px(6), p.y + (h - fpx(12)) * 0.5f), g_pal->dim,
+                       "Connecting");
+            ImGui::Dummy(ImVec2(px(100), h));
+        } else
+
             ImGui::TextColored(v4(g_pal->needs_you), "%s", st->second.c_str());
         ImGui::PopTextWrapPos();
         if (s.machine_add_pending.contains(typed)) {
