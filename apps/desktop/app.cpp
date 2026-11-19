@@ -44,6 +44,7 @@
 #include "agentdesk/ui/imgui_adapter.hpp"
 #include "agentdesk/ui/programs.hpp"
 #include "agentdesk/ui/keymap.hpp"
+#include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/mods.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
@@ -602,60 +603,206 @@ void save_settings(const Settings& s) {
 }
 
 // ------------------------------------------------------------------ layouts
-// A layout is one whole window: which chrome is shown and what fills the main area. Built-ins
-// below; <data>\layouts\<name>.json adds or overrides by name:
-//   {"name": "...", "sidebar": true, "details": false,
-//    "tab_bar": true, "status_bar": true, "theme": "ember", "style": "terminals", "font_size": 15}
-// "style": "terminals" draws herdr's Terminals chrome (terminals-bar, terminals-pane); "win98"
-// draws Herdr 98 (herdr mods/win98); "font_size" sets the terminals' font size while the layout
-// shows (herdr layout.rs 160-164).
+// herdr's layout engine (libs/ui layout.hpp): a layout is a tree of blocks (rows, columns,
+// stacks; the sidebar, tab bar, panes, panel and status bar are blocks) in herdr's format
+// (defaults/AGENTS.md "Layouts"). Built-ins are herdr's main.json (named workspace here),
+// terminals.json and win98.json; <data>\layouts\<name>.json adds one or replaces a built-in of
+// that name. The person's clicks on a layout (sizes, shown/hidden, a stack's child, where a float
+// sits) live in <data>\layouts\.state\<name>.json (herdr window.rs 203-216, layout_sync.rs).
+// AgentDesk's older files ({"sidebar", "tab_bar", "status_bar", "theme", "style", "font_size",
+// "details"} and no tree) still load: read as the built-in of their style with those parts hidden
+// (layout::from_legacy); the file itself is left as it is.
+namespace lay = ui::layout;
+
 struct LayoutSpec {
     std::string name;
-    bool sidebar = true;
-    std::optional<bool> details;  // unset: the person's toggle
-    bool tab_bar = true;
-    bool status_bar = true;
-    std::string theme;  // optional
-    std::string style;  // "", "terminals" or "win98"
+    lay::Node file;  // as its file (or herdr) has it
+    lay::Node tree;  // with the person's clicks: what is drawn
+    bool builtin = false;
+    bool from_file = false;
+    bool legacy = false;
+    std::optional<bool> details;  // AgentDesk's own details pane (old files only)
+    std::string error;            // the file is broken: shown as shipped meanwhile (window.rs 1005-1018)
+    std::filesystem::file_time_type mtime{};
+    // From the tree.
+    std::string theme;         // a palette AgentDesk has, else "" (the person's theme)
+    bool look_applies = true;  // false when the layout names a theme AgentDesk lacks
+    std::string style;         // "", "terminals" or "win98": which renderers its blocks name
     std::optional<float> font_size;
 };
 
-std::vector<LayoutSpec> load_layouts() {
-    // herdr ships main and terminals (src/window.rs LAYOUTS; win98 is its own mod). Board, Grid
-    // and Focus were ours and are gone (2026-11-19, the person's call: only what herdr has).
-    std::vector<LayoutSpec> list = {
-        {"workspace", true, std::nullopt, true, true, ""},
-        // herdr's second shipped layout (layouts/terminals.json): no sidebar, the terminal tabs.
-        {"terminals", false, false, true, false, "", "terminals", 15.0f},
-        // herdr's third (layouts/win98.json, "Herdr 98"): its own chrome in C++ (win98_*.inl), its
-        // theme (themes/win98.json), PxPlus IBM VGA 8x16 at 16 px for terminals.
-        {"win98", false, false, false, false, "win98", "win98", 16.0f},
-    };
-    std::error_code ec;
-    for (const auto& e : std::filesystem::directory_iterator(data_dir() / L"layouts", ec)) {
-        if (e.path().extension() != L".json")
-            continue;
-        std::ifstream in(e.path(), std::ios::binary);
-        std::stringstream ss;
-        ss << in.rdbuf();
-        const auto j = Json::parse(ss.str(), nullptr, false);
-        if (!j.is_object())
-            continue;
-        LayoutSpec l;
-        const auto stem = e.path().stem().u8string();
-        l.name = j.value("name", std::string(stem.begin(), stem.end()));
-        l.sidebar = j.value("sidebar", true);
-        if (j.contains("details") && j["details"].is_boolean())
-            l.details = j["details"].get<bool>();
-        l.tab_bar = j.value("tab_bar", true);
-        l.status_bar = j.value("status_bar", true);
-        l.theme = j.value("theme", "");
-        l.style = j.value("style", "");
-        if (j.contains("font_size") && j["font_size"].is_number())
-            l.font_size = std::clamp(j["font_size"].get<float>(), 6.0f, 72.0f);
-        std::erase_if(list, [&](const LayoutSpec& x) { return x.name == l.name; });
-        list.push_back(l);
+std::filesystem::path layouts_dir() {
+    return data_dir() / L"layouts";
+}
+
+std::filesystem::path layout_state_path(const std::string& name) {
+    return layouts_dir() / L".state" / win::to_wide(name + ".json");
+}
+
+bool palette_exists(const std::string& id) {
+    return std::any_of(std::begin(kPalettes), std::end(kPalettes), [&](const Palette& p) { return id == p.id; });
+}
+
+// The tree says how it looks and which of AgentDesk's renderers draw it.
+void derive_layout(LayoutSpec& l) {
+    const lay::Node& t = l.tree;
+    std::string theme;
+    if (t.look.contains("theme")) {
+        const Json& th = t.look["theme"];
+        if (th.is_string())
+            theme = th.get<std::string>();
+        else if (th.is_object())  // layout.rs 197-210: the system's appearance picks
+            theme = th.value(system_light() ? "light" : "dark", std::string());
     }
+    l.look_applies = theme.empty() || palette_exists(theme);
+    l.theme = palette_exists(theme) ? theme : std::string();
+    l.style.clear();
+    for (const lay::Node* n : t.walk()) {
+        const std::string m = n->mod();
+        if (m == "win98")
+            l.style = "win98";
+        else if (m == "terminals-bar" && l.style.empty())
+            l.style = "terminals";
+        if (n->is_block() && n->content.type == lay::Content::Type::kTab && n->content.pane &&
+            n->content.pane->header && n->content.pane->header->mod() == "terminals-pane" && l.style.empty())
+            l.style = "terminals";
+    }
+    // layout.rs 150-151: the nearest node setting it wins; the panes' block decides.
+    l.font_size.reset();
+    for (const lay::Node* n : t.visible_blocks()) {
+        if (n->content.type != lay::Content::Type::kTab)
+            continue;
+        if (const auto path = t.path_to(n->id))
+            for (const auto& id : *path)
+                if (const auto f = t.find(id)->font_size())
+                    l.font_size = std::clamp(*f, 6.0f, 72.0f);
+        break;
+    }
+    if (!l.font_size)
+        l.font_size = t.font_size();
+}
+
+// Before this engine the workspace's sizes were in ui.json: the first time, they become its
+// clicks (what herdr keeps in layouts/.state).
+lay::State seed_from_settings(const Settings& st, const lay::Node& file) {
+    lay::Node now = file;
+    const Settings d;
+    if (lay::Node* n = now.find("sidebar")) {
+        if (st.sidebar_width != d.sidebar_width)
+            n->size = lay::Span::pixels(std::clamp(st.sidebar_width, 44.0f, 480.0f));
+        if (!st.sidebar)
+            n->hidden = true;
+    }
+    if (lay::Node* n = now.find("panel"); n != nullptr && st.panel_width != d.panel_width)
+        n->size = lay::Span::pixels(std::clamp(st.panel_width, 280.0f, 900.0f));
+    lay::Node* sp = now.find("spaces");
+    lay::Node* ag = now.find("agents");
+    if (sp != nullptr && ag != nullptr && st.spaces_share != d.spaces_share) {
+        sp->size = lay::Span::weight(2.0f * st.spaces_share);
+        ag->size = lay::Span::weight(2.0f * (1.0f - st.spaces_share));
+    }
+    return lay::State::between(file, now);
+}
+
+// herdr window.rs 997-1043 load_layout: the file (or its shipped default when it is broken),
+// with the clicks; a click on a field the file changed since gives way.
+void apply_layout_state(LayoutSpec& l, const Settings& st) {
+    l.tree = l.file;
+    std::error_code ec;
+    const auto path = layout_state_path(l.name);
+    lay::State state;
+    if (std::filesystem::exists(path, ec)) {
+        state = lay::State::from_json(Json::parse(read_text_file(path), nullptr, false));
+        if (l.error.empty())
+            state.forget_since_saved(l.file);
+    } else if (l.name == "workspace") {
+        state = seed_from_settings(st, l.file);
+    }
+    state.apply(l.tree);
+    derive_layout(l);
+}
+
+// herdr window.rs 1199-1220 write_state: the clicks, with the file they were made on; none, no
+// file. Not for a broken file (it is not what shows).
+void save_layout_state(const LayoutSpec& l) {
+    if (!l.error.empty())
+        return;
+    lay::State state = lay::State::between(l.file, l.tree);
+    std::error_code ec;
+    const auto path = layout_state_path(l.name);
+    if (state.empty()) {
+        std::filesystem::remove(path, ec);
+        return;
+    }
+    state.file = lay::to_json(l.file);
+    Json j = state.to_json();
+    lay::normalize(j);
+    std::filesystem::create_directories(path.parent_path(), ec);
+    const auto tmp = std::filesystem::path(path).concat(L".tmp");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out << j.dump(2) << "\n";
+    }
+    ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+}
+
+std::vector<LayoutSpec> load_layouts(const Settings& st) {
+    std::vector<LayoutSpec> list;
+    for (const auto& name : lay::builtin_names()) {
+        LayoutSpec l;
+        l.name = name;
+        l.builtin = true;
+        l.file = lay::builtin(name);
+        list.push_back(std::move(l));
+    }
+    std::error_code ec;
+    std::vector<std::filesystem::path> files;
+    for (const auto& e : std::filesystem::directory_iterator(layouts_dir(), ec))
+        if (e.is_regular_file() && e.path().extension() == L".json")
+            files.push_back(e.path());
+    std::sort(files.begin(), files.end());
+    for (const auto& f : files) {
+        LayoutSpec l;
+        const auto stem = f.stem().u8string();
+        l.name.assign(stem.begin(), stem.end());
+        l.from_file = true;
+        l.mtime = std::filesystem::last_write_time(f, ec);
+        const Json j = Json::parse(read_text_file(f), nullptr, false);
+        if (lay::is_legacy(j)) {
+            l.legacy = true;
+            l.name = j.value("name", l.name);
+            l.file = lay::from_legacy(j);
+            if (j.contains("details") && j["details"].is_boolean())
+                l.details = j["details"].get<bool>();
+        } else if (auto n = j.is_discarded() ? std::nullopt : lay::parse(j, &l.error)) {
+            l.file = std::move(*n);
+        } else {
+            if (j.is_discarded())
+                l.error = "not valid JSON";
+            l.file = lay::builtin(l.name);  // window.rs 180-182: as shipped, main when not one
+        }
+        // window.rs 1222-1243 keep_ids: nodes without an id get one (here only in memory).
+        int k = 0;
+        std::set<std::string> taken;
+        for (const lay::Node* n : l.file.walk())
+            taken.insert(n->id);
+        l.file.fill_ids([&] {
+            std::string id;
+            do
+                id = "node-" + std::to_string(++k);
+            while (taken.count(id) != 0);
+            return id;
+        });
+        const auto it = std::find_if(list.begin(), list.end(), [&](const LayoutSpec& x) { return x.name == l.name; });
+        if (it != list.end()) {
+            l.builtin = it->builtin;
+            *it = std::move(l);
+        } else {
+            list.push_back(std::move(l));
+        }
+    }
+    for (auto& l : list)
+        apply_layout_state(l, st);
     return list;
 }
 
@@ -2140,6 +2287,16 @@ struct App::State {
                 return l;
         return layouts.front();
     }
+    LayoutSpec& layout() {
+        return const_cast<LayoutSpec&>(std::as_const(*this).layout());
+    }
+    ui::layout::Placement placed;  // the shown layout, as this frame drew it
+    struct LayoutDrag {
+        std::string container;
+        int index = 0;
+        ui::layout::Axis axis = ui::layout::Axis::kRow;
+    };
+    std::optional<LayoutDrag> layout_drag;  // window.rs Drag: a separator held down
 
     std::mutex placements_mutex;
     std::vector<Placement> placements;      // completed creates waiting for the UI thread
@@ -2555,7 +2712,25 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     std::snprintf(s_->launch_cwd, sizeof s_->launch_cwd, "%s", cwd.c_str());
     start_remotes(*s_);
     write_example_mods();
-    s_->layouts = load_layouts();
+    s_->layouts = load_layouts(s_->settings);
+    {
+        // ui.json kept the workspace's sidebar, panel and list sizes before this engine; they
+        // are now its clicks in layouts/.state/workspace.json (seed_from_settings). Written once,
+        // then ui.json forgets them so a later reload does not bring them back.
+        const Settings d;
+        Settings& st = s_->settings;
+        if (st.sidebar_width != d.sidebar_width || st.panel_width != d.panel_width ||
+            st.spaces_share != d.spaces_share || st.sidebar != d.sidebar) {
+            for (const auto& l : s_->layouts)
+                if (l.name == "workspace")
+                    save_layout_state(l);
+            st.sidebar_width = d.sidebar_width;
+            st.panel_width = d.panel_width;
+            st.spaces_share = d.spaces_share;
+            st.sidebar = d.sidebar;
+            save_settings(st);
+        }
+    }
     // Files / Changes for a pane on another machine: ask that machine's agent-host.
     s_->panels->remote = [st = s_.get()](const std::string& machine, const std::string& method,
                                         const Json& params) -> std::optional<Json> {
@@ -3247,6 +3422,94 @@ void open_rename(App::State& s, const std::string& kind, const std::string& targ
     std::snprintf(s.rename_buf, sizeof s.rename_buf, "%s", current.c_str());
 }
 
+// ------------------------------------------------------------------ layout commands
+// herdr tabs/main.js 62-80 syncPanel: the side panel is remembered per space (here the space's
+// `panel`, kept in the UI document): the shown space's choice opens or closes the layout's
+// "panel" node and picks the "panel-body" child.
+void sync_panel(App::State& s, LayoutSpec& l) {
+    lay::Node* panel = l.tree.find("panel");
+    if (panel == nullptr)
+        return;
+    const auto* sp = s.ws.active();
+    panel->hidden = sp == nullptr || sp->panel.empty();
+    if (sp != nullptr && !sp->panel.empty())
+        l.tree.select("panel-body", sp->panel);
+}
+
+// The arguments herdr's layout.* commands take ({"id": ..., "px": ...}) as JSON, or the short
+// spellings a key or the palette can carry: "id", "id=300" (px), "stack=child".
+Json layout_args(const std::string& arg, const char* first, const char* second) {
+    if (!arg.empty() && arg.front() == '{') {
+        Json j = Json::parse(arg, nullptr, false);
+        return j.is_object() ? j : Json::object();
+    }
+    Json j = Json::object();
+    const auto eq = arg.find('=');
+    j[first] = arg.substr(0, eq);
+    if (eq != std::string::npos) {
+        const std::string v = arg.substr(eq + 1);
+        if (std::string(second) == "px") {
+            char* end = nullptr;
+            const double d = std::strtod(v.c_str(), &end);
+            if (end != v.c_str())
+                j["px"] = d;
+        } else {
+            j[second] = v;
+        }
+    }
+    return j;
+}
+
+// herdr window.rs 3496-3538: layout.toggle / show / hide {id}, layout.resize {id, px | weight},
+// layout.select {stack, child}; the change is a click, kept in layouts/.state.
+std::optional<std::string> layout_command(App::State& s, const std::string& name, const std::string& arg) {
+    LayoutSpec& l = s.layout();
+    if (name == "layout.toggle" || name == "layout.show" || name == "layout.hide") {
+        const std::string id = layout_args(arg, "id", "").value("id", std::string());
+        lay::Node* n = l.tree.find(id);
+        if (n == nullptr)
+            return "no node \"" + id + "\" in the shown layout";
+        const bool hide = name == "layout.toggle" ? !n->hidden : name == "layout.hide";
+        if (id == "panel") {  // the space's choice (tabs/main.js 136-141)
+            if (auto* sp = s.ws.active()) {
+                const lay::Node* body = l.tree.find("panel-body");
+                const lay::Node* shown = body != nullptr ? body->active_child() : nullptr;
+                sp->panel = hide ? std::string() : shown != nullptr ? shown->id : std::string("files");
+                s.doc_dirty = true;
+                s.doc_dirty_at = Clock::now();
+            }
+        }
+        n->hidden = hide;
+    } else if (name == "layout.resize") {
+        const Json a = layout_args(arg, "id", "px");
+        const std::string id = a.value("id", std::string());
+        lay::Node* n = l.tree.find(id);
+        if (n == nullptr)
+            return "no node \"" + id + "\"";
+        if (a.contains("px") && a["px"].is_number())
+            n->size = lay::Span::pixels(a["px"].get<float>());
+        else if (a.contains("weight") && a["weight"].is_number())
+            n->size = lay::Span::weight(a["weight"].get<float>());
+    } else if (name == "layout.select") {
+        const Json a = layout_args(arg, "stack", "child");
+        const std::string st = a.value("stack", std::string());
+        const std::string ch = a.value("child", std::string());
+        if (!l.tree.select(st, ch))
+            return "no stack \"" + st + "\" with a child \"" + ch + "\"";
+        if (st == "panel-body")
+            if (auto* sp = s.ws.active(); sp != nullptr && !sp->panel.empty()) {
+                sp->panel = ch;
+                s.doc_dirty = true;
+                s.doc_dirty_at = Clock::now();
+            }
+    } else {
+        return std::nullopt;
+    }
+    save_layout_state(l);
+    derive_layout(l);
+    return std::string();
+}
+
 // person: the person ran it (palette, keys, a click), not a mod or --run (window.rs 2995).
 void run_command(App::State& s, const std::string& cmd, bool person = true);
 namespace w98 {
@@ -3268,8 +3531,10 @@ std::string exec_command(App::State& s, const std::string& cmd) {
     static const std::map<std::string, std::string> kHerdrNames = {
         {"terminal.park", "pane.park"}, {"terminal.peek", "agent.peek"}, {"terminal.open", "tab.new"},
         {"app.quit", "window.close"}};  // herdr Quit: the window closes, agents keep running
-    if (name == "layout.toggle" && arg == "sidebar")  // herdr ctrl-shift-b
-        return exec_command(s, "sidebar.toggle");
+    if (name == "layout.toggle" && arg.empty())  // the panel (AgentDesk's older spelling)
+        return exec_command(s, "panel");
+    if (auto r = layout_command(s, name, arg))
+        return *r;
     if (const auto al = kHerdrNames.find(name); al != kHerdrNames.end())
         return exec_command(s, arg.empty() ? al->second : al->second + ":" + arg);
     if (name == "mod.open" && arg == "picker")
@@ -3373,9 +3638,14 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         s.keymap = ui::Keymap::defaults();
         s.keymap_errors.clear();
         s.settings.layout = "workspace";
-        s.settings.sidebar = true;
-        s.settings.sidebar_width = 268;
         save_settings(s.settings);
+        // The workspace's sidebar back as shipped (shown, 268 px).
+        if (lay::Node* side = s.layout().tree.find("sidebar")) {
+            const lay::Node* shipped = s.layout().file.find("sidebar");
+            side->hidden = shipped != nullptr && shipped->hidden;
+            side->size = shipped != nullptr ? shipped->size : side->size;
+            save_layout_state(s.layout());
+        }
         s.toast("Back to the default screen", "keys.json was set aside as keys.json.aside.", "", g_pal->info);
     } else if (name == "pane.park") {
         // herdr terminal.park: a sub-agent's pane goes away; it keeps running under its parent
@@ -3464,16 +3734,23 @@ std::string exec_command(App::State& s, const std::string& cmd) {
             s.doc_dirty_at = Clock::now();
         }
     } else if (name == "sidebar.rail") {
-        // herdr toggleSidebar(): remember the width and shrink to 44, or go back to it.
-        if (!s.settings.sidebar)
-            s.settings.sidebar = true;
-        else if (s.settings.sidebar_width >= 160) {
-            s.settings.sidebar_restore = s.settings.sidebar_width;
-            s.settings.sidebar_width = 44;
+        // herdr workspace-chrome/main.js 18-24 toggleSidebar(): remember the width and
+        // layout.resize the sidebar to 44, or back to it (a hidden one is shown first).
+        LayoutSpec& l = s.layout();
+        lay::Node* side = l.tree.find("sidebar");
+        if (side == nullptr)
+            return "no node \"sidebar\" in the shown layout";
+        const float width = side->size && side->size->px ? side->size->value : 268.0f;
+        if (side->hidden) {
+            side->hidden = false;
+        } else if (width >= 160) {
+            s.settings.sidebar_restore = width;
+            save_settings(s.settings);
+            side->size = lay::Span::pixels(44);
         } else {
-            s.settings.sidebar_width = std::max(160.0f, s.settings.sidebar_restore);
+            side->size = lay::Span::pixels(std::max(160.0f, s.settings.sidebar_restore));
         }
-        save_settings(s.settings);
+        save_layout_state(l);
     } else if (name == "app.picker") {
         s.show_picker = !s.show_picker;
         s.picker_buf[0] = '\0';
@@ -3762,8 +4039,9 @@ std::string exec_command(App::State& s, const std::string& cmd) {
             create_session(s, it->second.profile_id, it->second.cwd, it->second.name, p);
         }
     } else if (name == "sidebar.toggle") {
-        s.settings.sidebar = !s.settings.sidebar;
-        save_settings(s.settings);
+        // herdr ctrl-shift-b: layout.toggle {"id": "sidebar"} (nothing when the layout has none).
+        if (s.layout().tree.find("sidebar") != nullptr)
+            return *layout_command(s, "layout.toggle", "sidebar");
     } else if (name == "details.toggle") {
         s.settings.details = !s.settings.details;
         save_settings(s.settings);
@@ -3847,77 +4125,81 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         if (name == "app.feedback" && !arg.empty() && s.feedback_buf[0] == '\0')
             std::snprintf(s.feedback_buf, sizeof s.feedback_buf, "%s", arg.c_str());
     } else if (name == "layout.clone") {
-        // herdr: duplicate a layout as <name>-copy and show it (a file you can edit).
-        const std::string from = arg.empty() ? s.settings.layout : arg;
+        // herdr window.rs 3443-3454 and 266-290 clone_layout: the layout (default: the shown one)
+        // as `as` (default <name>-copy), never over a file that is there, marked cloned_from, with
+        // its clicks; then shown. Ours is written in herdr's format, also from an old file.
+        const Json a = layout_args(arg, "name", "as");
+        const std::string from = a.value("name", std::string()).empty() ? s.settings.layout : a.value("name", std::string());
+        const std::string to = a.value("as", std::string()).empty() ? from + "-copy" : a.value("as", std::string());
+        auto valid = [](const std::string& n) {  // mods.rs valid_name: letters, digits, - or _
+            return !n.empty() && std::all_of(n.begin(), n.end(), [](char c) {
+                return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '-' || c == '_';
+            });
+        };
+        if (!valid(from) || !valid(to))
+            return "cannot clone layout: names use letters, digits, - or _";
         const auto it =
             std::find_if(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) { return l.name == from; });
-        if (it != s.layouts.end()) {
-            const auto dir = data_dir() / L"layouts";
-            std::error_code ec;
-            std::filesystem::create_directories(dir, ec);
-            auto taken = [&](const std::string& n) {
-                return std::any_of(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) { return l.name == n; });
-            };
-            std::string to = from + "-copy";
-            for (int n = 2; taken(to); ++n)
-                to = from + "-copy-" + std::to_string(n);
-            Json j{{"name", to},
-                   {"sidebar", it->sidebar},
-                   {"tab_bar", it->tab_bar},
-                   {"status_bar", it->status_bar}};
-            if (it->details)
-                j["details"] = *it->details;
-            if (!it->theme.empty())
-                j["theme"] = it->theme;
-            if (!it->style.empty())
-                j["style"] = it->style;
-            if (it->font_size)
-                j["font_size"] = *it->font_size;
-            std::ofstream(dir / win::to_wide(to + ".json"), std::ios::binary) << j.dump(2);
-            s.layouts = load_layouts();
-            run_command(s, "layout:" + to);
-            s.toast("Layout duplicated", "layouts\\" + to + ".json", "", g_pal->info);
+        if (it == s.layouts.end())
+            return "cannot clone layout: no layout \"" + from + "\"";
+        save_layout_state(*it);
+        std::error_code ec;
+        std::filesystem::create_directories(layouts_dir(), ec);
+        const auto dest = layouts_dir() / win::to_wide(to + ".json");
+        if (std::filesystem::exists(dest, ec) ||
+            std::any_of(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) { return l.name == to; }))
+            return "cannot clone layout: layouts\\" + to + ".json is already there";
+        lay::Node node = it->file;
+        node.cloned_from = Json{{"name", from}, {"version", AGENTDESK_VERSION_STRING}};
+        {
+            std::ofstream out(dest, std::ios::binary);
+            out << lay::text_of(node);
         }
+        if (std::filesystem::exists(layout_state_path(from), ec))
+            std::filesystem::copy_file(layout_state_path(from), layout_state_path(to),
+                                       std::filesystem::copy_options::overwrite_existing, ec);
+        s.layouts = load_layouts(s.settings);
+        run_command(s, "layout:" + to);
+        s.toast("Layout duplicated", "layouts\\" + to + ".json", "", g_pal->info);
     } else if (name == "layout.reset") {
-        // herdr: reset a shipped layout and its sizes; a file that changed it is kept aside.
+        // herdr window.rs 3514-3533: only a layout herdr ships; a file of that name is set aside
+        // (<name>.json.old-<time>, never over an older one, window.rs 218-224) and its clicks go.
         const std::string which = arg.empty() ? s.settings.layout : arg;
-        const auto dir = data_dir() / L"layouts";
+        if (lay::builtin_text(which).empty())
+            return "\"" + which + "\" isn't a layout AgentDesk ships";
         std::error_code ec;
         int aside = 0;
         std::vector<std::filesystem::path> files;
-        for (const auto& e : std::filesystem::directory_iterator(dir, ec))
-            if (e.path().extension() == L".json")
+        for (const auto& e : std::filesystem::directory_iterator(layouts_dir(), ec))
+            if (e.is_regular_file() && e.path().extension() == L".json")
                 files.push_back(e.path());
+        const long long stamp = static_cast<long long>(std::time(nullptr));
         for (const auto& f : files) {
-            std::string text;
-            {
-                std::ifstream in(f, std::ios::binary);
-                std::stringstream ss;
-                ss << in.rdbuf();
-                text = ss.str();
-            }
-            const auto j = Json::parse(text, nullptr, false);
+            const auto j = Json::parse(read_text_file(f), nullptr, false);
             const auto stem = f.stem().u8string();
             const std::string file_name(stem.begin(), stem.end());
-            const std::string n = j.is_object() ? j.value("name", file_name) : file_name;
+            // An old AgentDesk file says its name inside.
+            const std::string n = lay::is_legacy(j) ? j.value("name", file_name) : file_name;
             if (n != which)
                 continue;
-            auto to = f;
-            to += L".aside";
+            std::filesystem::path to;
+            for (int i = 1;; ++i) {
+                to = f;
+                to += win::to_wide(".old-" + std::to_string(stamp) + (i == 1 ? "" : "-" + std::to_string(i)));
+                if (!std::filesystem::exists(to, ec))
+                    break;
+            }
             std::filesystem::rename(f, to, ec);
-            aside += ec ? 0 : 1;
+            if (ec)
+                return "cannot set layouts\\" + file_name + ".json aside: " + ec.message();
+            ++aside;
         }
-        if (which == "workspace" || which == "terminals") {
-            const Settings d;
-            s.settings.sidebar_width = d.sidebar_width;
-            s.settings.panel_width = d.panel_width;
-            save_settings(s.settings);
-        }
-        s.layouts = load_layouts();
+        std::filesystem::remove(layout_state_path(which), ec);
+        s.layouts = load_layouts(s.settings);
         if (std::none_of(s.layouts.begin(), s.layouts.end(),
                          [&](const LayoutSpec& l) { return l.name == s.settings.layout; }))
             run_command(s, "layout:workspace");
-        s.toast("Layout reset: " + which, aside > 0 ? "Your file was kept aside as <name>.json.aside." : "", "",
+        s.toast("Layout reset: " + which, aside > 0 ? "Your file was kept aside as <name>.json.old-<time>." : "", "",
                 g_pal->info);
     } else if (name == "mod.clone") {
         if (arg.empty()) {
@@ -3941,7 +4223,7 @@ std::string exec_command(App::State& s, const std::string& cmd) {
             }
         }
     } else if (name == "mods.reload") {
-        s.layouts = load_layouts();
+        s.layouts = load_layouts(s.settings);
         s.mods->load(s.settings.mods_enabled);
         s.toast("Mods reloaded", "", "", g_pal->info, 2);
     } else if (name == "mods.folder") {
@@ -3954,8 +4236,6 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         if (c2 == std::string::npos)
             return "mod needs <mod>:<command>";
         s.mods->run_command(arg.substr(0, c2), arg.substr(c2 + 1));
-    } else if (name == "layout.toggle" && (arg == "panel" || arg.empty())) {
-        return exec_command(s, "panel");
     } else if (name.rfind("win98.", 0) == 0) {
         // Herdr 98's key commands (README.md 12-17), delivered to its taskbar (taskbar.js 126-176)
         // while the layout shows.
@@ -4008,9 +4288,12 @@ float fpx(float v);
 float px(float v);
 
 // Mod panels, inset and titled like the sidebar's own sections (herdr spaces/agents headers).
-void draw_mod_panels(App::State& s, const std::string& where) {
+// only_mod: just that mod's panels (a layout block naming it).
+void draw_mod_panels(App::State& s, const std::string& where, const std::string& only_mod = {}) {
     const float inset = px(18);
     for (const auto& panel : s.mods->panels(where)) {
+        if (!only_mod.empty() && panel.mod != only_mod)
+            continue;
         ImGui::PushID((panel.mod + "/" + panel.id).c_str());
         ImGui::Dummy(ImVec2(0, px(8)));
         ImGui::Indent(inset);
@@ -5432,43 +5715,6 @@ void draw_sidebar_footer(App::State& s, ImVec2 pos, float w, bool rail) {
     };
     item("##f-settings", ui::icon::kSettings, "Settings", g_pal->dim, "app.settings");
     item("##f-machine", ui::icon::kPlus, "Add machine", g_pal->faint, "machine.add");
-}
-
-void draw_sidebar(App::State& s, ImVec2 pos, ImVec2 size) {
-    refresh_git_facts(s);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), g_pal->sidebar);
-    ImGui::SetCursorScreenPos(pos);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
-    ImGui::BeginChild("##sidebar", size, ImGuiChildFlags_None,
-                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
-    const bool rail = size.x < px(160);
-    const float w = size.x;
-    draw_brand(s, pos, w, rail);
-    const float footer = px(69);
-    const float lists_top = pos.y + px(46);
-    const float lists_h = size.y - px(46) - footer;
-    // Spaces and agents share the lists area (weight 1 each, min 90); the boundary drags.
-    const float min_h = px(90);
-    float spaces_h = std::clamp(lists_h * s.settings.spaces_share, min_h, std::max(min_h, lists_h - min_h));
-    draw_spaces(s, ImVec2(pos.x, lists_top), w, spaces_h, rail);
-    draw_agents(s, ImVec2(pos.x, lists_top + spaces_h), w, lists_h - spaces_h, rail);
-    {
-        ImGui::SetCursorScreenPos(ImVec2(pos.x, lists_top + spaces_h - px(3)));
-        ImGui::InvisibleButton("##lists-split", ImVec2(w, px(6)));
-        if (ImGui::IsItemHovered() || ImGui::IsItemActive())
-            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
-        if (ImGui::IsItemActive()) {
-            const float my = ImGui::GetIO().MousePos.y - lists_top;
-            s.settings.spaces_share = std::clamp(my / std::max(1.0f, lists_h), 0.1f, 0.9f);
-        }
-        if (ImGui::IsItemDeactivated())
-            save_settings(s.settings);
-    }
-    draw_sidebar_footer(s, ImVec2(pos.x, pos.y + size.y - footer), w, rail);
-    ImGui::EndChild();
-    ImGui::PopStyleVar(2);
 }
 
 // ---------------------------------------------------------------- tab bar (tabs.js)
@@ -11509,6 +11755,213 @@ void draw_close_notice(App::State& s) {
 #include "win98_dialogs.inl"
 #include "win98_chrome.inl"
 
+// ------------------------------------------------------------------ the layout, drawn
+// herdr window.rs 4439-4502 render_node: each shown node of the layout tree gets its rect
+// (layout::place); a node's background and border are painted under its children (5232-5253
+// apply_look), and each block is drawn by the renderer its content names. herdr runs mods for
+// those; AgentDesk draws its built-in ones in C++ (below) and a C++ DLL mod's panels for a block
+// naming that mod.
+
+// A layout color: one of the theme's names (herdr themes: canvas, chrome, surface, ...) or
+// #rrggbb / #rrggbbaa.
+std::optional<ImU32> layout_color(const std::string& c) {
+    if (!c.empty() && c[0] == '#' && (c.size() == 7 || c.size() == 9)) {
+        unsigned v[4] = {0, 0, 0, 255};
+        for (std::size_t i = 0; i + 1 < c.size(); i += 2) {
+            const unsigned long x = std::strtoul(c.substr(i + 1, 2).c_str(), nullptr, 16);
+            v[i / 2] = static_cast<unsigned>(x);
+        }
+        return IM_COL32(v[0], v[1], v[2], v[3]);
+    }
+    static const std::map<std::string, ImU32 Palette::*> kNames = {
+        {"canvas", &Palette::bg},         {"chrome", &Palette::sidebar},  {"surface", &Palette::card},
+        {"raised", &Palette::hover},      {"background", &Palette::term_bg}, {"border", &Palette::border},
+        {"accent", &Palette::focus},      {"hover", &Palette::hover},     {"selected", &Palette::selected},
+        {"foreground", &Palette::text},   {"muted", &Palette::dim},       {"dim", &Palette::faint},
+        {"terminal_foreground", &Palette::term_fg}, {"selection", &Palette::selection}};
+    if (const auto it = kNames.find(c); it != kNames.end())
+        return g_pal->*(it->second);
+    return std::nullopt;
+}
+
+// window.rs 4611-4631 builtin_tabs: `"header": {"content": "tabs"}` on a stack: its children's
+// titles (else their number); a click selects one (layout.select).
+void draw_stack_tabs(App::State& s, const lay::Node& stack, const lay::Rect& r) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.right(), r.bottom()), g_pal->card);
+    const lay::Node* active = stack.active_child();
+    float x = r.x;
+    for (std::size_t i = 0; i < stack.children.size(); ++i) {
+        const auto& ch = stack.children[i];
+        const std::string label = ch.title.value_or(std::to_string(i + 1));
+        const float w = ImGui::CalcTextSize(label.c_str()).x + px(24);
+        const bool on = active == &ch;
+        if (on)
+            dl->AddRectFilled(ImVec2(x, r.y), ImVec2(x + w, r.bottom()), g_pal->hover);
+        dl->AddText(ImVec2(x + px(12), r.y + (r.h - ImGui::GetFontSize()) * 0.5f), on ? g_pal->text : g_pal->dim,
+                    label.c_str());
+        ImGui::SetCursorScreenPos(ImVec2(x, r.y));
+        ImGui::PushID(("##stacktab-" + stack.id + "/" + ch.id).c_str());
+        if (ImGui::InvisibleButton("##t", ImVec2(w, std::max(1.0f, r.h))))
+            run_command(s, "layout.select:" + Json{{"stack", stack.id}, {"child", ch.id}}.dump());
+        ImGui::PopID();
+        x += w;
+    }
+}
+
+void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, const lay::Placed& p, bool connected) {
+    const lay::Rect& r = p.inner;
+    if (r.w <= 0 || r.h <= 0)
+        return;
+    const ImVec2 pos(r.x, r.y);
+    const ImVec2 size(r.w, r.h);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const bool rail = r.w < px(160);  // workspace-chrome: the narrow sidebar
+    switch (n.content.type) {
+        case lay::Content::Type::kTab: {
+            if (l.style == "win98" && s.ws.active_tab() == nullptr)
+                return;
+            // AgentDesk's details pane (not herdr's): beside the panes when on.
+            const bool details = l.style.empty() && l.details.value_or(s.settings.details);
+            const float gap = px(8);
+            const float details_w = details ? std::min(px(320), (r.w + 2 * gap) * 0.3f) : 0.0f;
+            const ImVec2 panes(size.x - (details_w > 0 ? details_w + gap : 0.0f), size.y);
+            draw_panes(s, pos, panes, connected);
+            if (details_w > 0)
+                draw_details(s, ImVec2(pos.x + panes.x + gap, pos.y), ImVec2(details_w, size.y), connected);
+            return;
+        }
+        case lay::Content::Type::kMod:
+            break;
+        case lay::Content::Type::kTerminal:
+        case lay::Content::Type::kAgent:
+            return;  // terminals live in tabs here (not as layout blocks)
+    }
+    const std::string& m = n.content.value;
+    const Json& props = n.content.props;
+    if (m == "workspace-chrome") {
+        if (props.is_object() && props.value("footer", false))
+            draw_sidebar_footer(s, pos, size.x, rail);
+        else
+            draw_brand(s, pos, size.x, rail);
+    } else if (m == "spaces") {
+        refresh_git_facts(s);
+        draw_spaces(s, pos, size.x, size.y, rail);
+    } else if (m == "agents") {
+        draw_agents(s, pos, size.x, size.y, rail);
+    } else if (m == "tabs") {
+        draw_tab_bar(s, pos, size.x, size.y);
+    } else if (m == "terminals-bar") {
+        draw_terminals_bar(s, pos, size.x, size.y);
+    } else if (m == "workspace-status") {
+        draw_status_bar(s, pos, size.x, size.y);
+    } else if (m == "files" || m == "changes") {
+        draw_side_panel(s, pos, size);
+    } else if (m == "win98") {
+        const std::string role = n.role();
+        const w98::Box b{r.x, r.y, r.right(), r.bottom()};
+        if (role == "desktop")
+            w98::desktop(s, dl, b);
+        else if (role == "taskbar")
+            w98::taskbar(s, dl, b);
+    } else if (s.mods != nullptr) {
+        // A C++ DLL mod: its panels, in the block.
+        ImGui::SetCursorScreenPos(pos);
+        ImGui::BeginChild(("##modblock-" + n.id).c_str(), size, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+        draw_mod_panels(s, "sidebar", m);
+        draw_mod_panels(s, "details", m);
+        ImGui::EndChild();
+    }
+}
+
+void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
+    LayoutSpec& l = s.layout();
+    sync_panel(s, l);
+    const bool win98 = l.style == "win98";
+    if (win98) {
+        w98::begin(s);
+        w98::fit(s, l.tree);
+    }
+    s.placed = lay::place(l.tree, lay::Rect{origin.x, origin.y, full.x, full.y}, g_scale, {}, true);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    // Backgrounds and borders, parents first.
+    for (const auto& id : s.placed.order) {
+        const lay::Node* n = l.tree.find(id);
+        const lay::Placed& p = s.placed.nodes.at(id);
+        const ImVec2 a(p.outer.x, p.outer.y);
+        const ImVec2 b(p.outer.right(), p.outer.bottom());
+        const float radius = n->radius ? px(*n->radius) : 0.0f;
+        if (win98 && n == &l.tree) {
+            // Herdr 98's wallpaper: the root's background (a click in herdr, layout_sync.rs 324).
+            w98::background(s, dl, w98::Box{a.x, a.y, b.x, b.y});
+        } else if (l.look_applies && n->background.is_string()) {
+            if (const auto c = layout_color(n->background.get<std::string>()))
+                dl->AddRectFilled(a, b, *c, radius);
+        } else if (l.look_applies && n->background.is_object() && n->background.contains("gradient")) {
+            // layout.rs 107-112: two colors at an angle; drawn top to bottom or left to right.
+            const auto& g = n->background["gradient"];
+            const auto c0 = layout_color(g[0].get<std::string>());
+            const auto c1 = layout_color(g[1].get<std::string>());
+            if (c0 && c1) {
+                const float angle = n->background.value("angle", 180.0f);
+                const bool across = std::fmod(std::abs(angle), 180.0f) > 45.0f && std::fmod(std::abs(angle), 180.0f) < 135.0f;
+                if (across)  // 90 / 270: left to right
+                    dl->AddRectFilledMultiColor(a, b, *c0, *c1, *c1, *c0);
+                else
+                    dl->AddRectFilledMultiColor(a, b, *c0, *c0, *c1, *c1);
+            }
+        }
+        if (const lay::Line* line = lay::node_border(*n, false))
+            if (const auto c = layout_color(line->color))
+                dl->AddRect(a, b, *c, radius, 0, px(line->width));
+    }
+    // The blocks, in tree order.
+    for (const auto& id : s.placed.order) {
+        const lay::Node* n = l.tree.find(id);
+        if (n->is_block())
+            draw_layout_block(s, l, *n, s.placed.nodes.at(id), connected);
+    }
+    for (const auto& [id, r] : s.placed.headers) {
+        const lay::Node* n = l.tree.find(id);
+        if (n != nullptr && n->header && n->header->content.is_string())
+            draw_stack_tabs(s, *n, r);
+    }
+    // Separators (window.rs 4633-4669): the divider line, and a drag handle where the container
+    // is resizable.
+    for (const auto& sep : s.placed.separators) {
+        const lay::Node* c = l.tree.find(sep.container);
+        const bool row = sep.axis == lay::Axis::kRow;
+        if (c != nullptr && c->divider) {
+            if (const auto col = layout_color(c->divider->color)) {
+                const float lw = px(c->divider->width);
+                // A line lw wide down the middle of the separator (window.rs 63-69 separator_line).
+                if (row) {
+                    const float x = sep.box.x + (sep.box.w - lw) * 0.5f;
+                    dl->AddLine(ImVec2(x, sep.box.y), ImVec2(x, sep.box.bottom()), *col, lw);
+                } else {
+                    const float y = sep.box.y + (sep.box.h - lw) * 0.5f;
+                    dl->AddLine(ImVec2(sep.box.x, y), ImVec2(sep.box.right(), y), *col, lw);
+                }
+            }
+        }
+        if (!sep.resizable || sep.hit.w <= 0 || sep.hit.h <= 0)
+            continue;
+        ImGui::SetCursorScreenPos(ImVec2(sep.hit.x, sep.hit.y));
+        ImGui::PushID(("##sep-" + sep.container + "/" + std::to_string(sep.index)).c_str());
+        ImGui::InvisibleButton("##h", ImVec2(sep.hit.w, sep.hit.h));
+        const bool active = ImGui::IsItemActive();
+        if (ImGui::IsItemHovered() || active)
+            ImGui::SetMouseCursor(row ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
+        if (active) {
+            const ImVec2 m = ImGui::GetIO().MousePos;
+            lay::drag(l.tree, sep.container, sep.index, sep.axis, s.placed, row ? m.x : m.y, g_scale);
+        }
+        if (ImGui::IsItemDeactivated())
+            save_layout_state(l);
+        ImGui::PopID();
+    }
+}
+
 }  // namespace
 
 // ------------------------------------------------------------------ frame
@@ -11770,74 +12223,10 @@ void App::frame() {
     ImGui::PopStyleVar(3);
     const ImVec2 origin = vp->WorkPos;
     const ImVec2 full = vp->WorkSize;
-    const LayoutSpec& layout = s.layout();
-    const bool show_sidebar = layout.sidebar && s.settings.sidebar;
-    const bool show_details = layout.details.value_or(s.settings.details);
-    // herdr main.json: root row = sidebar (268, 44..480, chrome) | 1 px border | work column
-    // (tabs 42, body padding 8 gap 8 with the right panel 368, status 28).
+    // The shown layout's tree (herdr main.json: the sidebar, a 1 px divider and the work column of
+    // tabs, the panes with the panel, and the status bar; terminals.json; win98.json).
     ImGui::GetWindowDrawList()->AddRectFilled(origin, ImVec2(origin.x + full.x, origin.y + full.y), g_pal->bg);
-    if (win98) {  // herdr layouts/win98.json: the desktop, the panes and the taskbar (win98_*.inl)
-        w98::draw(s, origin, full, connected);
-    } else {
-    const float sidebar_w = show_sidebar ? px(s.settings.sidebar_width) : 0.0f;
-    const float status_h = layout.status_bar ? px(28) : 0.0f;
-    // herdr layouts/terminals.json: root padding 6, a 38 px bar, gap 8 (no body padding).
-    const bool terminals = layout.style == "terminals";
-    const float pad = terminals ? px(6) : 0.0f;
-    const float tabbar_h = layout.tab_bar ? px(terminals ? 38.0f : 42.0f) : 0.0f;
-    const float gap = px(8);
-    const float inset = terminals ? 0.0f : gap;
-    if (show_sidebar) {
-        draw_sidebar(s, origin, ImVec2(sidebar_w, full.y));
-        ImGui::GetWindowDrawList()->AddLine(ImVec2(origin.x + sidebar_w, origin.y),
-                                            ImVec2(origin.x + sidebar_w, origin.y + full.y), g_pal->border);
-        // The sidebar edge drags between 44 and 480 px (6 px hit strip).
-        ImGui::SetCursorScreenPos(ImVec2(origin.x + sidebar_w - px(3), origin.y + px(46)));
-        ImGui::InvisibleButton("##sidebar-edge", ImVec2(px(6), full.y - px(46)));
-        if (ImGui::IsItemHovered() || ImGui::IsItemActive())
-            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-        if (ImGui::IsItemActive())
-            s.settings.sidebar_width = std::clamp((ImGui::GetIO().MousePos.x - origin.x) / g_scale, 44.0f, 480.0f);
-        if (ImGui::IsItemDeactivated())
-            save_settings(s.settings);
-    }
-    const float work_x = origin.x + pad + sidebar_w + (show_sidebar ? 1.0f : 0.0f);
-    const ImVec2 main_pos(work_x, origin.y + pad);
-    const float main_w = origin.x + full.x - pad - work_x;
-    if (layout.tab_bar && terminals)
-        draw_terminals_bar(s, main_pos, main_w, tabbar_h);
-    else if (layout.tab_bar)
-        draw_tab_bar(s, main_pos, main_w, tabbar_h);
-    const auto* active_space = s.ws.active();
-    const bool show_panel =
-        !terminals && active_space != nullptr && !active_space->panel.empty();
-    const float panel_w = show_panel ? std::min(px(s.settings.panel_width), main_w * 0.6f) : 0.0f;
-    const float details_w = show_details ? std::min(px(320), main_w * 0.3f) : 0.0f;
-    const ImVec2 content_pos(main_pos.x + inset, main_pos.y + tabbar_h + gap);
-    const ImVec2 content_size(main_w - inset * 2 - (details_w > 0 ? details_w + gap : 0.0f) -
-                                  (panel_w > 0 ? panel_w + gap : 0.0f),
-                              full.y - pad * 2 - status_h - tabbar_h - gap - inset);
-    draw_panes(s, content_pos, content_size, connected);
-    float right_x = content_pos.x + content_size.x + gap;
-    if (panel_w > 0) {
-        // The boundary between the panes and the panel drags (280..900 px).
-        ImGui::SetCursorScreenPos(ImVec2(right_x - gap * 0.5f - px(3), content_pos.y));
-        ImGui::InvisibleButton("##panel-edge", ImVec2(px(6), content_size.y));
-        if (ImGui::IsItemHovered() || ImGui::IsItemActive())
-            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-        if (ImGui::IsItemActive())
-            s.settings.panel_width =
-                std::clamp((main_pos.x + main_w - gap - ImGui::GetIO().MousePos.x) / g_scale, 280.0f, 900.0f);
-        if (ImGui::IsItemDeactivated())
-            save_settings(s.settings);
-        draw_side_panel(s, ImVec2(right_x, content_pos.y), ImVec2(panel_w, content_size.y));
-        right_x += panel_w + gap;
-    }
-    if (details_w > 0)
-        draw_details(s, ImVec2(right_x, content_pos.y), ImVec2(details_w, content_size.y), connected);
-    if (layout.status_bar)
-        draw_status_bar(s, ImVec2(work_x, origin.y + full.y - status_h), main_w, status_h);
-    }
+    draw_layout(s, origin, full, connected);
     ImGui::End();
     if (win98)  // its floats, windows and menus (herdr overlays)
         w98::overlays(s);

@@ -2,7 +2,9 @@
 // prints mixed Chinese/ASCII text. Used to check rendering (fonts, CJK widths) without a human.
 //   screenshot_ui --out <png> [--build-dir <dir>] [--profile chinese|claude] [--wait-seconds 6]
 //                 [--run <command>] [--child profile:name] [--remote <machine>] [--mods a,b]
-//                 [--input "<step>;<step>..."]
+//                 [--input "<step>;<step>..."] [--layout <file.json>]
+// --layout copies a layout file into the isolated data folder's layouts\ (show it with
+// --run layout:<name>).
 // --input is passed to agent-ui, which feeds the steps to ImGui as a person's mouse and keys
 // (nothing outside its window is touched): click:x,y rclick:x,y mclick:x,y dblclick:x,y
 // press:x,y release:x,y (a left-button drag, with move steps between) move:x,y key:<enter|esc|tab|up|down|left|right|home|end|pgup|pgdn|back|del|space|f2|a-z|0-9>
@@ -188,6 +190,7 @@ int wmain(int argc, wchar_t** argv) {
         const std::wstring remote = args.get_or(L"remote", L"");
         const std::wstring mods = args.get_or(L"mods", L"");
         const std::wstring input = args.get_or(L"input", L"");
+        const std::wstring layout_file = args.get_or(L"layout", L"");
 
         ::SetProcessDPIAware();
         check(::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED), "CoInitializeEx");
@@ -237,6 +240,11 @@ int wmain(int argc, wchar_t** argv) {
                    std::string("[Console]::Write([char]27 + ']7501;state=") + st + "' + [char]7)"}}});
         }
         dk::write_file(data / L"profiles.json", dk::profiles_json(profiles));
+        if (!layout_file.empty()) {  // a layout of the person's: <data>\layouts\<name>.json
+            fs::create_directories(data / L"layouts");
+            fs::copy_file(fs::path(layout_file), data / L"layouts" / fs::path(layout_file).filename(),
+                          fs::copy_options::overwrite_existing);
+        }
         ::SetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", data.c_str());
 
         std::optional<Json> ui_doc;

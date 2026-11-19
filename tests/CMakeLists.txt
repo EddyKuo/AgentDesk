@@ -20,7 +20,8 @@ agentdesk_executable(unit_tests
     unit/updates_test.cpp
     unit/telemetry_test.cpp
     unit/win98_test.cpp
-    unit/programs_test.cpp)
+    unit/programs_test.cpp
+    unit/layout_test.cpp)
 target_link_libraries(unit_tests PRIVATE
     agentdesk::ui agentdesk::protocol agentdesk::terminal agentdesk::platform_win agentdesk::vterm
     nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock shell32)
@@ -35,6 +36,7 @@ set_target_properties(test_mod PROPERTIES OUTPUT_NAME mod RUNTIME_OUTPUT_DIRECTO
 add_dependencies(unit_tests test_mod)
 target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}"
     AGENTDESK_HERDR_PROGRAMS="${PROJECT_SOURCE_DIR}/third_party/herdr/programs"
+    AGENTDESK_HERDR_LAYOUTS="${PROJECT_SOURCE_DIR}/third_party/herdr/layouts"
     AGENTDESK_TEST_MOD=L"$<TARGET_FILE:test_mod>")
 gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)
 

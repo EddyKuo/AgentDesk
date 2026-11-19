@@ -13,6 +13,8 @@
 #include <string_view>
 #include <vector>
 
+#include "agentdesk/ui/layout.hpp"
+
 namespace agentdesk::ui::win98 {
 
 // ---------------------------------------------------------------- kit.js 12-32: the colors
@@ -95,8 +97,8 @@ MenuSize menu_size(const std::vector<MenuRowText>& items, bool start);
 
 // herdr src/layout.rs 33-59, 732-751 and src/window/floats.rs 78-96: a floating block (Clippy)
 // sits on an edge of its node, at the start, middle or end of it, `margin` from the edges.
-enum class Edge { kTop, kRight, kBottom, kLeft };
-enum class Align { kStart, kCenter, kEnd };
+using Edge = layout::Edge;  // the layout engine's (layout.hpp)
+using Align = layout::Align;
 struct FloatPlace {
     Edge edge = Edge::kRight;
     Align align = Align::kCenter;
@@ -112,8 +114,8 @@ inline constexpr float kDragStart = 4.0f;  // floats.rs 16: a press moves it fro
 // Its top left in the node (origin ox, oy; size w x h) for a block of bw x bh.
 std::array<float, 2> float_home(float ox, float oy, float w, float h, float bw, float bh, FloatPlace place,
                                 float margin);
-const char* edge_name(Edge e);    // "top", "right", "bottom", "left"
-const char* align_name(Align a);  // "start", "center", "end"
+using layout::align_name;  // "start", "center", "end"
+using layout::edge_name;   // "top", "right", "bottom", "left"
 FloatPlace parse_place(std::string_view edge, std::string_view align);
 
 // kit.js 373: each dialog's width in Win98 px (340 when not listed).

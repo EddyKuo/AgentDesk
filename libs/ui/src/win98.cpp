@@ -179,24 +179,6 @@ std::array<float, 2> float_home(float ox, float oy, float w, float h, float bw, 
     return {x, y};
 }
 
-const char* edge_name(Edge e) {
-    switch (e) {
-        case Edge::kTop:
-            return "top";
-        case Edge::kRight:
-            return "right";
-        case Edge::kBottom:
-            return "bottom";
-        case Edge::kLeft:
-            return "left";
-    }
-    return "right";
-}
-
-const char* align_name(Align a) {
-    return a == Align::kStart ? "start" : a == Align::kEnd ? "end" : "center";
-}
-
 // layout.rs 36-59: the defaults are right and center.
 FloatPlace parse_place(std::string_view edge, std::string_view align) {
     FloatPlace p;
