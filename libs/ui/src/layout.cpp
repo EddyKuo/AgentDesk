@@ -1064,12 +1064,12 @@ std::vector<std::string> builtin_names() {
     return {"workspace", "terminals", "win98"};
 }
 
-std::string_view herdr_name(std::string_view name) {
+std::string_view builtin_file_name(std::string_view name) {
     return name == "workspace" ? std::string_view("main") : name;
 }
 
 std::string_view builtin_text(std::string_view name) {
-    const std::string_view h = herdr_name(name);
+    const std::string_view h = builtin_file_name(name);
     if (h == "main")
         return detail::kPresetMain;
     if (h == "terminals")

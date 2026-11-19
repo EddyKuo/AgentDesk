@@ -16,7 +16,7 @@ using agentdesk::ui::Programs;
 
 namespace {
 
-const std::filesystem::path kTable = std::filesystem::path(AGENTDESK_HERDR_PROGRAMS) / "programs.json";
+const std::filesystem::path kTable = std::filesystem::path(AGENTDESK_PROGRAMS_DIR) / "programs.json";
 
 Programs table() {
     return Programs::load(kTable, {});

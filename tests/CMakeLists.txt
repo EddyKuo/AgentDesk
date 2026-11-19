@@ -42,8 +42,8 @@ set_target_properties(test_mod PROPERTIES OUTPUT_NAME mod RUNTIME_OUTPUT_DIRECTO
 add_dependencies(unit_tests test_mod)
 # The program table and layout files the tests read straight from the source tree.
 target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}"
-    AGENTDESK_HERDR_PROGRAMS="${PROJECT_SOURCE_DIR}/third_party/herdr/programs"
-    AGENTDESK_HERDR_LAYOUTS="${PROJECT_SOURCE_DIR}/third_party/herdr/layouts"
+    AGENTDESK_PROGRAMS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/programs"
+    AGENTDESK_PRESET_LAYOUTS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/layouts"
     AGENTDESK_TEST_MOD=L"$<TARGET_FILE:test_mod>")
 gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)
 

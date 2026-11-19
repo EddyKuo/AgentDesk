@@ -1,5 +1,4 @@
-// A stand-in agent-ui.exe for the update tests (herdr update.rs 729-753 writes a shell script
-// that echoes "herdr-app 0.1.8"). `--version` answers "agent-ui <fake-version.txt next to it>";
+// A stand-in agent-ui.exe for the update tests. `--version` answers "agent-ui <fake-version.txt next to it>";
 // started any other way it appends a line to launched.txt next to it and ends, so a relaunch can
 // be seen without opening a window.
 #include <windows.h>

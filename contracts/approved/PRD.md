@@ -1,6 +1,6 @@
 ---
 contract_type: PRD
-version: 2.0.0
+version: 2.0.1
 status: approved
 author_agent: PM
 sprint: 11
@@ -16,6 +16,7 @@ downstream_consumers:
   - RD
   - QA
 change_summary: |
+  2.0.1（Patch）：FR-21 引用的測試改名為 `Attention.AlertRules`（2026-11-20 重構時拿掉測試名稱裡的 herdr），需求不變。
   2.0.0（Major）：FR-27 刪掉了看板與格狀兩種版面，屬於刪除需求內容，依憲法 6.3 升主版號（下游 RD、QA 需重新確認 FR-27）。其餘：跟上出貨的產品版本 0.2.0，鎖定設計文件 v2.11。新增第 9 節 FR-29～FR-37，都是 Sprint 10 已實作、使用者在 2026-11-19 驗收過的功能：
   依 herdr-app 複刻的介面與行為（ADR-15）、Files／Changes 面板、Agent 狀態的生命週期（回到 shell 提示時清除）、新增 space 或分頁時選擇 shell（ADR-20）、
   程式裡只出現 AgentDesk（ADR-21）、主題、AgentDesk 線上更新與使用統計（ADR-18）、agent-host 單獨更新時接手終端機（ADR-19）。
@@ -156,7 +157,7 @@ v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外�
 | ID | 需求 | 驗收 | 驗證 |
 |---|---|---|---|
 | FR-20 | 工作依 space（工作地點）→ 分頁 → 分割面板組織；可往右或往下分割、放大、用鍵盤切換與交換、拖曳調整大小、改名；重開視窗後還原 | Given 兩個分頁與一個分割，When 關閉並重開 UI，Then 版面相同 | `HostFixture.UiStateIsSharedAndPersisted`、`Workspace.*` |
-| FR-21 | Agent 在沒被看時完成標為 done，看過才變 idle；需要使用者或完成時發出音效與通知，點通知跳到該 Agent | Given 使用者沒在看某個 Agent，When 它完成，Then 標為 Done、播放提示音並在右下角通知，點通知跳到該面板，看過後變成 Idle。Given 任一 Agent，When 它需要使用者（error 視同需要使用者），Then 一定播放提示音；只有沒在看它時才跳出通知 | `Attention.*`（含 `Attention.HerdrAlertRules`） |
+| FR-21 | Agent 在沒被看時完成標為 done，看過才變 idle；需要使用者或完成時發出音效與通知，點通知跳到該 Agent | Given 使用者沒在看某個 Agent，When 它完成，Then 標為 Done、播放提示音並在右下角通知，點通知跳到該面板，看過後變成 Idle。Given 任一 Agent，When 它需要使用者（error 視同需要使用者），Then 一定播放提示音；只有沒在看它時才跳出通知 | `Attention.*`（含 `Attention.AlertRules`） |
 | FR-22 | 命令面板、快捷鍵說明，快捷鍵可用 `keys.json` 修改，不送進終端機程式 | Given `keys.json` 把某個命令綁到一組按鍵，When 終端機有焦點時按下這組鍵，Then 執行該命令，按鍵不送進終端機程式 | `Keymap.*` |
 | FR-23 | 終端機可搜尋畫面與歷史、雙擊選字、三擊選行、放開即複製 | Given 畫面與歷史裡有某段文字，When 使用者搜尋它，Then 標出畫面與歷史裡的符合處（歷史分頁讀取，最多 5000 行）。Given 開啟放開即複製，When 雙擊一個字或三擊一行後放開滑鼠，Then 選取該字或該行並複製到剪貼簿 | 截圖驗證 |
 | FR-24 | 可為 repo 建立 git worktree 並開成新 space | Given 一個 git repo 的 space，When 使用者執行 New worktree 並輸入分支名稱，Then 在 `%USERPROFILE%\.agentdesk\worktrees\<repo>\<branch>` 建立 checkout，並開成新 space | `HostFixture.WorktreeAddCreatesCheckout` |
