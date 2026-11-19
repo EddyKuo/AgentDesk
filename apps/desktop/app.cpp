@@ -10463,6 +10463,35 @@ void draw_welcome(App::State& s) {
         ImGui::EndGroup();
         ImGui::Dummy(ImVec2(0, px(10)));
     };
+    // herdr welcome/main.js 139-141 para(): 13 px, 20 px lines, muted, the full width. Draws at
+    // `p` within `width` (draw false: only measures); returns the height.
+    auto para_at = [&](ImVec2 p, float width, const char* text, bool draw = true, ImU32 color = 0) -> float {
+        ImDrawList* d = ImGui::GetWindowDrawList();
+        const char* t = text;
+        const char* end = text + std::strlen(text);
+        float y = p.y;
+        while (t < end) {
+            const char* brk = s.fonts.ui->CalcWordWrapPosition(fpx(13), t, end, width);
+            if (brk == t)
+                brk = t + 1;
+            if (draw) {
+                const float th = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, t, brk).y;
+                d->AddText(s.fonts.ui, fpx(13), ImVec2(p.x, y + (px(20) - th) * 0.5f), color != 0 ? color : g_pal->dim, t, brk);
+            }
+            y += px(20);
+            t = brk;
+            while (t < end && (*t == ' ' || *t == '\n'))
+                ++t;
+        }
+        return y - p.y;
+    };
+    auto para = [&](const char* text) {
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const float h = para_at(p, ImGui::GetContentRegionAvail().x, text);
+        ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, h));
+    };
+    // A gap of `g` between blocks (the body's own item spacing taken off).
+    auto gap = [&](float g) { ImGui::Dummy(ImVec2(0, std::max(0.0f, g - 2 * ImGui::GetStyle().ItemSpacing.y))); };
     bool changed = false;
     if (page == 0) {
         title("AgentDesk runs your terminals in the background",
@@ -10489,14 +10518,59 @@ void draw_welcome(App::State& s) {
         title("Add your other machines",
               "A desktop at home, a server: AgentDesk reaches them over ssh, and agents there keep running while "
               "this PC sleeps.");
-        for (const auto& m : s.settings.machines)
-            ImGui::BulletText("%s  (%s)", m.name.c_str(), m.target.c_str());
-        primary_button_style(true);
-        if (ImGui::Button("Add a machine\xE2\x80\xA6"))
-            s.show_machine_add = true;
-        primary_button_style(false);
+        // welcome/main.js 297-345: one rounded box (12, a 1 px border, the background): "This
+        // computer · here", a row per machine, then an accent "Add a machine" row; under it, the
+        // note. Rows (machineRow 297-308): h 42, px 12, gap 10, a bottom border; a 15 px muted
+        // icon, the name (13 px), the note (12 px dim), an 8 px dot (green when connected).
+        {
+            ImDrawList* d = ImGui::GetWindowDrawList();
+            const ImVec2 b0 = ImGui::GetCursorScreenPos();
+            const float bw = ImGui::GetContentRegionAvail().x;
+            const float rh = px(42);
+            const int n_rows = 1 + static_cast<int>(s.settings.machines.size());
+            const float bh = rh * static_cast<float>(n_rows + 1);
+            d->AddRectFilled(b0, ImVec2(b0.x + bw, b0.y + bh), g_pal->bg, px(12));
+            auto mrow = [&](int i, const char* glyph, const std::string& name, const std::string& note, bool ok) {
+                const float y = b0.y + rh * static_cast<float>(i);
+                const float cy = y + rh * 0.5f;
+                draw_icon(s, d, glyph, fpx(15), ImVec2(b0.x + px(12) + px(7.5f), cy), g_pal->dim);
+                const float nx = b0.x + px(12) + px(15) + px(10);
+                const ImVec2 nt = s.fonts.ui->CalcTextSizeA(fpx(12), FLT_MAX, 0, note.c_str());
+                const float dot_x = b0.x + bw - px(12) - px(8);
+                const float note_x = dot_x - px(10) - nt.x;
+                text_clipped(d, s.fonts.ui, fpx(13), ImVec2(nx, cy - line_h(13) * 0.5f), g_pal->text, name,
+                             std::max(0.0f, note_x - px(10) - nx));
+                d->AddText(s.fonts.ui, fpx(12), ImVec2(note_x, cy - nt.y * 0.5f), g_pal->faint, note.c_str());
+                d->AddCircleFilled(ImVec2(dot_x + px(4), cy), px(4), ok ? g_pal->done : g_pal->faint);
+                d->AddLine(ImVec2(b0.x, y + rh - 0.5f), ImVec2(b0.x + bw, y + rh - 0.5f), g_pal->border);
+            };
+            mrow(0, ui::icon::kMonitor, "This computer", "here", true);
+            for (std::size_t i = 0; i < s.settings.machines.size(); ++i) {
+                const auto& m = s.settings.machines[i];
+                const std::string st = s.machine_state(m.name);
+                mrow(static_cast<int>(i) + 1, ui::icon::kServer, m.name, st, st == "connected");
+            }
+            // The add row (330-343): accent, 13 px, a 15 px plus; hover background.
+            const ImVec2 ar(b0.x, b0.y + rh * static_cast<float>(n_rows));
+            ImGui::SetCursorScreenPos(ar);
+            if (ImGui::InvisibleButton("##w-add-machine", ImVec2(bw, rh)))
+                s.show_machine_add = true;
+            if (ImGui::IsItemHovered())
+                d->AddRectFilled(ar, ImVec2(ar.x + bw, ar.y + rh), g_pal->hover, px(12), ImDrawFlags_RoundCornersBottom);
+            draw_icon(s, d, ui::icon::kPlus, fpx(15), ImVec2(ar.x + px(12) + px(7.5f), ar.y + rh * 0.5f), g_pal->focus);
+            d->AddText(s.fonts.ui, fpx(13), ImVec2(ar.x + px(12) + px(15) + px(10), ar.y + (rh - line_h(13)) * 0.5f),
+                       g_pal->focus, "Add a machine");
+            d->AddRect(b0, ImVec2(b0.x + bw, b0.y + bh), g_pal->border, px(12));
+            ImGui::SetCursorScreenPos(b0);
+            ImGui::Dummy(ImVec2(bw, bh));
+        }
+        gap(px(18));
+        para("Not now? Add machine is at the bottom of the sidebar too.");  // welcome/main.js 345
     } else if (page == 2) {
-        title("Choose your panels", "Buttons at the right of the tab bar open them beside your terminals.");
+        // welcome/main.js 396-400.
+        title("Choose your panels",
+              "AgentDesk comes with a couple of panels. Turn one on and it appears beside your terminals. Drag "
+              "this window aside to see it. Later, the buttons in the tab bar open and close them.");
         // herdr welcome.js 396-413: the first visit to this page starts with both off; skipping
         // the welcome leaves both on.
         if (!s.welcome_panels_seen) {
@@ -10504,9 +10578,49 @@ void draw_welcome(App::State& s) {
             s.settings.panels.clear();
             changed = true;
         }
-        auto toggle = [&](const char* id, const char* label, const char* text) {
+        // welcome/main.js 348-394 panelCard(): p 12, gap 12, rounded 12, a 1 px border (accent
+        // when on, else the input colour; the ring colour on hover), an accent tint when on; a
+        // 32 px tile (rounded 9, raised, bordered) with the 16 px icon; the title (13.5
+        // semibold) and a `mods/<id>` chip (px 6, rounded 5, hover background, 11 px dim), then
+        // the description; a 34 x 20 switch (mt 4).
+        auto toggle = [&](const char* id, const char* glyph, const char* label, const char* text) {
             bool on = std::find(s.settings.panels.begin(), s.settings.panels.end(), id) != s.settings.panels.end();
-            if (ImGui::Checkbox(label, &on)) {
+            ImDrawList* d = ImGui::GetWindowDrawList();
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            const float cw = ImGui::GetContentRegionAvail().x;
+            const float tx = a.x + px(12) + px(32) + px(12);
+            const float text_w = cw - px(12) - px(32) - px(12) - px(12) - px(34) - px(12);
+            const float body_h = para_at(ImVec2(tx, 0), text_w, text, false);
+            const float inner = std::max(px(32), line_h(13.5f) + px(4) + body_h);
+            const float ch = px(12) + inner + px(12);
+            ImGui::PushID(id);
+            const bool clicked = ImGui::InvisibleButton("##panel", ImVec2(cw, ch));
+            const bool hov = ImGui::IsItemHovered();
+            ImGui::PopID();
+            const ImVec2 b(a.x + cw, a.y + ch);
+            if (on)
+                d->AddRectFilled(a, b, alpha(g_pal->focus, 0x10), px(12));
+            d->AddRect(a, b, on ? g_pal->focus : hov ? g_pal->dim : g_pal->border, px(12));
+            const ImVec2 t0(a.x + px(12), a.y + px(12));
+            d->AddRectFilled(t0, ImVec2(t0.x + px(32), t0.y + px(32)), raised_color(), px(9));
+            d->AddRect(t0, ImVec2(t0.x + px(32), t0.y + px(32)), g_pal->border, px(9));
+            draw_icon(s, d, glyph, fpx(16), ImVec2(t0.x + px(16), t0.y + px(16)), g_pal->text);
+            const ImVec2 lt = s.fonts.ui_bold->CalcTextSizeA(fpx(13.5f), FLT_MAX, 0, label);
+            const float ly = a.y + px(12);
+            d->AddText(s.fonts.ui_bold, fpx(13.5f), ImVec2(tx, ly + (line_h(13.5f) - lt.y) * 0.5f), g_pal->text, label);
+            const std::string chip = std::string("mods/") + id;
+            const ImVec2 ct = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, chip.c_str());
+            const ImVec2 c0(tx + lt.x + px(8), ly + (line_h(13.5f) - ct.y - px(1)) * 0.5f);
+            d->AddRectFilled(c0, ImVec2(c0.x + ct.x + px(12), c0.y + ct.y + px(1)), g_pal->hover, px(5));
+            d->AddText(s.fonts.ui, fpx(11), ImVec2(c0.x + px(6), c0.y + px(0.5f)), g_pal->faint, chip.c_str());
+            para_at(ImVec2(tx, ly + line_h(13.5f) + px(4)), text_w, text);
+            const ImVec2 sw(b.x - px(12) - px(34), a.y + px(12) + px(4));
+            d->AddRectFilled(sw, ImVec2(sw.x + px(34), sw.y + px(20)), on ? g_pal->focus : g_pal->border, px(10));
+            d->AddCircleFilled(ImVec2(on ? sw.x + px(34) - px(10) : sw.x + px(10), sw.y + px(10)), px(8),
+                               on ? accent_foreground() : g_pal->dim);
+            gap(px(14));
+            if (clicked) {
+                on = !on;
                 if (on)
                     s.settings.panels.push_back(id);
                 else
@@ -10524,12 +10638,54 @@ void draw_welcome(App::State& s) {
                     s.doc_dirty_at = Clock::now();
                 }
             }
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", text);
         };
-        toggle("files", "Files", "Browse the focused terminal's folder.");
-        toggle("changes", "Changes", "What your agents changed: every file with its diff, and a commit box.");
+        // welcome/main.js 18-21 PANELS.
+        toggle("files", ui::icon::kFile, "Files", "The folder you're in as a tree. Open a file to read it, highlighted.");
+        toggle("changes", ui::icon::kChanges, "Changes",
+               "What your agents changed: every file with its diff, and a commit box.");
+        // welcome/main.js 403-411: p 12, rounded 10, raised.
+        {
+            const char* kBoard = "Ask your agent for a board of your agents, your pull requests, a cost meter, or the "
+                                 "sidebar on the right. Not sure what's possible? Ask it that too.";
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            const float cw = ImGui::GetContentRegionAvail().x;
+            const float th = para_at(ImVec2(a.x + px(12), 0), cw - px(24), kBoard, false);
+            ImDrawList* d = ImGui::GetWindowDrawList();
+            d->AddRectFilled(a, ImVec2(a.x + cw, a.y + th + px(24)), raised_color(), px(10));
+            para_at(ImVec2(a.x + px(12), a.y + px(12)), cw - px(24), kBoard);
+            ImGui::Dummy(ImVec2(cw, th + px(24)));
+        }
     } else {
+        // welcome/main.js 416-436: first, while a key opens the palette, "One key opens
+        // everything" (p 12, gap 12, rounded 10, an accent border and tint): the key in a chip
+        // (px 8, py 3, rounded 6, bordered, raised, 13 px semibold), the title (13.5 semibold)
+        // and its line. Then (gap 16) the rest of the page.
+        if (const std::string pal = s.keymap.chord_for("app.palette"); !pal.empty()) {
+            const char* kPal = "It opens the command palette, with every action by name and its key. It works the same "
+                               "in every layout.";
+            ImDrawList* d = ImGui::GetWindowDrawList();
+            const ImVec2 a = ImGui::GetCursorScreenPos();
+            const float cw = ImGui::GetContentRegionAvail().x;
+            const ImVec2 kt = s.fonts.ui_bold->CalcTextSizeA(fpx(13), FLT_MAX, 0, pal.c_str());
+            const ImVec2 ks(kt.x + px(16) + 2.0f, line_h(13) + px(6) + 2.0f);
+            const float tx = a.x + px(12) + ks.x + px(12);
+            const float tw = a.x + cw - px(12) - tx;
+            const float body = para_at(ImVec2(tx, 0), tw, kPal, false);
+            const float inner = std::max(ks.y, line_h(13.5f) + px(2) + body);
+            const ImVec2 b(a.x + cw, a.y + px(12) + inner + px(12));
+            d->AddRectFilled(a, b, alpha(g_pal->focus, 0x10), px(10));
+            d->AddRect(a, b, g_pal->focus, px(10));
+            const ImVec2 k0(a.x + px(12), a.y + px(12) + (inner - ks.y) * 0.5f);
+            d->AddRectFilled(k0, ImVec2(k0.x + ks.x, k0.y + ks.y), raised_color(), px(6));
+            d->AddRect(k0, ImVec2(k0.x + ks.x, k0.y + ks.y), g_pal->border, px(6));
+            d->AddText(s.fonts.ui_bold, fpx(13), ImVec2(k0.x + (ks.x - kt.x) * 0.5f, k0.y + (ks.y - kt.y) * 0.5f),
+                       g_pal->text, pal.c_str());
+            const float ty = a.y + px(12) + (inner - (line_h(13.5f) + px(2) + body)) * 0.5f;
+            d->AddText(s.fonts.ui_bold, fpx(13.5f), ImVec2(tx, ty), g_pal->text, "One key opens everything");
+            para_at(ImVec2(tx, ty + line_h(13.5f) + px(2)), tw, kPal);
+            ImGui::Dummy(ImVec2(cw, b.y - a.y));
+            gap(px(16));
+        }
         title("Make it yours", "Everything AgentDesk does is a command.");
         ImGui::Text("Press %s for the command palette, %s to jump to a space or agent.",
                     s.keymap.chord_for("app.palette").c_str(), s.keymap.chord_for("app.picker").c_str());
@@ -10572,6 +10728,8 @@ void draw_welcome(App::State& s) {
         ImGui::EndChild();
         ImGui::PopStyleVar(2);
         ImGui::PopStyleColor();
+        gap(px(16));
+        para("Something off or missing? Settings \xE2\x80\xBA Send feedback. We read every one.");  // welcome/main.js 461
     }
     ImGui::Dummy(ImVec2(0, px(20)));
     ImGui::EndChild();
@@ -11017,14 +11175,32 @@ void draw_notes(App::State& s) {
         s.show_notes = false;
     }
     const bool feedback = s.notes_kind == "feedback";
-    center_next(px(feedback ? 560.0f : 520.0f), 0.16f);
+    if (feedback) {
+        // window.rs 3584: 680 wide; feedback/main.js 86: 650 high.
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        const float fw = std::min(px(680), vp->WorkSize.x - px(16));
+        const float fh = std::min(px(650), vp->WorkSize.y - px(16));
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - fw) * 0.5f, vp->WorkPos.y + (vp->WorkSize.y - fh) * 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(fw, fh));
+    } else {
+        center_next(px(520.0f), 0.16f);
+    }
     push_overlay_style();
-    const bool open = ImGui::BeginPopupModal("##notes", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize);
+    if (feedback)
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    const bool open = ImGui::BeginPopupModal("##notes", nullptr,
+                                             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                                 (feedback ? ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse : 0));
+    if (feedback)
+        ImGui::PopStyleVar();
     pop_overlay_style();
     if (!open)
         return;
-    std::string title = feedback ? std::string("Send feedback") : std::string("What's new in ") + AGENTDESK_VERSION_STRING;
-    bool close = overlay_title(s, title.c_str());
+    bool close = false;
+    if (!feedback) {
+        const std::string title = std::string("What's new in ") + AGENTDESK_VERSION_STRING;
+        close = overlay_title(s, title.c_str());
+    }
     if (!feedback) {
         for (const char* line : kWhatsNew) {
             ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->focus));
@@ -11041,15 +11217,34 @@ void draw_notes(App::State& s) {
         close = ImGui::Button("Got it", ImVec2(bw, px(30))) || close;
         primary_button_style(false);
     } else {
-        ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
-        ImGui::TextWrapped("What works, what doesn't, what you'd like. AgentDesk sends nothing by itself: copy the "
-                           "draft or save it to a file, then send it the way you like.");
-        ImGui::PopStyleColor();
-        if (ImGui::IsWindowAppearing())
-            ImGui::SetKeyboardFocusHere();
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-        ImGui::InputTextMultiline("##fb", s.feedback_buf, sizeof s.feedback_buf, ImVec2(-1, px(180)));
-        ImGui::PopStyleVar();
+        // feedback/main.js 86-112. AgentDesk has no server: Copy and Save to file stand in for
+        // Send, and the line herdr shows when a build can't send says so.
+        const ImVec2 wp = ImGui::GetWindowPos();
+        const float ww = ImGui::GetWindowWidth();
+        const float wh = ImGui::GetWindowHeight();
+        ImDrawList* d = ImGui::GetWindowDrawList();
+        // Title (98): px 24, py 18, 19 px semibold.
+        const float title_h = px(18) + line_h(19) + px(18);
+        d->AddText(s.fonts.ui_bold, fpx(19), ImVec2(wp.x + px(24), wp.y + px(18)), g_pal->text, "Send feedback");
+        // 99: px 24, pb 12, 13 px accent.
+        const char* kNoServer = "AgentDesk sends nothing by itself: copy the draft or save it to a file, then send it "
+                                "the way you like.";
+        float y = wp.y + title_h;
+        {
+            const char* t = kNoServer;
+            const char* end = t + std::strlen(t);
+            while (t < end) {
+                const char* brk = s.fonts.ui->CalcWordWrapPosition(fpx(13), t, end, ww - px(48));
+                if (brk == t)
+                    brk = t + 1;
+                d->AddText(s.fonts.ui, fpx(13), ImVec2(wp.x + px(24), y), g_pal->focus, t, brk);
+                y += line_h(13);
+                t = brk;
+                while (t < end && *t == ' ')
+                    ++t;
+            }
+            y += px(12);
+        }
         OSVERSIONINFOEXW os{};
         os.dwOSVersionInfoSize = sizeof os;
         using RtlGetVersionFn = LONG(WINAPI*)(OSVERSIONINFOEXW*);
@@ -11059,24 +11254,104 @@ void draw_notes(App::State& s) {
         const std::string about = std::string("AgentDesk ") + AGENTDESK_VERSION_STRING + ", Windows " +
                                   std::to_string(os.dwMajorVersion) + "." + std::to_string(os.dwMinorVersion) + "." +
                                   std::to_string(os.dwBuildNumber) + ", layout " + s.settings.layout;
-        ImGui::PushFont(s.fonts.ui, 11.5f);
-        ImGui::TextDisabled("Added at the end: %s", about.c_str());
-        ImGui::PopFont();
         const std::string draft = std::string(s.feedback_buf) + "\n\n-- " + about + "\n";
-        if (!s.feedback_note.empty()) {
-            ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->focus));
-            ImGui::TextWrapped("%s", s.feedback_note.c_str());
-            ImGui::PopStyleColor();
+        // Footer (110-112): px 24, py 16, gap 10, at the end: Cancel, then (ours) Save to file and
+        // Copy, the primary. Buttons (61-66): px 14, py 7, rounded 7, a border; raised and muted,
+        // or accent; a disabled primary looks like the others.
+        const float btn_h = px(7) + line_h(13) + px(7) + 2.0f;
+        const float foot_y = wp.y + wh - px(16) - btn_h;
+        const float note_h = s.feedback_note.empty() ? 0.0f : px(10) + line_h(13);
+        // Body (100-108): px 24, gap 10, scrolls between the title and the footer.
+        ImGui::SetCursorScreenPos(ImVec2(wp.x, y));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(24), 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(px(10), 0));
+        ImGui::BeginChild("##fb-body", ImVec2(ww, std::max(px(40), foot_y - px(16) - note_h - y)),
+                          ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoBackground);
+        ImDrawList* bd = ImGui::GetWindowDrawList();
+        const float bw_full = ImGui::GetContentRegionAvail().x;
+        auto label = [&](const char* text) {  // 95: 13 px muted
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            bd->AddText(s.fonts.ui, fpx(13), p, g_pal->dim, text);
+            ImGui::Dummy(ImVec2(bw_full, line_h(13) + px(10)));
+        };
+        label("Your message (up to 4000 characters).");
+        // 96, 104: p 10, rounded 7, a border, the background, 14 px; 130 high.
+        {
+            if (ImGui::IsWindowAppearing())
+                ImGui::SetKeyboardFocusHere();
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            ImGui::PushFont(s.fonts.ui, 14);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(10), px(10)));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, px(7));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, v4(g_pal->bg));
+            ImGui::PushStyleColor(ImGuiCol_Border, v4(g_pal->border));
+            ImGui::InputTextMultiline("##fb", s.feedback_buf, std::min<std::size_t>(sizeof s.feedback_buf, 4001),
+                                      ImVec2(bw_full, px(130)));
+            ImGui::PopStyleColor(2);
+            ImGui::PopStyleVar(3);
+            ImGui::PopFont();
+            // 9: the placeholder.
+            if (s.feedback_buf[0] == '\0')
+                bd->AddText(s.fonts.ui, fpx(14), ImVec2(p.x + px(10), p.y + px(10)), g_pal->faint,
+                            "What happened? What did you expect?");
+            ImGui::Dummy(ImVec2(0, px(10)));
         }
-        ImGui::Dummy(ImVec2(0, px(4)));
-        const float bw = px(100);
-        ImGui::SetCursorPosX(ImGui::GetWindowWidth() - bw * 3 - px(34));
-        ImGui::PushStyleColor(ImGuiCol_Button, v4(raised_color()));
-        close = ImGui::Button("Close", ImVec2(bw, px(30))) || close;
-        ImGui::SameLine();
+        label("What gets copied or saved: exactly this, nothing else.");
+        // 107-108: p 10, rounded 7, a border, the background; 11 px lines of 15 px, dim.
+        {
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            int lines = 1;
+            for (const char ch : draft)
+                lines += ch == '\n' ? 1 : 0;
+            const float bh = px(10) * 2 + px(15) * static_cast<float>(lines);
+            bd->AddRectFilled(p, ImVec2(p.x + bw_full, p.y + bh), g_pal->bg, px(7));
+            bd->AddRect(p, ImVec2(p.x + bw_full, p.y + bh), g_pal->border, px(7));
+            bd->PushClipRect(p, ImVec2(p.x + bw_full - px(10), p.y + bh), true);
+            float ly = p.y + px(10);
+            for (std::size_t at = 0; at <= draft.size();) {
+                const auto nl = draft.find('\n', at);
+                const std::string line = draft.substr(at, nl == std::string::npos ? std::string::npos : nl - at);
+                bd->AddText(s.fonts.ui, fpx(11), ImVec2(p.x + px(10), ly + (px(15) - fpx(11)) * 0.5f), g_pal->faint,
+                            line.empty() ? " " : line.c_str());
+                ly += px(15);
+                if (nl == std::string::npos)
+                    break;
+                at = nl + 1;
+            }
+            bd->PopClipRect();
+            ImGui::Dummy(ImVec2(bw_full, bh));
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleVar(2);
+        // 109: px 24, pt 10, 13 px accent (the note after Copy or Save).
+        if (!s.feedback_note.empty())
+            d->AddText(s.fonts.ui, fpx(13), ImVec2(wp.x + px(24), foot_y - px(16) - line_h(13)), g_pal->focus,
+                       s.feedback_note.c_str());
         const bool empty = s.feedback_buf[0] == '\0';
-        ImGui::BeginDisabled(empty);
-        if (ImGui::Button("Save to file", ImVec2(bw, px(30)))) {
+        auto button = [&](const char* id, const char* text, bool primary, bool disabled, float x) {
+            const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, text);
+            const ImVec2 a(x, foot_y);
+            const ImVec2 sz(t.x + px(28) + 2.0f, btn_h);
+            ImGui::SetCursorScreenPos(a);
+            const bool hit = ImGui::InvisibleButton(id, sz) && !disabled;
+            const bool on = primary && !disabled;
+            d->AddRectFilled(a, ImVec2(a.x + sz.x, a.y + sz.y), on ? g_pal->focus : raised_color(), px(7));
+            d->AddRect(a, ImVec2(a.x + sz.x, a.y + sz.y), g_pal->border, px(7));
+            d->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(14) + 1.0f, a.y + (sz.y - t.y) * 0.5f),
+                       on ? accent_foreground() : g_pal->dim, text);
+            return hit;
+        };
+        auto width_of = [&](const char* text) {
+            return s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, text).x + px(28) + 2.0f;
+        };
+        float bx = wp.x + ww - px(24) - width_of("Copy");
+        const float copy_x = bx;
+        bx -= px(10) + width_of("Save to file");
+        const float save_x = bx;
+        bx -= px(10) + width_of("Cancel");
+        close = button("##fb-cancel", "Cancel", false, false, bx) || close;
+        if (button("##fb-save", "Save to file", false, empty, save_x)) {
             const auto dir = data_dir() / L"feedback";
             std::error_code ec;
             std::filesystem::create_directories(dir, ec);
@@ -11089,15 +11364,10 @@ void draw_notes(App::State& s) {
             ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             s.feedback_note = "Saved in the feedback folder.";
         }
-        ImGui::PopStyleColor();
-        ImGui::SameLine();
-        primary_button_style(true);
-        if (ImGui::Button("Copy", ImVec2(bw, px(30)))) {
+        if (button("##fb-copy", "Copy", true, empty, copy_x)) {
             ImGui::SetClipboardText(draft.c_str());
             s.feedback_note = "Copied. Paste it where you want to send it.";
         }
-        primary_button_style(false);
-        ImGui::EndDisabled();
     }
     if (close || ImGui::IsKeyPressed(ImGuiKey_Escape) || dialog_outside_click()) {
         ImGui::CloseCurrentPopup();
