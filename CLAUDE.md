@@ -10,7 +10,7 @@ MVP（M0～M4，Sprint 1～5）已完成：結論在 `docs/poc/M0-report.md`、`
 
 ## 常用指令
 
-建置都要在 VS 2022 x64 vcvars 環境裡跑；`scripts\build.cmd` 會自己進入 vcvars、設 `VCPKG_ROOT` 與英文編譯訊息（`VSLANG=1033`）。
+建置都要在 VS 2022 x64 vcvars 環境裡跑；`scripts\build.cmd` 會自己進入 vcvars、設 `VCPKG_ROOT` 與英文編譯訊息（`VSLANG=1033`）。建置前它會先結束從 `build\<preset>\` 啟動的 agent-ui 與 agent-host（它們鎖住執行檔與 `conpty.dll`；host 裡的終端機會一起結束），其他位置的 AgentDesk 不受影響；設 `AGENTDESK_KEEP_HOST=1` 可略過。
 
 ```bat
 scripts\build.cmd msvc-x64-debug all          :: configure + build + ctest
