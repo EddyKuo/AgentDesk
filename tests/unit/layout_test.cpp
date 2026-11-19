@@ -218,7 +218,7 @@ TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
         ASSERT_TRUE(n.has_value()) << name << ": " << error;
         for (const Node* x : n->walk())
             EXPECT_FALSE(x->id.empty()) << name;
-        std::ifstream in(std::string(AGENTDESK_HERDR_LAYOUTS) + "/" + std::string(herdr_name(name)) + ".json",
+        std::ifstream in(std::string(AGENTDESK_PRESET_LAYOUTS_DIR) + "/" + std::string(builtin_file_name(name)) + ".json",
                          std::ios::binary);
         std::stringstream ss;
         ss << in.rdbuf();

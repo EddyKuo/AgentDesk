@@ -191,7 +191,7 @@ void normalize(Json& v);
 // "workspace", as its settings always have.
 std::vector<std::string> builtin_names();              // workspace, terminals, win98
 std::string_view builtin_text(std::string_view name);  // "" when not one
-std::string_view herdr_name(std::string_view name);    // file name of a built-in: workspace -> main
+std::string_view builtin_file_name(std::string_view name);    // file name of a built-in: workspace -> main
 // A layout as shipped (main for a name that is not a built-in).
 Node builtin(std::string_view name);
 

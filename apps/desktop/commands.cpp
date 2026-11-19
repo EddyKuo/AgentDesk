@@ -1,6 +1,7 @@
 // Commands: the command names, run_command / exec_command (palette, keys.json, mods, --run,
 // clicks) and the layout commands.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
+#include "overlay_kit.hpp"
 #include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
@@ -923,8 +924,7 @@ Outcome exec_app_command(App::State& s, const Command& c) {
                       std::round((s.settings.zoom + (name == "app.zoom_in" ? 0.1f : -0.1f)) * 10.0f) / 10.0f,
                       0.5f, 3.0f);
         save_settings(s.settings);
-        g_scale = s.dpi * ui_scale(s.settings);
-        apply_style(s.dpi, ui_scale(s.settings));
+        apply_zoom(s);
     } else if (name == "app.keys") {
         const auto path = data_dir() / L"keys.json";
         load_keys(s);  // writes the defaults when the file is missing
