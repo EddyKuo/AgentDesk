@@ -32,6 +32,13 @@ if /i "%STEP%"=="test" goto test
 cmake --preset %PRESET% || goto fail
 if /i "%STEP%"=="configure" goto done
 :build
+rem A running agent-host (and agent-ui) from this build folder holds its exe and conpty.dll open,
+rem and the build cannot replace them: end those first. Only processes started from
+rem build\<preset>\ stop; an installed AgentDesk elsewhere keeps running. Ending agent-host ends
+rem the terminals it runs. set AGENTDESK_KEEP_HOST=1 to skip this.
+if "%AGENTDESK_KEEP_HOST%"=="1" goto build_run
+powershell -NoProfile -NonInteractive -Command "$d = (Join-Path (Get-Location) 'build\%PRESET%') + '\'; $p = Get-Process agent-ui, agent-host -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) }; foreach ($x in $p) { Write-Host ('[build] ending ' + $x.Name + ' (pid ' + $x.Id + ')'); Stop-Process -Id $x.Id -Force }; if ($p) { Start-Sleep -Milliseconds 800 }"
+:build_run
 cmake --build --preset %PRESET% || goto fail
 if /i "%STEP%"=="build" goto done
 :test
