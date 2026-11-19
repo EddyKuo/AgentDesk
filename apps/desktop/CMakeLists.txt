@@ -1,5 +1,7 @@
 agentdesk_executable(agent-ui WIN32 main.cpp app.cpp agent-ui.manifest)
 target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc d3d11 dxgi dwmapi dbghelp winmm imm32 shell32 nlohmann_json::nlohmann_json)
+# app.cpp (with the Herdr 98 .inl files) passes the COFF section limit in Debug.
+target_compile_options(agent-ui PRIVATE /bigobj)
 # The UI starts agent-host.exe from its own directory (design doc 2.2).
 add_dependencies(agent-ui agent-host agentctl)
 add_custom_command(TARGET agent-ui POST_BUILD

@@ -1798,7 +1798,8 @@ std::optional<News> clippy_news(App::State& s) {
     return list.back().second;
 }
 
-void clippy(App::State& s, Box owner) {
+// owner: the node the layout floats it over; f: its floating block there (layout.rs 61-77).
+void clippy(App::State& s, Box owner, ui::layout::Float& f) {
     if (shared_str(s, "win98.clippy") == "off")
         return;
     W98& w = st(s);
@@ -1835,13 +1836,19 @@ void clippy(App::State& s, Box owner) {
     }
     const float cw = std::max(U(s, 64), text.empty() ? 0.0f : bw) + U(s, 8);
     const float ch = U(s, 8) + (text.empty() ? 0.0f : bh + U(s, 2)) + U(s, 80);
-    // win98.json 70-80: on the left edge of the screen row, at its end; dragged elsewhere it
-    // snaps to the nearest edge and third (layout.rs 732-751), 12 px in (floats.rs 14, 78-96).
-    const float m = px(12);
-    const Json& pj = shared(s, "win98.float.clippy");
-    const k98::FloatPlace place = pj.is_object()
-                                      ? k98::parse_place(pj.value("edge", ""), pj.value("align", ""))
-                                      : k98::FloatPlace{k98::Edge::kLeft, k98::Align::kEnd};
+    // win98.json 70-80: where the layout's floating block says (the left edge of the screen row, at
+    // its end, unless dragged: a click kept in layouts/.state); dragged elsewhere it snaps to the
+    // nearest edge and third (layout.rs 732-751), 12 px in (floats.rs 14, 78-96).
+    const float m = px(ui::layout::kFloatMargin);
+    if (const Json& pj = shared(s, "win98.float.clippy"); pj.is_object()) {
+        // Where it was dropped before the layout kept it: now the float's click.
+        const auto old = k98::parse_place(pj.value("edge", ""), pj.value("align", ""));
+        f.edge = static_cast<ui::layout::Edge>(old.edge);
+        f.align = static_cast<ui::layout::Align>(old.align);
+        save_layout_state(s.layout());
+        set_shared(s, "win98.float.clippy", nullptr);
+    }
+    const k98::FloatPlace place{static_cast<k98::Edge>(f.edge), static_cast<k98::Align>(f.align)};
     const bool right = place.edge != k98::Edge::kLeft;  // clippy.js 469
     const auto home = k98::float_home(owner.x0, owner.y0, owner.w(), owner.h(), cw, ch, place, m);
     ImVec2 at(snap(home[0]), snap(home[1]));
@@ -1939,8 +1946,9 @@ void clippy(App::State& s, Box owner) {
                 const float cx = mouse.x - cw * w.clippy.grab.x + cw * 0.5f - owner.x0;
                 const float cy = mouse.y - ch * w.clippy.grab.y + ch * 0.5f - owner.y0;
                 const auto to = k98::snap_float(cx, cy, owner.w(), owner.h());
-                set_shared(s, "win98.float.clippy",
-                           Json{{"edge", k98::edge_name(to.edge)}, {"align", k98::align_name(to.align)}});
+                f.edge = static_cast<ui::layout::Edge>(to.edge);
+                f.align = static_cast<ui::layout::Align>(to.align);
+                save_layout_state(s.layout());  // floats.rs 288-297 + layout_sync.rs FloatState
                 // floats.rs 288-297: spring from where it was let go to its new home.
                 const auto next = k98::float_home(owner.x0, owner.y0, owner.w(), owner.h(), cw, ch, to, m);
                 w.clippy.spring_from = ImVec2(mouse.x - cw * w.clippy.grab.x - next[0],
@@ -2161,8 +2169,9 @@ void background(App::State& s, ImDrawList* dl, Box b) {
 }
 
 // win98.json: a column of the screen (the desktop, 84 px, and the panes with 10 px padding;
-// Clippy floats over it) and the taskbar (28 px).
-void draw(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
+// Clippy floats over it) and the taskbar (28 px). The layout engine places them (draw_layout);
+// this is what the taskbar does each time it shows, before its blocks draw.
+void begin(App::State& s) {
     W98& w = st(s);
     ensure_fonts(s);
     if (!w.was_shown) {
@@ -2175,28 +2184,35 @@ void draw(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
         boot(s, age >= 0 && age < 45);
     }
     sync_games(s);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const Box all = box(origin, full);
-    background(s, dl, all);
-    const float tb_h = snap(U(s, k98::kTaskbarPx));
-    const Box screen{all.x0, all.y0, all.x1, all.y1 - tb_h};
-    const Box desk{screen.x0, screen.y0, snap(screen.x0 + U(s, k98::kDesktopPx)), screen.y1};
-    const Box main{desk.x1 + px(10), screen.y0 + px(10), screen.x1 - px(10), screen.y1 - px(10)};
-    if (s.ws.active_tab() != nullptr && main.w() > 0 && main.h() > 0)
-        draw_panes(s, main.a(), ImVec2(main.w(), main.h()), connected);
-    desktop(s, dl, desk);
-    taskbar(s, dl, Box{all.x0, screen.y1, all.x1, all.y1});
-    st(s).start_bounds.w = st(s).start_bounds.w;  // set by the taskbar this frame
     w.wakeup_ms = 250;
-    (void)screen;
+}
+
+// kit.js 441-479 fitLayout: the bars in Win98 pixels (n * scale / zoom layout px, which the zoom
+// makes n * scale screen px), whole on screen as before. Clicks, not edits (layout_sync.rs 324).
+void fit(App::State& s, ui::layout::Node& root) {
+    const float zoom = g_scale;
+    auto want = [&](float n) { return snap(U(s, n)) / zoom; };
+    if (auto* d = root.find("desktop"))
+        d->size = ui::layout::Span::pixels(want(k98::kDesktopPx));
+    if (auto* t = root.find("taskbar"))
+        t->size = ui::layout::Span::pixels(want(k98::kTaskbarPx));
 }
 
 void overlays(App::State& s) {
     W98& w = st(s);
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    const float tb_h = snap(U(s, k98::kTaskbarPx));
-    clippy(s, Box{vp->WorkPos.x, vp->WorkPos.y, vp->WorkPos.x + vp->WorkSize.x,
-                  vp->WorkPos.y + vp->WorkSize.y - tb_h});
+    // The floating blocks of the shown layout that are Clippy, over the node they float on.
+    LayoutSpec& l = s.layout();
+    for (const ui::layout::Node* n : l.tree.walk()) {
+        const auto* placed = s.placed.at(n->id);
+        if (placed == nullptr)
+            continue;
+        for (const auto& f : n->floating)
+            if (!f.hidden && f.content.type == ui::layout::Content::Type::kMod && f.content.value == "win98" &&
+                f.content.props.is_object() && f.content.props.value("role", "") == "clippy") {
+                const auto& r = placed->padded;
+                clippy(s, Box{r.x, r.y, r.right(), r.bottom()}, *l.tree.find_float(f.id));
+            }
+    }
     raise("##w98clippy");  // a float: over the layout, under the overlays
     draw_windows(s);
     draw_menus(s);
