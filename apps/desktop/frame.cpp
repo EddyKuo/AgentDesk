@@ -1,4 +1,6 @@
-// The layout as drawn, the --input script, and App's per-frame members (tick, frame).
+// Drawing the layout tree, the --input automation script, and App's per-frame members (tick,
+// frame, before_new_frame).
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
@@ -6,14 +8,13 @@ namespace detail {
 
 namespace {
 // ------------------------------------------------------------------ the layout, drawn
-// herdr window.rs 4439-4502 render_node: each shown node of the layout tree gets its rect
-// (layout::place); a node's background and border are painted under its children (5232-5253
-// apply_look), and each block is drawn by the renderer its content names. herdr runs mods for
-// those; AgentDesk draws its built-in ones in C++ (below) and a C++ DLL mod's panels for a block
-// naming that mod.
+// Every shown node of the layout tree gets its rect (lay::place). A node's background and
+// border are painted under its children, and each block is drawn by what its content names:
+// AgentDesk's built-in blocks in C++ (below), or a C++ DLL mod's panels for a block naming that
+// mod.
 
-// A layout color: one of the theme's names (herdr themes: canvas, chrome, surface, ...) or
-// #rrggbb / #rrggbbaa.
+// A layout colour: one of the theme's names (canvas, chrome, surface, ...) or #rrggbb /
+// #rrggbbaa.
 std::optional<ImU32> layout_color(const std::string& c) {
     if (!c.empty() && c[0] == '#' && (c.size() == 7 || c.size() == 9)) {
         unsigned v[4] = {0, 0, 0, 255};
@@ -23,19 +24,27 @@ std::optional<ImU32> layout_color(const std::string& c) {
         }
         return IM_COL32(v[0], v[1], v[2], v[3]);
     }
-    static const std::map<std::string, ImU32 Palette::*> kNames = {
-        {"canvas", &Palette::bg},         {"chrome", &Palette::sidebar},  {"surface", &Palette::card},
-        {"raised", &Palette::hover},      {"background", &Palette::term_bg}, {"border", &Palette::border},
-        {"accent", &Palette::focus},      {"hover", &Palette::hover},     {"selected", &Palette::selected},
-        {"foreground", &Palette::text},   {"muted", &Palette::dim},       {"dim", &Palette::faint},
-        {"terminal_foreground", &Palette::term_fg}, {"selection", &Palette::selection}};
+    static const std::map<std::string, ImU32 Palette::*> kNames = {{"canvas", &Palette::bg},
+                                                                   {"chrome", &Palette::sidebar},
+                                                                   {"surface", &Palette::card},
+                                                                   {"raised", &Palette::hover},
+                                                                   {"background", &Palette::term_bg},
+                                                                   {"border", &Palette::border},
+                                                                   {"accent", &Palette::focus},
+                                                                   {"hover", &Palette::hover},
+                                                                   {"selected", &Palette::selected},
+                                                                   {"foreground", &Palette::text},
+                                                                   {"muted", &Palette::dim},
+                                                                   {"dim", &Palette::faint},
+                                                                   {"terminal_foreground", &Palette::term_fg},
+                                                                   {"selection", &Palette::selection}};
     if (const auto it = kNames.find(c); it != kNames.end())
         return g_pal->*(it->second);
     return std::nullopt;
 }
 
-// window.rs 4611-4631 builtin_tabs: `"header": {"content": "tabs"}` on a stack: its children's
-// titles (else their number); a click selects one (layout.select).
+// A stack's `"header": {"content": "tabs"}`: one tab per child, by its title (else its number);
+// a click selects it (layout.select).
 void draw_stack_tabs(App::State& s, const lay::Node& stack, const lay::Rect& r) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.right(), r.bottom()), g_pal->card);
@@ -48,8 +57,8 @@ void draw_stack_tabs(App::State& s, const lay::Node& stack, const lay::Rect& r) 
         const bool on = active == &ch;
         if (on)
             dl->AddRectFilled(ImVec2(x, r.y), ImVec2(x + w, r.bottom()), g_pal->hover);
-        dl->AddText(ImVec2(x + px(12), r.y + (r.h - ImGui::GetFontSize()) * 0.5f), on ? g_pal->text : g_pal->dim,
-                    label.c_str());
+        dl->AddText(ImVec2(x + px(12), r.y + (r.h - ImGui::GetFontSize()) * 0.5f),
+                    on ? g_pal->text : g_pal->dim, label.c_str());
         ImGui::SetCursorScreenPos(ImVec2(x, r.y));
         ImGui::PushID(("##stacktab-" + stack.id + "/" + ch.id).c_str());
         if (ImGui::InvisibleButton("##t", ImVec2(w, std::max(1.0f, r.h))))
@@ -59,7 +68,8 @@ void draw_stack_tabs(App::State& s, const lay::Node& stack, const lay::Rect& r) 
     }
 }
 
-void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, const lay::Placed& p, bool connected) {
+void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, const lay::Placed& p,
+                       bool connected) {
     const lay::Rect& r = p.inner;
     if (r.w <= 0 || r.h <= 0)
         return;
@@ -71,7 +81,7 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         case lay::Content::Type::kTab: {
             if (l.style == "win98" && s.ws.active_tab() == nullptr)
                 return;
-            // AgentDesk's details pane (not herdr's): beside the panes when on.
+            // The details pane sits beside the panes when it is on (not in styled layouts).
             const bool details = l.style.empty() && l.details.value_or(s.settings.details);
             const float gap = px(8);
             const float details_w = details ? std::min(px(320), (r.w + 2 * gap) * 0.3f) : 0.0f;
@@ -117,24 +127,18 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
     } else if (s.mods != nullptr) {
         // A C++ DLL mod: its panels, in the block.
         ImGui::SetCursorScreenPos(pos);
-        ImGui::BeginChild(("##modblock-" + n.id).c_str(), size, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+        ImGui::BeginChild(("##modblock-" + n.id).c_str(), size, ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoBackground);
         draw_mod_panels(s, "sidebar", m);
         draw_mod_panels(s, "details", m);
         ImGui::EndChild();
     }
 }
 
-void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
-    LayoutSpec& l = s.layout();
-    sync_panel(s, l);
-    const bool win98 = l.style == "win98";
-    if (win98) {
-        w98::begin(s);
-        w98::fit(s, l.tree);
-    }
-    s.placed = lay::place(l.tree, lay::Rect{origin.x, origin.y, full.x, full.y}, g_scale, {}, true);
+// Backgrounds and borders, parents first: a colour, or a two-colour gradient drawn top to bottom
+// (or left to right for angles near 90 / 270). The win98 layout's root gets its wallpaper.
+void draw_layout_backgrounds(App::State& s, LayoutSpec& l, bool win98) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    // Backgrounds and borders, parents first.
     for (const auto& id : s.placed.order) {
         const lay::Node* n = l.tree.find(id);
         const lay::Placed& p = s.placed.nodes.at(id);
@@ -142,20 +146,19 @@ void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
         const ImVec2 b(p.outer.right(), p.outer.bottom());
         const float radius = n->radius ? px(*n->radius) : 0.0f;
         if (win98 && n == &l.tree) {
-            // Herdr 98's wallpaper: the root's background (a click in herdr, layout_sync.rs 324).
             w98::background(s, dl, w98::Box{a.x, a.y, b.x, b.y});
         } else if (l.look_applies && n->background.is_string()) {
             if (const auto c = layout_color(n->background.get<std::string>()))
                 dl->AddRectFilled(a, b, *c, radius);
         } else if (const auto g = l.look_applies ? safe::gradient(n->background) : std::nullopt) {
-            // layout.rs 107-112: two colors at an angle; drawn top to bottom or left to right. A
-            // background from layouts\.state is checked here (the file loader checks its own).
+            // A background from layouts\.state is checked here (the file loader checks its own).
             const auto c0 = layout_color(g->from);
             const auto c1 = layout_color(g->to);
             if (c0 && c1) {
                 const float angle = g->angle;
-                const bool across = std::fmod(std::abs(angle), 180.0f) > 45.0f && std::fmod(std::abs(angle), 180.0f) < 135.0f;
-                if (across)  // 90 / 270: left to right
+                const bool across =
+                    std::fmod(std::abs(angle), 180.0f) > 45.0f && std::fmod(std::abs(angle), 180.0f) < 135.0f;
+                if (across)
                     dl->AddRectFilledMultiColor(a, b, *c0, *c1, *c1, *c0);
                 else
                     dl->AddRectFilledMultiColor(a, b, *c0, *c0, *c1, *c1);
@@ -165,26 +168,18 @@ void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
             if (const auto c = layout_color(line->color))
                 dl->AddRect(a, b, *c, radius, 0, px(line->width));
     }
-    // The blocks, in tree order.
-    for (const auto& id : s.placed.order) {
-        const lay::Node* n = l.tree.find(id);
-        if (n->is_block())
-            draw_layout_block(s, l, *n, s.placed.nodes.at(id), connected);
-    }
-    for (const auto& [id, r] : s.placed.headers) {
-        const lay::Node* n = l.tree.find(id);
-        if (n != nullptr && n->header && n->header->content.is_string())
-            draw_stack_tabs(s, *n, r);
-    }
-    // Separators (window.rs 4633-4669): the divider line, and a drag handle where the container
-    // is resizable.
+}
+
+// Separators: the divider line down the middle of each, and a drag handle where the container
+// is resizable (the new sizes are saved when the drag ends).
+void draw_layout_separators(App::State& s, LayoutSpec& l) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
     for (const auto& sep : s.placed.separators) {
         const lay::Node* c = l.tree.find(sep.container);
         const bool row = sep.axis == lay::Axis::kRow;
         if (c != nullptr && c->divider) {
             if (const auto col = layout_color(c->divider->color)) {
                 const float lw = px(c->divider->width);
-                // A line lw wide down the middle of the separator (window.rs 63-69 separator_line).
                 if (row) {
                     const float x = sep.box.x + (sep.box.w - lw) * 0.5f;
                     dl->AddLine(ImVec2(x, sep.box.y), ImVec2(x, sep.box.bottom()), *col, lw);
@@ -212,14 +207,42 @@ void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
     }
 }
 
-// ------------------------------------------------------------------ frame
+void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
+    LayoutSpec& l = s.layout();
+    sync_panel(s, l);
+    const bool win98 = l.style == "win98";
+    if (win98) {
+        w98::begin(s);
+        w98::fit(s, l.tree);
+    }
+    s.placed = lay::place(l.tree, lay::Rect{origin.x, origin.y, full.x, full.y}, g_scale, {}, true);
+    draw_layout_backgrounds(s, l, win98);
+    for (const auto& id : s.placed.order) {  // the blocks, in tree order
+        const lay::Node* n = l.tree.find(id);
+        if (n->is_block())
+            draw_layout_block(s, l, *n, s.placed.nodes.at(id), connected);
+    }
+    for (const auto& [id, r] : s.placed.headers) {
+        const lay::Node* n = l.tree.find(id);
+        if (n != nullptr && n->header && n->header->content.is_string())
+            draw_stack_tabs(s, *n, r);
+    }
+    draw_layout_separators(s, l);
+}
+
+// ------------------------------------------------------------------ --input automation
+// The script is ";"-separated steps run one per turn after the --run commands, once sessions
+// exist: wait:MS, move:X,Y, click / rclick / mclick / dblclick:X,Y, press:X,Y and release:X,Y
+// (a drag, with move steps between), key:NAME, type:TEXT, and shot:NAME (asks the screenshot
+// tool for a picture and waits until it has taken it, up to 10 s).
 
 ImGuiKey input_key(const std::string& n) {
     static const std::pair<const char*, ImGuiKey> kKeys[] = {
-        {"enter", ImGuiKey_Enter}, {"esc", ImGuiKey_Escape},  {"tab", ImGuiKey_Tab},          {"up", ImGuiKey_UpArrow},
-        {"down", ImGuiKey_DownArrow}, {"left", ImGuiKey_LeftArrow}, {"right", ImGuiKey_RightArrow},
-        {"home", ImGuiKey_Home},   {"end", ImGuiKey_End},     {"pgup", ImGuiKey_PageUp},     {"pgdn", ImGuiKey_PageDown},
-        {"back", ImGuiKey_Backspace}, {"del", ImGuiKey_Delete}, {"space", ImGuiKey_Space},    {"f2", ImGuiKey_F2}};
+        {"enter", ImGuiKey_Enter},      {"esc", ImGuiKey_Escape},     {"tab", ImGuiKey_Tab},
+        {"up", ImGuiKey_UpArrow},       {"down", ImGuiKey_DownArrow}, {"left", ImGuiKey_LeftArrow},
+        {"right", ImGuiKey_RightArrow}, {"home", ImGuiKey_Home},      {"end", ImGuiKey_End},
+        {"pgup", ImGuiKey_PageUp},      {"pgdn", ImGuiKey_PageDown},  {"back", ImGuiKey_Backspace},
+        {"del", ImGuiKey_Delete},       {"space", ImGuiKey_Space},    {"f2", ImGuiKey_F2}};
     for (const auto& [name, key] : kKeys)
         if (n == name)
             return key;
@@ -230,31 +253,32 @@ ImGuiKey input_key(const std::string& n) {
     return ImGuiKey_None;
 }
 
-// --input: one step per turn, after the --run commands, once sessions exist.
-void run_input_script(App::State& s) {
-    if (s.config.input_script.empty() || s.next_dev_command < s.config.run_commands.size() || s.sessions.empty() ||
-        !s.doc_loaded)
-        return;
+std::vector<std::string> input_steps(const std::string& script) {
     std::vector<std::string> steps;
-    for (std::size_t p = 0; p <= s.config.input_script.size();) {
-        const auto q = s.config.input_script.find(';', p);
-        steps.push_back(s.config.input_script.substr(p, q == std::string::npos ? std::string::npos : q - p));
+    for (std::size_t p = 0; p <= script.size();) {
+        const auto q = script.find(';', p);
+        steps.push_back(script.substr(p, q == std::string::npos ? std::string::npos : q - p));
         if (q == std::string::npos)
             break;
         p = q + 1;
     }
-    const auto now = Clock::now();
-    if (s.config.wake)
-        s.config.wake();
+    return steps;
+}
+
+// Handles what must happen before the next step: waiting for a shot to be taken, the first
+// frames settling (1.5 s), and releasing a click's button (pressing again for a double click).
+// Returns true when the next step must wait.
+bool input_busy(App::State& s, Clock::time_point now) {
     if (s.input_shot_wait) {
         std::error_code ec;
-        if (std::filesystem::exists(s.config.shot_signal, ec) && now - s.input_shot_since < std::chrono::seconds(10))
-            return;
+        if (std::filesystem::exists(s.config.shot_signal, ec) &&
+            now - s.input_shot_since < std::chrono::seconds(10))
+            return true;
         s.input_shot_wait = false;
         s.input_at = now + std::chrono::milliseconds(100);
     }
     if (s.input_at == Clock::time_point{})
-        s.input_at = now + std::chrono::milliseconds(1500);  // first frames settle
+        s.input_at = now + std::chrono::milliseconds(1500);
     if (s.input_up >= 0 && now >= s.input_at) {
         ImGui::GetIO().AddMouseButtonEvent(s.input_up, false);
         const int b = s.input_up;
@@ -265,11 +289,13 @@ void run_input_script(App::State& s) {
             ImGui::GetIO().AddMouseButtonEvent(b, true);
             s.input_up = b;
         }
-        return;
+        return true;
     }
-    if (now < s.input_at || s.next_input >= steps.size())
-        return;
-    const std::string step = steps[s.next_input++];
+    return false;
+}
+
+// Runs one "op:arg" step; the next one follows 300 ms later unless the step says otherwise.
+void run_input_step(App::State& s, const std::string& step, Clock::time_point now) {
     const auto colon = step.find(':');
     const std::string op = step.substr(0, colon);
     const std::string arg = colon == std::string::npos ? std::string() : step.substr(colon + 1);
@@ -295,7 +321,6 @@ void run_input_script(App::State& s) {
             s.input_clicks_left = op == "dblclick" ? 1 : 0;
         }
     } else if (op == "press" || op == "release") {
-        // A drag: "press:x,y", then "move:x,y" steps, then "release:x,y".
         const ImVec2 p = xy();
         s.input_mouse = p;
         io.AddMousePosEvent(p.x, p.y);
@@ -314,181 +339,81 @@ void run_input_script(App::State& s) {
     }
 }
 
-}  // namespace
-
-}  // namespace detail
-
-void App::before_new_frame() {
-    // The Win32 backend reads the real cursor while the window has focus; a running --input
-    // script wins over it.
-    if (s_->input_mouse && !s_->config.input_script.empty())
-        ImGui::GetIO().AddMousePosEvent(s_->input_mouse->x, s_->input_mouse->y);
+void run_input_script(App::State& s) {
+    if (s.config.input_script.empty() || s.next_dev_command < s.config.run_commands.size() ||
+        s.sessions.empty() || !s.doc_loaded)
+        return;
+    const std::vector<std::string> steps = input_steps(s.config.input_script);
+    const auto now = Clock::now();
+    if (s.config.wake)
+        s.config.wake();  // keep frames coming while the script runs
+    if (input_busy(s, now))
+        return;
+    if (now < s.input_at || s.next_input >= steps.size())
+        return;
+    run_input_step(s, steps[s.next_input++], now);
 }
 
-void App::tick() {
-    State& s = *s_;
-    const bool connected = s.host->connected();
-    // window.rs 879-887 note_core: on connect and every reconnect, what agent-host says it is.
-    if (connected && s.host->host_instance_id() != s.noted_host) {
-        s.noted_host = s.host->host_instance_id();
-        const std::string v = s.host->host_version();
-        ui::updates::set_core(v.empty() ? std::nullopt : std::optional<std::string>(v), std::nullopt);
+// ------------------------------------------------------------------ per-frame upkeep
+// keys.json and programs.json are read again when they change (checked every 400 ms), with a
+// toast saying whether the change applied.
+void reload_changed_files(App::State& s) {
+    if (Clock::now() - s.keys_checked <= std::chrono::milliseconds(400))
+        return;
+    s.keys_checked = Clock::now();
+    std::error_code ec;
+    const auto t = std::filesystem::last_write_time(data_dir() / L"keys.json", ec);
+    if (!ec && t != s.keys_mtime) {
+        load_keys(s);
+        if (s.keymap_errors.empty())
+            s.toast("keys.json applied", "", "", g_pal->info, 2);
+        else
+            s.toast("keys.json not applied", s.keymap_errors.front(), "", g_pal->needs_you, 8);
     }
-    // window.rs 795-799: lost the core.
-    if (s.was_connected && !connected)
-        ui::telemetry::count("core_lost");
-    s.was_connected = connected;
-    // window.rs 4142-4147: keep a dismissed core error dismissed until it changes.
-    reconcile_core_update_error(s.core_update_error_dismissed, ui::updates::core());
-    // settings main.js 65-71: after "Check now", follow the look, then "Up to date" for 3 s.
-    if (s.updates_asked) {
-        if (ui::updates::status().checking)
-            s.updates_asked = Clock::now();
-        else if (Clock::now() - *s.updates_asked >= std::chrono::milliseconds(3000))
-            s.updates_asked.reset();
-    }
-
-    if (auto doc = s.host->take_ui_state()) {
-        if (!s.doc_loaded || doc->dump() != s.last_sent_doc)
-            adopt_doc(s, *doc);
-        s.doc_loaded = true;
-    }
-    s.sessions = s.host->sessions();
-    s.machine_of.clear();
-    for (const auto& sess : s.sessions)
-        s.machine_of[sess->id()] = "";
-    for (auto& r : s.remotes) {
-        for (const auto& sess : r.host->sessions()) {
-            s.sessions.push_back(sess);
-            s.machine_of[sess->id()] = r.cfg.name;
-        }
-    }
-    s.views_by_id.clear();
-    s.by_id.clear();
-    for (const auto& sess : s.sessions) {
-        s.views_by_id[sess->id()] = sess->view();
-        s.by_id[sess->id()] = sess;
-    }
-    if (s.doc_loaded || !connected)
-        sync_sessions(s);
-    if (!s.started_dev && !s.config.start_profile.empty() && connected && s.doc_loaded) {
-        s.started_dev = true;
-        Placement p;
-        p.target = LaunchTarget::kTab;
-        create_session(s, s.config.start_profile, s.launch_cwd, "", p);
-    }
-    update_attention(s);
-    // window.rs 4155-4158: every 25 polls of 400 ms, what is open.
-    if (Clock::now() - s.observed_at >= std::chrono::seconds(10)) {
-        s.observed_at = Clock::now();
-        observe(s);
-    }
-    run_mods(s);
-    persist(s);
+    const auto pt = std::filesystem::last_write_time(data_dir() / L"programs.json", ec);
+    if (ec)
+        ec.clear();
+    if (pt != g_programs_mtime)
+        if (const std::string problem = load_programs(); !problem.empty())
+            s.toast("programs.json not applied", problem, "", g_pal->needs_you, 8);
 }
 
-void App::frame() {
-    State& s = *s_;
-    for (const auto& cmd : std::exchange(s.chord_commands, {}))
-        run_command(s, cmd);
-    g_scale = s.dpi * ui_scale(s.settings);
-    s.fonts.mono_size = s.layout().font_size.value_or(s.settings.font_size) / ui_text_factor(s.settings);
-    const bool win98 = s.layout().style == "win98";
-    if (win98)  // kit.js 451-452: the MS-DOS font, 32 px with Large Fonts
-        s.fonts.mono_size = w98::terminal_font_size(s) / ui_text_factor(s.settings);
-    if (s.fonts_win98 != win98) {  // a layout with fonts of its own (Herdr 98), or back from it
-        s.fonts_win98 = win98;
-        apply_terminal_font(s);
-        apply_ui_font(s);
-    }
-    if (!win98)
-        w98::hidden(s);
-    if (Clock::now() - s.keys_checked > std::chrono::milliseconds(400)) {
-        s.keys_checked = Clock::now();
-        std::error_code ec;
-        const auto t = std::filesystem::last_write_time(data_dir() / L"keys.json", ec);
-        if (!ec && t != s.keys_mtime) {
-            load_keys(s);
-            if (s.keymap_errors.empty())
-                s.toast("keys.json applied", "", "", g_pal->info, 2);
-            else
-                s.toast("keys.json not applied", s.keymap_errors.front(), "", g_pal->needs_you, 8);
-        }
-        // herdr window.rs 982-991: programs.json is read again when it changes.
-        const auto pt = std::filesystem::last_write_time(data_dir() / L"programs.json", ec);
-        if (ec)
-            ec.clear();
-        if (pt != g_programs_mtime)
-            if (const std::string problem = load_programs(); !problem.empty())
-                s.toast("programs.json not applied", problem, "", g_pal->needs_you, 8);
-    }
-    if (!g_settings_problem.empty()) {
-        s.toast(g_settings_problem, "", "", g_pal->needs_you, 8);
-        g_settings_problem.clear();
-    }
-    s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
-    const auto theme_pair = layout_theme_pair(s.settings);
-    if (const Palette* want = effective_palette(s.settings.appearance, theme_pair.first, theme_pair.second,
-                                                s.layout().theme);
-        want != g_pal) {
-        g_pal = want;
-        apply_style(s.dpi, ui_scale(s.settings));
-    }
-    const bool connected = s.host->connected();
-    for (const auto& c : std::exchange(s.pending_mod_commands, {}))
-        run_command(s, c, false);
-    run_input_script(s);
-    if (s.started_dev || s.config.start_profile.empty()) {
-        if (s.next_dev_command < s.config.run_commands.size() && s.doc_loaded && !s.launch_busy &&
-            Clock::now() >= s.next_dev_at && !s.sessions.empty()) {
-            if (s.next_dev_at == Clock::time_point{}) {
-                s.next_dev_at = Clock::now() + std::chrono::milliseconds(800);
-            } else {
-                run_command(s, s.config.run_commands[s.next_dev_command++], false);
-                s.next_dev_at = Clock::now() + std::chrono::milliseconds(700);
-            }
+// --start and --run: the --run commands one at a time (800 ms before the first, 700 ms apart)
+// once the document is loaded and a session exists.
+void run_dev_commands(App::State& s) {
+    if (!s.started_dev && !s.config.start_profile.empty())
+        return;
+    if (s.next_dev_command < s.config.run_commands.size() && s.doc_loaded && !s.launch_busy &&
+        Clock::now() >= s.next_dev_at && !s.sessions.empty()) {
+        if (s.next_dev_at == Clock::time_point{}) {
+            s.next_dev_at = Clock::now() + std::chrono::milliseconds(800);
+        } else {
+            run_command(s, s.config.run_commands[s.next_dev_command++], false);
+            s.next_dev_at = Clock::now() + std::chrono::milliseconds(700);
         }
     }
+}
 
-    // Global shortcuts while no terminal holds the keyboard (a focused terminal reports them).
-    if (!ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) {
-        // The layout's section ("layout:<name>") first, then global (herdr keys.rs tab()).
-        std::set<ImGuiKeyChord> chords;
-        for (const auto& [chord, cmd] : s.keymap.global_map())
-            chords.insert(chord);
-        for (const auto& [chord, cmd] : s.keymap.layout_map())
-            chords.insert(chord);
-        for (const ImGuiKeyChord chord : chords) {
-            if (ImGui::IsKeyChordPressed(chord))
-                if (const auto cmd = s.keymap.global(chord))
-                    run_command(s, *cmd);
-        }
+// Global shortcuts while no terminal holds the keyboard (a focused terminal reports them) and
+// no popup is open. The keymap resolves a chord in the layout's section ("layout:<name>")
+// first, then the global one.
+void run_global_shortcuts(App::State& s) {
+    if (ImGui::GetIO().WantTextInput || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId))
+        return;
+    std::set<ImGuiKeyChord> chords;
+    for (const auto& [chord, cmd] : s.keymap.global_map())
+        chords.insert(chord);
+    for (const auto& [chord, cmd] : s.keymap.layout_map())
+        chords.insert(chord);
+    for (const ImGuiKeyChord chord : chords) {
+        if (ImGui::IsKeyChordPressed(chord))
+            if (const auto cmd = s.keymap.global(chord))
+                run_command(s, *cmd);
     }
+}
 
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(vp->WorkPos);
-    ImGui::SetNextWindowSize(vp->WorkSize);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
-    ImGui::Begin("##root", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav |
-                     ImGuiWindowFlags_NoScrollWithMouse);
-    ImGui::PopStyleVar(3);
-    const ImVec2 origin = vp->WorkPos;
-    const ImVec2 full = vp->WorkSize;
-    // The shown layout's tree (herdr main.json: the sidebar, a 1 px divider and the work column of
-    // tabs, the panes with the panel, and the status bar; terminals.json; win98.json).
-    ImGui::GetWindowDrawList()->AddRectFilled(origin, ImVec2(origin.x + full.x, origin.y + full.y), g_pal->bg);
-    // Commands raised inside wait for the end of it (State::deferred_commands).
-    s.defer_commands = true;
-    draw_layout(s, origin, full, connected);
-    run_deferred_commands(s);
-    ImGui::End();
-    if (win98)  // its floats, windows and menus (herdr overlays)
-        w98::overlays(s);
-
+// Dialogs and overlays, in the order they stack (later ones on top).
+void draw_dialogs(App::State& s) {
     draw_peek(s);
     draw_launcher(s);
     draw_rename(s);
@@ -505,21 +430,163 @@ void App::frame() {
     draw_picker(s);
     draw_help(s);
     draw_toasts(s);
+}
 
-    // Window title follows what is shown.
-    {
-        static std::string last;
-        std::string title = "AgentDesk";
-        if (auto* sp = s.ws.active())
-            title = s.ws.space_title(s.ws.active_space, s.session_cwds()) + " - AgentDesk";
-        if (title != last) {
-            last = title;
-            ::SetWindowTextW(s.config.hwnd, win::to_wide(title).c_str());
+// The window title follows the space shown.
+void update_window_title(App::State& s) {
+    static std::string last;
+    std::string title = "AgentDesk";
+    if (s.ws.active() != nullptr)
+        title = s.ws.space_title(s.ws.active_space, s.session_cwds()) + " - AgentDesk";
+    if (title != last) {
+        last = title;
+        ::SetWindowTextW(s.config.hwnd, win::to_wide(title).c_str());
+    }
+}
+
+// The sessions of this computer and of every connected machine, by id.
+void collect_sessions(App::State& s) {
+    s.sessions = s.host->sessions();
+    s.machine_of.clear();
+    for (const auto& sess : s.sessions)
+        s.machine_of[sess->id()] = "";
+    for (auto& r : s.remotes) {
+        for (const auto& sess : r.host->sessions()) {
+            s.sessions.push_back(sess);
+            s.machine_of[sess->id()] = r.cfg.name;
         }
     }
+    s.views_by_id.clear();
+    s.by_id.clear();
+    for (const auto& sess : s.sessions) {
+        s.views_by_id[sess->id()] = sess->view();
+        s.by_id[sess->id()] = sess;
+    }
+}
+
+// Keeps the update and telemetry state in step with agent-host's connection.
+void follow_core(App::State& s, bool connected) {
+    // On connect and every reconnect: the version agent-host reports.
+    if (connected && s.host->host_instance_id() != s.noted_host) {
+        s.noted_host = s.host->host_instance_id();
+        const std::string v = s.host->host_version();
+        ui::updates::set_core(v.empty() ? std::nullopt : std::optional<std::string>(v), std::nullopt);
+    }
+    if (s.was_connected && !connected)
+        ui::telemetry::count("core_lost");
+    s.was_connected = connected;
+    // A dismissed agent-host update error stays dismissed until the error changes.
+    reconcile_core_update_error(s.core_update_error_dismissed, ui::updates::core());
+    // After "Check now": keep the time fresh while it checks, then "Up to date" shows for 3 s.
+    if (s.updates_asked) {
+        if (ui::updates::status().checking)
+            s.updates_asked = Clock::now();
+        else if (Clock::now() - *s.updates_asked >= std::chrono::milliseconds(3000))
+            s.updates_asked.reset();
+    }
+}
+
+}  // namespace
+
+}  // namespace detail
+
+void App::before_new_frame() {
+    // The Win32 backend reads the real cursor while the window has focus; a running --input
+    // script wins over it.
+    if (s_->input_mouse && !s_->config.input_script.empty())
+        ImGui::GetIO().AddMousePosEvent(s_->input_mouse->x, s_->input_mouse->y);
+}
+
+void App::tick() {
+    State& s = *s_;
+    const bool connected = s.host->connected();
+    follow_core(s, connected);
+    if (auto doc = s.host->take_ui_state()) {
+        if (!s.doc_loaded || doc->dump() != s.last_sent_doc)
+            adopt_doc(s, *doc);
+        s.doc_loaded = true;
+    }
+    collect_sessions(s);
+    if (s.doc_loaded || !connected)
+        sync_sessions(s);
+    if (!s.started_dev && !s.config.start_profile.empty() && connected && s.doc_loaded) {
+        s.started_dev = true;
+        Placement p;
+        p.target = LaunchTarget::kTab;
+        create_session(s, s.config.start_profile, s.launch_cwd, "", p);
+    }
+    update_attention(s);
+    // What is open, for usage data: every 10 s.
+    if (Clock::now() - s.observed_at >= std::chrono::seconds(10)) {
+        s.observed_at = Clock::now();
+        observe(s);
+    }
+    run_mods(s);
     persist(s);
-    // window.rs 832: the window is up.
-    if (!s.window_opened) {
+}
+
+void App::frame() {
+    State& s = *s_;
+    for (const auto& cmd : std::exchange(s.chord_commands, {}))
+        run_command(s, cmd);
+    g_scale = s.dpi * ui_scale(s.settings);
+    s.fonts.mono_size = s.layout().font_size.value_or(s.settings.font_size) / ui_text_factor(s.settings);
+    const bool win98 = s.layout().style == "win98";
+    if (win98)  // its own terminal font size
+        s.fonts.mono_size = w98::terminal_font_size(s) / ui_text_factor(s.settings);
+    if (s.fonts_win98 != win98) {  // into a layout with fonts of its own, or back from it
+        s.fonts_win98 = win98;
+        apply_terminal_font(s);
+        apply_ui_font(s);
+    }
+    if (!win98)
+        w98::hidden(s);
+    reload_changed_files(s);
+    if (!g_settings_problem.empty()) {
+        s.toast(g_settings_problem, "", "", g_pal->needs_you, 8);
+        g_settings_problem.clear();
+    }
+    s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
+    const auto theme_pair = layout_theme_pair(s.settings);
+    if (const Palette* want =
+            effective_palette(s.settings.appearance, theme_pair.first, theme_pair.second, s.layout().theme);
+        want != g_pal) {
+        g_pal = want;
+        apply_style(s.dpi, ui_scale(s.settings));
+    }
+    const bool connected = s.host->connected();
+    for (const auto& c : std::exchange(s.pending_mod_commands, {}))
+        run_command(s, c, false);
+    run_input_script(s);
+    run_dev_commands(s);
+    run_global_shortcuts(s);
+
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(vp->WorkPos);
+    ImGui::SetNextWindowSize(vp->WorkSize);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+    ImGui::Begin("##root", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav |
+                     ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar(3);
+    const ImVec2 origin = vp->WorkPos;
+    const ImVec2 full = vp->WorkSize;
+    ImGui::GetWindowDrawList()->AddRectFilled(origin, ImVec2(origin.x + full.x, origin.y + full.y),
+                                              g_pal->bg);
+    // Commands raised while the layout draws wait for the end of it (State::deferred_commands).
+    s.defer_commands = true;
+    draw_layout(s, origin, full, connected);
+    run_deferred_commands(s);
+    ImGui::End();
+    if (win98)  // its floating windows and menus
+        w98::overlays(s);
+    draw_dialogs(s);
+    update_window_title(s);
+    persist(s);
+    if (!s.window_opened) {  // the window is up: counted once for usage data
         s.window_opened = true;
         ui::telemetry::window_open();
     }

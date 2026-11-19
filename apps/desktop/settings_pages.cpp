@@ -1,82 +1,68 @@
-// Settings dialog building blocks: rows, steppers, fonts, segmented controls, and the Updates
-// and Privacy pages.
+// Settings dialog building blocks (rows, buttons, steppers, toggles, font pickers, segmented
+// controls, layout previews) and the Updates and Privacy pages.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
+#include "overlay_kit.hpp"
 #include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
 
-// ------------------------------------------------------------------ settings (herdr settings.js)
-// Dialog 880 wide (window.rs 3594), 620 high, left navigation 190 px (settings/main.js 897-918);
-// every change applies and saves at once (no Save). The body has no item spacing: each gap is
-// herdr's own.
+// The settings body has no ImGui item spacing: every gap below is explicit. Sizes are pixels
+// at scale 1 (px / fpx scale them).
+
+// Line height of `size` px text: 1.3 times the size, rounded.
 float line_h(float size) {
     return std::round(fpx(size) * 1.3f);
 }
 
-// Moves the cursor down by `h` (the body has no item spacing).
 void settings_gap(float h) {
     ImGui::Dummy(ImVec2(0, std::max(0.0f, h)));
 }
 
-// Dim text wrapped to the body's width (herdr: 12.5 px with 18 px lines, or `size` and `lh`).
-void settings_wrapped(App::State& s, const char* text, ImU32 color, float size, float lh,
-                      ImFont* font) {
+// Text wrapped to the body's width, each line centred in a line `lh` high (12.5 px text on
+// 18 px lines unless given).
+void settings_wrapped(App::State& s, const char* text, ImU32 color, float size, float lh, ImFont* font) {
     ImFont* f = font != nullptr ? font : s.fonts.ui;
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float w = ImGui::GetContentRegionAvail().x;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const char* t = text;
-    const char* end = text + std::strlen(text);
     float y = p.y;
-    while (t < end) {
-        const char* brk = f->CalcWordWrapPosition(fpx(size), t, end, w);
-        if (brk == t)
-            brk = t + 1;
-        const float th = f->CalcTextSizeA(fpx(size), FLT_MAX, 0, t, brk).y;
-        dl->AddText(f, fpx(size), ImVec2(p.x, y + (px(lh) - th) * 0.5f), color, t, brk);
+    for_each_wrapped_line(f, fpx(size), text, w, [&](const char* a, const char* b) {
+        const float th = f->CalcTextSizeA(fpx(size), FLT_MAX, 0, a, b).y;
+        dl->AddText(f, fpx(size), ImVec2(p.x, y + (px(lh) - th) * 0.5f), color, a, b);
         y += px(lh);
-        t = brk;
-        while (t < end && (*t == ' ' || *t == '\n'))
-            ++t;
-    }
+    });
     ImGui::Dummy(ImVec2(w, y - p.y));
 }
 
-// settings/main.js 157: pt 6, pb 8, 12 px semibold, dim, upper case.
+// A section heading: 12 px semibold, dim, upper case; 6 px above, 8 px below.
 void settings_section(App::State& s, const char* title) {
     std::string up;
     for (const char* c = title; *c != 0; ++c)
         up += static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
     const ImVec2 p = ImGui::GetCursorScreenPos();
-    ImGui::GetWindowDrawList()->AddText(s.fonts.ui_bold, fpx(12), ImVec2(p.x, p.y + px(6)), g_pal->faint, up.c_str());
+    ImGui::GetWindowDrawList()->AddText(s.fonts.ui_bold, fpx(12), ImVec2(p.x, p.y + px(6)), g_pal->faint,
+                                        up.c_str());
     settings_gap(px(6) + line_h(12) + px(8));
 }
 
-// settings/main.js 161-176 row(): gap 16, py 12, items centred, a 1 px bottom border; the
-// title 14 px foreground, then (gap 3) the note 12.5 px dim with 18 px lines; the control on
-// the right. Call the control after this returns: the cursor is placed for it.
+// A settings row: 12 px above and below, a 1 px bottom border; the label (14 px) over an
+// optional note (12.5 px dim, 18 px lines) on the left, the control on the right, both centred
+// vertically. A negative `control_h` means a settings button. Call the control right after:
+// the cursor is placed for it. settings_row_done() then moves below the row.
 void settings_row(App::State& s, const char* label, const char* note, float control_w, float control_h) {
     if (control_h < 0)
-        control_h = std::round(fpx(13) * 1.3f) + px(10) + 2.0f;  // a settings button
+        control_h = std::round(fpx(13) * 1.3f) + px(10) + 2.0f;
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float w = ImGui::GetContentRegionAvail().x;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float wrap = std::max(px(80), w - control_w - px(16));
     std::vector<std::pair<const char*, const char*>> lines;
-    if (note != nullptr && *note != 0) {
-        const char* t = note;
-        const char* end = note + std::strlen(note);
-        while (t < end) {
-            const char* brk = s.fonts.ui->CalcWordWrapPosition(fpx(12.5f), t, end, wrap);
-            if (brk == t)
-                brk = t + 1;
-            lines.emplace_back(t, brk);
-            t = brk;
-            while (t < end && (*t == ' ' || *t == '\n'))
-                ++t;
-        }
-    }
-    const float text_h = line_h(14) + (lines.empty() ? 0.0f : px(3) + px(18) * static_cast<float>(lines.size()));
+    if (note != nullptr && *note != 0)
+        for_each_wrapped_line(s.fonts.ui, fpx(12.5f), note, wrap,
+                              [&](const char* a, const char* b) { lines.emplace_back(a, b); });
+    const float text_h =
+        line_h(14) + (lines.empty() ? 0.0f : px(3) + px(18) * static_cast<float>(lines.size()));
     const float inner = std::max(text_h, control_h);
     float y = p.y + px(12) + (inner - text_h) * 0.5f;
     dl->AddText(s.fonts.ui, fpx(14), ImVec2(p.x, y), g_pal->text, label);
@@ -93,17 +79,21 @@ void settings_row(App::State& s, const char* label, const char* note, float cont
     s.settings_row_end = p.y + h;
     s.settings_row_x = p.x;
 }
+
 void settings_row_done(App::State& s) {
     ImGui::SetCursorScreenPos(ImVec2(s.settings_row_x, s.settings_row_end));
     ImGui::Dummy(ImVec2(0, 0));
 }
-bool stepper(App::State& s, const char* id, float& v, float step, float lo, float hi, const char* fmt, float scale) {
+
+bool stepper(App::State& s, const char* id, float& v, float step, float lo, float hi, const char* fmt,
+             float scale) {
     bool changed = false;
     ImGui::PushID(id);
     const ImVec2 a = ImGui::GetCursorScreenPos();
     const ImVec2 b(a.x + px(kStepperW), a.y + px(kStepperH));
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(a, b, raised_color(), px(7));
+    // One 28 x 28 cell: a click moves the value one step, snapped to the step and clamped.
     auto cell = [&](const char* key, const char* label, float x, float dir) {
         const ImVec2 c(x, a.y + px(1));
         ImGui::SetCursorScreenPos(c);
@@ -113,18 +103,16 @@ bool stepper(App::State& s, const char* id, float& v, float step, float lo, floa
         }
         const bool hov = ImGui::IsItemHovered();
         if (hov)
-            dl->AddRectFilled(c, ImVec2(c.x + px(28), c.y + px(28)), g_pal->hover,
-                              px(6), dir < 0 ? ImDrawFlags_RoundCornersLeft : ImDrawFlags_RoundCornersRight);
-        const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(15), FLT_MAX, 0, label);
-        dl->AddText(s.fonts.ui, fpx(15), ImVec2(c.x + (px(28) - t.x) * 0.5f, c.y + (px(28) - t.y) * 0.5f),
-                    hov ? g_pal->text : g_pal->dim, label);
+            dl->AddRectFilled(c, ImVec2(c.x + px(28), c.y + px(28)), g_pal->hover, px(6),
+                              dir < 0 ? ImDrawFlags_RoundCornersLeft : ImDrawFlags_RoundCornersRight);
+        text_centered(dl, s.fonts.ui, fpx(15), c, ImVec2(px(28), px(28)), hov ? g_pal->text : g_pal->dim,
+                      label);
     };
     cell("##minus", "\xE2\x88\x92", a.x + px(1), -1.0f);
     char buf[32];
     std::snprintf(buf, sizeof buf, fmt, v * scale);
-    const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, buf);
-    dl->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(29) + (px(54) - t.x) * 0.5f, a.y + (px(kStepperH) - t.y) * 0.5f),
-                g_pal->text, buf);
+    text_centered(dl, s.fonts.ui, fpx(13), ImVec2(a.x + px(29), a.y), ImVec2(px(54), px(kStepperH)),
+                  g_pal->text, buf);
     cell("##plus", "+", a.x + px(29) + px(54), 1.0f);
     dl->AddRect(a, b, g_pal->border, px(7));
     ImGui::SetCursorScreenPos(a);
@@ -134,8 +122,7 @@ bool stepper(App::State& s, const char* id, float& v, float step, float lo, floa
 }
 
 namespace {
-// Terminal fonts offered in Settings: the bundled default, then monospace faces Windows ships.
-// ---- fonts (herdr: every installed family, filterable; weight; interface font)
+// Every font family installed on this computer, read once.
 const std::vector<ui::FontFamily>& font_families() {
     static const std::vector<ui::FontFamily> families = ui::installed_font_families();
     return families;
@@ -150,29 +137,33 @@ const ui::FontFamily* find_family(const std::string& name) {
     return nullptr;
 }
 
-// Terminal font: family (empty: bundled JetBrains Mono) at the chosen weight, bold from the
-// family's 700 face. A layout with fonts of its own (Herdr 98: win98.json "font") uses those.
+// Terminal font: the chosen family (empty: the bundled JetBrains Mono) at the chosen weight, and
+// its 700 face for bold. A layout with fonts of its own (the win98 layout) uses those instead.
 void apply_terminal_font(App::State& s) {
     if (s.layout().style == "win98") {
         w98::ensure_fonts(s);
         s.fonts.mono = s.fonts.mono_bold = w98::layout_font(s, 0);
         return;
     }
-    const auto* f = find_family(s.settings.terminal_font.empty() ? std::string("JetBrains Mono") : s.settings.terminal_font);
-    ImFont* mono = f != nullptr ? ui::load_font_file(f->file_for(s.settings.terminal_weight), s.settings.font_size, true) : nullptr;
+    const auto* f = find_family(s.settings.terminal_font.empty() ? std::string("JetBrains Mono")
+                                                                 : s.settings.terminal_font);
+    ImFont* mono =
+        f != nullptr ? ui::load_font_file(f->file_for(s.settings.terminal_weight), s.settings.font_size, true)
+                     : nullptr;
     s.fonts.mono = mono != nullptr ? mono : ui::load_terminal_font(L"", s.settings.font_size);
     ImFont* bold = f != nullptr ? ui::load_font_file(f->file_for(700), s.settings.font_size, true) : nullptr;
     s.fonts.mono_bold = bold != nullptr ? bold : s.fonts.mono;
 }
 
-// Interface font: family (empty: bundled Geist, kept from startup) at 400 / 500 / 600.
+// Interface font: the chosen family (empty: the bundled Geist, kept from startup) at 400, 500
+// and 600.
 void apply_ui_font(App::State& s) {
     if (s.base_ui == nullptr) {  // the bundled set, loaded once at startup
         s.base_ui = s.fonts.ui;
         s.base_ui_medium = s.fonts.ui_medium;
         s.base_ui_bold = s.fonts.ui_bold;
     }
-    if (s.layout().style == "win98") {  // win98.json "ui_font": "Pixelated MS Sans Serif"
+    if (s.layout().style == "win98") {  // win98.json "ui_font"
         w98::ensure_fonts(s);
         s.fonts.ui = s.fonts.ui_medium = w98::layout_font(s, 1);
         s.fonts.ui_bold = w98::layout_font(s, 2);
@@ -195,8 +186,10 @@ void apply_ui_font(App::State& s) {
     ImGui::GetIO().FontDefault = s.fonts.ui;
 }
 
-// herdr font list: a filter box and up to 200 matching families.
-bool font_picker(App::State& /*s*/, const char* id, std::string& family, const char* default_label, float width) {
+// A font family combo: a filter box, the default entry, then up to 200 matching families (a
+// computer can have thousands).
+bool font_picker(App::State& /*s*/, const char* id, std::string& family, const char* default_label,
+                 float width) {
     bool changed = false;
     ImGui::SetNextItemWidth(width);
     const std::string current = family.empty() ? std::string(default_label) : family;
@@ -212,17 +205,11 @@ bool font_picker(App::State& /*s*/, const char* id, std::string& family, const c
             family.clear();
             changed = true;
         }
+        const std::string query = ascii_lower(filter);
         int shown = 0;
         for (const auto& f : font_families()) {
-            if (filter[0] != '\0') {
-                std::string a = f.name, q = filter;
-                for (auto& c : a)
-                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                for (auto& c : q)
-                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                if (a.find(q) == std::string::npos)
-                    continue;
-            }
+            if (!query.empty() && ascii_lower(f.name).find(query) == std::string::npos)
+                continue;
             if (++shown > 200) {
                 ImGui::TextDisabled("Showing 200: type to narrow the list");
                 break;
@@ -237,7 +224,7 @@ bool font_picker(App::State& /*s*/, const char* id, std::string& family, const c
     return changed;
 }
 
-// A row of choices, one selected (herdr's segment control).
+// A row of 78 x 28 choices on a raised strip; the chosen one is highlighted.
 bool segmented(App::State& s, const char* id, std::string& value,
                std::initializer_list<std::pair<const char*, const char*>> options) {
     bool changed = false;
@@ -245,7 +232,8 @@ bool segmented(App::State& s, const char* id, std::string& value,
     const float bw = px(78), bh = px(28);
     const ImVec2 a = ImGui::GetCursorScreenPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(a, ImVec2(a.x + bw * static_cast<float>(options.size()) + px(4), a.y + bh + px(4)), raised_color(), px(7));
+    dl->AddRectFilled(a, ImVec2(a.x + bw * static_cast<float>(options.size()) + px(4), a.y + bh + px(4)),
+                      raised_color(), px(7));
     float x = a.x + px(2);
     for (const auto& [key, label] : options) {
         ImGui::SetCursorScreenPos(ImVec2(x, a.y + px(2)));
@@ -256,10 +244,10 @@ bool segmented(App::State& s, const char* id, std::string& value,
         const bool on = value == key;
         const bool hov = ImGui::IsItemHovered();
         if (on || hov)
-            dl->AddRectFilled(ImVec2(x, a.y + px(2)), ImVec2(x + bw, a.y + px(2) + bh), on ? g_pal->selected : g_pal->hover, px(6));
-        const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(12), FLT_MAX, 0, label);
-        dl->AddText(s.fonts.ui, fpx(12), ImVec2(x + (bw - t.x) * 0.5f, a.y + px(2) + (bh - t.y) * 0.5f),
-                    on ? g_pal->text : g_pal->dim, label);
+            dl->AddRectFilled(ImVec2(x, a.y + px(2)), ImVec2(x + bw, a.y + px(2) + bh),
+                              on ? g_pal->selected : g_pal->hover, px(6));
+        text_centered(dl, s.fonts.ui, fpx(12), ImVec2(x, a.y + px(2)), ImVec2(bw, bh),
+                      on ? g_pal->text : g_pal->dim, label);
         x += bw;
     }
     ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + bh + px(6)));
@@ -268,9 +256,10 @@ bool segmented(App::State& s, const char* id, std::string& value,
     return changed;
 }
 
-// herdr frame/settings/main.js 242-270: a small drawing of each layout in the theme's colors.
-// main: a 42 px sidebar of lines, a tab strip (accent + two raised), two terminals side by side.
-// terminals: its own dark look, a bar with one tab and two cards. Anything else: a plain frame.
+// A small drawing of a layout in the current theme's colors for its Settings card.
+// workspace: a 42 px sidebar of lines, a tab strip (one accent tab, two raised), two terminals
+// side by side. terminals: its own fixed dark look, a bar with one tab over two cards. Anything
+// else: a plain frame with one terminal.
 void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 size) {
     const ImVec2 b(a.x + size.x, a.y + size.y);
     auto line = [&](float x, float y, float w, ImU32 c) {
@@ -330,8 +319,8 @@ void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 siz
     d->AddRect(a, b, g_pal->border, px(6));
 }
 
-// ---- herdr settings main.js helpers used by Updates and Privacy
-// main.js 180-192: px 12, py 5, rounded 7, a 1 px border, raised, 13 px text, hover background.
+// A settings button: 13 px text with 12 px of padding each side and 5 px above and below, plus
+// a 1 px border; rounded 7, raised, the hover colour under the mouse.
 ImVec2 settings_button_size(App::State& s, const char* label, ImFont* font) {
     const ImVec2 t = (font != nullptr ? font : s.fonts.ui)->CalcTextSizeA(fpx(13), FLT_MAX, 0, label);
     return ImVec2(t.x + px(24) + 2.0f, std::round(fpx(13) * 1.3f) + px(10) + 2.0f);
@@ -346,41 +335,40 @@ bool settings_button(App::State& s, const char* id, const char* label) {
     const ImVec2 b(a.x + size.x, a.y + size.y);
     dl->AddRectFilled(a, b, hov ? g_pal->hover : raised_color(), px(7));
     dl->AddRect(a, b, g_pal->border, px(7));
-    const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, label);
-    dl->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + (size.x - t.x) * 0.5f, a.y + (size.y - t.y) * 0.5f), g_pal->text, label);
+    text_centered(dl, s.fonts.ui, fpx(13), a, size, g_pal->text, label);
     return clicked;
 }
 
 namespace {
-// main.js 787-788 primary(): px 12, py 5, rounded 7, accent fill, accent_foreground semibold 13,
-// hover opacity 0.9.
+// The primary settings button: the settings button's size in semibold, an accent fill and no
+// border; 90 % opacity under the mouse.
 bool settings_primary(App::State& s, const char* id, const char* label) {
     const ImVec2 a = ImGui::GetCursorScreenPos();
     const ImVec2 size = settings_button_size(s, label, s.fonts.ui_bold);
     const bool clicked = ImGui::InvisibleButton(id, size);
     const bool hov = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(a, ImVec2(a.x + size.x, a.y + size.y), hov ? alpha(g_pal->focus, 230) : g_pal->focus, px(7));
-    const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fpx(13), FLT_MAX, 0, label);
-    dl->AddText(s.fonts.ui_bold, fpx(13), ImVec2(a.x + (size.x - t.x) * 0.5f, a.y + (size.y - t.y) * 0.5f),
-                hov ? alpha(accent_foreground(), 230) : accent_foreground(), label);
+    dl->AddRectFilled(a, ImVec2(a.x + size.x, a.y + size.y), hov ? alpha(g_pal->focus, 230) : g_pal->focus,
+                      px(7));
+    text_centered(dl, s.fonts.ui_bold, fpx(13), a, size,
+                  hov ? alpha(accent_foreground(), 230) : accent_foreground(), label);
     return clicked;
 }
 
-// main.js 779, 781: a button's place taken by text (px 12, py 5, 13 px).
+// Text in a settings button's place (the same size, no frame), for a state that is not an action.
 void settings_chip(App::State& s, const char* label, ImU32 color) {
     const ImVec2 a = ImGui::GetCursorScreenPos();
     const ImVec2 size = settings_button_size(s, label);
     ImGui::Dummy(size);
     const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, label);
-    ImGui::GetWindowDrawList()->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(12) + 1.0f, a.y + (size.y - t.y) * 0.5f),
-                                        color, label);
+    ImGui::GetWindowDrawList()->AddText(
+        s.fonts.ui, fpx(13), ImVec2(a.x + px(12) + 1.0f, a.y + (size.y - t.y) * 0.5f), color, label);
 }
 
 }  // namespace
 
-// main.js 225-238: 36 x 20, rounded 10, padding 2; accent when on (knob at the end), hover
-// colour when off; a 16 px knob, accent_foreground on, muted off.
+// An on/off switch, 36 x 20, rounded 10: accent with the 16 px knob at the end when on, the hover
+// colour with a dim knob at the start when off. Returns true when clicked.
 bool settings_toggle(const char* id, bool on) {
     const ImVec2 a = ImGui::GetCursorScreenPos();
     const ImVec2 size(px(36), px(20));
@@ -393,30 +381,26 @@ bool settings_toggle(const char* id, bool on) {
     return clicked;
 }
 
-// main.js 757, 815: a dim note under the rows (pt 12, 12.5 px, 18 px lines).
+// A dim note under a page's rows: 12 px above, 12.5 px text on 18 px lines.
 void settings_footnote(App::State& s, const char* text) {
     ImGui::Dummy(ImVec2(0, px(12)));
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float w = ImGui::GetContentRegionAvail().x;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const char* t = text;
-    const char* end = text + std::strlen(text);
     float y = p.y;
-    while (t < end) {
-        const char* brk = s.fonts.ui->CalcWordWrapPosition(fpx(12.5f), t, end, w);
-        if (brk == t)
-            brk = t + 1;
-        dl->AddText(s.fonts.ui, fpx(12.5f), ImVec2(p.x, y), g_pal->faint, t, brk);
+    for_each_wrapped_line(s.fonts.ui, fpx(12.5f), text, w, [&](const char* a, const char* b) {
+        dl->AddText(s.fonts.ui, fpx(12.5f), ImVec2(p.x, y), g_pal->faint, a, b);
         y += px(18);
-        t = brk;
-        while (t < end && (*t == ' ' || *t == '\n'))
-            ++t;
-    }
+    });
     ImGui::Dummy(ImVec2(w, y - p.y));
 }
 
+// ------------------------------------------------------------------ Updates page
 namespace {
-// main.js 764-767: local HH:MM.
+constexpr const char* kChecking = "Checking\xE2\x80\xA6";
+constexpr const char* kUpToDate = "\xE2\x9C\x93 Up to date";
+
+// Local time of day as HH:MM.
 std::string clock_at(std::uint64_t secs) {
     const std::time_t t = static_cast<std::time_t>(secs);
     std::tm tm{};
@@ -426,10 +410,10 @@ std::string clock_at(std::uint64_t secs) {
     return buf;
 }
 
-// main.js 847: new Date(secs * 1000).toLocaleString(): the date and time as Windows writes them.
+// Unix seconds as the date and time in the user's own Windows format.
 std::string local_date_time(std::uint64_t secs) {
     ULARGE_INTEGER u{};
-    u.QuadPart = (secs + 11644473600ull) * 10000000ull;
+    u.QuadPart = (secs + 11644473600ull) * 10000000ull;  // 100 ns ticks since 1601
     FILETIME ft{u.LowPart, u.HighPart};
     FILETIME local{};
     SYSTEMTIME st{};
@@ -442,142 +426,156 @@ std::string local_date_time(std::uint64_t secs) {
     return win::to_utf8(std::wstring(d) + L", " + t);
 }
 
-}  // namespace
+enum class UpdateControl { kNone, kCheck, kRestart, kRetry, kUpdateCore };
 
-// ---- Updates (herdr settings main.js 760-816). True: the settings dialog should close.
-bool settings_updates(App::State& s) {
-    bool close = false;
-    const auto u = ui::updates::status();
+// One row of the Updates page: what it says and the control at its right.
+struct UpdateRow {
+    std::string text;
+    UpdateControl control = UpdateControl::kNone;
+};
+
+// The outcome of the last check, in words.
+std::string check_result(const ui::updates::Status& u) {
     const std::string checked = u.checked ? " Checked at " + clock_at(*u.checked) + "." : std::string();
-    const std::string result = u.checking ? std::string("Checking\xE2\x80\xA6")
-                               : u.checked ? "Up to date." + checked
-                                           : std::string("No successful check. Check your connection and try again.");
-    // Pressed: "Checking..." while it looks, then "Up to date" for a moment (a find changes the
-    // row instead). One per row.
-    const bool asked =
-        s.updates_asked && Clock::now() - *s.updates_asked < std::chrono::milliseconds(3000);
-    enum class Control { kNone, kCheck, kRestart, kRetry, kUpdateCore };
-    // The check control's look (main.js 775-786).
-    const auto check_w = [&]() -> float {
-        if (u.checking && s.updates_asked)
-            return settings_button_size(s, "Checking\xE2\x80\xA6").x;
-        if (asked && u.checked && !u.checking)
-            return settings_button_size(s, "\xE2\x9C\x93 Up to date").x;
-        return settings_button_size(s, "Check now").x;
-    };
-    const auto draw_check = [&](const char* id) {
-        if (u.checking && s.updates_asked) {
-            settings_chip(s, "Checking\xE2\x80\xA6", g_pal->faint);
-        } else if (asked && u.checked && !u.checking) {
-            settings_chip(s, "\xE2\x9C\x93 Up to date", g_pal->done);  // t.ansi2
-        } else if (settings_button(s, id, "Check now")) {
-            s.updates_asked = Clock::now();
-            run_command(s, "app.check_updates");
-        }
-    };
-    // main.js 789-793
-    std::string app_text;
-    Control app_control = Control::kNone;
-    if (!u.app_updates) {
-        app_text = "A build from source: it updates with git, not here.";
-    } else if (u.app_ready) {
-        app_text = *u.app_ready + " is ready. Restart to switch now; it also switches when you quit.";
-        app_control = Control::kRestart;
-    } else {
-        app_text = result;
-        app_control = u.checks ? Control::kCheck : Control::kNone;
-    }
-    // main.js 794-805
+    return u.checking  ? std::string(kChecking)
+           : u.checked ? "Up to date." + checked
+                       : std::string("No successful check. Check your connection and try again.");
+}
+
+UpdateRow app_update_row(const ui::updates::Status& u, const std::string& result) {
+    if (!u.app_updates)
+        return {"A build from source: it updates with git, not here.", UpdateControl::kNone};
+    if (u.app_ready)
+        return {*u.app_ready + " is ready. Restart to switch now; it also switches when you quit.",
+                UpdateControl::kRestart};
+    return {result, u.checks ? UpdateControl::kCheck : UpdateControl::kNone};
+}
+
+UpdateRow core_update_row(const ui::updates::Status& u, const std::string& result) {
     const auto& c = u.core;
-    std::string core_text;
-    Control core_control = Control::kNone;
-    if (c.managed) {
-        core_text = "Managed by " + *c.managed + ": update it there." + (c.ready ? " " + *c.ready + " is available." : "");
-        core_control = u.checks ? Control::kCheck : Control::kNone;
-    } else if (c.updating) {
-        core_text = "Updating\xE2\x80\xA6 your terminals keep running.";
-    } else if (c.error) {
-        core_text = "The update failed: " + *c.error;
-        core_control = Control::kRetry;
-    } else if (c.ready) {
-        core_text = *c.ready + " is ready. Your terminals keep running through it.";
-        core_control = Control::kUpdateCore;
-    } else if (u.checks) {
-        core_text = result;
-        core_control = Control::kCheck;
-    } else {
-        core_text = "Not checked: a build from source looks for no updates.";
+    if (c.managed)
+        return {"Managed by " + *c.managed + ": update it there." +
+                    (c.ready ? " " + *c.ready + " is available." : ""),
+                u.checks ? UpdateControl::kCheck : UpdateControl::kNone};
+    if (c.updating)
+        return {"Updating\xE2\x80\xA6 your terminals keep running.", UpdateControl::kNone};
+    if (c.error)
+        return {"The update failed: " + *c.error, UpdateControl::kRetry};
+    if (c.ready)
+        return {*c.ready + " is ready. Your terminals keep running through it.", UpdateControl::kUpdateCore};
+    if (u.checks)
+        return {result, UpdateControl::kCheck};
+    return {"Not checked: a build from source looks for no updates.", UpdateControl::kNone};
+}
+
+// Measures and draws the controls at the right of the Updates rows.
+struct UpdateControls {
+    App::State& s;
+    const ui::updates::Status& u;
+    bool just_asked;  // "Check now" was pressed within the last 3 s (App::tick ends it)
+
+    // A check the person asked for shows "Checking…" while it runs, then "✓ Up to date" for a
+    // moment; otherwise the "Check now" button.
+    const char* check_chip() const {
+        if (u.checking && s.updates_asked)
+            return kChecking;
+        if (just_asked && u.checked && !u.checking)
+            return kUpToDate;
+        return nullptr;
     }
-    const auto control_w = [&](Control k) -> float {
+
+    float width(UpdateControl k) const {
         switch (k) {
-            case Control::kCheck:
-                return check_w();
-            case Control::kRestart:
+            case UpdateControl::kCheck: {
+                const char* chip = check_chip();
+                return settings_button_size(s, chip != nullptr ? chip : "Check now").x;
+            }
+            case UpdateControl::kRestart:
                 return settings_button_size(s, "Restart to update", s.fonts.ui_bold).x;
-            case Control::kRetry:
+            case UpdateControl::kRetry:
                 return settings_button_size(s, "Try again", s.fonts.ui_bold).x;
-            case Control::kUpdateCore:
+            case UpdateControl::kUpdateCore:
                 return settings_button_size(s, "Update agent-host", s.fonts.ui_bold).x;
-            case Control::kNone:
+            case UpdateControl::kNone:
                 break;
         }
         return 0.0f;
-    };
-    const auto draw_control = [&](Control k, const char* check_id) {
+    }
+
+    void draw(UpdateControl k, const char* check_id) const {
         switch (k) {
-            case Control::kCheck:
-                draw_check(check_id);
+            case UpdateControl::kCheck:
+                if (const char* chip = check_chip()) {
+                    settings_chip(s, chip, chip == kUpToDate ? g_pal->done : g_pal->faint);
+                } else if (settings_button(s, check_id, "Check now")) {
+                    s.updates_asked = Clock::now();
+                    run_command(s, "app.check_updates");
+                }
                 break;
-            case Control::kRestart:
+            case UpdateControl::kRestart:
                 if (settings_primary(s, "##st-app-update", "Restart to update"))
                     run_command(s, "app.update");
                 break;
-            case Control::kRetry:
+            case UpdateControl::kRetry:
                 if (settings_primary(s, "##st-core-retry", "Try again"))
                     run_command(s, "app.update_core");
                 break;
-            case Control::kUpdateCore:
+            case UpdateControl::kUpdateCore:
                 if (settings_primary(s, "##st-core-update", "Update agent-host"))
                     run_command(s, "app.update_core");
                 break;
-            case Control::kNone:
+            case UpdateControl::kNone:
                 break;
         }
-    };
-    // main.js 806-811: heading "Herdr" (the product), "Herdr <version>", What's new + the control.
+    }
+};
+
+}  // namespace
+
+// Two sections, AgentDesk itself and agent-host, each one row with its version, its state and a
+// control. Returns true when the settings dialog should close (What's new opens over it).
+bool settings_updates(App::State& s) {
+    bool close = false;
+    const auto u = ui::updates::status();
+    const UpdateControls controls{
+        s, u, s.updates_asked && Clock::now() - *s.updates_asked < std::chrono::milliseconds(3000)};
+    const std::string result = check_result(u);
+    const UpdateRow app = app_update_row(u, result);
+    const UpdateRow core = core_update_row(u, result);
     settings_section(s, "AgentDesk");
     {
-        const float wn = settings_button_size(s, "What's new").x;
-        const float extra = control_w(app_control);
+        const float whats_new_w = settings_button_size(s, "What's new").x;
+        const float extra = controls.width(app.control);
         const std::string title = "AgentDesk " + u.app_version;
-        settings_row(s, title.c_str(), app_text.c_str(), wn + (extra > 0 ? px(8) + extra : 0.0f));
+        settings_row(s, title.c_str(), app.text.c_str(), whats_new_w + (extra > 0 ? px(8) + extra : 0.0f));
         if (settings_button(s, "##st-whats-new", "What's new")) {
-            close = true;  // main.js 810: closeOverlay, then app.whats_new
+            close = true;
             run_command(s, "app.whats_new");
         }
         if (extra > 0) {
             ImGui::SameLine(0, px(8));
-            draw_control(app_control, "##st-check-app");
+            controls.draw(app.control, "##st-check-app");
         }
         settings_row_done(s);
     }
-    // main.js 812-814: 18 px, heading "herdr-core", "herdr-core <version>".
     ImGui::Dummy(ImVec2(0, px(18)));
     settings_section(s, "agent-host");
     {
-        const std::string title = "agent-host " + c.version.value_or("");
-        settings_row(s, title.c_str(), core_text.c_str(), control_w(core_control));
-        draw_control(core_control, "##st-check-core");
+        const std::string title = "agent-host " + u.core.version.value_or("");
+        settings_row(s, title.c_str(), core.text.c_str(), controls.width(core.control));
+        controls.draw(core.control, "##st-check-core");
         settings_row_done(s);
     }
-    // main.js 815
-    settings_footnote(s, "AgentDesk looks for both every hour and tells you in the corner. agent-host runs your "
-                         "terminals, so they keep running through its updates.");
+    settings_footnote(s,
+                      "AgentDesk looks for both every hour and tells you in the corner. agent-host runs your "
+                      "terminals, so they keep running through its updates.");
     return close;
 }
 
+// ------------------------------------------------------------------ Privacy page
 namespace {
-// main.js 821-842: a report as it goes out, one line per line of JSON.
+// A usage report exactly as it goes out: a title, a dim line about it, then the JSON pretty
+// printed in a bordered box, 12 px monospace on 17 px lines.
 void settings_report(App::State& s, const std::string& title, const std::string& about,
                      const ui::telemetry::Json& report) {
     if (s.report_font == nullptr)
@@ -594,7 +592,7 @@ void settings_report(App::State& s, const std::string& title, const std::string&
         dl->AddText(s.fonts.ui, fpx(12.5f), p, g_pal->faint, about.c_str());
         p.y += std::round(fpx(12.5f) * 1.3f) + px(4);
     }
-    p.y += px(4);  // mt 4
+    p.y += px(4);
     int lines = 1;
     for (const char ch : text)
         lines += ch == '\n' ? 1 : 0;
@@ -619,9 +617,37 @@ void settings_report(App::State& s, const std::string& title, const std::string&
     ImGui::Dummy(ImVec2(w, 0));
 }
 
+// Under "What we send" when shown: every report waiting to go, today's draft and the last one
+// sent; or a line saying nothing is collected while sharing is off.
+void privacy_reports(App::State& s, const ui::telemetry::Json& st) {
+    const bool have = st.is_object();
+    if (!have || !st.value("enabled", false)) {
+        ImGui::Dummy(ImVec2(0, px(14) - ImGui::GetStyle().ItemSpacing.y));
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddText(s.fonts.ui, fpx(13), p, g_pal->faint,
+                                            "Nothing is collected or sent while it's off.");
+        ImGui::Dummy(ImVec2(0, std::round(fpx(13) * 1.3f)));
+        return;
+    }
+    if (const auto q = st.find("queued"); q != st.end() && q->is_array())
+        for (const auto& r : *q)
+            if (r.is_object())
+                settings_report(s, "Waiting to send: " + safe::string_or(r, "day"), "Sent as is, soon.", r);
+    if (const auto d = st.find("draft"); d != st.end() && d->is_object())
+        settings_report(s, "Today so far",
+                        "A draft: it changes until the day ends (UTC), then goes out once.", *d);
+    if (const auto l = st.find("last_sent"); l != st.end() && l->is_object() && l->contains("report")) {
+        const auto& r = (*l)["report"];
+        const std::uint64_t at =
+            l->contains("at") && (*l)["at"].is_number_unsigned() ? (*l)["at"].get<std::uint64_t>() : 0;
+        settings_report(s, "Last sent: " + safe::string_or(r, "day"), "Sent " + local_date_time(at) + ".", r);
+    }
+}
+
 }  // namespace
 
-// ---- Privacy (herdr settings main.js 844-882). True: ui.json changed.
+// The usage-data switch and a way to read exactly what is sent. Returns true when ui.json
+// changed.
 bool settings_privacy(App::State& s) {
     bool changed = false;
     const ui::telemetry::Json st = ui::telemetry::status();
@@ -632,51 +658,31 @@ bool settings_privacy(App::State& s) {
         why = "Off for now: " + st["off_because"].get<std::string>() + " is set where AgentDesk started.";
     settings_section(s, "Usage data");
     settings_row(s, "Share anonymous usage data",
-                 !why.empty() ? why.c_str()
-                              : "Once a day: which agents and features you use, how many spaces and tabs, your system "
-                                "and AgentDesk's version. Never what's in your terminals, never names of files, "
-                                "folders or projects.",
+                 !why.empty()
+                     ? why.c_str()
+                     : "Once a day: which agents and features you use, how many spaces and tabs, your system "
+                       "and AgentDesk's version. Never what's in your terminals, never names of files, "
+                       "folders or projects.",
                  px(36));
     if (settings_toggle("##st-telemetry", on)) {
-        // main.js 858-861: on -> "telemetry": false; off -> the key goes.
         s.settings.telemetry = !on;
         changed = true;
-        ui::telemetry::set_setting(s.settings.telemetry);  // window.rs 955: read again on change
+        ui::telemetry::set_setting(s.settings.telemetry);  // the reporter reads it again now
     }
     settings_row_done(s);
     const bool sends = have && st.value("sends", false);
     const char* label = s.show_data ? "Hide" : "Show";
     settings_row(s, "What we send",
-                 have && !sends ? "This build never sends: it's built from source. You can still see what a release "
-                                  "would send."
-                                : "Exactly what leaves your computer, word for word.",
+                 have && !sends
+                     ? "This build never sends: it's built from source. You can still see what a release "
+                       "would send."
+                     : "Exactly what leaves your computer, word for word.",
                  settings_button_size(s, label).x);
     if (settings_button(s, "##st-telemetry-show", label))
         s.show_data = !s.show_data;
     settings_row_done(s);
-    if (!s.show_data)
-        return changed;
-    if (!have || !st.value("enabled", false)) {
-        ImGui::Dummy(ImVec2(0, px(14) - ImGui::GetStyle().ItemSpacing.y));
-        const ImVec2 p = ImGui::GetCursorScreenPos();
-        ImGui::GetWindowDrawList()->AddText(s.fonts.ui, fpx(13), p, g_pal->faint,
-                                            "Nothing is collected or sent while it's off.");
-        ImGui::Dummy(ImVec2(0, std::round(fpx(13) * 1.3f)));
-        return changed;
-    }
-    // main.js 879-881
-    if (const auto q = st.find("queued"); q != st.end() && q->is_array())
-        for (const auto& r : *q)
-            if (r.is_object())
-                settings_report(s, "Waiting to send: " + safe::string_or(r, "day"), "Sent as is, soon.", r);
-    if (const auto d = st.find("draft"); d != st.end() && d->is_object())
-        settings_report(s, "Today so far", "A draft: it changes until the day ends (UTC), then goes out once.", *d);
-    if (const auto l = st.find("last_sent"); l != st.end() && l->is_object() && l->contains("report")) {
-        const auto& r = (*l)["report"];
-        const std::uint64_t at = l->contains("at") && (*l)["at"].is_number_unsigned() ? (*l)["at"].get<std::uint64_t>() : 0;
-        settings_report(s, "Last sent: " + safe::string_or(r, "day"),
-                        "Sent " + local_date_time(at) + ".", r);
-    }
+    if (s.show_data)
+        privacy_reports(s, st);
     return changed;
 }
 }  // namespace detail
