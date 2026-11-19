@@ -1,9 +1,26 @@
 // GitCache: git facts per folder (top, worktree, branch, ahead/behind), asked on a background
-// thread and refreshed when the repo's git folder changes.
+// thread and refreshed when the repo's git folder changes. Also git on another machine.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
+
+host::ToolResult remote_git(const RemoteCall& remote, const std::string& machine, const std::string& cwd,
+                            const std::vector<std::wstring>& args) {
+    host::ToolResult r;
+    Json a = Json::array();
+    for (const auto& x : args)
+        a.push_back(win::to_utf8(x));
+    if (const auto res =
+            remote ? remote(machine, "git.run", Json{{"cwd", cwd}, {"args", a}}) : std::nullopt) {
+        r.started = true;
+        r.exit_code = static_cast<unsigned long>(safe::int_or(*res, "exit_code", 1));
+        r.output = safe::string_or(*res, "output");
+        r.error = safe::string_or(*res, "error");
+    }
+    return r;
+}
 
 GitCache::~GitCache() {
     worker_.request_stop();
@@ -20,12 +37,12 @@ GitCache::~GitCache() {
 GitInfo GitCache::get(const std::string& dir, const std::string& machine) {
     if (dir.empty())
         return {};
-    const std::string key = machine.empty() ? dir : machine + "|" + dir;
+    const std::string key = key_of(dir, machine);
     std::lock_guard lock(mutex_);
     auto& e = entries_[key];
     const auto now = Clock::now();
     e.used = now;
-    // The fallback look (60 s) only while the window is in front (spaces.js 140-145).
+    // The 60 s look again happens only while the window is in front.
     if (!e.queued && (e.at == Clock::time_point{} || (active_ && now - e.at > std::chrono::seconds(60)))) {
         e.queued = true;
         queue_.push_back(key);
@@ -44,7 +61,7 @@ void GitCache::invalidate_repo(const std::string& dir, const std::string& machin
     if (dir.empty())
         return;
     std::lock_guard lock(mutex_);
-    const std::string key = machine.empty() ? dir : machine + "|" + dir;
+    const std::string key = key_of(dir, machine);
     std::string common;
     if (const auto it = entries_.find(key); it != entries_.end()) {
         it->second.at = Clock::time_point{};
@@ -69,9 +86,19 @@ void GitCache::invalidate_repo(const std::string& dir, const std::string& machin
             e.at = Clock::time_point{};
 }
 
+// A Windows path cannot hold '|', so the first one ends the machine name.
+std::string GitCache::key_of(const std::string& dir, const std::string& machine) {
+    return machine.empty() ? dir : machine + "|" + dir;
+}
+
 std::string GitCache::machine_of(const std::string& key) {
     const auto bar = key.find('|');
     return bar == std::string::npos ? std::string() : key.substr(0, bar);
+}
+
+std::string GitCache::dir_of(const std::string& key) {
+    const auto bar = key.find('|');
+    return bar == std::string::npos ? key : key.substr(bar + 1);
 }
 
 void GitCache::watch_loop(std::stop_token st) {
@@ -159,28 +186,15 @@ std::string GitCache::norm(std::string p) {
 
 GitInfo GitCache::query(const std::string& key) {
     GitInfo g;
-    const auto bar = key.find('|');
-    const std::string machine = bar == std::string::npos ? std::string() : key.substr(0, bar);
-    const std::string dir = bar == std::string::npos ? key : key.substr(bar + 1);
+    const std::string machine = machine_of(key);
+    const std::string dir = dir_of(key);
     const std::filesystem::path cwd(win::to_wide(dir));
     std::error_code ec;
     if (machine.empty() && !std::filesystem::is_directory(cwd, ec))
         return g;
     auto git = [&](std::vector<std::wstring> args) {
-        if (!machine.empty()) {  // the remote host adds its own safety switches and -C
-            host::ToolResult r;
-            Json a = Json::array();
-            for (const auto& x : args)
-                a.push_back(win::to_utf8(x));
-            if (const auto res =
-                    remote ? remote(machine, "git.run", Json{{"cwd", dir}, {"args", a}}) : std::nullopt) {
-                r.started = true;
-                r.exit_code = static_cast<unsigned long>(safe::int_or(*res, "exit_code", 1));
-                r.output = safe::string_or(*res, "output");
-                r.error = safe::string_or(*res, "error");
-            }
-            return r;
-        }
+        if (!machine.empty())
+            return remote_git(remote, machine, dir, args);
         args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-C", cwd.native()});
         return host::run_tool(args, cwd, std::chrono::seconds(10));
     };

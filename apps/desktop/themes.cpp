@@ -1,32 +1,169 @@
-// Colour palettes: AgentDesk's own, the preset themes from themes\, the active palette and the
-// ImGui style built from it.
+// Colour palettes: AgentDesk's own, the preset themes and theme files, the active palette and
+// the ImGui style built from it.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
 
 namespace {
-constexpr std::array<std::uint32_t, 3> kHerdrDarkStatus = {0xe5c07b, 0xf0705f, 0x76a8ff};  // settings.rs 31
+// The AgentDesk 98 layout's 16 ANSI colours (0-7, then the bright 8-15).
+constexpr std::array<ImU32, 16> kWin98Ansi = {
+    IM_COL32(0x55, 0x55, 0x55, 255), IM_COL32(0xaa, 0x00, 0x00, 255), IM_COL32(0x00, 0xaa, 0x00, 255),
+    IM_COL32(0xaa, 0x55, 0x00, 255), IM_COL32(0x00, 0x00, 0xbb, 255), IM_COL32(0xaa, 0x00, 0xaa, 255),
+    IM_COL32(0x00, 0xaa, 0xaa, 255), IM_COL32(0xaa, 0xaa, 0xaa, 255), IM_COL32(0x55, 0x55, 0x55, 255),
+    IM_COL32(0xff, 0x55, 0x55, 255), IM_COL32(0x55, 0xff, 0x55, 255), IM_COL32(0xff, 0xff, 0x55, 255),
+    IM_COL32(0x55, 0x55, 0xff, 255), IM_COL32(0xff, 0x55, 0xff, 255), IM_COL32(0x55, 0xff, 0xff, 255),
+    IM_COL32(0xff, 0xff, 0xff, 255)};
+
+// Defined in this one translation unit, so a Palette* compares equal to the same entry wherever
+// it was taken (g_pal, palette_by_id, the Settings lists).
+constexpr Palette kPalettes[] = {
+    {"midnight",
+     "Midnight",
+     false,
+     IM_COL32(13, 17, 27, 255),
+     IM_COL32(16, 21, 33, 255),
+     IM_COL32(18, 23, 36, 255),
+     IM_COL32(36, 44, 64, 255),
+     IM_COL32(139, 124, 246, 255),
+     IM_COL32(27, 34, 52, 255),
+     IM_COL32(35, 43, 66, 255),
+     IM_COL32(226, 230, 242, 255),
+     IM_COL32(136, 145, 170, 255),
+     IM_COL32(86, 95, 120, 255),
+     IM_COL32(240, 100, 122, 255),
+     IM_COL32(92, 203, 154, 255),
+     IM_COL32(233, 185, 73, 255),
+     IM_COL32(136, 145, 170, 255),
+     IM_COL32(110, 168, 250, 255),
+     IM_COL32(15, 19, 30, 255),
+     IM_COL32(222, 226, 238, 255),
+     IM_COL32(200, 190, 255, 255),
+     IM_COL32(139, 124, 246, 85)},
+    {"ember",
+     "Ember",
+     false,
+     IM_COL32(20, 17, 15, 255),
+     IM_COL32(25, 21, 18, 255),
+     IM_COL32(27, 23, 20, 255),
+     IM_COL32(56, 46, 38, 255),
+     IM_COL32(236, 140, 74, 255),
+     IM_COL32(40, 33, 28, 255),
+     IM_COL32(52, 42, 34, 255),
+     IM_COL32(240, 232, 222, 255),
+     IM_COL32(170, 152, 136, 255),
+     IM_COL32(112, 98, 86, 255),
+     IM_COL32(238, 98, 86, 255),
+     IM_COL32(150, 200, 110, 255),
+     IM_COL32(240, 196, 90, 255),
+     IM_COL32(170, 152, 136, 255),
+     IM_COL32(120, 176, 230, 255),
+     IM_COL32(22, 19, 17, 255),
+     IM_COL32(236, 228, 216, 255),
+     IM_COL32(255, 200, 150, 255),
+     IM_COL32(236, 140, 74, 80)},
+    {"moss",
+     "Moss",
+     false,
+     IM_COL32(12, 20, 18, 255),
+     IM_COL32(15, 25, 22, 255),
+     IM_COL32(17, 28, 25, 255),
+     IM_COL32(34, 54, 48, 255),
+     IM_COL32(64, 200, 170, 255),
+     IM_COL32(24, 40, 35, 255),
+     IM_COL32(30, 50, 44, 255),
+     IM_COL32(222, 236, 230, 255),
+     IM_COL32(132, 160, 150, 255),
+     IM_COL32(84, 108, 100, 255),
+     IM_COL32(236, 108, 118, 255),
+     IM_COL32(120, 214, 140, 255),
+     IM_COL32(226, 196, 88, 255),
+     IM_COL32(132, 160, 150, 255),
+     IM_COL32(110, 180, 230, 255),
+     IM_COL32(14, 23, 21, 255),
+     IM_COL32(218, 234, 228, 255),
+     IM_COL32(160, 240, 220, 255),
+     IM_COL32(64, 200, 170, 80)},
+    {"paper",
+     "Paper",
+     true,
+     IM_COL32(236, 236, 232, 255),
+     IM_COL32(226, 226, 220, 255),
+     IM_COL32(250, 250, 247, 255),
+     IM_COL32(204, 204, 196, 255),
+     IM_COL32(88, 92, 220, 255),
+     IM_COL32(216, 216, 210, 255),
+     IM_COL32(206, 208, 228, 255),
+     IM_COL32(30, 32, 40, 255),
+     IM_COL32(100, 102, 112, 255),
+     IM_COL32(150, 150, 156, 255),
+     IM_COL32(204, 52, 72, 255),
+     IM_COL32(30, 150, 90, 255),
+     IM_COL32(190, 130, 10, 255),
+     IM_COL32(110, 112, 122, 255),
+     IM_COL32(40, 110, 210, 255),
+     IM_COL32(250, 250, 247, 255),
+     IM_COL32(36, 38, 46, 255),
+     IM_COL32(60, 60, 200, 255),
+     IM_COL32(88, 92, 220, 70)},
+    // The AgentDesk 98 layout's own theme. A theme named like a layout belongs to that layout, so
+    // Settings and the palette do not offer it elsewhere (layout_only). Chrome: surfaces #c0c0c0,
+    // raised and hover #dfdfdf, border #808080, text #000000, dim #808080, muted #404040, accent
+    // #000080; status blocked #ff0000, done #0000ff, working #808000, idle #808080. Terminals are
+    // black with #c0c0c0 text and cursor and a navy selection.
+    {"win98",
+     "AgentDesk 98",
+     true,
+     IM_COL32(0xc0, 0xc0, 0xc0, 255),
+     IM_COL32(0xc0, 0xc0, 0xc0, 255),
+     IM_COL32(0xc0, 0xc0, 0xc0, 255),
+     IM_COL32(0x80, 0x80, 0x80, 255),
+     IM_COL32(0x00, 0x00, 0x80, 255),
+     IM_COL32(0xdf, 0xdf, 0xdf, 255),
+     IM_COL32(0xdf, 0xdf, 0xdf, 255),
+     IM_COL32(0x00, 0x00, 0x00, 255),
+     IM_COL32(0x80, 0x80, 0x80, 255),
+     IM_COL32(0x40, 0x40, 0x40, 255),
+     IM_COL32(0xff, 0x00, 0x00, 255),
+     IM_COL32(0x00, 0x00, 0xff, 255),
+     IM_COL32(0x80, 0x80, 0x00, 255),
+     IM_COL32(0x80, 0x80, 0x80, 255),
+     IM_COL32(0x00, 0x00, 0x80, 255),
+     IM_COL32(0x00, 0x00, 0x00, 255),
+     IM_COL32(0xc0, 0xc0, 0xc0, 255),
+     IM_COL32(0xc0, 0xc0, 0xc0, 255),
+     IM_COL32(0x00, 0x00, 0x80, 0x80),  // drawn over the text here, so not opaque
+     true,
+     &kWin98Ansi},
+};
+
+// Status colours (working, blocked, done) of the dark presets.
+constexpr std::array<std::uint32_t, 3> kPresetDarkStatus = {0xe5c07b, 0xf0705f, 0x76a8ff};
 
 }  // namespace
 
-const std::array<std::pair<const char*, HerdrPalette>, 4>& herdr_presets() {
-    static const std::array<std::pair<const char*, HerdrPalette>, 4> k = {{
+std::span<const Palette> builtin_palettes() {
+    return kPalettes;
+}
+
+const std::array<std::pair<const char*, PresetPalette>, 4>& preset_palettes() {
+    static const std::array<std::pair<const char*, PresetPalette>, 4> k = {{
         {"graphite",
          {0x17191d, 0xd2d4d9, 0x394454, std::nullopt,
           {0x45484f, 0xdc8c95, 0xa6bd91, 0xd8be87, 0x96b2d7, 0xb5a2ce, 0x8cbdc3, 0xd2d4d9, 0x818793, 0xf0a5ad,
            0xbad5a2, 0xead2a1, 0xb0cbef, 0xcbb7e6, 0xa4d5db, 0xf0f0f2},
-          kHerdrDarkStatus}},
+          kPresetDarkStatus}},
         {"ink",
          {0x111720, 0xcdd6e4, 0x344861, std::nullopt,
           {0x414b5a, 0xe58c9a, 0x89c5aa, 0xd9be82, 0x91b6ee, 0xb9a0e2, 0x85c4d0, 0xcdd6e4, 0x7f91a7, 0xf5a5b2,
            0xa5dec3, 0xedd39c, 0xaccbfa, 0xd0b7f4, 0xa0dce5, 0xf0f5fc},
-          kHerdrDarkStatus}},
+          kPresetDarkStatus}},
         {"moss",
          {0x151c19, 0xcdd7ce, 0x354a40, std::nullopt,
           {0x435248, 0xdf978d, 0xa0c4a2, 0xd4bc8b, 0x99b9cd, 0xbba4c8, 0x8bbdb5, 0xcdd7ce, 0x82968a, 0xf1afa3,
            0xb8dab9, 0xe9d2a5, 0xb1d0e2, 0xd1bddc, 0xa4d6ca, 0xeff5ee},
-          kHerdrDarkStatus}},
+          kPresetDarkStatus}},
         {"paper",
          {0xffffff, 0x25272c, 0xcfdcf5, 0x25272c,
           {0x25272c, 0xc62a2a, 0x1a7f37, 0x8f5d00, 0x1f62d0, 0x7a45c8, 0x0f6f74, 0x5f6068, 0x7b7e87, 0xd1242f,
@@ -41,12 +178,14 @@ ImU32 rgb_col(std::uint32_t c, int a = 255) {
     return IM_COL32((c >> 16) & 255, (c >> 8) & 255, c & 255, a);
 }
 
-// settings.rs 268-270 is_light, 292-297 mix.
-bool herdr_is_light(std::uint32_t c) {
+// Relative luminance (Rec. 709 weights) above one half.
+bool rgb_is_light(std::uint32_t c) {
     auto ch = [&](int sh) { return static_cast<float>((c >> sh) & 255) / 255.0f; };
     return 0.2126f * ch(16) + 0.7152f * ch(8) + 0.0722f * ch(0) > 0.5f;
 }
-std::uint32_t herdr_mix(std::uint32_t a, std::uint32_t b, float t) {
+
+// a mixed toward b by t (0..1), per channel, rounded.
+std::uint32_t rgb_mix(std::uint32_t a, std::uint32_t b, float t) {
     std::uint32_t out = 0;
     for (const int sh : {16, 8, 0}) {
         const float x = static_cast<float>((a >> sh) & 255), y = static_cast<float>((b >> sh) & 255);
@@ -55,6 +194,7 @@ std::uint32_t herdr_mix(std::uint32_t a, std::uint32_t b, float t) {
     return out;
 }
 
+// "#rrggbb" or "#rrggbbaa".
 std::optional<ImU32> parse_hex_color(const std::string& h) {
     if ((h.size() != 7 && h.size() != 9) || h[0] != '#')
         return std::nullopt;
@@ -72,18 +212,19 @@ struct OwnedPalette {
     std::array<ImU32, 16> ansi{};
     Palette p{};
 };
-std::deque<OwnedPalette> g_herdr_palettes;  // stable addresses: g_pal may point into it
+std::deque<OwnedPalette> g_loaded_palettes;  // a deque keeps addresses stable: g_pal may point in
 
-// herdr resolve(): our Palette's fields from herdr's derived colors. bg = canvas (behind the
-// panes), sidebar = chrome, card = the terminal background (surface), text = foreground,
-// dim = muted, faint = dim, focus/info = accent; theme files' "colors" override by herdr's names.
-void add_herdr_palette(const std::string& id, const std::string& label, const HerdrPalette& h,
-                       const std::map<std::string, std::string>& colors) {
-    OwnedPalette& o = g_herdr_palettes.emplace_back();
+// Derives the chrome colours from a theme's background, foreground and ANSI table, then applies
+// the theme file's "colors" overrides by name. Mapping onto Palette: bg = canvas (behind the
+// panes), sidebar = chrome, card = surface (the terminal background), text = foreground,
+// dim = muted, faint = dim, focus and info = accent.
+void add_preset_palette(const std::string& id, const std::string& label, const PresetPalette& h,
+                        const std::map<std::string, std::string>& colors) {
+    OwnedPalette& o = g_loaded_palettes.emplace_back();
     o.id = id;
     o.label = label;
     const std::uint32_t bg = h.background;
-    const bool light = herdr_is_light(bg);
+    const bool light = rgb_is_light(bg);
     const std::uint32_t fg = light ? 0x1b1b1e : 0xeeeeef;
     const auto st = h.status.value_or(std::array<std::uint32_t, 3>{h.ansi[3], h.ansi[1], h.ansi[4]});
     std::map<std::string, ImU32> t;
@@ -96,24 +237,24 @@ void add_herdr_palette(const std::string& id, const std::string& label, const He
         t["hover"] = IM_COL32(0, 0, 0, 0x0c);
         t["selected"] = IM_COL32(0, 0, 0, 0x12);
         t["border"] = IM_COL32(0, 0, 0, 0x17);
-        t["canvas"] = rgb_col(herdr_mix(bg, warm, 0.2f));
-        t["chrome"] = rgb_col(herdr_mix(bg, warm, 0.6f));
+        t["canvas"] = rgb_col(rgb_mix(bg, warm, 0.2f));
+        t["chrome"] = rgb_col(rgb_mix(bg, warm, 0.6f));
     } else {
         t["hover"] = IM_COL32(255, 255, 255, 0x0e);
         t["selected"] = IM_COL32(255, 255, 255, 0x17);
         t["border"] = IM_COL32(255, 255, 255, 0x18);
-        t["canvas"] = rgb_col(herdr_mix(bg, 0, 0.16f));
-        t["chrome"] = rgb_col(herdr_mix(bg, 0, 0.32f));
+        t["canvas"] = rgb_col(rgb_mix(bg, 0, 0.16f));
+        t["chrome"] = rgb_col(rgb_mix(bg, 0, 0.32f));
     }
-    t["muted"] = rgb_col(herdr_mix(bg, fg, light ? 0.66f : 0.6f));
-    t["dim"] = rgb_col(herdr_mix(bg, fg, light ? 0.46f : 0.38f));
+    t["muted"] = rgb_col(rgb_mix(bg, fg, light ? 0.66f : 0.6f));
+    t["dim"] = rgb_col(rgb_mix(bg, fg, light ? 0.46f : 0.38f));
     t["accent"] = rgb_col(h.ansi[4]);
     t["selection"] = rgb_col(h.selection);
     t["cursor"] = rgb_col(h.cursor.value_or(h.foreground));
     t["working"] = rgb_col(st[0]);
     t["blocked"] = rgb_col(st[1]);
     t["done"] = rgb_col(st[2]);
-    t["idle"] = rgb_col(herdr_mix(bg, fg, 0.38f));
+    t["idle"] = rgb_col(rgb_mix(bg, fg, 0.38f));
     for (std::size_t i = 0; i < 16; ++i)
         o.ansi[i] = rgb_col(h.ansi[i]);
     for (const auto& [k, v] : colors)
@@ -125,12 +266,10 @@ void add_herdr_palette(const std::string& id, const std::string& label, const He
                   t["cursor"], (t["selection"] & 0x00FFFFFFu) | (static_cast<ImU32>(light ? 0xa0 : 0x90) << 24), false, &o.ansi};
 }
 
-// herdr settings.rs 103-113: a theme file. A bad file is skipped (herdr: not listed).
-std::optional<std::pair<HerdrPalette, std::map<std::string, std::string>>> read_theme_file(const std::filesystem::path& f) {
-    std::ifstream in(f, std::ios::binary);
-    std::stringstream ss;
-    ss << in.rdbuf();
-    const auto j = nlohmann::json::parse(ss.str(), nullptr, false);
+// A theme file: {background, foreground, selection, cursor?, ansi[16], colors{}}, colours as
+// "#rrggbb". A file that does not have that shape is skipped (not listed).
+std::optional<std::pair<PresetPalette, std::map<std::string, std::string>>> read_theme_file(const std::filesystem::path& f) {
+    const auto j = nlohmann::json::parse(read_text_file(f), nullptr, false);
     if (!j.is_object())
         return std::nullopt;
     auto hex = [](const nlohmann::json& v) -> std::optional<std::uint32_t> {
@@ -141,7 +280,7 @@ std::optional<std::pair<HerdrPalette, std::map<std::string, std::string>>> read_
             return std::nullopt;
         return static_cast<std::uint32_t>(std::strtoul(h.c_str() + 1, nullptr, 16));
     };
-    HerdrPalette p;
+    PresetPalette p;
     const auto b = hex(j.value("background", nlohmann::json())), fgc = hex(j.value("foreground", nlohmann::json())),
                sel = hex(j.value("selection", nlohmann::json()));
     if (!b || !fgc || !sel || !j.contains("ansi") || !j["ansi"].is_array() || j["ansi"].size() != 16)
@@ -165,14 +304,34 @@ std::optional<std::pair<HerdrPalette, std::map<std::string, std::string>>> read_
     return std::make_pair(p, colors);
 }
 
-std::filesystem::path shipped_themes_dir() {
-    wchar_t exe[MAX_PATH]{};
-    ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    return std::filesystem::path(exe).parent_path() / L"themes";
-}
-
-std::filesystem::file_time_type g_themes_mtime{};
 bool g_themes_loaded = false;
+
+// The presets, then the theme files by name (a file in <data>\themes wins over a shipped one of
+// the same name). win98.json is skipped: that theme is one of our own palettes. Loaded once per
+// run, so the addresses g_pal holds stay valid; a changed file applies at the next start.
+void load_theme_files() {
+    g_themes_loaded = true;
+    if (!g_loaded_palettes.empty())
+        return;
+    for (const auto& [name, pal] : preset_palettes())
+        add_preset_palette(std::string(kPresetPrefix) + name, name, pal, {});
+    std::map<std::string, std::filesystem::path> files;
+    std::error_code ec;
+    for (const auto& dir : {exe_dir() / L"themes", data_dir() / L"themes"})
+        for (const auto& e : std::filesystem::directory_iterator(dir, ec))
+            if (e.path().extension() == L".json") {
+                const auto stem = e.path().stem().u8string();
+                const std::string name(stem.begin(), stem.end());
+                if (name != "win98")
+                    files[name] = e.path();
+            }
+    for (const auto& [name, file] : files)
+        if (const auto t = read_theme_file(file)) {
+            std::string label = name;
+            std::replace(label.begin(), label.end(), '-', ' ');  // "atom-one-dark" -> "atom one dark"
+            add_preset_palette(name, label, t->first, t->second);
+        }
+}
 
 }  // namespace
 
@@ -180,50 +339,20 @@ std::string theme_id(std::string id) {
     const auto dash = id.find('-');
     if (dash == std::string::npos || id.starts_with(kPresetPrefix))
         return id;
-    for (const auto& [name, pal] : herdr_presets())
+    for (const auto& [name, pal] : preset_palettes())
         if (id.compare(dash + 1, std::string::npos, name) == 0)
             return std::string(kPresetPrefix) + name;
     return id;
 }
 
-namespace {
-// Presets, then the shipped files, then the person's (sorted by name), as herdr themes() lists
-// them (settings.rs 272-286). win98 is Herdr 98's own and already one of ours.
-void load_herdr_themes() {
-    g_themes_loaded = true;
-    std::error_code ec;
-    g_themes_mtime = std::filesystem::last_write_time(data_dir() / L"themes", ec);
-    if (!g_herdr_palettes.empty())
-        return;  // addresses stay valid for g_pal; a changed file applies at the next start
-    for (const auto& [name, pal] : herdr_presets())
-        add_herdr_palette(std::string(kPresetPrefix) + name, name, pal, {});
-    std::map<std::string, std::filesystem::path> files;
-    for (const auto& dir : {shipped_themes_dir(), data_dir() / L"themes"})
-        for (const auto& e : std::filesystem::directory_iterator(dir, ec))
-            if (e.path().extension() == L".json") {
-                const auto stem = e.path().stem().u8string();
-                const std::string name(stem.begin(), stem.end());
-                if (name != "win98")
-                    files[name] = e.path();  // the person's file wins over a shipped one
-            }
-    for (const auto& [name, file] : files)
-        if (const auto t = read_theme_file(file)) {
-            std::string label = name;
-            std::replace(label.begin(), label.end(), '-', ' ');  // settings/main.js 367
-            add_herdr_palette(name, label, t->first, t->second);
-        }
-}
-
-}  // namespace
-
-// Ours, then herdr's.
+// Ours, then the presets and theme files.
 std::vector<const Palette*> all_palettes() {
     if (!g_themes_loaded)
-        load_herdr_themes();
+        load_theme_files();
     std::vector<const Palette*> out;
     for (const auto& p : kPalettes)
         out.push_back(&p);
-    for (const auto& o : g_herdr_palettes)
+    for (const auto& o : g_loaded_palettes)
         out.push_back(&o.p);
     return out;
 }
@@ -266,8 +395,8 @@ bool system_light() {
     return light;
 }
 
-// herdr Appearance: System follows Windows; Light and Dark use the chosen theme of that kind. A
-// layout file with a "theme" overrides it.
+// Appearance "system" follows Windows; "light" and "dark" use the chosen theme of that kind. A
+// layout that names a theme overrides both.
 const Palette* effective_palette(const std::string& appearance, const std::string& dark, const std::string& light,
                                  const std::string& layout_theme) {
     if (!layout_theme.empty())
@@ -283,7 +412,7 @@ void apply_style(float dpi, float zoom) {
         ImGui::StyleColorsLight(&s);
     else
         ImGui::StyleColorsDark(&s);
-    s.WindowRounding = 8;  // herdr overlays: radius 8, popover background, 1 px border
+    s.WindowRounding = 8;  // overlays: radius 8, popover background, 1 px border
     s.ChildRounding = 10;
     s.FrameRounding = 7;
     s.PopupRounding = 8;
@@ -326,7 +455,7 @@ void apply_style(float dpi, float zoom) {
     c[ImGuiCol_Separator] = v4(g_pal->border);
     c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
     c[ImGuiCol_ScrollbarGrab] = v4(g_pal->border);
-    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.35f);  // herdr window.rs 4767: hsla(0, 0, 0, 0.35)
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.35f);  // black at 35 % behind modal dialogs
     c[ImGuiCol_TitleBg] = v4(g_pal->card);
     c[ImGuiCol_TitleBgActive] = v4(g_pal->card);
     c[ImGuiCol_NavCursor] = v4(g_pal->focus);

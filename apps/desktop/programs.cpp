@@ -1,28 +1,23 @@
 // Programs (programs\programs.json and icons) and small shared helpers: paths, elapsed time,
-// clipped text, attention colours, fuzzy matching.
+// clipped text, attention colours.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
 
-namespace {
-// ------------------------------------------------------------------ programs
-// herdr src/programs.rs: one table (defaults/programs.json, shipped in programs\ next to the exe)
-// with the person's programs.json in the data folder on top; read again when that file changes,
-// problems go to programs.error (herdr window.rs 982-991, 909-912).
-ui::Programs g_programs;
-
-}  // namespace
-
 std::filesystem::file_time_type g_programs_mtime{};
 
 namespace {
+// ------------------------------------------------------------------ programs
+// One table: the shipped programs\programs.json next to the exe, with the person's
+// programs.json in the data folder on top. Read again when that file changes; its problems go to
+// programs.error.
+ui::Programs g_programs;
 bool g_programs_loaded = false;
 
 std::filesystem::path programs_dir() {
-    wchar_t exe[MAX_PATH]{};
-    ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    return std::filesystem::path(exe).parent_path() / L"programs";
+    return exe_dir() / L"programs";
 }
 
 }  // namespace
@@ -52,7 +47,7 @@ const ui::Programs& programs() {
 
 }  // namespace
 
-// What runs in a terminal (herdr programs::of): the agent's 7501 `app` first, else the
+// What runs in a terminal: the agent's OSC 7501 `app` first, else the
 // foreground program's argv (its name alone from an older host).
 ui::Program program_of(const ui::SessionView& v) {
     std::vector<std::string> argv = v.program_argv;
@@ -66,7 +61,7 @@ ui::Program program_of_profile(const std::string& executable, const std::string&
     return programs().of({}, {executable.empty() ? id : executable});
 }
 
-// A person's icon (in the data folder) before the shipped one (herdr: both live in its home).
+// The person's icon (same relative path in the data folder) before the shipped one.
 std::filesystem::path program_icon_file(const ui::Program& p) {
     if (p.icon.empty())
         return {};
@@ -94,8 +89,8 @@ ui::ImageCache& program_images() {
 
 }  // namespace
 
-// herdr's icon(p, size, color) (pane/main.js 27-30, agents/main.js 78, tabs/main.js 120): a
-// tinted entry is a one-color SVG in `color`, else the picture itself. `min` is its top left.
+// A program's icon, `size` px square with its top left at `min`: a tinted entry is a one-colour
+// SVG drawn in `color`, else the picture itself.
 void program_icon(ImDrawList* dl, const ui::Program& p, ImVec2 min, float size, ImU32 color) {
     const auto file = program_icon_file(p);
     if (file.empty())
@@ -203,52 +198,7 @@ ImU32 attention_color(Attention a) {
     return g_pal->faint;
 }
 
-namespace {
-// Shape + color mark; never color alone (design doc 4.1). Working pulses gently.
-void attention_mark(ImDrawList* dl, ImVec2 c, float r, Attention a) {
-    const ImU32 col = attention_color(a);
-    switch (a) {
-        case Attention::kBlocked: {
-            dl->AddCircleFilled(c, r * 1.15f, col);
-            dl->AddLine(ImVec2(c.x, c.y - r * 0.55f), ImVec2(c.x, c.y + r * 0.15f), g_pal->card, px(1.6f));
-            dl->AddCircleFilled(ImVec2(c.x, c.y + r * 0.55f), px(1.0f), g_pal->card);
-            break;
-        }
-        case Attention::kDone:
-            dl->AddCircleFilled(c, r * 1.1f, col);
-            dl->AddLine(ImVec2(c.x - r * 0.5f, c.y), ImVec2(c.x - r * 0.1f, c.y + r * 0.45f), g_pal->card,
-                        px(1.6f));
-            dl->AddLine(ImVec2(c.x - r * 0.1f, c.y + r * 0.45f), ImVec2(c.x + r * 0.55f, c.y - r * 0.4f),
-                        g_pal->card, px(1.6f));
-            break;
-        case Attention::kWorking: {
-            const float t = static_cast<float>(ImGui::GetTime());
-            const float a0 = t * 4.0f;
-            dl->PathArcTo(c, r, a0, a0 + 4.2f, 16);
-            dl->PathStroke(col, 0, px(1.8f));
-            break;
-        }
-        case Attention::kIdle:
-            dl->AddCircle(c, r * 0.8f, col, 0, px(1.4f));
-            break;
-        case Attention::kNone:
-            (void)col;
-            break;
-    }
-}
-
-bool fuzzy_match(const std::string& text, const std::string& query) {
-    std::size_t j = 0;
-    for (std::size_t i = 0; i < text.size() && j < query.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(text[i])) ==
-            std::tolower(static_cast<unsigned char>(query[j])))
-            ++j;
-    }
-    return j == query.size();
-}
-
-}  // namespace
-
+// "left", "up", "down", anything else right.
 Dir parse_dir(const std::string& s) {
     if (s == "left")
         return Dir::kLeft;

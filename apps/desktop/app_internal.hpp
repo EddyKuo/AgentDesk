@@ -1,6 +1,7 @@
 #pragma once
 // Internal to agent-ui: App::State, the types the window's files share, and the helpers more
 // than one of them calls (namespace detail). Not for use outside apps/desktop.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app.hpp"
 #include "safe_read.hpp"
 #include "win98_state.hpp"
@@ -24,6 +25,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <span>
 #include <sstream>
 #include <stop_token>
 #include <string>
@@ -67,7 +69,10 @@ namespace safe = agentdesk::desktop::safe;
 using ui::Dir;
 
 // ------------------------------------------------------------ themes.cpp
-// ------------------------------------------------------------------ themes (our own palettes)
+// ------------------------------------------------------------------ palettes
+// Every colour the chrome and the terminals use. AgentDesk's own palettes come first; the
+// preset themes and the theme files (shipped themes\ and <data>\themes\) follow, with their
+// chrome colours derived from each theme's background, foreground and ANSI table.
 struct Palette {
     const char* id;
     const char* label;
@@ -75,153 +80,22 @@ struct Palette {
     ImU32 bg, sidebar, card, border, focus, hover, selected, text, dim, faint;
     ImU32 needs_you, done, working, idle, info;
     ImU32 term_bg, term_fg, cursor, selection;
-    bool layout_only = false;  // a layout's own theme (herdr: offered only there)
-    const std::array<ImU32, 16>* ansi = nullptr;  // the theme's "ansi" table (herdr themes/*.json)
+    bool layout_only = false;  // a layout's own theme: not offered in Settings or the palette
+    const std::array<ImU32, 16>* ansi = nullptr;  // the theme's 16 ANSI colours (null: VtEngine's)
 };
+// AgentDesk's own palettes, in the order Settings lists them. The first is the fallback.
+std::span<const Palette> builtin_palettes();
 
-// herdr themes/win98.json "ansi" (0-7, then the bright 8-15).
-inline constexpr std::array<ImU32, 16> kWin98Ansi = {
-    IM_COL32(0x55, 0x55, 0x55, 255), IM_COL32(0xaa, 0x00, 0x00, 255), IM_COL32(0x00, 0xaa, 0x00, 255),
-    IM_COL32(0xaa, 0x55, 0x00, 255), IM_COL32(0x00, 0x00, 0xbb, 255), IM_COL32(0xaa, 0x00, 0xaa, 255),
-    IM_COL32(0x00, 0xaa, 0xaa, 255), IM_COL32(0xaa, 0xaa, 0xaa, 255), IM_COL32(0x55, 0x55, 0x55, 255),
-    IM_COL32(0xff, 0x55, 0x55, 255), IM_COL32(0x55, 0xff, 0x55, 255), IM_COL32(0xff, 0xff, 0x55, 255),
-    IM_COL32(0x55, 0x55, 0xff, 255), IM_COL32(0xff, 0x55, 0xff, 255), IM_COL32(0x55, 0xff, 0xff, 255),
-    IM_COL32(0xff, 0xff, 0xff, 255)};
-
-inline constexpr Palette kPalettes[] = {
-    {"midnight",
-     "Midnight",
-     false,
-     IM_COL32(13, 17, 27, 255),
-     IM_COL32(16, 21, 33, 255),
-     IM_COL32(18, 23, 36, 255),
-     IM_COL32(36, 44, 64, 255),
-     IM_COL32(139, 124, 246, 255),
-     IM_COL32(27, 34, 52, 255),
-     IM_COL32(35, 43, 66, 255),
-     IM_COL32(226, 230, 242, 255),
-     IM_COL32(136, 145, 170, 255),
-     IM_COL32(86, 95, 120, 255),
-     IM_COL32(240, 100, 122, 255),
-     IM_COL32(92, 203, 154, 255),
-     IM_COL32(233, 185, 73, 255),
-     IM_COL32(136, 145, 170, 255),
-     IM_COL32(110, 168, 250, 255),
-     IM_COL32(15, 19, 30, 255),
-     IM_COL32(222, 226, 238, 255),
-     IM_COL32(200, 190, 255, 255),
-     IM_COL32(139, 124, 246, 85)},
-    {"ember",
-     "Ember",
-     false,
-     IM_COL32(20, 17, 15, 255),
-     IM_COL32(25, 21, 18, 255),
-     IM_COL32(27, 23, 20, 255),
-     IM_COL32(56, 46, 38, 255),
-     IM_COL32(236, 140, 74, 255),
-     IM_COL32(40, 33, 28, 255),
-     IM_COL32(52, 42, 34, 255),
-     IM_COL32(240, 232, 222, 255),
-     IM_COL32(170, 152, 136, 255),
-     IM_COL32(112, 98, 86, 255),
-     IM_COL32(238, 98, 86, 255),
-     IM_COL32(150, 200, 110, 255),
-     IM_COL32(240, 196, 90, 255),
-     IM_COL32(170, 152, 136, 255),
-     IM_COL32(120, 176, 230, 255),
-     IM_COL32(22, 19, 17, 255),
-     IM_COL32(236, 228, 216, 255),
-     IM_COL32(255, 200, 150, 255),
-     IM_COL32(236, 140, 74, 80)},
-    {"moss",
-     "Moss",
-     false,
-     IM_COL32(12, 20, 18, 255),
-     IM_COL32(15, 25, 22, 255),
-     IM_COL32(17, 28, 25, 255),
-     IM_COL32(34, 54, 48, 255),
-     IM_COL32(64, 200, 170, 255),
-     IM_COL32(24, 40, 35, 255),
-     IM_COL32(30, 50, 44, 255),
-     IM_COL32(222, 236, 230, 255),
-     IM_COL32(132, 160, 150, 255),
-     IM_COL32(84, 108, 100, 255),
-     IM_COL32(236, 108, 118, 255),
-     IM_COL32(120, 214, 140, 255),
-     IM_COL32(226, 196, 88, 255),
-     IM_COL32(132, 160, 150, 255),
-     IM_COL32(110, 180, 230, 255),
-     IM_COL32(14, 23, 21, 255),
-     IM_COL32(218, 234, 228, 255),
-     IM_COL32(160, 240, 220, 255),
-     IM_COL32(64, 200, 170, 80)},
-    {"paper",
-     "Paper",
-     true,
-     IM_COL32(236, 236, 232, 255),
-     IM_COL32(226, 226, 220, 255),
-     IM_COL32(250, 250, 247, 255),
-     IM_COL32(204, 204, 196, 255),
-     IM_COL32(88, 92, 220, 255),
-     IM_COL32(216, 216, 210, 255),
-     IM_COL32(206, 208, 228, 255),
-     IM_COL32(30, 32, 40, 255),
-     IM_COL32(100, 102, 112, 255),
-     IM_COL32(150, 150, 156, 255),
-     IM_COL32(204, 52, 72, 255),
-     IM_COL32(30, 150, 90, 255),
-     IM_COL32(190, 130, 10, 255),
-     IM_COL32(110, 112, 122, 255),
-     IM_COL32(40, 110, 210, 255),
-     IM_COL32(250, 250, 247, 255),
-     IM_COL32(36, 38, 46, 255),
-     IM_COL32(60, 60, 200, 255),
-     IM_COL32(88, 92, 220, 70)},
-    // herdr themes/win98.json, Herdr 98's own (settings.rs 99): a theme named like a layout is that
-    // layout's own, so Settings and the palette do not offer it (AGENTS.md 338-339). Panel colors
-    // from its "colors": surface/popover #c0c0c0, raised/hover #dfdfdf, border #808080, foreground
-    // #000000, dim #808080, muted #404040, accent #000080; status blocked #ff0000, done #0000ff,
-    // working #808000, idle #808080. Terminals: the pane's black (terminal_opacity 0 over
-    // background #000000), foreground #c0c0c0, cursor #c0c0c0, selection #000080.
-    {"win98",
-     "AgentDesk 98",
-     true,
-     IM_COL32(0xc0, 0xc0, 0xc0, 255),
-     IM_COL32(0xc0, 0xc0, 0xc0, 255),
-     IM_COL32(0xc0, 0xc0, 0xc0, 255),
-     IM_COL32(0x80, 0x80, 0x80, 255),
-     IM_COL32(0x00, 0x00, 0x80, 255),
-     IM_COL32(0xdf, 0xdf, 0xdf, 255),
-     IM_COL32(0xdf, 0xdf, 0xdf, 255),
-     IM_COL32(0x00, 0x00, 0x00, 255),
-     IM_COL32(0x80, 0x80, 0x80, 255),
-     IM_COL32(0x40, 0x40, 0x40, 255),
-     IM_COL32(0xff, 0x00, 0x00, 255),
-     IM_COL32(0x00, 0x00, 0xff, 255),
-     IM_COL32(0x80, 0x80, 0x00, 255),
-     IM_COL32(0x80, 0x80, 0x80, 255),
-     IM_COL32(0x00, 0x00, 0x80, 255),
-     IM_COL32(0x00, 0x00, 0x00, 255),
-     IM_COL32(0xc0, 0xc0, 0xc0, 255),
-     IM_COL32(0xc0, 0xc0, 0xc0, 255),
-     IM_COL32(0x00, 0x00, 0x80, 0x80),  // drawn over the text here, so not opaque
-     true,
-     &kWin98Ansi},
-};
-
-// ------------------------------------------------------------------ herdr's themes
-// The person chose to have herdr's themes beside ours (2026-11-19). herdr settings.rs: four
-// presets (graphite, ink, moss, paper; 19-79), shipped theme files (atom-one-dark; 97-101) and
-// the person's themes/<name>.json (background, foreground, selection, cursor?, ansi[16],
-// colors{}; 103-113). The chrome colors come from the palette as herdr's resolve() derives them
-// (306-375). Ids of herdr's presets get "herdr-" in front, since ours already use moss and paper.
-struct HerdrPalette {
+// A preset theme or a theme file before its chrome colours are derived (0xRRGGBB values).
+struct PresetPalette {
     std::uint32_t background = 0, foreground = 0, selection = 0;
     std::optional<std::uint32_t> cursor;
     std::array<std::uint32_t, 16> ansi{};
     std::optional<std::array<std::uint32_t, 3>> status;  // working, blocked, done
 };
-const std::array<std::pair<const char*, HerdrPalette>, 4>& herdr_presets();
+// The four preset themes by name. Their ids get kPresetPrefix, since moss and paper are also
+// names of our own palettes.
+const std::array<std::pair<const char*, PresetPalette>, 4>& preset_palettes();
 
 // The preset themes' ids. Settings written by 0.2.0 and earlier named them with another prefix:
 // theme_id() reads "<anything>-<preset>" as the same preset.
@@ -257,8 +131,8 @@ struct Settings {
     float zoom = 1.0f;
     float font_size = 14.0f;
     bool sounds = true;
-    // Read from ui.json and written back, but ignored: herdr always shows the note (settings/main.js
-    // 751: "A note shows in the corner either way"), so Settings no longer offers it.
+    // Read from ui.json and written back, but ignored: the corner note always shows, so Settings
+    // no longer offers it.
     bool toasts = true;
     bool copy_on_select = true;
     float scroll_speed = 1.0f;
@@ -266,36 +140,38 @@ struct Settings {
     bool details = false;
     std::string worktree_dir;  // empty: %USERPROFILE%\.agentdesk\worktrees
     std::string shell_profile;  // new spaces/tabs/splits; empty: pwsh, powershell, cmd
-    float ui_text = 15.0f;       // interface text size at zoom 1 (herdr: 13); scales all chrome
-    float sidebar_width = 268;   // herdr design px, 44..480; under 160 = rail
+    float ui_text = 15.0f;       // interface text size at zoom 1 (13 = the chrome's design size)
+    float sidebar_width = 268;   // design px, 44..480; under 160 = rail
     float sidebar_restore = 268; // width the rail toggle goes back to
     float spaces_share = 0.5f;   // spaces / agents split of the sidebar lists
     float panel_width = 368;     // right panel (Files / Changes), 280..900
     std::string agents_sort = "priority";  // or "space"
     std::vector<std::string> palette_recent;  // last 20 palette commands, newest first
     std::string terminal_font;   // font family; "" = JetBrains Mono (bundled)
-    int terminal_weight = 500;   // herdr terminal font weight (JetBrains Mono Medium)
+    int terminal_weight = 500;   // terminal font weight (500: JetBrains Mono Medium)
     std::string ui_font;         // interface font family; "" = Geist (bundled)
-    std::string appearance = "system";  // "system", "light" or "dark" (herdr Appearance)
+    std::string appearance = "system";  // "system", "light" or "dark"
     std::string theme_dark = "midnight";
     std::string theme_light = "paper";
-    // herdr window.rs 3620-3635: a layout is a look; each keeps its own dark and light theme
-    // (layout -> {dark, light}). Without an entry the two above are used.
+    // A layout is a look: each keeps its own dark and light theme (layout -> {dark, light}).
+    // Without an entry the two above are used.
     std::map<std::string, std::pair<std::string, std::string>> layout_themes;
     float line_height = 1.0f;    // terminal cell height multiplier
     float cell_width = 1.0f;     // terminal cell width multiplier
     std::string sound_done;      // MP3 replacing the bundled sounds
     std::string sound_blocked;
     std::string welcomed;        // "", "finished" or "skipped"
-    std::string seen_version;    // What's new was shown for this version (herdr: once after an update)
+    std::string seen_version;    // What's new was shown for this version (once after an update)
     std::vector<std::string> folded_machines;  // machine headers folded in the sidebar
     std::vector<std::string> panels = {"files", "changes"};  // panel buttons in the tab bar
-    Json agents_changed = Json::object();  // session id -> {s: state, at: ms}: herdr agents.js 85-110
-    // herdr settings.rs 718-726 / main.js 857-861: on unless the file says "telemetry": false;
-    // turning it on again removes the key.
+    Json agents_changed = Json::object();  // session id -> {s: state, at: ms since 1970}
+    // On unless the file says "telemetry": false; turning it on again removes the key.
     bool telemetry = true;
 };
+// %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk; created when missing.
 std::filesystem::path data_dir();
+// The folder agent-ui.exe is in (fonts\, sounds\, programs\, themes\, mods\ ship there).
+std::filesystem::path exe_dir();
 std::pair<std::string, std::string> layout_theme_pair(const Settings& st);
 Settings load_settings();
 float ui_text_factor(const Settings& s);
@@ -306,12 +182,11 @@ void save_settings(const Settings& s);
 
 // ------------------------------------------------------------ layouts.cpp
 // ------------------------------------------------------------------ layouts
-// herdr's layout engine (libs/ui layout.hpp): a layout is a tree of blocks (rows, columns,
-// stacks; the sidebar, tab bar, panes, panel and status bar are blocks) in herdr's format
-// (defaults/AGENTS.md "Layouts"). Built-ins are herdr's main.json (named workspace here),
-// terminals.json and win98.json; <data>\layouts\<name>.json adds one or replaces a built-in of
-// that name. The person's clicks on a layout (sizes, shown/hidden, a stack's child, where a float
-// sits) live in <data>\layouts\.state\<name>.json (herdr window.rs 203-216, layout_sync.rs).
+// A layout is a tree of blocks (rows, columns, stacks; the sidebar, tab bar, panes, panel and
+// status bar are blocks), parsed by libs/ui layout.hpp. Built-ins are workspace, terminals and
+// win98; <data>\layouts\<name>.json adds one or replaces a built-in of that name. The person's
+// clicks on a layout (sizes, shown/hidden, a stack's child, where a float sits) live apart from
+// the file, in <data>\layouts\.state\<name>.json, so editing the file never loses them.
 // AgentDesk's older files ({"sidebar", "tab_bar", "status_bar", "theme", "style", "font_size",
 // "details"} and no tree) still load: read as the built-in of their style with those parts hidden
 // (layout::from_legacy); the file itself is left as it is.
@@ -319,13 +194,13 @@ namespace lay = ui::layout;
 
 struct LayoutSpec {
     std::string name;
-    lay::Node file;  // as its file (or herdr) has it
+    lay::Node file;  // as its file (or the built-in) has it
     lay::Node tree;  // with the person's clicks: what is drawn
     bool builtin = false;
     bool from_file = false;
     bool legacy = false;
     std::optional<bool> details;  // AgentDesk's own details pane (old files only)
-    std::string error;            // the file is broken: shown as shipped meanwhile (window.rs 1005-1018)
+    std::string error;            // the file is broken: the built-in shows meanwhile
     std::filesystem::file_time_type mtime{};
     // From the tree.
     std::string theme;         // a palette AgentDesk has, else "" (the person's theme)
@@ -341,6 +216,8 @@ std::vector<LayoutSpec> load_layouts(const Settings& st);
 void write_example_mods();
 
 // ------------------------------------------------------------ programs.cpp
+// The program table (what a terminal runs: name, icon, colour) and small helpers the drawing
+// files share.
 extern std::filesystem::file_time_type g_programs_mtime;
 std::string load_programs();
 ui::Program program_of(const ui::SessionView& v);
@@ -438,12 +315,20 @@ bool known_command(std::string_view name);
 
 // ------------------------------------------------------------ git_cache.cpp
 // ------------------------------------------------------------------ git facts per folder
-// herdr's spaces mod asks git for the checkout's top, its common dir (worktrees), the branch and
-// ahead/behind of upstream; at most a few at a time, again when the folder changes and every
-// 60 s (spaces.js 105-147, 229-264). Here one background thread runs git for queued folders.
-// Like herdr's watchFolder (spaces.js 266-286) a second thread watches each local repo's git
-// folder, so a commit or checkout made outside shows at once; the 60 s look again happens only
-// while the window is in front (spaces.js 140).
+// The checkout's top, its common dir (worktrees), the branch and ahead/behind of upstream, for
+// the sidebar's spaces. One background thread runs git for queued folders; a second watches each
+// local repo's git folder, so a commit or checkout made outside shows at once. Facts are asked
+// again every 60 s, but only while the window is in front.
+
+// Calls another machine's agent-host (fs.list, fs.read, git.run). Runs on a worker thread;
+// returns the result, or nullopt when the machine did not answer.
+using RemoteCall =
+    std::function<std::optional<Json>(const std::string& machine, const std::string& method, const Json& params)>;
+// git `args` in `cwd` on `machine` through its agent-host's git.run (it adds its own safety
+// switches and -C). Not started when the machine did not answer.
+host::ToolResult remote_git(const RemoteCall& remote, const std::string& machine, const std::string& cwd,
+                            const std::vector<std::wstring>& args);
+
 struct GitInfo {
     bool repo = false;
     std::string top;         // checkout top (a worktree's own folder)
@@ -466,15 +351,14 @@ public:
     GitCache& operator=(const GitCache&) = delete;
 
     // Another machine's folders: git through its agent-host (git.run), set by the app.
-    std::function<std::optional<Json>(const std::string& machine, const std::string& method, const Json& params)> remote;
+    RemoteCall remote;
 
     // Cached facts for `dir` on `machine` ("" = here; empty until the first answer); schedules a
     // refresh when stale.
     GitInfo get(const std::string& dir, const std::string& machine = {});
     // Ask again soon (a command or an agent turn ended: a checkout or commit may have happened).
     void invalidate(const std::string& dir);
-    // `dir` and every other folder in its repo (spaces.js 149-153: a commit there moves their
-    // ahead/behind too).
+    // `dir` and every other folder in its repo (a commit there moves their ahead/behind too).
     void invalidate_repo(const std::string& dir, const std::string& machine = {});
     // The window is in front: the 60 s fallback runs only then.
     void set_active(bool active) { active_ = active; }
@@ -487,10 +371,12 @@ private:
         Clock::time_point used{};  // last asked for by the UI
     };
 
+    // Entries are keyed by "<machine>|<dir>", or just <dir> on this computer.
+    static std::string key_of(const std::string& dir, const std::string& machine);
     static std::string machine_of(const std::string& key);
+    static std::string dir_of(const std::string& key);
 
-    // Local repos' git folders, each with a change notification (spaces.js 266-286 watchFolder).
-    // A change looks again at every folder of that repo; folders no longer asked about for
+    // Local repos' git folders, each with a change notification. A change looks again at every folder of that repo; folders no longer asked about for
     // 10 minutes stop being watched. At most 62 at once (WaitForMultipleObjects).
     void watch_loop(std::stop_token st);
 
@@ -513,9 +399,9 @@ private:
 
 // ------------------------------------------------------------ side_panels.cpp
 // ------------------------------------------------------------------ Files / Changes panels
-// herdr-app mods/files and mods/changes (docs/research/herdr-app/spec-files-changes.md): both
-// follow the focused pane's live folder, refresh every 10 s and when the folder changes on
-// disk, and never write under .git while reading. Git and file reads run on one worker thread.
+// Both panels follow the focused pane's live folder, refresh every 10 s and when the folder
+// changes on disk, and never write under .git while reading. Git and file reads run on one
+// worker thread.
 class SidePanels {
 public:
     struct FileEntry {
@@ -541,10 +427,7 @@ public:
     SidePanels(const SidePanels&) = delete;
     SidePanels& operator=(const SidePanels&) = delete;
 
-    // Folders on another machine go through its agent-host (fs.list, fs.read, git.run). Runs on
-    // the panel worker; returns the result, or nullopt when the machine did not answer.
-    using RemoteCall = std::function<std::optional<Json>(const std::string& machine, const std::string& method,
-                                                          const Json& params)>;
+    // Folders on another machine go through its agent-host (fs.list, fs.read, git.run).
     RemoteCall remote;
 
     std::mutex mutex;  // guards everything below
@@ -609,9 +492,9 @@ private:
     std::string top_of(const std::string& mc, const std::string& cwd);
     // porcelain v1 -z: "XY path\0"
     std::vector<std::pair<std::string, std::string>> status(const std::string& mc, const std::string& top, bool* ok);
-    // Changes list (herdr changes/main.js): conflicts first.
+    // Changes list letter: conflicts (U) first, then D, A, M.
     static char letter_of(const std::string& xy);
-    // Files tree marks (herdr files/main.js:99): added first, then U, D, M.
+    // Files tree mark: added first, then U, D, M.
     static char file_mark_of(const std::string& xy);
 
     void load_files(const std::string& mc, const std::string& root, std::set<std::string> folders,
@@ -681,7 +564,7 @@ struct Placement {
     std::string split_of;
     std::string replace;  // restart in place
     std::string space_name;
-    std::string tab_name;  // herdr tab.new {name} (Herdr 98 names its tabs)
+    std::string tab_name;  // the new tab's name (AgentDesk 98 names its tabs)
 };
 
 struct WorktreeEntry {
@@ -713,16 +596,16 @@ struct App::State {
     float dpi = 1.0f;
     bool window_focused = true;
     std::atomic<bool> exit_now{false};  // also set by shutdown_host's answer (a HostClient thread)
-    // Updates and Privacy (herdr update.rs, telemetry.rs, settings main.js 760-882).
-    std::optional<Clock::time_point> updates_asked;  // main.js 65-71 `this.asked`
-    bool show_data = false;                          // main.js 870 `this.showData`
-    std::optional<std::string> update_dismissed;     // window.rs 4840
-    std::optional<std::string> core_update_error_dismissed;  // window.rs 3974
+    // Updates and Privacy.
+    std::optional<Clock::time_point> updates_asked;  // Settings asked for an update check (polls while set)
+    bool show_data = false;                          // Privacy shows what telemetry would send
+    std::optional<std::string> update_dismissed;     // the version whose update notice was closed
+    std::optional<std::string> core_update_error_dismissed;  // the agent-host update error closed
     std::string noted_host;                          // host instance whose version updates.cpp has
     bool was_connected = false;
     bool window_opened = false;
     Clock::time_point observed_at{};
-    ImFont* report_font = nullptr;  // JetBrains Mono for the report lines (main.js 840)
+    ImFont* report_font = nullptr;  // JetBrains Mono for the telemetry report lines
 
     ui::Workspace ws;
     std::set<std::string> hidden;  // sessions the user closed the pane of (still running)
@@ -763,7 +646,7 @@ struct App::State {
         int index = 0;
         ui::layout::Axis axis = ui::layout::Axis::kRow;
     };
-    std::optional<LayoutDrag> layout_drag;  // window.rs Drag: a separator held down
+    std::optional<LayoutDrag> layout_drag;  // a layout separator held down
 
     std::mutex placements_mutex;
     std::vector<Placement> placements;      // completed creates waiting for the UI thread
@@ -817,7 +700,7 @@ struct App::State {
     bool wt_busy = false;
     bool open_popup_next = false;
     std::string popup_to_open;
-    // herdr chrome
+    // chrome
     GitCache git;
     std::unique_ptr<SidePanels> panels = std::make_unique<SidePanels>();
     std::set<std::string> folded_machines;
@@ -832,20 +715,20 @@ struct App::State {
     std::set<std::string> folded_groups;
     std::set<std::string> folded_agents;
     // Each agent's last state and when it changed (ms since 1970), kept across restarts in
-    // ui.json (herdr agents.js 85-110).
+    // ui.json (agents_changed).
     struct Changed {
         std::string s;
         long long at = 0;
     };
     std::map<std::string, Changed> changed;
     bool changed_loaded = false;
-    std::map<std::string, bool> busy_terminal;  // a command or an agent turn running (spaces.js 128-133)
-    std::string spaces_revealed;                // active space last brought into view (spaces.js 533-539)
+    std::map<std::string, bool> busy_terminal;  // a command or an agent turn running
+    std::string spaces_revealed;                // active space last brought into view
     int spaces_revealed_at = -1;
     float spaces_list_h = 0;
     int drag_space = -1;
     int drag_tab = -1;
-    std::string drag_pane;          // pane being dragged by its grip (herdr pane drag)
+    std::string drag_pane;          // pane being dragged by its grip
     ImVec2 drag_pane_from{};
     std::map<std::string, ui::Rect> pane_rects;  // panes of the shown tab, this frame
     float tab_scroll = 0;
@@ -867,10 +750,10 @@ struct App::State {
     char feedback_buf[4096] = {};
     std::string feedback_note;
     int welcome_page = 0;
-    ImVec2 welcome_pos{-1.0f, -1.0f};  // top-left once the person dragged it (herdr: Drag to move)
+    ImVec2 welcome_pos{-1.0f, -1.0f};  // top-left once the person dragged it
     bool show_machine_add = false;
     std::vector<std::pair<std::string, std::string>> ssh_hosts;  // alias, what it reaches
-    // Add a machine (herdr machine-add): target -> "adding" or why it could not be added.
+    // Add a machine: target -> "adding" or why it could not be added.
     std::map<std::string, std::string> machine_add_state;
     std::set<std::string> machine_add_pending;  // needs the person to answer something first
     std::string machine_add_copied;
@@ -894,12 +777,17 @@ struct App::State {
     };
     bool defer_commands = false;
     std::vector<DeferredCommand> deferred_commands;
-    ui::ImageCache program_images;  // herdr's program icons (programs\icons), as textures
-    // Herdr 98 (win98_*.cpp): its menus, dialogs, games and shared values.
+    ui::ImageCache program_images;  // the program icons (programs\icons), as textures
+    // AgentDesk 98 (win98_*.cpp): its menus, dialogs, games and shared values.
     std::unique_ptr<w98state::W98> win98 = std::make_unique<w98state::W98>();
-    bool fonts_win98 = false;  // Herdr 98's fonts are the ones in use
+    bool fonts_win98 = false;  // AgentDesk 98's fonts are the ones in use
 
     // ---------------------------------------------------------------- helpers
+    // The UI document (spaces, tabs, panes) changed: persist() sends it to the host soon.
+    void doc_changed() {
+        doc_dirty = true;
+        doc_dirty_at = Clock::now();
+    }
     [[nodiscard]] std::string title_of(const ui::SessionView& v) const {
         if (!v.name.empty())
             return v.name;
@@ -923,8 +811,8 @@ struct App::State {
             return Attention::kNone;
         return attention.get(id);
     }
-    // Folder that names an unnamed space (herdr model.rs 271-279): its first terminal's git top
-    // (a worktree's own folder), on whichever machine it runs, else that terminal's folder.
+    // Folder that names an unnamed space: its first terminal's git top (a worktree's own
+    // folder), on whichever machine it runs, else that terminal's folder.
     [[nodiscard]] std::map<std::string, std::string> session_cwds() {
         std::map<std::string, std::string> m;
         for (const auto& sp : ws.spaces) {
@@ -953,11 +841,11 @@ struct App::State {
             return it->second.cwd;
         return settings.last_cwd;
     }
-    // herdr toasts: 5 s, 8 s for errors and warnings.
+    // A toast shows 5 s, errors and warnings (needs_you, working colours) 8 s.
     void toast(std::string title, std::string body, std::string session, ImU32 color, int seconds = 0) {
         if (seconds <= 0)
             seconds = color == g_pal->needs_you || color == g_pal->working ? 8 : 5;
-        // No cap: herdr stacks every toast (window.rs 4794-4796).
+        // No cap: every toast stacks until it times out.
         toasts.push_back({std::move(title), std::move(body), std::move(session), color,
                           Clock::now() + std::chrono::seconds(seconds)});
     }
@@ -996,9 +884,8 @@ struct App::State {
     [[nodiscard]] std::string machine_label(const std::string& machine) const {
         return machine.empty() ? std::string("This PC") : machine;
     }
-    // herdr spaces/main.js 347-351 loading(): the machine's layout is still on its way. Here:
-    // the machine is connecting (not connected, no error yet), or this computer's document has
-    // not arrived. Disconnected or failed is not loading.
+    // The machine's spaces are still on their way: it is connecting (not connected, no error
+    // yet), or this computer's document has not arrived. Disconnected or failed is not loading.
     [[nodiscard]] bool machine_loading(const std::string& machine) const {
         const ui::HostClient* h = host.get();
         for (const auto& r : remotes)
@@ -1010,7 +897,7 @@ struct App::State {
             return machine.empty() && !doc_loaded;
         return h->last_error().empty();
     }
-    // The state herdr writes after a machine's name (spaces/main.js 370, 385).
+    // The state shown after a machine's name in the sidebar.
     [[nodiscard]] std::string machine_state(const std::string& machine) const {
         if (machine_connected(machine))
             return "connected";
@@ -1065,7 +952,8 @@ void open_launcher(App::State& s, LaunchTarget target);
 void open_rename(App::State& s, const std::string& kind, const std::string& target,
                  const std::string& current);
 void sync_panel(App::State& s, LayoutSpec& l);
-// person: the person ran it (palette, keys, a click), not a mod or --run (window.rs 2995).
+// person: the person ran it (palette, keys, a click), not a mod or --run; only those count in
+// telemetry.
 void run_command(App::State& s, const std::string& cmd, bool person = true);
 void run_deferred_commands(App::State& s);
 

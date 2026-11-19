@@ -1,17 +1,16 @@
-// AgentDesk window contents. Feature set follows herdr's app (spaces, tabs, split panes, agent
-// attention, notifications, command palette, worktrees; observed from its public guide
-// defaults/AGENTS.md and keys.json), with AgentDesk's own look, names and code (ADR-12/ADR-13).
+// AgentDesk window contents: spaces, tabs, split panes, agent attention, notifications, the
+// command palette and worktrees, drawn with AgentDesk's own look (ADR-12/ADR-13).
 //
 // This file: App construction and teardown and its small public members.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
 
 // ------------------------------------------------------------------ construction
-// keys.json (herdr keys.rs): installed from the defaults when missing; read again whenever it
-// changes on disk; problems go to keys.error (removed once the file applies) and the defaults
-// stay in force.
+// keys.json: installed from the defaults when missing; read again whenever it changes on disk;
+// problems go to keys.error (removed once the file applies) and the defaults stay in force.
 void load_keys(App::State& s) {
     const auto path = data_dir() / L"keys.json";
     const auto err_path = data_dir() / L"keys.error";
@@ -38,54 +37,52 @@ void load_keys(App::State& s) {
 }
 
 namespace {
-// What telemetry.cpp asks the app (herdr reads these from its own modules).
+// For telemetry's mod counts: of the enabled mods, the shipped ones as shipped (by name), how
+// many are shipped but edited, and how many are the person's own. Shipped: the example mods
+// next to agent-ui.exe (write_example_mods); as shipped: the same mod.dll and mod.json bytes.
+std::tuple<std::vector<std::string>, std::size_t, std::size_t> mod_kinds(const std::set<std::string>& names) {
+    const auto shipped = exe_dir() / L"mods";
+    std::vector<std::string> builtin;
+    std::size_t edited = 0;
+    std::size_t custom = 0;
+    for (const auto& name : names) {
+        std::error_code ec;
+        const auto from = shipped / win::to_wide(name);
+        if (!std::filesystem::is_regular_file(from / L"mod.dll", ec)) {
+            ++custom;
+            continue;
+        }
+        const auto have = data_dir() / L"mods" / win::to_wide(name);
+        bool same = true;
+        for (const wchar_t* f : {L"mod.dll", L"mod.json"}) {
+            bool a_ok = false;
+            bool b_ok = false;
+            const std::string a = read_text_file(from / f, &a_ok);
+            const std::string b = read_text_file(have / f, &b_ok);
+            same = same && a_ok == b_ok && a == b;
+        }
+        if (same)
+            builtin.push_back(name);
+        else
+            ++edited;
+    }
+    return std::make_tuple(builtin, edited, custom);
+}
+
+// What telemetry.cpp asks the app.
 ui::telemetry::Config telemetry_config(App::State& s) {
     ui::telemetry::Config c;
     c.data_dir = data_dir();
     c.app_version = AGENTDESK_VERSION_STRING;
-    // window.rs 171-173 shipped_layouts(): herdr ships main and terminals; ours are named
-    // workspace and terminals (load_layouts).
+    // The layouts and themes AgentDesk ships; any other name counts as the person's own.
     c.shipped_layouts = {"workspace", "terminals"};
-    // settings.rs 80, 101: the presets and shipped themes; ours are the palettes.
-    for (const auto& p : kPalettes)
+    for (const auto& p : builtin_palettes())
         c.shipped_themes.emplace_back(p.id);
-    for (const auto& [name, pal] : herdr_presets())  // herdr's presets and shipped file
+    for (const auto& [name, pal] : preset_palettes())
         c.shipped_themes.emplace_back(std::string(kPresetPrefix) + name);
-    c.shipped_themes.emplace_back("atom-one-dark");
-    // mods.rs 281-299 kinds(): shipped ones as shipped (by name), shipped but edited, the
-    // person's own. Shipped: the example mods next to agent-ui.exe (write_example_mods); as
-    // shipped: the same mod.dll and mod.json bytes.
-    c.mod_kinds = [](const std::set<std::string>& names) {
-        wchar_t exe[MAX_PATH]{};
-        ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
-        const auto shipped = std::filesystem::path(exe).parent_path() / L"mods";
-        std::vector<std::string> builtin;
-        std::size_t edited = 0;
-        std::size_t custom = 0;
-        for (const auto& name : names) {
-            std::error_code ec;
-            const auto from = shipped / win::to_wide(name);
-            if (!std::filesystem::is_regular_file(from / L"mod.dll", ec)) {
-                ++custom;
-                continue;
-            }
-            const auto have = data_dir() / L"mods" / win::to_wide(name);
-            bool same = true;
-            for (const wchar_t* f : {L"mod.dll", L"mod.json"}) {
-                bool a_ok = false;
-                bool b_ok = false;
-                const std::string a = read_text_file(from / f, &a_ok);
-                const std::string b = read_text_file(have / f, &b_ok);
-                same = same && a_ok == b_ok && a == b;
-            }
-            if (same)
-                builtin.push_back(name);
-            else
-                ++edited;
-        }
-        return std::make_tuple(builtin, edited, custom);
-    };
-    // telemetry.rs 317-324: keys.json differs from the shipped one.
+    c.shipped_themes.emplace_back("atom-one-dark");  // the shipped theme file
+    c.mod_kinds = mod_kinds;
+    // keys.json differs from the shipped one.
     c.keys_custom = [] {
         bool ok = false;
         const std::string text = read_text_file(data_dir() / L"keys.json", &ok);
@@ -100,14 +97,14 @@ ui::telemetry::Config telemetry_config(App::State& s) {
 
 }  // namespace
 
-// window.rs 834-856: what telemetry.rs counts: how much is open, never what's in it.
+// What telemetry counts: how much is open, never what is in it.
 void observe(App::State& s) {
     if (!ui::telemetry::collecting())
         return;
     ui::telemetry::Observation o;
     o.foreground = s.window_focused;
-    // Every terminal reporting an agent. herdr names it by its 7501 `app`; agent-host does not
-    // pass that on, so it is what runs there (`claude`, `codex`), named by the same table.
+    // Every terminal reporting an agent, named by what runs there (`claude`, `codex`): agent-host
+    // does not pass the agent's own OSC 7501 name on.
     for (const auto& [id, v] : s.views_by_id) {
         if (v.agent_state == "Unknown" || v.lost)
             continue;
@@ -129,11 +126,84 @@ void observe(App::State& s) {
     ui::telemetry::observe(std::move(o));
 }
 
-// window.rs 5455-5459
+// A closed agent-host update error stays closed only while that same error is shown; a new
+// error, or no update and no error, forgets it.
 void reconcile_core_update_error(std::optional<std::string>& dismissed, const ui::updates::CoreInfo& core) {
     if ((core.error && dismissed != core.error) || (!core.updating && !core.error))
         dismissed.reset();
 }
+
+namespace {
+// ui.json kept the workspace's sidebar, panel and list sizes before the layout engine; they are
+// now its clicks in layouts\.state\workspace.json (seed_from_settings). Written once, then ui.json
+// forgets them so a later reload does not bring them back.
+void move_sizes_to_layout_state(App::State& s) {
+    const Settings d;
+    Settings& st = s.settings;
+    if (st.sidebar_width == d.sidebar_width && st.panel_width == d.panel_width &&
+        st.spaces_share == d.spaces_share && st.sidebar == d.sidebar)
+        return;
+    for (const auto& l : s.layouts)
+        if (l.name == "workspace")
+            save_layout_state(l);
+    st.sidebar_width = d.sidebar_width;
+    st.panel_width = d.panel_width;
+    st.spaces_share = d.spaces_share;
+    st.sidebar = d.sidebar;
+    save_settings(st);
+}
+
+// Files / Changes and git for a pane on another machine: a blocking call to that machine's
+// agent-host, made from a worker thread.
+RemoteCall remote_call(App::State* st) {
+    return [st](const std::string& machine, const std::string& method,
+                const Json& params) -> std::optional<Json> {
+        std::shared_ptr<ui::HostClient> h;
+        {
+            std::lock_guard lock(st->remotes_mutex);
+            for (const auto& r : st->remotes)
+                if (r.cfg.name == machine)
+                    h = r.host;
+        }
+        if (!h || !h->connected())
+            return std::nullopt;
+        auto done = std::make_shared<std::promise<std::optional<Json>>>();
+        auto result = done->get_future();
+        // git worktree add / remove may take minutes: 10 minutes for those, else 1.
+        const auto args = params.find("args");
+        const bool slow = method == "git.run" && args != params.end() && args->is_array() && !args->empty() &&
+                          (*args)[0] == "worktree";
+        const auto wait = std::chrono::seconds(slow ? 600 : 60);
+        h->call(
+            method, params,
+            [done](Json r, std::string error) {
+                done->set_value(error.empty() ? std::optional<Json>(std::move(r)) : std::nullopt);
+            },
+            wait);
+        if (result.wait_for(wait + std::chrono::seconds(5)) != std::future_status::ready)
+            return std::nullopt;
+        return result.get();
+    };
+}
+
+// The welcome on the first run (until it is finished or skipped), else What's new once after an
+// update. Neither in automated runs.
+void show_first_dialogs(App::State& s) {
+    if (s.config.automated)
+        return;
+    if (s.settings.welcomed.empty()) {
+        s.show_welcome = true;
+        s.settings.seen_version = AGENTDESK_VERSION_STRING;  // nothing is new on a first run
+        save_settings(s.settings);
+    } else if (s.settings.seen_version != AGENTDESK_VERSION_STRING) {
+        s.show_notes = true;
+        s.notes_kind = "whats_new";
+        s.settings.seen_version = AGENTDESK_VERSION_STRING;
+        save_settings(s.settings);
+    }
+}
+
+}  // namespace
 }  // namespace detail
 
 App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_unique<State>()) {
@@ -154,71 +224,16 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     start_remotes(*s_);
     write_example_mods();
     s_->layouts = load_layouts(s_->settings);
-    {
-        // ui.json kept the workspace's sidebar, panel and list sizes before this engine; they
-        // are now its clicks in layouts/.state/workspace.json (seed_from_settings). Written once,
-        // then ui.json forgets them so a later reload does not bring them back.
-        const Settings d;
-        Settings& st = s_->settings;
-        if (st.sidebar_width != d.sidebar_width || st.panel_width != d.panel_width ||
-            st.spaces_share != d.spaces_share || st.sidebar != d.sidebar) {
-            for (const auto& l : s_->layouts)
-                if (l.name == "workspace")
-                    save_layout_state(l);
-            st.sidebar_width = d.sidebar_width;
-            st.panel_width = d.panel_width;
-            st.spaces_share = d.spaces_share;
-            st.sidebar = d.sidebar;
-            save_settings(st);
-        }
-    }
-    // Files / Changes for a pane on another machine: ask that machine's agent-host.
-    s_->panels->remote = [st = s_.get()](const std::string& machine, const std::string& method,
-                                        const Json& params) -> std::optional<Json> {
-        std::shared_ptr<ui::HostClient> h;
-        {
-            std::lock_guard lock(st->remotes_mutex);
-            for (const auto& r : st->remotes)
-                if (r.cfg.name == machine)
-                    h = r.host;
-        }
-        if (!h || !h->connected())
-            return std::nullopt;
-        auto done = std::make_shared<std::promise<std::optional<Json>>>();
-        auto result = done->get_future();
-        // git worktree add/remove may take minutes (herdr worktree/main.js:205-207, 243).
-        const auto args = params.find("args");
-        const bool slow = method == "git.run" && args != params.end() && args->is_array() && !args->empty() &&
-                          (*args)[0] == "worktree";
-        const auto wait = std::chrono::seconds(slow ? 600 : 60);
-        h->call(
-            method, params,
-            [done](Json r, std::string error) {
-                done->set_value(error.empty() ? std::optional<Json>(std::move(r)) : std::nullopt);
-            },
-            wait);
-        if (result.wait_for(wait + std::chrono::seconds(5)) != std::future_status::ready)
-            return std::nullopt;
-        return result.get();
-    };
+    move_sizes_to_layout_state(*s_);
+    s_->panels->remote = remote_call(s_.get());
     s_->git.remote = s_->panels->remote;
     s_->mods = std::make_unique<ui::ModHost>(data_dir() / L"mods");
     s_->mods->load(s_->settings.mods_enabled);
-    // herdr main.rs 154-158: after an update, then the checker, then telemetry.
+    // A finished update first, then the update checker, then telemetry.
     ui::updates::after_update();
     ui::updates::start();
     ui::telemetry::start(telemetry_config(*s_), s_->settings.telemetry);
-    // herdr: the welcome opens on the first run (until it is finished or skipped).
-    if (s_->settings.welcomed.empty() && !s_->config.automated) {
-        s_->show_welcome = true;
-        s_->settings.seen_version = AGENTDESK_VERSION_STRING;  // nothing is new on a first run
-        save_settings(s_->settings);
-    } else if (s_->settings.seen_version != AGENTDESK_VERSION_STRING && !s_->config.automated) {
-        s_->show_notes = true;  // herdr: What's new once after an update
-        s_->notes_kind = "whats_new";
-        s_->settings.seen_version = AGENTDESK_VERSION_STRING;
-        save_settings(s_->settings);
-    }
+    show_first_dialogs(*s_);
 }
 namespace detail {
 void start_remotes(App::State& s) {
@@ -283,8 +298,8 @@ std::filesystem::path data_folder() {
     return data_dir();
 }
 
-// herdr main.rs 177-192 on_app_quit: telemetry's clean quit, then the waiting update goes in
-// place (not restarted for it).
+// The loop ended: telemetry's clean quit, then a downloaded update goes in place (AgentDesk is
+// not restarted for it).
 void App::on_quit() {
     ui::telemetry::quit();
     std::string error;
@@ -297,7 +312,7 @@ ui::HostClient& App::host() {
 }
 
 void App::load_fonts() {
-    s_->fonts = ui::load_fonts(s_->settings.font_size, 13.0f);  // herdr UI base 13, scaled by ui_scale()
+    s_->fonts = ui::load_fonts(s_->settings.font_size, 13.0f);  // design size; ui_scale() scales it
     ImGui::GetIO().FontDefault = s_->fonts.ui;
     apply_terminal_font(*s_);
     apply_ui_font(*s_);
@@ -350,12 +365,12 @@ long long App::next_wakeup_ms() const {
     if (!s_->toasts.empty())
         ms = std::min<long long>(ms, 250);
     if (s_->updates_asked)
-        ms = std::min<long long>(ms, 300);  // settings main.js 66: every 300 ms
+        ms = std::min<long long>(ms, 300);  // Settings polls the update check every 300 ms
     for (const auto& [id, v] : s_->views_by_id) {
         if (v.agent_state == "Working")
             ms = std::min<long long>(ms, 50);  // the working mark spins
     }
-    if (s_->layout().style == "win98")  // Herdr 98's clock, carets, badges, games and screens
+    if (s_->layout().style == "win98")  // AgentDesk 98's clock, carets, badges, games and screens
         ms = std::min<long long>(ms, s_->win98->wakeup_ms);
     return ms;
 }
