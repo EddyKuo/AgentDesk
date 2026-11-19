@@ -10437,8 +10437,9 @@ void draw_welcome(App::State& s) {
                           ImGuiWindowFlags_NoBackground);
         ImGui::PopStyleVar();
     }
+    // welcome/main.js 135-140 title(): 18 px semibold, then the paragraph (gap 6).
     auto title = [&](const char* t, const char* sub) {
-        ImGui::PushFont(s.fonts.ui_bold, 20);
+        ImGui::PushFont(s.fonts.ui_bold, 18);
         ImGui::TextWrapped("%s", t);
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(0, px(4)));
@@ -10447,10 +10448,15 @@ void draw_welcome(App::State& s) {
         ImGui::PopStyleColor();
         ImGui::Dummy(ImVec2(0, px(14)));
     };
+    // welcome/main.js 217-223 feature(): a 32 px tile (rounded 9, raised, a 1 px border) with the
+    // 16 px accent icon, gap 12, then the title (13.5 semibold) over the paragraph.
     auto feature = [&](const char* glyph, const char* head, const char* text) {
         const ImVec2 a = ImGui::GetCursorScreenPos();
-        draw_icon(s, ImGui::GetWindowDrawList(), glyph, fpx(16), ImVec2(a.x + px(10), a.y + px(10)), g_pal->focus);
-        ImGui::SetCursorScreenPos(ImVec2(a.x + px(32), a.y));
+        ImDrawList* fd = ImGui::GetWindowDrawList();
+        fd->AddRectFilled(a, ImVec2(a.x + px(32), a.y + px(32)), raised_color(), px(9));
+        fd->AddRect(a, ImVec2(a.x + px(32), a.y + px(32)), g_pal->border, px(9));
+        draw_icon(s, fd, glyph, fpx(16), ImVec2(a.x + px(16), a.y + px(16)), g_pal->focus);
+        ImGui::SetCursorScreenPos(ImVec2(a.x + px(32) + px(12), a.y));
         ImGui::BeginGroup();
         ImGui::PushFont(s.fonts.ui_medium, 13.5f);
         ImGui::TextUnformatted(head);
@@ -10494,13 +10500,25 @@ void draw_welcome(App::State& s) {
     auto gap = [&](float g) { ImGui::Dummy(ImVec2(0, std::max(0.0f, g - 2 * ImGui::GetStyle().ItemSpacing.y))); };
     bool changed = false;
     if (page == 0) {
+        // welcome/main.js 284-293 pageOne (Herdr -> AgentDesk, herdr-core -> agent-host). Its
+        // "Coming from herdr?" box (261-280) is for herdr's earlier app and is left out.
         title("AgentDesk runs your terminals in the background",
-              "Close the window and your agents keep working; open it again and everything is where you left it.");
-        feature(ui::icon::kLayers, "Spaces, tabs and panes", "A space per project; split it into the terminals you need.");
-        feature(ui::icon::kTerminal, "Agents report what they're doing",
-                "Claude Code and Codex tell AgentDesk when they work, finish or need you.");
-        feature(ui::icon::kChanges, "Files and Changes", "Look at what your agents changed, and commit it.");
-        ImGui::Dummy(ImVec2(0, px(6)));
+              "The terminals and agents you open here don't live in this window. They run in agent-host, a small "
+              "background program on your computer. Close AgentDesk, update it, or let it crash, and your agents "
+              "keep working. Open it again and everything is where you left it, as long as the computer is on.");
+        feature(ui::icon::kBot, "Agents tell you when they need you",
+                "A ring while one works, \xE2\x80\x9CNeeds you\xE2\x80\x9D when it asks something, a sound when it "
+                "finishes.");
+        feature(ui::icon::kMessages, "Agents can start helpers",
+                "They show up under the agent that started them. Click one to watch it.");
+        feature(ui::icon::kLayers, "Your other machines, in the same window",
+                "A server or a Mac mini runs its own agent-host, so its agents keep going even while this laptop "
+                "sleeps.");
+        {  // welcome/main.js 290: a 1 px border line before Appearance and Size.
+            const ImVec2 lp = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddLine(lp, ImVec2(lp.x + ImGui::GetContentRegionAvail().x, lp.y), g_pal->border);
+            ImGui::Dummy(ImVec2(0, px(10)));
+        }
         // herdr welcome page 1: Appearance System / Light / Dark.
         ImGui::TextDisabled("Appearance");
         ImGui::SameLine(px(120));
