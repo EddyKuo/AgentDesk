@@ -44,16 +44,15 @@ void feature(App::State& s, float w, const char* glyph, const char* head, const 
     ImGui::Dummy(ImVec2(0, px(10)));
 }
 
-// A paragraph: 13 px on 20 px lines, dim unless `color` is given, wrapped to `width` and drawn
-// at `p` (only measured when `draw` is false). Returns its height.
-float para_at(App::State& s, ImVec2 p, float width, const char* text, bool draw = true, ImU32 color = 0) {
+// A paragraph: 13 px dim text on 20 px lines, wrapped to `width` and drawn at `p` (only
+// measured when `draw` is false). Returns its height.
+float para_at(App::State& s, ImVec2 p, float width, const char* text, bool draw = true) {
     ImDrawList* d = ImGui::GetWindowDrawList();
     float y = p.y;
     for_each_wrapped_line(s.fonts.ui, fpx(13), text, width, [&](const char* a, const char* b) {
         if (draw) {
             const float th = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, a, b).y;
-            d->AddText(s.fonts.ui, fpx(13), ImVec2(p.x, y + (px(20) - th) * 0.5f),
-                       color != 0 ? color : g_pal->dim, a, b);
+            d->AddText(s.fonts.ui, fpx(13), ImVec2(p.x, y + (px(20) - th) * 0.5f), g_pal->dim, a, b);
         }
         y += px(20);
     });

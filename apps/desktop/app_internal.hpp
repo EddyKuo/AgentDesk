@@ -1153,9 +1153,9 @@ void pop_overlay_style();
 
 // How a dialog's title row shows Esc.
 enum class EscChip {
-    kButton,  // help/main.js 61, picker 250, machine-add 305: px 6, py 2, rounded 5, 11 px dim,
-              // no border; hover: background + foreground; a click closes
-    kPlain,   // prompt/main.js 42, confirm/main.js 42: plain 11 px dim text
+    kButton,  // a chip, 6 x 2 px padding, rounded 5, 11 px dim, no border; the hover colour and
+              // foreground under the mouse; a click closes
+    kPlain,   // plain 11 px dim text (prompts)
 };
 bool overlay_title(App::State& s, const char* title, EscChip esc = EscChip::kButton, float size = 15.0f);
 void worktree_title(App::State& s, const std::string& title, const std::string& right = {});
@@ -1190,9 +1190,9 @@ void settings_section(App::State& s, const char* title);
 void settings_row(App::State& s, const char* label, const char* note, float control_w, float control_h = -1.0f);
 void settings_row_done(App::State& s);
 
-// settings/main.js 196-222 stepper(): one bordered group (rounded 7, raised): 28 x 28 cells
-// with "−" and "+" (15 px muted; hover: background + foreground) around a 54 px value (13 px).
-// 112 x 30 with the border. Returns true when the value changed.
+// A stepper: one bordered group (rounded 7, raised) of 28 x 28 cells with "−" and "+" (15 px
+// dim; the hover colour and foreground under the mouse) around a 54 px value (13 px); 112 x 30
+// with the border. Returns true when the value changed.
 inline constexpr float kStepperW = 28 + 54 + 28 + 2;
 inline constexpr float kStepperH = 28 + 2;
 bool stepper(App::State& s, const char* id, float& v, float step, float lo, float hi, const char* fmt, float scale = 1.0f);
