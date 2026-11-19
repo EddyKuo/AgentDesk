@@ -1,3 +1,4 @@
+// The Named Pipe server (one thread per client, overlapped I/O) and client of protocol v1.
 #include "agentdesk/ipc/pipe.hpp"
 
 // sddl.h needs windows.h first (included through pipe.hpp).
@@ -363,6 +364,7 @@ std::unique_ptr<PipeClient> PipeClient::adopt(UniqueHandle read, UniqueHandle wr
 UniqueHandle open_raw_pipe(const std::wstring& name, std::chrono::milliseconds timeout) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
+        // SECURITY_IDENTIFICATION: the server may identify us but not act as us.
         HANDLE h =
             ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                           FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
@@ -371,7 +373,7 @@ UniqueHandle open_raw_pipe(const std::wstring& name, std::chrono::milliseconds t
             ULONG server_pid = 0;
             if (!::GetNamedPipeServerProcessId(pipe.get(), &server_pid) ||
                 !pid_belongs_to_current_user(server_pid))
-                return {};
+                return {};  // a pipe with our name owned by someone else: refuse it
             return pipe;
         }
         const DWORD err = ::GetLastError();
@@ -382,37 +384,15 @@ UniqueHandle open_raw_pipe(const std::wstring& name, std::chrono::milliseconds t
         if (err == ERROR_PIPE_BUSY)
             ::WaitNamedPipeW(name.c_str(), static_cast<DWORD>(std::min<long long>(left, 1000)));
         else
-            ::Sleep(static_cast<DWORD>(std::min<long long>(left, 50)));
+            ::Sleep(static_cast<DWORD>(std::min<long long>(left, 50)));  // not created yet
     }
 }
 
 std::unique_ptr<PipeClient> PipeClient::connect(const std::wstring& name, std::chrono::milliseconds timeout) {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    for (;;) {
-        // SECURITY_IDENTIFICATION: the server may identify us but not act as us.
-        HANDLE h =
-            ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
-                          FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
-        if (h != INVALID_HANDLE_VALUE) {
-            UniqueHandle pipe(h);
-            ULONG server_pid = 0;
-            if (!::GetNamedPipeServerProcessId(pipe.get(), &server_pid) ||
-                !pid_belongs_to_current_user(server_pid)) {
-                return nullptr;  // a pipe with our name owned by someone else: refuse it
-            }
-            return std::unique_ptr<PipeClient>(new PipeClient(std::move(pipe)));
-        }
-        const DWORD err = ::GetLastError();
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= deadline)
-            return nullptr;
-        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
-        if (err == ERROR_PIPE_BUSY) {
-            ::WaitNamedPipeW(name.c_str(), static_cast<DWORD>(std::min<long long>(left, 1000)));
-        } else {
-            ::Sleep(static_cast<DWORD>(std::min<long long>(left, 50)));  // not created yet
-        }
-    }
+    UniqueHandle pipe = open_raw_pipe(name, timeout);
+    if (!pipe)
+        return nullptr;
+    return std::unique_ptr<PipeClient>(new PipeClient(std::move(pipe)));
 }
 
 PipeClient::PipeClient(UniqueHandle pipe) : pipe_(std::move(pipe)), stop_event_(make_event(true)) {

@@ -1,5 +1,7 @@
 #pragma once
 
+// Finding or starting agent-host, and reaching a host on another machine through a command.
+
 #include <chrono>
 #include <filesystem>
 #include <memory>

@@ -1,3 +1,4 @@
+// IPC framing and protocol v1 messages: limits, malformed input, and the screen encoding.
 #include <random>
 #include <string>
 #include <vector>

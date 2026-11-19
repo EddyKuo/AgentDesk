@@ -1,3 +1,4 @@
+// OSC 7501 parsing and the per-terminal store of status records (lifetime rules of the spec).
 #include "agentdesk/terminal/program_status.hpp"
 
 #include <algorithm>
@@ -193,17 +194,9 @@ std::optional<std::string> decode_text(std::string_view encoded, std::size_t max
     return decoded;
 }
 
-}  // namespace
-
-std::optional<Osc7501Message> parse_osc7501(std::string_view body) {
-    if (body.size() > kMaxBodyBytes) {
-        return std::nullopt;
-    }
-    if (trim(body) == "?") {
-        return StatusQuery{};
-    }
-
-    // Repeated keys keep their last value; malformed pairs are skipped.
+// The body's key=value pairs, separated by ':'. Repeated keys keep their last value; malformed
+// pairs are skipped.
+std::map<std::string_view, std::string_view> parse_pairs(std::string_view body) {
     std::map<std::string_view, std::string_view> pairs;
     std::size_t start = 0;
     while (start <= body.size()) {
@@ -223,7 +216,20 @@ std::optional<Osc7501Message> parse_osc7501(std::string_view body) {
         }
         start = colon + 1;
     }
+    return pairs;
+}
 
+}  // namespace
+
+std::optional<Osc7501Message> parse_osc7501(std::string_view body) {
+    if (body.size() > kMaxBodyBytes) {
+        return std::nullopt;
+    }
+    if (trim(body) == "?") {
+        return StatusQuery{};
+    }
+
+    const auto pairs = parse_pairs(body);
     const auto state_it = pairs.find("state");
     if (state_it == pairs.end()) {
         return std::nullopt;

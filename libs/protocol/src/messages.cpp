@@ -1,3 +1,4 @@
+// Protocol v1 envelopes (request, response, event) and the screen encoding used on the wire.
 #include "agentdesk/protocol/messages.hpp"
 
 #include <array>

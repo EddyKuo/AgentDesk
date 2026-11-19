@@ -1,3 +1,4 @@
+// spawn_detached: agent-host outlives the program that started it.
 #include "agentdesk/platform/win/detached.hpp"
 
 #include "agentdesk/platform/win/command_line.hpp"
@@ -25,8 +26,8 @@ DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vecto
     PROCESS_INFORMATION pi{};
     constexpr DWORD kBase = DETACHED_PROCESS | CREATE_UNICODE_ENVIRONMENT;
     // Not in the program's own folder: Windows can't rename a folder that is a process's working
-    // directory, so an update could never be put in place (herdr update.rs 443-457 leaves the
-    // install folder for the home folder). The home folder, else the program's folder.
+    // directory, so an update could never be put in place. The home folder, else the program's
+    // folder.
     std::filesystem::path cwd = exe.parent_path();
     {
         wchar_t home[MAX_PATH]{};

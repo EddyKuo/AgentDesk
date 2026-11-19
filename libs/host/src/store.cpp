@@ -1,3 +1,4 @@
+// The host's JSON files (profiles, sessions): atomic writes, backups, and profile detection.
 #include "agentdesk/host/store.hpp"
 
 #include <windows.h>

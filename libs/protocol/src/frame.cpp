@@ -1,3 +1,4 @@
+// IPC framing: 4-byte little-endian length + UTF-8 payload, decoded incrementally.
 #include "agentdesk/protocol/frame.hpp"
 
 #include <stdexcept>

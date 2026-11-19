@@ -1,3 +1,4 @@
+// Connects to agent-host (starting it when allowed) or to a remote host over ssh-like stdio.
 #include "agentdesk/ipc/host_launcher.hpp"
 
 #include <atomic>
@@ -10,6 +11,23 @@
 #include "agentdesk/platform/win/job.hpp"
 
 namespace agentdesk::ipc {
+
+namespace {
+
+protocol::Json hello_params() {
+    return {{"version", protocol::kProtocolVersion}, {"client", "agentdesk"}};
+}
+
+// What the host said about itself in its hello reply.
+void take_hello(HostConnection& out, const protocol::Json& result) {
+    out.host_instance_id = result.value("host_instance_id", "");
+    out.host_version = result.value("host_version", "");
+    for (const auto& s : result.value("succeeds", protocol::Json::array()))
+        if (s.is_string())
+            out.host_succeeds.push_back(s.get<std::string>());
+}
+
+}  // namespace
 
 std::filesystem::path sibling_executable(const wchar_t* file_name) {
     wchar_t buf[MAX_PATH]{};
@@ -32,17 +50,12 @@ HostConnection connect_or_start_host(const std::filesystem::path& host_exe, cons
     }
     if (!out.client)
         return out;
-    const auto hello =
-        out.client->call("hello", {{"version", protocol::kProtocolVersion}, {"client", "agentdesk"}});
+    const auto hello = out.client->call("hello", hello_params());
     if (!hello || hello->error) {
         out.client.reset();
         return out;
     }
-    out.host_instance_id = hello->result->value("host_instance_id", "");
-    out.host_version = hello->result->value("host_version", "");
-    for (const auto& s : hello->result->value("succeeds", protocol::Json::array()))
-        if (s.is_string())
-            out.host_succeeds.push_back(s.get<std::string>());
+    take_hello(out, *hello->result);
     return out;
 }
 
@@ -150,8 +163,7 @@ HostConnection connect_over_command(const std::vector<std::wstring>& argv,
     });
 
     out.client = PipeClient::adopt(std::move(from_child_ours), std::move(to_child_ours));
-    const auto hello = out.client->call(
-        "hello", {{"version", protocol::kProtocolVersion}, {"client", "agentdesk"}}, timeout);
+    const auto hello = out.client->call("hello", hello_params(), timeout);
     if (!hello || hello->error) {
         out.client->close();
         out.client.reset();
@@ -166,11 +178,7 @@ HostConnection connect_over_command(const std::vector<std::wstring>& argv,
                                 : why;
         return out;
     }
-    out.host_instance_id = hello->result->value("host_instance_id", "");
-    out.host_version = hello->result->value("host_version", "");
-    for (const auto& s : hello->result->value("succeeds", protocol::Json::array()))
-        if (s.is_string())
-            out.host_succeeds.push_back(s.get<std::string>());
+    take_hello(out, *hello->result);
     out.transport = t;
     return out;
 }

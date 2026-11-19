@@ -1,5 +1,7 @@
 #pragma once
 
+// A Job Object that ends every process in it when its last handle closes.
+
 #include <windows.h>
 
 #include "agentdesk/platform/win/unique_handle.hpp"

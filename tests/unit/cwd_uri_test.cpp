@@ -1,3 +1,4 @@
+// OSC 7 file:// URIs to Windows paths, and the URIs that must be refused.
 #include "agentdesk/terminal/cwd_uri.hpp"
 
 #include <gtest/gtest.h>

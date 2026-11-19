@@ -1,5 +1,8 @@
 #pragma once
 
+// SessionManager: the host side of IPC protocol v1. Owns the session table, answers requests,
+// fans screen updates out to clients and persists session metadata.
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -29,7 +32,7 @@ struct HostConfig {
     std::string host_version;           // agent-host's version, said in hello (Settings > Updates)
     std::function<void()> on_shutdown;  // host.shutdown accepted
     std::chrono::milliseconds request_dedupe_window{std::chrono::minutes(10)};  // design doc 3.7
-    // ---- self-update (design doc 7.4 OQ-09; herdr src/update.rs 236-262, `hc update`)
+    // ---- self-update (design doc 7.4 OQ-09, `agentctl update`)
     // Instance ids whose sessions this host took over, newest last (said in hello as
     // "succeeds", so a client keeps those sessions instead of calling them Lost).
     std::vector<std::string> succeeds;
@@ -97,8 +100,8 @@ private:
         std::optional<std::uint64_t> controller;
         std::map<std::uint64_t, Subscriber> subscribers;
         std::string last_process_state;
-        // First message for an agent (session.create "task"): sent once it reports Idle, or
-        // after kTaskFallback when it reports nothing.
+        // First message for an agent (session.create "task"): sent once it reports Idle, or at
+        // task_after when it reports nothing (see kTaskFallback in session_manager.cpp).
         std::string pending_task;
         std::chrono::steady_clock::time_point task_after{};
         // Reports from sub-agents, delivered when this agent is not busy (session.report).
@@ -139,6 +142,8 @@ private:
     // Resolves "session" (UUID or unique name). Sets `error` on failure. Takes mutex_.
     ManagedPtr resolve(const protocol::Request& req, std::optional<protocol::Response>& error);
     protocol::Json describe(const Managed& m) const;  // mutex_ held
+    // The callbacks a session `id` reports through (fanout, on_session_info).
+    SessionListener listener_for(const std::string& id);
     void fanout(const std::string& id, std::shared_ptr<const terminal::ScreenSnapshot> snap);
     void on_session_info(const std::string& id, const SessionInfo& info);
     // Sends a full snapshot as chunked "screen.snapshot" events. mutex_ held.
@@ -159,7 +164,8 @@ private:
     std::map<std::string, Dedupe> dedupe_;
     std::uint64_t next_snapshot_id_ = 1;
     // Shared UI document (spaces, tabs, splits): opaque to the host, newest write wins, every
-    // watching client gets "ui.state" when it changes (herdr keeps its layout in the core too).
+    // watching client gets "ui.state" when it changes. It lives in the host so that every window
+    // and every reconnect sees the same layout.
     nlohmann::json ui_state_ = nlohmann::json::object();
     std::uint64_t ui_state_rev_ = 0;
     bool ui_state_loaded_ = false;

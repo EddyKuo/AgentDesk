@@ -1,5 +1,7 @@
 #pragma once
 
+// Windows command-line quoting (CommandLineToArgvW rules) and checks on launchable files.
+
 #include <string>
 #include <string_view>
 #include <vector>

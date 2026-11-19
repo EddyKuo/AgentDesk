@@ -1,3 +1,4 @@
+// argv quoting must round-trip through CommandLineToArgvW; batch files are recognised.
 #include "agentdesk/platform/win/command_line.hpp"
 
 // <windows.h> (category 1 in .clang-format) must precede <shellapi.h>.

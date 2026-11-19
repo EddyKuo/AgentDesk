@@ -1,3 +1,4 @@
+// Command-line quoting for CreateProcessW and the checks that keep batch files out.
 #include "agentdesk/platform/win/command_line.hpp"
 
 #include <windows.h>

@@ -194,7 +194,7 @@ TEST_P(ConPtyCompareTest, KeyboardBytesArriveUnchanged) {
     EXPECT_TRUE(host.process().wait_exit(10s).has_value());
 }
 
-// herdr src/win32_keys.rs: ConPTY asks its viewer for win32-input-mode; the engine notices and
+// ConPTY asks its viewer for win32-input-mode; the engine notices and
 // sends Shift+Enter as win32 key events, which ConPTY turns back into Enter for the program.
 TEST_P(ConPtyCompareTest, Win32InputModeShiftEnterReachesProgram) {
     ProbeHost host(api_, L"echo");

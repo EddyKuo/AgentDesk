@@ -1,5 +1,5 @@
-// agent-host's self-update (design doc 7.4 OQ-09; herdr src/update.rs 236: "terminals keep
-// running"): the pieces that move a live terminal to another owner.
+// agent-host's self-update (design doc 7.4 OQ-09; terminals keep running): the pieces that move
+// a live terminal to another owner.
 #include <windows.h>
 
 #include <algorithm>

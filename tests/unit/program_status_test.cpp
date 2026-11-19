@@ -1,3 +1,4 @@
+// OSC 7501 parsing (spec Revision 0.4) and the status record lifetime rules.
 #include "agentdesk/terminal/program_status.hpp"
 
 #include <string>

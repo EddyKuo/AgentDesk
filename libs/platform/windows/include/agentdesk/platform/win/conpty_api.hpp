@@ -1,5 +1,7 @@
 #pragma once
 
+// The ConPTY entry points, loaded from the bundled conpty.dll when present, else kernel32.
+
 #include <windows.h>
 
 #include <filesystem>
