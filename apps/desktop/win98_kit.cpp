@@ -1,28 +1,15 @@
-// Herdr 98, part 1: the drawing kit, the shared values, the popup menus and the overlay windows.
-// Ported from herdr-app defaults/mods/win98 (commit 321c9a8, Apache-2.0): kit.js, menu.js; herdr's
-// overlays (herdr.d.ts 395-425). Included by app.cpp inside its anonymous namespace, after
-// App::State; uses app.cpp's helpers (run_command, create_session, program_info, ...).
-//
-// Pixels: kit.js 4-6 draws in whole Win98 pixels, u(n) = n * scale (Small Fonts 1, Large 2) at
-// the display's scale; herdr's zoom does not change them. Layout px (padding, gaps) are px().
+// AgentDesk 98 drawing kit: shared values, sounds, fonts, text, bevels, icons, buttons, title
+// bars and popup menus.
+#include "win98_internal.hpp"
 
-namespace w98 {
-
-using namespace ::agentdesk::desktop::w98state;
-namespace k98 = agentdesk::ui::win98;
-namespace C = agentdesk::ui::win98::color;
-using k98::Bevel;
-using MenuItems = std::vector<MenuItem>;
-
-void open_dialog(App::State& s, Dialog d);
-void command(App::State& s, const std::string& cmd);
-void sfx(App::State& s, const std::string& name);
+namespace agentdesk::desktop {
+namespace detail::w98 {
 
 W98& st(App::State& s) {
     return *s.win98;
 }
 
-ImU32 rgb(std::uint32_t c, int a = 255) {
+ImU32 rgb(std::uint32_t c, int a) {
     return IM_COL32((c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff, a);
 }
 
@@ -67,11 +54,14 @@ k98::DateTime local_now() {
     return d;
 }
 
+namespace {
 // ---------------------------------------------------------------- shared (herdr shared(), persisted)
 
 std::filesystem::path shared_file() {
     return data_dir() / L"win98.json";
 }
+
+}  // namespace
 
 const Json& shared(App::State& s, const std::string& key) {
     W98& w = st(s);
@@ -147,6 +137,7 @@ void set_app(App::State& s, const std::string& name, const std::string& state) {
     set_shared(s, "win98.apps", a);
 }
 
+namespace {
 // ---------------------------------------------------------------- sounds (kit.js 404-413)
 
 void play_file(const std::filesystem::path& file) {
@@ -160,6 +151,8 @@ void play_file(const std::filesystem::path& file) {
         }
     }).detach();
 }
+
+}  // namespace
 
 // Plays a Herdr 98 sound unless sounds are off (settings, or the speaker in the tray).
 void sfx(App::State& s, const std::string& name) {
@@ -221,19 +214,19 @@ ImFont* face(App::State& s, bool bold) {
     return bold ? st(s).bold : st(s).font;
 }
 
-float text_w(App::State& s, const std::string& t, bool bold = false, float size = 11) {
+float text_w(App::State& s, const std::string& t, bool bold, float size) {
     return face(s, bold)->CalcTextSizeA(U(s, size), FLT_MAX, 0, t.c_str()).x;
 }
 
 // The font's baseline in a line box of `line` Win98 px (CSS centers the text in its line).
-float text_top(App::State& s, float top, float size = 11, float line = 13) {
+float text_top(App::State& s, float top, float size, float line) {
     return snap(top + (U(s, line) - U(s, size)) * 0.5f);
 }
 
 // One line of text in a line box of `line` px at (x, top). "&File" underlines the F unless
 // noAccess (kit.js 56-71). Returns its width.
 float label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col,
-            bool bold = false, float size = 11, float line = 13, bool access = true, ImFont* font = nullptr) {
+            bool bold, float size, float line, bool access, ImFont* font) {
     ImFont* f = font != nullptr ? font : face(s, bold);
     const float px_size = U(s, size);
     const float y = text_top(s, top, size, line);
@@ -256,6 +249,7 @@ float label(App::State& s, ImDrawList* dl, float x, float top, const std::string
     return f->CalcTextSizeA(px_size, FLT_MAX, 0, shown.c_str()).x;
 }
 
+namespace {
 // Text read bottom to top (the Start menu's banner): laid out level from (x, bottom), then turned
 // a quarter left about that point, its top toward x. Returns its length.
 float label_up(App::State& s, ImDrawList* dl, float x, float bottom, const std::string& text, ImU32 col, bool bold,
@@ -271,16 +265,18 @@ float label_up(App::State& s, ImDrawList* dl, float x, float bottom, const std::
     return w;
 }
 
+}  // namespace
+
 // A truncated line (GPUI truncate: an ellipsis).
 float label_clipped(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col,
-                    float max_w, bool bold = false) {
+                    float max_w, bool bold) {
     return text_clipped(dl, face(s, bold), U(s, 11), ImVec2(snap(x), text_top(s, top)), col, text, max_w);
 }
 
 // The text's lines (dialog.js 40-44: one per "\n", an empty one keeps its height), wrapped at
 // `width` as GPUI wraps a div's text.
-std::vector<std::string> wrap(App::State& s, const std::string& text, float width, bool bold = false,
-                              float size = 11) {
+std::vector<std::string> wrap(App::State& s, const std::string& text, float width, bool bold,
+                              float size) {
     std::vector<std::string> out;
     std::stringstream in(text);
     for (std::string para; std::getline(in, para, '\n');) {
@@ -333,7 +329,7 @@ std::vector<std::string> wrap(App::State& s, const std::string& text, float widt
 
 // Draws lines from the top; returns the height (13 px each).
 float lines(App::State& s, ImDrawList* dl, float x, float top, const std::vector<std::string>& ls, ImU32 col,
-            bool bold = false) {
+            bool bold) {
     float y = top;
     for (const auto& l : ls) {
         label(s, dl, x, y, l, col, bold, 11, 13, false);
@@ -341,21 +337,6 @@ float lines(App::State& s, ImDrawList* dl, float x, float top, const std::vector
     }
     return y - top;
 }
-
-// ---------------------------------------------------------------- bevels (kit.js 82-137)
-
-struct Box {
-    float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-    [[nodiscard]] float w() const { return x1 - x0; }
-    [[nodiscard]] float h() const { return y1 - y0; }
-    [[nodiscard]] ImVec2 a() const { return ImVec2(x0, y0); }
-    [[nodiscard]] ImVec2 b() const { return ImVec2(x1, y1); }
-    [[nodiscard]] Box inset(float t, float r, float b2, float l) const {
-        return {x0 + l, y0 + t, x1 - r, y1 - b2};
-    }
-    [[nodiscard]] Box inset(float v) const { return inset(v, v, v, v); }
-    [[nodiscard]] bool contains(ImVec2 p) const { return p.x >= x0 && p.x < x1 && p.y >= y0 && p.y < y1; }
-};
 
 Box box(ImVec2 a, ImVec2 size) {
     return {snap(a.x), snap(a.y), snap(a.x + size.x), snap(a.y + size.y)};
@@ -367,7 +348,7 @@ void fill(ImDrawList* dl, Box b, ImU32 c) {
 
 // One bevel: per layer, outside in, the right and bottom edges in one color (the full height and
 // width) and the top and left edges in the other. Returns the inside.
-Box bevel(App::State& s, ImDrawList* dl, Box b, Bevel kind, std::optional<ImU32> bg = std::nullopt) {
+Box bevel(App::State& s, ImDrawList* dl, Box b, Bevel kind, std::optional<ImU32> bg) {
     const float o = one(s);
     for (const auto& l : k98::bevel_layers(kind)) {
         dl->AddRectFilled(ImVec2(b.x0, b.y0), ImVec2(b.x1 - o, b.y0 + o), rgb(l.tl));
@@ -394,7 +375,7 @@ void etch(App::State& s, ImDrawList* dl, float x, float y, float len, bool verti
 }
 
 // kit.js 192-195: a left-to-right gradient (angle 90), or top to bottom (180).
-void gradient(ImDrawList* dl, Box b, ImU32 from, ImU32 to, bool down = false) {
+void gradient(ImDrawList* dl, Box b, ImU32 from, ImU32 to, bool down) {
     if (down)
         dl->AddRectFilledMultiColor(b.a(), b.b(), from, from, to, to);
     else
@@ -416,25 +397,26 @@ void dither(App::State& s, ImDrawList* dl, Box b) {
 // ---------------------------------------------------------------- icons (kit.js 202-225)
 
 void image(App::State& s, ImDrawList* dl, const std::filesystem::path& file, Box b,
-           ImU32 tint = IM_COL32_WHITE, bool mono = false) {
+           ImU32 tint, bool mono) {
     const auto img = st(s).images.svg(file, static_cast<int>(b.w()), static_cast<int>(b.h()), mono);
     if (img.ok())
         dl->AddImage(img.tex, b.a(), b.b(), ImVec2(0, 0), ImVec2(1, 1), tint);
 }
 
-void picture(App::State& s, ImDrawList* dl, const std::string& rel, Box b, ImU32 tint = IM_COL32_WHITE) {
+void picture(App::State& s, ImDrawList* dl, const std::string& rel, Box b, ImU32 tint) {
     const auto img = st(s).images.picture(root_dir() / win::to_wide(rel));
     if (img.ok())
         dl->AddImage(img.tex, b.a(), b.b(), ImVec2(0, 0), ImVec2(1, 1), tint);
 }
 
 // A pixel-art icon: 32 px art (name.svg) for big sizes, 16 px (name-sm.svg), 9 px badges.
-void icon(App::State& s, ImDrawList* dl, const std::string& name, float size, ImVec2 at, int alpha = 255) {
+void icon(App::State& s, ImDrawList* dl, const std::string& name, float size, ImVec2 at, int alpha) {
     const std::string file = size >= 24 ? name : size >= 12 ? name + "-sm" : name + "-xs";
     image(s, dl, root_dir() / L"icons" / win::to_wide(file + ".svg"), box(at, ImVec2(U(s, size), U(s, size))),
           IM_COL32(255, 255, 255, alpha));
 }
 
+namespace {
 // AgentDesk 98's name: the Start icon, "AgentDesk" and an orange "98" (the Welcome header's), at
 // the given size, starting at x; returns its width. measure: only the width.
 float brand_name(App::State& s, ImDrawList* dl, float x, float top, float size, bool measure = false) {
@@ -452,6 +434,8 @@ float brand_name(App::State& s, ImDrawList* dl, float x, float top, float size, 
     label(s, dl, x, ty, "98", rgb(0xd07000), false, size, line, false);
     return w;
 }
+
+}  // namespace
 
 // The About box's picture (art/generate.ts 120: white to #a4d2ee, the name at 32).
 void brand_header(App::State& s, ImDrawList* dl, Box b) {
@@ -473,7 +457,7 @@ void glyph(App::State& s, ImDrawList* dl, const std::string& name, float w, floa
 }
 
 // kit.js 208-225 programIcon: from the app's program table (herdr programs.json, programs_of in
-// app.cpp); shells, the generic shell entry and programs without an icon are MS-DOS. A tinted
+// programs.cpp); shells, the generic shell entry and programs without an icon are MS-DOS. A tinted
 // glyph sits on its tile (navy without one), 4 px smaller, in its color (white without one).
 void program_icon(App::State& s, ImDrawList* dl, const ui::Program& p, float size, ImVec2 at) {
     if (p.shell || p.key == "shell" || p.icon.empty()) {
@@ -490,33 +474,12 @@ void program_icon(App::State& s, ImDrawList* dl, const ui::Program& p, float siz
     }
 }
 
-// ---------------------------------------------------------------- buttons (kit.js 139-174)
-
-struct ButtonOpts {
-    bool def = false;      // the thick outline
-    bool toggled = false;  // stays in
-    bool disabled = false;
-    float pad_y = 0, pad_x = 4;
-    bool on_down = false;  // acts on the press (onDown), not the click
-    const char* tooltip = nullptr;
-    ImU32 bg = 0;  // 0: the face color
-};
-
-struct Pressed {
-    bool clicked = false;  // released over it (or pressed, with on_down)
-    bool right = false;    // right button down on it
-    bool hovered = false;
-    bool held = false;
-    bool double_click = false;
-    Box content;  // where its face goes (moved 1 px while held)
-};
-
 // Some control was under the pointer (reset by the caller; a focused terminal keeps an ImGui item
 // active, which makes ImGui::IsAnyItemHovered() always true).
 bool g_area_hovered = false;
 
 // The press handling of an area: an invisible ImGui button.
-Pressed area(const char* id, Box b, bool on_down = false) {
+Pressed area(const char* id, Box b, bool on_down) {
     Pressed p;
     ImGui::SetCursorScreenPos(b.a());
     const bool released = ImGui::InvisibleButton(id, ImVec2(std::max(1.0f, b.w()), std::max(1.0f, b.h())),
@@ -532,7 +495,7 @@ Pressed area(const char* id, Box b, bool on_down = false) {
     return p;
 }
 
-Pressed button(App::State& s, ImDrawList* dl, const char* id, Box b, const ButtonOpts& o = {}) {
+Pressed button(App::State& s, ImDrawList* dl, const char* id, Box b, const ButtonOpts& o) {
     Pressed p = o.disabled ? Pressed{} : area(id, b, o.on_down);
     if (o.disabled) {
         ImGui::SetCursorScreenPos(b.a());
@@ -561,7 +524,7 @@ Pressed button(App::State& s, ImDrawList* dl, const char* id, Box b, const Butto
 
 // A push button with a label, centered (kit.js 150-151).
 Pressed text_button(App::State& s, ImDrawList* dl, const char* id, Box b, const std::string& text,
-                    ButtonOpts o = {}, bool bold = false) {
+                    ButtonOpts o, bool bold) {
     Pressed p = button(s, dl, id, b, o);
     const float tw = text_w(s, k98::plain(text), bold);
     label(s, dl, p.content.x0 + (p.content.w() - tw) * 0.5f, p.content.y0 + (p.content.h() - U(s, 13)) * 0.5f,
@@ -569,6 +532,7 @@ Pressed text_button(App::State& s, ImDrawList* dl, const char* id, Box b, const 
     return p;
 }
 
+namespace {
 // kit.js 229-239: a title bar's little button, 16 x 14, its glyph 8 x 7.
 bool control(App::State& s, ImDrawList* dl, const char* id, const std::string& kind, ImVec2 at,
              const char* tip) {
@@ -589,18 +553,7 @@ bool control(App::State& s, ImDrawList* dl, const char* id, const std::string& k
     return p.clicked;
 }
 
-// ---------------------------------------------------------------- title bars (kit.js 241-289)
-
-struct Control {
-    std::string kind;
-    std::function<void()> fn;
-    const char* tip = nullptr;
-};
-struct TitleEvents {
-    bool click = false;
-    bool double_click = false;
-    bool right = false;
-};
+}  // namespace
 
 // The bar: pl 3, pr 2, gap 3; the gradient (navy to blue when active, grays when not); the icon,
 // the bold title (truncated), the buttons (close 2 px apart from the others).
@@ -644,14 +597,15 @@ TitleEvents title_bar(App::State& s, ImDrawList* dl, const char* id, Box b, cons
 }
 
 // kit.js 310-318: a sunken white field and a status bar panel.
-Box field(App::State& s, ImDrawList* dl, Box b, float pad_y = 2, float pad_x = 3, ImU32 bg = 0) {
+Box field(App::State& s, ImDrawList* dl, Box b, float pad_y, float pad_x, ImU32 bg) {
     return bevel(s, dl, b, Bevel::kField, bg != 0 ? bg : rgb(C::kWhite))
         .inset(U(s, pad_y), U(s, pad_x), U(s, pad_y), U(s, pad_x));
 }
-Box well(App::State& s, ImDrawList* dl, Box b, float pad_y = 1, float pad_x = 3) {
+Box well(App::State& s, ImDrawList* dl, Box b, float pad_y, float pad_x) {
     return bevel(s, dl, b, Bevel::kWell).inset(U(s, pad_y), U(s, pad_x), U(s, pad_y), U(s, pad_x));
 }
 
+namespace {
 // ---------------------------------------------------------------- menus (menu.js, kit.js 322-371)
 
 Menu* find_menu(App::State& s, int id) {
@@ -661,11 +615,13 @@ Menu* find_menu(App::State& s, int id) {
     return nullptr;
 }
 
+}  // namespace
+
 // kit.js 356-371: opens a popup menu at `at` (the pointer when not given), or above a box (the
 // Start menu over its button). Returns its id.
-int open_menu(App::State& s, MenuItems items, std::optional<ImVec2> at, bool start = false,
-              std::string owner = {}, std::vector<int> parents = {},
-              std::optional<Box> above = std::nullopt) {
+int open_menu(App::State& s, MenuItems items, std::optional<ImVec2> at, bool start,
+              std::string owner, std::vector<int> parents,
+              std::optional<Box> above) {
     W98& w = st(s);
     std::vector<k98::MenuRowText> rows;
     for (const auto& it : items)
@@ -696,6 +652,7 @@ int open_menu(App::State& s, MenuItems items, std::optional<ImVec2> at, bool sta
     return w.menus.back().id;
 }
 
+namespace {
 void release_owner(App::State& s, const Menu& m) {
     if (!m.owner.empty() && shared_str(s, "win98.menu.owner") == m.owner)
         set_shared(s, "win98.menu.owner", nullptr);
@@ -718,6 +675,8 @@ void close_tree(App::State& s, int id) {
         }
 }
 
+}  // namespace
+
 // menu.js 261-268: a choice closes the whole chain.
 void close_all_menus(App::State& s) {
     W98& w = st(s);
@@ -728,6 +687,7 @@ void close_all_menus(App::State& s) {
         set_shared(s, "win98.start", nullptr);
 }
 
+namespace {
 // menu.js 277-290: a submenu to the right of its row (at the pointer when opened by a key).
 void open_sub(App::State& s, int menu_id, int i, std::optional<Box> row) {
     Menu* m = find_menu(s, menu_id);
@@ -910,6 +870,8 @@ void menu_row(App::State& s, ImDrawList* dl, int menu_id, int i, Box r, bool sta
             choose(s, it);
     }
 }
+
+}  // namespace
 
 // Puts a Herdr 98 window above the others, unless one of AgentDesk's own dialogs (an ImGui popup:
 // Settings, the palette) is open over everything.
@@ -1105,5 +1067,6 @@ void open_dialog(App::State& s, Dialog d) {
     win->dialog = std::make_unique<Dialog>(std::move(d));
     open_window(s, std::move(win));
 }
+}  // namespace detail::w98
 
-}  // namespace w98
+}  // namespace agentdesk::desktop

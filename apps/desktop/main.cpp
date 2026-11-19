@@ -1,7 +1,8 @@
 // agent-ui.exe: Win32 + DX11 + Dear ImGui front end of agent-host.exe (design doc 4).
 // The UI holds no process or ConPTY: every session lives in the host. Closing the window only
 // detaches; "Exit and stop all sessions" is the explicit way to end the host (design doc 4.3).
-// This file is the platform shell; the window contents are in app.cpp.
+// This file is the platform shell; the window contents are in app.cpp and the files that share
+// app_internal.hpp.
 #include <functional>
 #include <d3d11.h>
 #include <dxgi1_2.h>

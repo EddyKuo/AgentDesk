@@ -1,7 +1,37 @@
-agentdesk_executable(agent-ui WIN32 main.cpp app.cpp agent-ui.manifest)
+agentdesk_executable(agent-ui WIN32
+    main.cpp
+    app.cpp
+    chrome.cpp
+    code_preview.cpp
+    commands.cpp
+    files_changes.cpp
+    frame.cpp
+    git_cache.cpp
+    layouts.cpp
+    machine_add.cpp
+    notes.cpp
+    notices.cpp
+    overlays.cpp
+    panes.cpp
+    programs.cpp
+    sessions.cpp
+    settings_dialog.cpp
+    settings_pages.cpp
+    settings_store.cpp
+    side_panels.cpp
+    sidebar.cpp
+    tab_bar.cpp
+    terminals_layout.cpp
+    themes.cpp
+    welcome.cpp
+    win98_chrome.cpp
+    win98_desktop.cpp
+    win98_dialogs.cpp
+    win98_games.cpp
+    win98_kit.cpp
+    worktrees.cpp
+    agent-ui.manifest)
 target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc d3d11 dxgi dwmapi dbghelp winmm imm32 shell32 nlohmann_json::nlohmann_json)
-# app.cpp (with the Herdr 98 .inl files) passes the COFF section limit in Debug.
-target_compile_options(agent-ui PRIVATE /bigobj)
 # The UI starts agent-host.exe from its own directory (design doc 2.2).
 add_dependencies(agent-ui agent-host agentctl)
 # Bundled fonts (OFL / MIT, third_party/fonts/README.agentdesk.md): fonts\ next to agent-ui.exe;
@@ -14,7 +44,7 @@ add_custom_command(TARGET agent-ui POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets/win98" "$<TARGET_FILE_DIR:agent-ui>/win98"
     # The source notes stay in the repository; the app ships the files and their licenses.
     COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:agent-ui>/win98/README.herdr.md" "$<TARGET_FILE_DIR:agent-ui>/win98/README.agentdesk.md" "$<TARGET_FILE_DIR:agent-ui>/fonts/README.agentdesk.md"
-    # AgentDesk 98 draws its name itself (win98_kit.inl brand_*): not the pictures that say Herdr.
+    # AgentDesk 98 draws its name itself (win98_kit.cpp brand_*): not the pictures that say Herdr.
     COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:agent-ui>/win98/img/splash.png" "$<TARGET_FILE_DIR:agent-ui>/win98/img/about.png" "$<TARGET_FILE_DIR:agent-ui>/win98/img/banner.png" "$<TARGET_FILE_DIR:agent-ui>/win98/img/banner@2x.png"
     # herdr's program table and icons (defaults/programs.json, defaults/icons): programs\.
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/programs" "$<TARGET_FILE_DIR:agent-ui>/programs"
