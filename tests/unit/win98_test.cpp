@@ -1,5 +1,6 @@
-// Herdr 98's rules (herdr-app defaults/mods/win98: kit.js, taskbar.js, dialog.js, mines.js,
-// sol.js) as ported to agentdesk::ui::win98.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
+// Tests for the win98 layout's logic (agentdesk::ui::win98): pixels, menus, paths, clock texts,
+// floats, Mines and Solitaire.
 #include "agentdesk/ui/win98.hpp"
 
 #include <gtest/gtest.h>
@@ -8,12 +9,12 @@ using namespace agentdesk::ui::win98;
 
 namespace {
 
-// A fixed Math.random: always the same value.
+// A fixed random source: always the same value.
 Mines::Random fixed(double v) {
     return [v] { return v; };
 }
 
-// A repeatable Math.random.
+// A repeatable random source.
 Mines::Random lcg(unsigned seed) {
     return [state = seed]() mutable {
         state = state * 1664525u + 1013904223u;
@@ -33,7 +34,6 @@ unsigned playing_seed() {
 
 }  // namespace
 
-// kit.js 84-95.
 TEST(Win98Kit, BevelLayersFromOutsideIn) {
     const auto raised = bevel_layers(Bevel::kRaised);
     ASSERT_EQ(raised.size(), 2u);
@@ -48,7 +48,6 @@ TEST(Win98Kit, BevelLayersFromOutsideIn) {
     EXPECT_EQ(window[1].tl, color::kHi);
 }
 
-// kit.js 40-51, 451-452.
 TEST(Win98Kit, PixelsAndScale) {
     EXPECT_EQ(scale_of(2), 2);
     EXPECT_EQ(scale_of(1), 1);
@@ -61,7 +60,6 @@ TEST(Win98Kit, PixelsAndScale) {
     EXPECT_FLOAT_EQ(terminal_font_px(2, 2.0f), 16.0f);  // 32 px on screen at zoom 2
 }
 
-// kit.js 55-75, menu.js 326-327.
 TEST(Win98Kit, AccessKeys) {
     EXPECT_EQ(access_index("&File"), 0);
     EXPECT_EQ(access_index("Sh&ut Down..."), 2);
@@ -73,7 +71,6 @@ TEST(Win98Kit, AccessKeys) {
     EXPECT_FALSE(access_matches("S&ettings", 's'));
 }
 
-// kit.js 326-344.
 TEST(Win98Kit, MenuSize) {
     // A popup: 28 + longest * 6 + (shortcuts: keys * 6 + 24) + 20, at least 120; rows 18, seps 9,
     // the frame 3 above and below.
@@ -88,7 +85,6 @@ TEST(Win98Kit, MenuSize) {
     EXPECT_FLOAT_EQ(dialog_width("nope"), 340.0f);
 }
 
-// kit.js 431-437, taskbar.js 61-65, dialog.js 224-227.
 TEST(Win98Kit, PathsAndNames) {
     EXPECT_EQ(dos_path("", "C:\\Users\\ann"), "C:\\");
     EXPECT_EQ(dos_path("C:\\Users\\ann", "C:\\Users\\ann"), "C:\\My Documents");
@@ -108,7 +104,6 @@ TEST(Win98Kit, PathsAndNames) {
     EXPECT_EQ(run_history(many, "x").size(), 12u);
 }
 
-// taskbar.js 36-46, dialog.js 655-691.
 TEST(Win98Kit, ClockTexts) {
     DateTime d;
     d.year = 2026;
@@ -139,7 +134,7 @@ TEST(Win98Kit, ClockTexts) {
     EXPECT_EQ(feb.back()[4], 29);
 }
 
-// dialog.js 940-946: twelve 4 px ticks on a radius of 40 around (48, 48), navy every third.
+// Twelve 4 px ticks on a radius of 40 around (48, 48), navy every third.
 TEST(Win98Kit, ClockFaceTicks) {
     DateTime d;
     const auto dots = clock_face(d);
@@ -152,7 +147,6 @@ TEST(Win98Kit, ClockFaceTicks) {
     EXPECT_EQ(dots[1].color, 0x008080u);
 }
 
-// mines.js 8-21.
 TEST(Win98Mines, Counter) {
     EXPECT_EQ(counter_chars(10), "010");
     EXPECT_EQ(counter_chars(1234), "999");
@@ -169,7 +163,7 @@ TEST(Win98Mines, Counter) {
     EXPECT_EQ(mines_number_color(1), 0x0000ffu);
 }
 
-// mines.js 6, 34-69: the first click is never a mine, nor next to one.
+// The first click is never a mine, nor next to one.
 TEST(Win98Mines, FirstRevealIsSafeAndStartsTheClock) {
     Mines m({}, fixed(0.5));
     EXPECT_EQ(m.cols(), 9);
@@ -241,7 +235,6 @@ TEST(Win98Mines, MarksBoomAndWin) {
     EXPECT_FALSE(l.running());
 }
 
-// mines.js 106-123.
 TEST(Win98Mines, ChordAndRequests) {
     Mines m({}, lcg(playing_seed()));
     m.reveal(0, 0);
@@ -276,7 +269,6 @@ TEST(Win98Mines, ChordAndRequests) {
     EXPECT_EQ(Mines(bad).options().level, "beginner");
 }
 
-// sol.js 223-234.
 TEST(Win98Solitaire, DealSevenColumns) {
     Solitaire s(fixed(0.0));
     for (int i = 0; i < 7; ++i) {
@@ -292,7 +284,6 @@ TEST(Win98Solitaire, DealSevenColumns) {
     EXPECT_FALSE(Solitaire::red(26));
 }
 
-// sol.js 251-288.
 TEST(Win98Solitaire, RulesAndScoring) {
     Solitaire s(fixed(0.0));
     s.g = {};
@@ -339,7 +330,6 @@ TEST(Win98Solitaire, RulesAndScoring) {
     EXPECT_EQ(s.g.score, before - 2);
 }
 
-// sol.js 305-309, 313-327, 339.
 TEST(Win98Solitaire, TargetsAndVictory) {
     const auto home = Solitaire::target(260, 50);
     ASSERT_TRUE(home);
@@ -364,7 +354,6 @@ TEST(Win98Solitaire, TargetsAndVictory) {
     EXPECT_GT(frames, 52);
 }
 
-// herdr src/layout.rs 759-765 (its own test) and src/window/floats.rs 418-421.
 TEST(Win98Float, SnapsToTheNearestEdgeAndThird) {
     EXPECT_EQ(snap_float(10, 400, 1200, 800), (FloatPlace{Edge::kLeft, Align::kCenter}));
     EXPECT_EQ(snap_float(1190, 20, 1200, 800), (FloatPlace{Edge::kRight, Align::kStart}));
@@ -382,7 +371,6 @@ TEST(Win98Float, SnapsToTheNearestEdgeAndThird) {
     EXPECT_STREQ(align_name(parse_place("x", "start").align), "start");
 }
 
-// herdr floats.rs 410-415.
 TEST(Win98Float, TheSpringOvershootsThenSettles) {
     EXPECT_EQ(agentdesk::ui::win98::spring(0.0f), 0.0f);
     EXPECT_NEAR(agentdesk::ui::win98::spring(1.0f), 1.0f, 1e-6f);

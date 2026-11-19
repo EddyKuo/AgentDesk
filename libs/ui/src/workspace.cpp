@@ -1,3 +1,6 @@
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
+// The workspace model: split trees, tab and space rules, focus, persistence, attention, and the
+// pure helpers behind the spaces and agents lists.
 #include "agentdesk/ui/workspace.hpp"
 
 #include <utility>
@@ -5,6 +8,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cctype>
 #include <climits>
 #include <cmath>
 #include <functional>
@@ -63,8 +67,16 @@ void fix_weights(Node& n) {
             w = 1.0f;
 }
 
-// Removes leaf `s`. herdr layout.rs: its share goes back to the siblings in proportion, and a
-// container left with one child is replaced by that child. Returns true when removed.
+// A container left with a single child is replaced by that child.
+void collapse_single_child(Node& n) {
+    if (!n.leaf() && n.children.size() == 1) {
+        Node keep = std::move(n.children.front());
+        n = std::move(keep);
+    }
+}
+
+// Removes leaf `s`. Its share goes back to the siblings in proportion, and a container left with
+// one child is replaced by that child. Returns true when removed.
 bool remove_leaf(Node& n, const std::string& s) {
     if (n.leaf())
         return false;
@@ -74,17 +86,11 @@ bool remove_leaf(Node& n, const std::string& s) {
             fix_weights(n);
             n.children.erase(n.children.begin() + static_cast<std::ptrdiff_t>(i));
             n.weights.erase(n.weights.begin() + static_cast<std::ptrdiff_t>(i));
-            if (n.children.size() == 1) {
-                Node keep = std::move(n.children.front());
-                n = std::move(keep);
-            }
+            collapse_single_child(n);
             return true;
         }
         if (remove_leaf(c, s)) {
-            if (!c.leaf() && c.children.size() == 1) {
-                Node keep = std::move(c.children.front());
-                c = std::move(keep);
-            }
+            collapse_single_child(c);
             // A container that now runs on the same axis as its parent merges into it.
             if (!c.leaf() && c.vertical == n.vertical) {
                 fix_weights(n);
@@ -276,10 +282,7 @@ Node node_from_json(const Json& j, int depth = 0) {
             if (w.is_number() && std::isfinite(w.get<float>()))
                 n.weights.push_back(std::clamp(w.get<float>(), 0.01f, 100.0f));
         fix_weights(n);
-        if (n.children.size() == 1) {
-            Node keep = std::move(n.children.front());
-            return keep;
-        }
+        collapse_single_child(n);
         return n;
     }
     if (j.contains("split") && j.contains("a") && j.contains("b")) {  // documents from before
@@ -294,7 +297,7 @@ Node node_from_json(const Json& j, int depth = 0) {
     return n;
 }
 
-// herdr model.rs 635-647 (folder_name): the last folder; nothing or the home folder reads "~".
+// A folder's display name: its last component; nothing or the home folder reads "~".
 std::string folder_of(const std::string& cwd) {
     auto trimmed = [](std::string x) {
         while (!x.empty() && (x.back() == '\\' || x.back() == '/'))
@@ -310,6 +313,30 @@ std::string folder_of(const std::string& cwd) {
         return cwd.substr(0, 1);
     const auto p = s.find_last_of("\\/");
     return p == std::string::npos ? s : s.substr(p + 1);
+}
+
+// The first session of a tree, or empty.
+std::string first_session(const Node& root) {
+    std::vector<std::string> ids;
+    collect(root, ids);
+    return ids.empty() ? std::string() : ids.front();
+}
+
+// Index of the space or tab with `id`, or -1.
+template <class T>
+int index_of_id(const std::vector<T>& items, const std::string& id) {
+    for (int i = 0; i < static_cast<int>(items.size()); ++i)
+        if (items[static_cast<std::size_t>(i)].id == id)
+            return i;
+    return -1;
+}
+
+// Moves element `from` to position `to` (both valid indexes).
+template <class T>
+void move_item(std::vector<T>& items, int from, int to) {
+    T moved = std::move(items[static_cast<std::size_t>(from)]);
+    items.erase(items.begin() + from);
+    items.insert(items.begin() + to, std::move(moved));
 }
 
 }  // namespace
@@ -418,9 +445,9 @@ bool Workspace::split(const std::string& target, const std::string& session, Dir
     const bool before = dir == Dir::kLeft || dir == Dir::kUp;
     Node fresh;
     fresh.session = session;
-    // herdr layout.rs 598-629: when the target's container already runs along that axis, the new
-    // pane goes next to the target and the two share the target's weight; otherwise the target
-    // becomes a new container [target, new].
+    // When the target's container already runs along that axis, the new pane goes next to the
+    // target and the two share the target's weight; otherwise the target becomes a new container
+    // [target, new].
     int index = -1;
     Node* parent = parent_of(tab.root, target, &index);
     if (parent != nullptr && parent->vertical == vertical) {
@@ -463,7 +490,7 @@ void Workspace::remove(const std::string& session) {
     if (tab.zoomed == session)
         tab.zoomed.clear();
     if (tab.focused == session) {
-        // herdr model.rs 403-419: back to the pane focused before it, else the first.
+        // Back to the pane focused before it, else the first.
         const auto rest = sessions_in(tab);
         tab.focused = rest.empty() ? std::string() : rest.front();
         for (auto it = tab.focus_history.rbegin(); it != tab.focus_history.rend(); ++it)
@@ -512,7 +539,7 @@ void Workspace::close_tab(int space, int tab) {
         close_space(space);
         return;
     }
-    // herdr: closing the shown tab shows the one that slides into its slot, else the last.
+    // Closing the shown tab shows the one that slides into its slot, else the last.
     if (sp.active_tab > tab)
         --sp.active_tab;
     sp.active_tab = std::min(sp.active_tab, static_cast<int>(sp.tabs.size()) - 1);
@@ -537,12 +564,9 @@ bool Workspace::move_tab(int space, int from, int to) {
     to = ((to % n) + n) % n;
     auto& sp = spaces[static_cast<std::size_t>(space)];
     const std::string shown = tabs[static_cast<std::size_t>(std::clamp(sp.active_tab, 0, n - 1))].id;
-    Tab t = std::move(tabs[static_cast<std::size_t>(from)]);
-    tabs.erase(tabs.begin() + from);
-    tabs.insert(tabs.begin() + to, std::move(t));
-    for (int i = 0; i < n; ++i)
-        if (tabs[static_cast<std::size_t>(i)].id == shown)
-            sp.active_tab = i;
+    move_item(tabs, from, to);
+    if (const int i = index_of_id(tabs, shown); i >= 0)
+        sp.active_tab = i;
     return true;
 }
 
@@ -555,7 +579,7 @@ void Workspace::focus(const std::string& session) {
     Space& sp = spaces[static_cast<std::size_t>(loc.space)];
     sp.active_tab = loc.tab;
     Tab& t = sp.tabs[static_cast<std::size_t>(loc.tab)];
-    if (t.focused != session && !t.focused.empty()) {  // herdr Tab::focus history
+    if (t.focused != session && !t.focused.empty()) {  // remember the pane focused before
         std::erase(t.focus_history, t.focused);
         t.focus_history.push_back(t.focused);
         if (t.focus_history.size() > 32)
@@ -564,7 +588,7 @@ void Workspace::focus(const std::string& session) {
     t.focused = session;
     t.settled = false;  // showing a terminal brings its tab back
     if (!t.zoomed.empty() && t.zoomed != session)
-        t.zoomed = session;  // herdr: the zoom moves to the focused pane
+        t.zoomed = session;  // the zoom moves to the focused pane
 }
 
 void Workspace::select_space(int index) {
@@ -597,7 +621,7 @@ bool Workspace::settle_tab(int space, int tab, bool keep_shown) {
     Space& sp = spaces[static_cast<std::size_t>(space)];
     if (tab < 0 || tab >= static_cast<int>(sp.tabs.size()) || sp.tabs[static_cast<std::size_t>(tab)].settled)
         return false;
-    // The nearest tab still shown, preferring the right (herdr selects the one that slides in).
+    // The nearest tab still shown, preferring the right (the one that slides into its slot).
     int next = -1;
     for (int d = 1; d < static_cast<int>(sp.tabs.size()) && next < 0; ++d)
         for (const int i : {tab + d, tab - d})
@@ -633,7 +657,7 @@ void Workspace::cycle_tab(int delta) {
     Space* sp = active();
     if (sp == nullptr || sp->tabs.empty())
         return;
-    // Wraps and skips tabs put away (herdr tab.next / tab.prev).
+    // Wraps and skips tabs put away.
     const int n = static_cast<int>(sp->tabs.size());
     int i = sp->active_tab;
     for (int step = 0; step < n; ++step) {
@@ -659,7 +683,7 @@ bool Workspace::focus_dir(Dir dir, Rect area) {
     const auto next = neighbour(layout_tree(t->root, area, 0), t->focused, dir);
     if (!next)
         return false;
-    focus(*next);  // a zoomed tab moves its zoom along (herdr model.rs 131-133)
+    focus(*next);  // a zoomed tab moves its zoom along
     return true;
 }
 
@@ -722,7 +746,7 @@ bool Workspace::resize(Dir dir, float px, Rect area) {
 
 void Workspace::toggle_zoom(const std::string& pane) {
     Tab* t = active_tab();
-    if (!pane.empty()) {  // herdr pane.zoom {pane}: that pane, focused
+    if (!pane.empty()) {  // a named pane: zoom (or unzoom) it and focus it
         const auto loc = find(pane);
         if (loc.space < 0)
             return;
@@ -745,14 +769,13 @@ std::string Workspace::space_title(int index, const std::map<std::string, std::s
     const Space& sp = spaces[static_cast<std::size_t>(index)];
     if (!sp.name.empty())
         return sp.name;
-    // herdr model.rs 271-279: the first terminal's checkout top (or its folder outside git),
-    // else the folder the space was made in.
+    // The first terminal's checkout top (or its folder outside git), else the folder the space
+    // was made in.
     for (const auto& t : sp.tabs) {
-        std::vector<std::string> ids;
-        collect(t.root, ids);
-        if (ids.empty())
+        const std::string first = first_session(t.root);
+        if (first.empty())
             continue;
-        const auto it = session_top.find(ids.front());
+        const auto it = session_top.find(first);
         if (it != session_top.end() && !it->second.empty())
             return folder_of(it->second);
         break;
@@ -871,14 +894,11 @@ bool Workspace::move_space(int from, int to) {
     if (from < 0 || from >= n || to < 0 || to >= n || from == to)
         return false;
     if (spaces[static_cast<std::size_t>(from)].machine != spaces[static_cast<std::size_t>(to)].machine)
-        return false;  // herdr: a space moves only inside its machine's block
+        return false;  // a space moves only inside its machine's block
     const std::string active_id = spaces[static_cast<std::size_t>(active_space)].id;
-    Space moved = std::move(spaces[static_cast<std::size_t>(from)]);
-    spaces.erase(spaces.begin() + from);
-    spaces.insert(spaces.begin() + to, std::move(moved));
-    for (int i = 0; i < n; ++i)
-        if (spaces[static_cast<std::size_t>(i)].id == active_id)
-            active_space = i;
+    move_item(spaces, from, to);
+    if (const int i = index_of_id(spaces, active_id); i >= 0)
+        active_space = i;
     return true;
 }
 
@@ -888,7 +908,7 @@ void Workspace::assign_colors(const std::map<std::string, std::string>* session_
         auto& sp = spaces[i];
         if (!sp.color.empty())
             continue;
-        // herdr spaces.js 526: the home space ("~") waits for a real name.
+        // The home space ("~") waits for a real name before it gets a colour.
         if (session_top != nullptr && space_title(static_cast<int>(i), *session_top) == "~")
             continue;
         std::map<std::string, int> used;
@@ -930,9 +950,8 @@ bool Workspace::reorder_spaces(const std::vector<int>& order) {
     for (const int o : order)
         next.push_back(std::move(spaces[static_cast<std::size_t>(o)]));
     spaces = std::move(next);
-    for (int i = 0; i < n; ++i)
-        if (spaces[static_cast<std::size_t>(i)].id == active_id)
-            active_space = i;
+    if (const int i = index_of_id(spaces, active_id); i >= 0)
+        active_space = i;
     return true;
 }
 
@@ -940,11 +959,10 @@ void Workspace::remember_folders(const std::map<std::string, std::string>& sessi
     for (auto& sp : spaces) {
         if (!sp.folder.empty() || sp.tabs.empty())
             continue;
-        std::vector<std::string> ids;
-        collect(sp.tabs.front().root, ids);
-        if (ids.empty())
+        const std::string first = first_session(sp.tabs.front().root);
+        if (first.empty())
             continue;
-        if (const auto it = session_start.find(ids.front()); it != session_start.end())
+        if (const auto it = session_start.find(first); it != session_start.end())
             sp.folder = it->second;
     }
 }
@@ -992,7 +1010,7 @@ void drag_divider(Node& root, const Divider& d, float pos, float gap) {
 
 // ------------------------------------------------------------------ attention
 bool AttentionTracker::update(const std::string& session, const std::string& agent_state, bool looking) {
-    // herdr model.rs 529-572: to blocked/error from anything else always alerts (also while
+    // To blocked/error from anything else always alerts (also while
     // looking: the caller then plays the sound but shows no note); from busy (working/blocked/
     // error) to anything else alerts only when not looking, and that agent is "done" until seen.
     // States in the first listing never alert; one already done shows as done.
@@ -1089,9 +1107,9 @@ const char* attention_label(Attention a) {
     return "";
 }
 
-// ------------------------------------------------------------------ spaces list (herdr spaces.js)
+// ------------------------------------------------------------------ spaces list
 std::vector<int> nest_worktrees(const std::vector<SpaceRepo>& info, std::vector<bool>* tree) {
-    // spaces.js 298-315: mains are repos with a main checkout; a worktree of one goes under the
+    // Mains are repos with a main checkout; a worktree of one goes under the
     // first main-checkout space of its repo.
     std::set<std::string> mains;
     for (const auto& r : info)
@@ -1123,7 +1141,7 @@ std::vector<int> nest_worktrees(const std::vector<SpaceRepo>& info, std::vector<
     return out;
 }
 
-// ------------------------------------------------------------------ agents list (herdr agents.js)
+// ------------------------------------------------------------------ agents list
 namespace {
 
 // Decodes one UTF-8 code point at s[i]; returns its length (1 for a broken byte).
@@ -1142,8 +1160,8 @@ std::size_t decode_utf8(const std::string& s, std::size_t i, char32_t& cp) {
     return len;
 }
 
-// \p{L}, \p{N}, \p{Ps} or \p{Pi}: what a title may start with (agents.js 31). An approximation by
-// block: letters and digits of every script, opening brackets and opening quotes.
+// \p{L}, \p{N}, \p{Ps} or \p{Pi}: what a title may start with. An approximation by block:
+// letters and digits of every script, opening brackets and opening quotes.
 bool title_start(char32_t c) {
     if (c < 0x80)
         return std::isalnum(static_cast<int>(c)) != 0 || c == '(' || c == '[' || c == '{';
@@ -1173,6 +1191,20 @@ bool title_start(char32_t c) {
     return c < 0xF0000;
 }
 
+// Byte offset of the first code point in `s` that satisfies `stop`, or s.size().
+template <class Pred>
+std::size_t skip_until(const std::string& s, Pred stop) {
+    std::size_t i = 0;
+    while (i < s.size()) {
+        char32_t cp = 0;
+        const std::size_t len = decode_utf8(s, i, cp);
+        if (stop(cp))
+            break;
+        i += len;
+    }
+    return i;
+}
+
 std::string lower(std::string s) {
     for (auto& c : s)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -1182,15 +1214,7 @@ std::string lower(std::string s) {
 }  // namespace
 
 std::string clean_agent_title(const std::string& title) {
-    std::size_t i = 0;
-    while (i < title.size()) {
-        char32_t cp = 0;
-        const std::size_t len = decode_utf8(title, i, cp);
-        if (title_start(cp))
-            break;
-        i += len;
-    }
-    std::string out = title.substr(i);
+    std::string out = title.substr(skip_until(title, title_start));
     for (const char* mark : {"[ ! ] ", "[ . ] "})
         if (out.rfind(mark, 0) == 0)
             out = out.substr(6);
@@ -1206,16 +1230,11 @@ std::string clean_agent_title(const std::string& title) {
 std::string agent_tab_label(const TabLabel& in) {
     const std::string live = clean_agent_title(in.title);
     // clean() would strip a path's leading ~ or /: test the title with only its status glyph gone.
-    std::size_t i = 0;
-    while (i < in.title.size()) {
-        char32_t cp = 0;
-        const std::size_t len = decode_utf8(in.title, i, cp);
-        if (cp == '~' || cp == '/' || (title_start(cp) && cp != '(' && cp != '[' && cp != '{' && cp != 0xAB &&
-                                       !(cp >= 0x2018 && cp <= 0x201F) && cp != 0x2039 && cp != 0x2045))
-            break;
-        i += len;
-    }
-    const std::string bare = in.title.substr(i);
+    const std::string bare = in.title.substr(skip_until(in.title, [](char32_t cp) {
+        return cp == '~' || cp == '/' ||
+               (title_start(cp) && cp != '(' && cp != '[' && cp != '{' && cp != 0xAB &&
+                !(cp >= 0x2018 && cp <= 0x201F) && cp != 0x2039 && cp != 0x2045);
+    }));
     const bool path = (!bare.empty() && (bare[0] == '~' || bare[0] == '/')) ||
                       (bare.size() >= 3 && std::isalpha(static_cast<unsigned char>(bare[0])) != 0 && bare[1] == ':' &&
                        bare[2] == '\\');

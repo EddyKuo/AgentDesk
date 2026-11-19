@@ -1,3 +1,5 @@
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
+// Tests for the context-menu navigation, picker plan and keybinding listing helpers.
 #include "agentdesk/ui/chrome_logic.hpp"
 
 #include <gtest/gtest.h>
@@ -6,7 +8,7 @@
 
 using namespace agentdesk::ui;
 
-// herdr menu/main.js 131-137.
+// Menu keyboard: first row highlighted, arrows wrap, Enter runs.
 TEST(MenuNav, FirstRowHighlightedArrowsWrapEnterRuns) {
     MenuNav nav;
     nav.open();
@@ -36,7 +38,7 @@ TEST(MenuNav, FirstRowHighlightedArrowsWrapEnterRuns) {
     EXPECT_EQ(nav.at(), 0);
 }
 
-// herdr picker/main.js 86-98.
+// Picker grouping: busy spaces (blocked first), quiet spaces under the "earlier" row.
 TEST(Picker, BusyHasAnyStatusBlockedFirstEarlierAlwaysShown) {
     std::vector<PickerSpace> spaces = {
         {false, false, 1},  // quiet
@@ -72,7 +74,7 @@ TEST(Picker, FindTabById) {
     EXPECT_EQ(find_tab(w, "nope").space, -1);
 }
 
-// herdr keys.rs listing() and help/main.js label().
+// keys.json listing order and the readable command labels.
 TEST(Keymap, ListingKeepsTheFileAsWritten) {
     const auto file = nlohmann::json::parse(R"({
         "terminal": {"ctrl-shift-c": "terminal.copy", "ctrl-backspace": "send:\u0017"},

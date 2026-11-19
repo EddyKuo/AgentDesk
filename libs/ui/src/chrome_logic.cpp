@@ -1,3 +1,5 @@
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
+// Context-menu keyboard navigation, the "Go to" picker plan, and tab lookup by id.
 #include "agentdesk/ui/chrome_logic.hpp"
 
 #include <algorithm>
@@ -11,7 +13,7 @@ void MenuNav::open() {
     enter_ = false;
 }
 
-// herdr menu/main.js 132-134: down = (at + 1) % n, up = (at + n - 1) % n, enter = choose(at).
+// Down and Up wrap around; Enter chooses the highlighted row. The row count is last frame's.
 void MenuNav::frame(bool up, bool down, bool enter) {
     last_rows_ = rows_;
     rows_ = 0;
@@ -44,7 +46,7 @@ PickerPlan plan_picker(const std::vector<PickerSpace>& spaces, bool filtering, b
             continue;
         (s.status ? p.busy : p.quiet).push_back(i);
     }
-    // busy.sort((a, b) => (b.w.status === "blocked") - (a.w.status === "blocked")): stable.
+    // Blocked spaces first; otherwise keep their order (the sort must be stable).
     std::stable_sort(p.busy.begin(), p.busy.end(), [&](int a, int b) {
         return spaces[static_cast<std::size_t>(a)].blocked && !spaces[static_cast<std::size_t>(b)].blocked;
     });
