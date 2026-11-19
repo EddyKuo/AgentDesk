@@ -3280,8 +3280,14 @@ void sync_sessions(App::State& s) {
     }
     std::set<std::string> present;
     for (const auto& sess : s.sessions) {
-        present.insert(sess->id());
         s.awaiting_list.erase(sess->id());
+        // herdr window.rs 2262-2283, 2695-2719 (reconcile / checked_closed): a pane whose terminal
+        // ended (exited, killed) or is gone is removed; its tab, then its space, close when
+        // they empty (model.rs 403-422). Lost: the agent-host that ran it is gone.
+        const auto& v = s.views_by_id[sess->id()];
+        if (v.process_state == "Exited" || v.lost)
+            continue;
+        present.insert(sess->id());
     }
     // A machine that is not connected right now keeps its panes (its sessions still run there).
     for (const auto& sp : s.ws.spaces)
@@ -3304,8 +3310,8 @@ void sync_sessions(App::State& s) {
             continue;
         s.known.insert(id);
         const auto& v = s.views_by_id[id];
-        if (v.process_state == "Exited" && !initial)
-            continue;  // finished elsewhere; listed in the sidebar, not opened
+        if (v.process_state == "Exited" || v.lost)
+            continue;  // ended: never opened (herdr places live terminals only, window.rs 2277-2283)
         if (!v.parent.empty() && s.views_by_id.count(v.parent))
             continue;  // a sub-agent: listed under its parent, peeked or opened on demand
         const int before_space = s.ws.active_space;
