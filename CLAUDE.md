@@ -123,6 +123,10 @@ M 模式、standard 執行模式。Web 專用條目（JWT、CORS、HTTP 格式�
 
 Git：Conventional Commits；分支 `feature/sprint-N/...`；不要直接在 main 上開發。commit 訊息結尾加 Co-Authored-By 行。
 
+## 回覆語言
+
+回覆使用者一律用中文（台灣繁體），包括解釋、進度回報與問題說明；程式碼、指令、識別字與 commit message 照原樣（使用者要求，2026-11-19）。
+
 ## 文件撰寫
 
 中文文件用台灣繁體與全形標點，完成前依使用者全域設定跑 `speak-human-tw`（它要求先列清單、等使用者確認才改）。引用 herdr 時寫明是觀察結果與出處。
