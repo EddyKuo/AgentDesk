@@ -233,6 +233,8 @@ private:
     void push_history(int cols, const void* vterm_cells);
     bool pop_history(int cols, void* vterm_cells);
     void handle_osc(int command, std::string body);
+    void handle_status_osc(const std::string& body);  // OSC 7501
+    void handle_link_osc(const std::string& body);    // OSC 8
     void watch_win32_mode(std::string_view bytes);
     void move_links(int src_row0, int src_row1, int dest_row0, int dest_row1, int dy);
     [[nodiscard]] std::string cells_text(int row, int col0, int col1) const;
