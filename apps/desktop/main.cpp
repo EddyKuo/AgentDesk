@@ -3,6 +3,7 @@
 // detaches; "Exit and stop all sessions" is the explicit way to end the host (design doc 4.3).
 // This file is the platform shell; the window contents are in app.cpp and the files that share
 // app_internal.hpp.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include <functional>
 #include <d3d11.h>
 #include <dxgi1_2.h>
@@ -70,9 +71,9 @@ std::atomic<bool> g_close_requested{false};
 std::atomic<int> g_focus_change{-1};  // -1 none, 0 lost, 1 gained
 
 // Windows takes Ctrl+Esc (Start) and Ctrl+Shift+Esc (Task Manager) before any window sees them.
-// herdr's Herdr 98 binds both (mods/win98/README.md 15-16: win98.start, win98.taskman); while
-// AgentDesk is in front and keys.json binds the chord (its layout section or global), a low-level
-// keyboard hook keeps it from the shell and hands it to the app. Anywhere else Windows keeps them.
+// The AgentDesk 98 layout binds both (win98.start, win98.taskman); while AgentDesk is in front
+// and keys.json binds the chord (its layout section or global), a low-level keyboard hook keeps
+// it from the shell and hands it to the app. Anywhere else Windows keeps them.
 HWND g_main_hwnd = nullptr;
 std::atomic<bool> g_take_ctrl_esc{false};
 std::atomic<bool> g_take_ctrl_shift_esc{false};
@@ -191,8 +192,8 @@ LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         return 1;
     switch (msg) {
         case WM_NCCALCSIZE:
-            // herdr's layout hides the system title bar and draws its own (window buttons in the
-            // tab bar). The whole window is client area; when maximized, keep it inside the
+            // No system title bar: the layout draws its own (window buttons in the tab bar).
+            // The whole window is client area; when maximized, keep it inside the
             // monitor (a maximized window extends past the screen by the frame thickness).
             if (wparam == TRUE) {
                 auto* p = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);  // Win32 contract
@@ -265,8 +266,7 @@ LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
                 return 0;  // Alt must reach the terminal
             break;
         case WM_DROPFILES: {
-            // Files dropped from Explorer: the terminal under the pointer types their paths in
-            // (herdr src/terminal.rs:717-723).
+            // Files dropped from Explorer: the terminal under the pointer types their paths in.
             auto* drop = reinterpret_cast<HDROP>(wparam);  // Win32 contract for this message
             const UINT n = ::DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
             for (UINT i = 0; i < n; ++i) {
@@ -388,36 +388,79 @@ DevOptions parse_dev_options() {
     return o;
 }
 
+// `agent-ui --version` prints "agent-ui <version>" on the stdout it was given, before any window:
+// the updater asks a downloaded copy this way. True when that was the request.
+bool answered_version() {
+    int argc = 0;
+    LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
+    const bool version = argv != nullptr && argc == 2 && std::wstring(argv[1]) == L"--version";
+    ::LocalFree(argv);
+    if (!version)
+        return false;
+    const std::string line = std::string("agent-ui ") + AGENTDESK_VERSION_STRING + "\n";
+    DWORD written = 0;
+    ::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE), line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
+    return true;
+}
+
+// The updater works on this executable and the data folder; it wakes the loop when it has news.
+void configure_updates() {
+    wchar_t exe[MAX_PATH]{};
+    const DWORD n = ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    ui::updates::configure({AGENTDESK_VERSION_STRING, std::filesystem::path(std::wstring(exe, n)),
+                            agentdesk::desktop::data_folder(), [] {
+                                if (g_wake != nullptr)
+                                    ::SetEvent(g_wake);
+                            }});
+}
+
+// No system caption (see WM_NCCALCSIZE): a 1 px DWM frame keeps the shadow and the rounded
+// corners, and the title bar Windows would draw is dark to match the chrome.
+void use_custom_frame(HWND hwnd) {
+    const BOOL dark = TRUE;
+    ::DwmSetWindowAttribute(hwnd, 20, &dark, sizeof(dark));  // DWMWA_USE_IMMERSIVE_DARK_MODE
+    const MARGINS m{0, 0, 1, 0};
+    ::DwmExtendFrameIntoClientArea(hwnd, &m);
+    ::SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+}
+
+agentdesk::desktop::AppConfig app_config(const DevOptions& dev, HWND hwnd) {
+    agentdesk::desktop::AppConfig cfg;
+    cfg.hwnd = hwnd;
+    cfg.wake = [] { ::SetEvent(g_wake); };
+    cfg.start_profile = dev.start_profile;
+    cfg.run_commands = dev.run;
+    cfg.input_script = dev.input;
+    if (!dev.report.empty())
+        cfg.shot_signal = std::filesystem::path(dev.report).concat(L".shot");
+    cfg.automated = dev.exit_after_ms > 0;
+    return cfg;
+}
+
+// Installs reserved_keys_hook while keys.json binds Ctrl+Esc or Ctrl+Shift+Esc, removes it
+// otherwise. A low-level hook runs on this thread: while it is installed, every key anywhere in
+// Windows waits for this loop, so a UI thread that is busy (a long git job) would hold up the
+// keyboard; hence only while a binding wants it.
+void sync_reserved_hook(const agentdesk::desktop::App& app, HINSTANCE instance, HHOOK& hook) {
+    g_take_ctrl_esc = app.binds_chord(ImGuiMod_Ctrl | ImGuiKey_Escape);
+    g_take_ctrl_shift_esc = app.binds_chord(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Escape);
+    if (const bool want_hook = g_take_ctrl_esc || g_take_ctrl_shift_esc; want_hook && hook == nullptr) {
+        hook = ::SetWindowsHookExW(WH_KEYBOARD_LL, reserved_keys_hook, instance, 0);
+    } else if (!want_hook && hook != nullptr) {
+        ::UnhookWindowsHookEx(hook);
+        hook = nullptr;
+    }
+}
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
-    // herdr update.rs 392-400 asks a downloaded copy `herdr-app --version` ("herdr-app 0.2.0");
-    // ours answers "agent-ui <version>" on the stdout it was given, before any window.
-    {
-        int argc = 0;
-        LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
-        const bool version = argv != nullptr && argc == 2 && std::wstring(argv[1]) == L"--version";
-        ::LocalFree(argv);
-        if (version) {
-            const std::string line = std::string("agent-ui ") + AGENTDESK_VERSION_STRING + "\n";
-            DWORD written = 0;
-            ::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE), line.data(), static_cast<DWORD>(line.size()), &written,
-                        nullptr);
-            return 0;
-        }
-    }
+    if (answered_version())
+        return 0;
     ::SetUnhandledExceptionFilter(write_crash_report);
-    {
-        wchar_t exe[MAX_PATH]{};
-        const DWORD n = ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
-        ui::updates::configure({AGENTDESK_VERSION_STRING, std::filesystem::path(std::wstring(exe, n)),
-                                agentdesk::desktop::data_folder(), [] {
-                                    if (g_wake != nullptr)
-                                        ::SetEvent(g_wake);
-                                }});
-    }
-    // herdr main.rs 127-132: leave the install folder, put a waiting update in place (that
-    // starts the new copy and this one ends), then start the clock for telemetry.
+    configure_updates();
+    // Leave the install folder, put a waiting update in place (that starts the new copy and this
+    // one ends), then start the clock for telemetry.
     ui::updates::leave_install_folder();
     if (ui::updates::apply_on_startup())
         return 0;
@@ -430,25 +473,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"AgentDesk", WS_OVERLAPPEDWINDOW, 100, 100, 1400, 900,
                                 nullptr, nullptr, instance, nullptr);
     g_main_hwnd = hwnd;
-    // Only for Ctrl+Esc / Ctrl+Shift+Esc while a binding wants them (reserved_keys_hook). A
-    // low-level hook runs on this thread: while it is installed, every key anywhere in Windows
-    // waits for this loop. It is installed only while keys.json binds one of those chords, so a
-    // UI thread that is busy (a long git job) never holds up the keyboard otherwise.
-    HHOOK reserved_hook = nullptr;
+    HHOOK reserved_hook = nullptr;  // see sync_reserved_hook
     if (!create_device(hwnd)) {
         destroy_device();
         ::UnregisterClassW(wc.lpszClassName, instance);
         ::MessageBoxW(nullptr, L"Direct3D 11 is not available", L"AgentDesk", MB_ICONERROR);
         return 1;
     }
-    {
-        const BOOL dark = TRUE;  // dark title bar to match the chrome (DWMWA_USE_IMMERSIVE_DARK_MODE)
-        ::DwmSetWindowAttribute(hwnd, 20, &dark, sizeof(dark));
-        // No system caption (WM_NCCALCSIZE); a 1 px DWM frame keeps the shadow and rounded corners.
-        const MARGINS m{0, 0, 1, 0};
-        ::DwmExtendFrameIntoClientArea(hwnd, &m);
-        ::SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
-    }
+    use_custom_frame(hwnd);
     ::DragAcceptFiles(hwnd, TRUE);
     ::ShowWindow(hwnd, SW_SHOWDEFAULT);
     ::UpdateWindow(hwnd);
@@ -466,16 +498,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     hopts.pipe_name = dev.pipe.empty() ? ipc::default_pipe_name() : dev.pipe;
     ui::updates::set_pipe(dev.pipe);  // agent-host's update goes to the host this window uses
     hopts.wake = [] { ::SetEvent(g_wake); };
-    agentdesk::desktop::AppConfig cfg;
-    cfg.hwnd = hwnd;
-    cfg.wake = [] { ::SetEvent(g_wake); };
-    cfg.start_profile = dev.start_profile;
-    cfg.run_commands = dev.run;
-    cfg.input_script = dev.input;
-    if (!dev.report.empty())
-        cfg.shot_signal = std::filesystem::path(dev.report).concat(L".shot");
-    cfg.automated = dev.exit_after_ms > 0;
-    agentdesk::desktop::App app(std::move(cfg), std::make_unique<ui::HostClient>(hopts));
+    agentdesk::desktop::App app(app_config(dev, hwnd), std::make_unique<ui::HostClient>(hopts));
     app.load_fonts();
     app.apply_scale(ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd));
 
@@ -539,14 +562,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             app.on_close_requested();
         if (const int f = g_focus_change.exchange(-1); f >= 0)
             app.on_focus_changed(f == 1);
-        g_take_ctrl_esc = app.binds_chord(ImGuiMod_Ctrl | ImGuiKey_Escape);
-        g_take_ctrl_shift_esc = app.binds_chord(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Escape);
-        if (const bool want_hook = g_take_ctrl_esc || g_take_ctrl_shift_esc; want_hook && reserved_hook == nullptr) {
-            reserved_hook = ::SetWindowsHookExW(WH_KEYBOARD_LL, reserved_keys_hook, instance, 0);
-        } else if (!want_hook && reserved_hook != nullptr) {
-            ::UnhookWindowsHookEx(reserved_hook);
-            reserved_hook = nullptr;
-        }
+        sync_reserved_hook(app, instance, reserved_hook);
         if (const int r = g_reserved_chord.exchange(0); r != 0)  // the bound command, as its window chord
             app.run_chord(r == 2 ? (ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Escape) : (ImGuiMod_Ctrl | ImGuiKey_Escape));
         if (!g_dropped.empty())

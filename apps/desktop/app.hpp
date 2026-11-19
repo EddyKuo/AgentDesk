@@ -1,6 +1,7 @@
 #pragma once
 // AgentDesk window contents (design doc 4, ADR-12/ADR-13). main.cpp owns Win32, Direct3D and
 // the event loop; everything drawn and every command lives here.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include <windows.h>
 
 #include <filesystem>
@@ -48,7 +49,7 @@ public:
     void before_new_frame();    // after the platform backend's NewFrame, before ImGui::NewFrame
     void on_close_requested();  // window X
     void on_focus_changed(bool focused);
-    // A window chord keys.json binds in the shown layout or globally (Herdr 98's Ctrl+Esc).
+    // A window chord keys.json binds in the shown layout or globally (AgentDesk 98's Ctrl+Esc).
     [[nodiscard]] bool binds_chord(int chord) const;
     void run_chord(int chord);  // runs the command keys.json binds to that window chord
     // Files dropped on the window: their paths go to the terminal under the pointer (else the
@@ -59,8 +60,7 @@ public:
     [[nodiscard]] long long next_wakeup_ms() const;
     [[nodiscard]] nlohmann::json report() const;  // developer option --report
     [[nodiscard]] ui::HostClient& host();
-    // The loop ended (herdr main.rs 177-192 on_app_quit): telemetry's clean quit, then the
-    // downloaded update goes in place.
+    // The loop ended: telemetry's clean quit, then the downloaded update goes in place.
     void on_quit();
 
     struct State;
