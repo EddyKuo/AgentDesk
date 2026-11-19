@@ -602,13 +602,15 @@ void Session::handle(FreezeCmd& c) {
             c.result->set_value({});
             return;
         }
+        // Checked on every byte: a program that keeps writing one endless sequence must not hold
+        // the actor (and the handover) past the deadline.
+        if (Clock::now() >= c.deadline) {
+            *c.error = "a program stopped in the middle of an escape sequence";
+            c.result->set_value({});
+            return;
+        }
         std::string byte = process_->read_available(1);
         if (byte.empty()) {
-            if (Clock::now() >= c.deadline) {
-                *c.error = "a program stopped in the middle of an escape sequence";
-                c.result->set_value({});
-                return;
-            }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
@@ -632,12 +634,20 @@ void Session::handle(FreezeCmd& c) {
     c.result->set_value(save_session_state());
 }
 
-void Session::handle(UnfreezeCmd&) {
+void Session::handle(UnfreezeCmd& c) {
     frozen_ = false;
+    c.done->set_value();
 }
 
 void Session::resume() {
-    post(UnfreezeCmd{});
+    // freeze() may have given up while the actor still reads the program's bytes itself
+    // (handle(FreezeCmd)). The reader may only start again once the actor has stopped: the queue
+    // runs in order, so the actor reaching this command means any FreezeCmd before it finished.
+    // That is bounded by the freeze deadline; two readers would mix up the bytes' order.
+    UnfreezeCmd cmd{std::make_shared<std::promise<void>>()};
+    auto done = cmd.done->get_future();
+    post(std::move(cmd));
+    done.wait();
     if (process_)
         process_->resume_reader();  // no-op once closed
 }
