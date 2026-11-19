@@ -873,31 +873,6 @@ void attention_mark(ImDrawList* dl, ImVec2 c, float r, Attention a) {
     }
 }
 
-void space_badge(ImDrawList* dl, ImFont* bold, float size, ImVec2 min, float side, const std::string& name,
-                 bool active) {
-    std::uint32_t h = 2166136261u;
-    for (const unsigned char ch : name)
-        h = (h ^ ch) * 16777619u;
-    static constexpr ImU32 kColors[] = {IM_COL32(124, 112, 240, 255), IM_COL32(58, 180, 160, 255),
-                                        IM_COL32(220, 120, 80, 255),  IM_COL32(210, 90, 140, 255),
-                                        IM_COL32(80, 150, 230, 255),  IM_COL32(200, 170, 60, 255)};
-    const ImU32 col = kColors[h % std::size(kColors)];
-    dl->AddRectFilled(min, ImVec2(min.x + side, min.y + side), active ? col : alpha(col, 150), side * 0.32f);
-    std::string letter = name.empty() ? std::string("?") : name.substr(0, 1);
-    if (static_cast<unsigned char>(letter[0]) >= 0x80) {
-        std::size_t len = 1;
-        while (len < name.size() && (static_cast<unsigned char>(name[len]) & 0xC0) == 0x80)
-            ++len;
-        letter = name.substr(0, len);
-    } else {
-        letter[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(letter[0])));
-    }
-    const float ls = size * 0.8f;
-    const ImVec2 t = bold->CalcTextSizeA(ls, FLT_MAX, 0, letter.c_str());
-    dl->AddText(bold, ls, ImVec2(min.x + (side - t.x) * 0.5f, min.y + (side - t.y) * 0.5f),
-                IM_COL32(255, 255, 255, 240), letter.c_str());
-}
-
 bool fuzzy_match(const std::string& text, const std::string& query) {
     std::size_t j = 0;
     for (std::size_t i = 0; i < text.size() && j < query.size(); ++i) {
