@@ -1,4 +1,5 @@
-// Ports of herdr-app src/update.rs tests (update.rs 637-903) that need no child process.
+// Updater tests that need no child process: version order, hashes, paths, the recorded time.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/updates.hpp"
 
 #include <windows.h>
@@ -27,7 +28,6 @@ std::string read(const fs::path& p) {
 
 }  // namespace
 
-// update.rs 872-880
 TEST(Updates, VersionsCompareLikeSemver) {
     EXPECT_TRUE(up::newer("0.2.0", "0.1.9"));
     EXPECT_TRUE(up::newer("0.10.0", "0.9.0"));
@@ -55,12 +55,11 @@ TEST(Updates, PrereleaseIdentifiersCompareLikeSemver) {
     EXPECT_FALSE(up::newer("1.0.0+build.2", "1.0.0+build.1"));  // build metadata does not count
 }
 
-// update.rs 899-902
 TEST(Updates, Sha256IsHex) {
     EXPECT_EQ(up::sha256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
 
-// update.rs 676-714 (the part about the recorded time; the request half is an integration test).
+// The recorded time of the last check (the request half is an integration test).
 TEST(Updates, FailedCheckClearsSuccessAndRecoveryRecordsANewTime) {
     auto checked = up::checked_at(true, 100);
     EXPECT_EQ(checked, 100u);
@@ -70,7 +69,6 @@ TEST(Updates, FailedCheckClearsSuccessAndRecoveryRecordsANewTime) {
     EXPECT_EQ(checked, 300u);
 }
 
-// update.rs 716-725
 TEST(Updates, StartupAppliesOnlyANewerVersionAndNeverRelaunchesTwice) {
     EXPECT_EQ(up::startup_target("0.1.7", std::string("0.1.8"), std::nullopt),
               std::optional<std::string>("0.1.8"));
@@ -81,7 +79,6 @@ TEST(Updates, StartupAppliesOnlyANewerVersionAndNeverRelaunchesTwice) {
         EXPECT_FALSE(up::startup_target("0.1.7", std::string("0.1.8"), std::string(expected)).has_value());
 }
 
-// update.rs 778-790
 TEST(Updates, FailedInstallRestoresThePreviousVersion) {
     const fs::path work = temp_dir(L"agentdesk-update-rollback");
     fs::remove_all(work);
@@ -97,7 +94,7 @@ TEST(Updates, FailedInstallRestoresThePreviousVersion) {
     fs::remove_all(work);
 }
 
-// update.rs 50-59: next to the install, by name.
+// Next to the install, by name.
 TEST(Updates, StagesLiveBesideTheInstall) {
     EXPECT_EQ(up::beside(L"C:\\Apps\\AgentDesk-0.1.0-win-x64", L".new"),
               fs::path(L"C:\\Apps\\AgentDesk-0.1.0-win-x64.new"));
@@ -105,7 +102,7 @@ TEST(Updates, StagesLiveBesideTheInstall) {
     EXPECT_EQ(up::system(L"curl").filename(), fs::path(L"curl.exe"));
 }
 
-// update.rs 34-45: only a folder from the zip (it holds THIRD_PARTY_NOTICES.md) is an install.
+// Only a folder from the zip (it holds THIRD_PARTY_NOTICES.md) is an install.
 TEST(Updates, OnlyTheZipFolderIsAnInstall) {
     const fs::path work = temp_dir(L"agentdesk-update-root");
     fs::remove_all(work);

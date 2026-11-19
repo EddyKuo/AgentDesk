@@ -1,11 +1,11 @@
-// Ports of herdr-app src/telemetry.rs tests (telemetry.rs 699-742), plus its buckets.
+// Telemetry tests: what a report may contain, its key order, the buckets and today.json.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/telemetry.hpp"
 
 #include <gtest/gtest.h>
 
 namespace tel = agentdesk::ui::telemetry;
 
-// telemetry.rs 703-709
 TEST(Telemetry, DatesAreUtcCalendarDays) {
     EXPECT_EQ(tel::date(0), "1970-01-01");
     EXPECT_EQ(tel::date(19'723), "2024-01-01");
@@ -13,7 +13,6 @@ TEST(Telemetry, DatesAreUtcCalendarDays) {
     EXPECT_EQ(tel::date(20'745), "2026-10-19");
 }
 
-// telemetry.rs 711-720
 TEST(Telemetry, VersionsAreReleasesOrOther) {
     EXPECT_EQ(tel::version("0.2.0"), "0.2.0");
     EXPECT_EQ(tel::version("hc 0.1.5"), "0.1.5");
@@ -24,7 +23,6 @@ TEST(Telemetry, VersionsAreReleasesOrOther) {
     EXPECT_EQ(tel::version("dev"), "other");
 }
 
-// telemetry.rs 722-741
 TEST(Telemetry, AReportHoldsNoFreeText) {
     tel::Day day{"2026-10-19"};
     tel::Observation o;
@@ -36,7 +34,7 @@ TEST(Telemetry, AReportHoldsNoFreeText) {
     day.core = "hc /home/me/build";
     tel::Config config;
     config.app_version = "0.1.0";
-    // mods.rs kinds(): "agents" shipped, the rest the person's own (counted, never named).
+    // "agents" is shipped; the rest are the person's own (counted, never named).
     config.mod_kinds = [](const std::set<std::string>& names) {
         std::vector<std::string> builtin;
         std::size_t custom = 0;
@@ -52,7 +50,7 @@ TEST(Telemetry, AReportHoldsNoFreeText) {
     EXPECT_NE(text.find("\"custom\""), std::string::npos) << text;
 }
 
-// telemetry.rs 234-270: the keys in the order herdr writes them.
+// The keys in the order the report writes them.
 TEST(Telemetry, ReportShape) {
     tel::Day day{"2026-11-19"};
     day.startups = 120;
@@ -77,7 +75,6 @@ TEST(Telemetry, ReportShape) {
     EXPECT_EQ(r["welcome"], "none");
 }
 
-// telemetry.rs 273-302
 TEST(Telemetry, Buckets) {
     EXPECT_EQ(tel::bucket(0), "0");
     EXPECT_EQ(tel::bucket(1), "1");
@@ -93,7 +90,6 @@ TEST(Telemetry, Buckets) {
     EXPECT_EQ(tel::startup_bucket(5000), "5s+");
 }
 
-// programs.rs 212-237
 TEST(Telemetry, AgentNamesComeFromTheTable) {
     EXPECT_EQ(tel::agent_name(std::string("claude-code")), "claude");
     EXPECT_EQ(tel::agent_name(std::string("Codex")), "codex");
@@ -103,7 +99,7 @@ TEST(Telemetry, AgentNamesComeFromTheTable) {
     EXPECT_EQ(tel::agent_name(std::string("my-tool")), "other");
 }
 
-// telemetry.rs 187-190: today.json reads back as it was written.
+// today.json reads back as it was written.
 TEST(Telemetry, DayRoundTrips) {
     tel::Day d{"2026-11-19"};
     d.open_secs = 90;

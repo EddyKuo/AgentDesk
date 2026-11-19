@@ -1,3 +1,4 @@
+// ModHost tests against a test mod DLL: loading, settings, guarded calls and the panels it returns.
 #include "agentdesk/ui/mods.hpp"
 
 #include <windows.h>

@@ -1,6 +1,7 @@
-// Ports of herdr-app src/update.rs tests that run programs (curl.exe, tar.exe, a stand-in
-// agent-ui.exe) against an isolated release server on 127.0.0.1 (update.rs 676-753). Nothing
-// here touches an installed AgentDesk or the internet.
+// Updater tests that run programs (curl.exe, tar.exe, a stand-in agent-ui.exe, agentctl and
+// agent-host) against an isolated release server on 127.0.0.1. Nothing here touches an installed
+// AgentDesk or the internet.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include <winsock2.h>
 
 #include <ws2tcpip.h>
@@ -153,7 +154,7 @@ std::string make_zip(const fs::path& work, const std::string& version) {
 
 }  // namespace
 
-// update.rs 676-714: an isolated release server drops the first connection, then recovers.
+// An isolated release server drops the first connection, then recovers.
 TEST(Updates, FailedCheckClearsSuccessAndRecoveryRecordsANewTime) {
     Server server({{"/app/latest.json", R"({"version":"0.1.0"})"}}, "/app/latest.json");
     const fs::path home = temp_dir(L"agentdesk-offline-check");
@@ -172,7 +173,6 @@ TEST(Updates, FailedCheckClearsSuccessAndRecoveryRecordsANewTime) {
     EXPECT_EQ(server.requests[0], "/app/latest.json");
 }
 
-// update.rs 727-753
 TEST(Updates, StagesNeedAReceiptAndAMatchingExecutable) {
     const fs::path work = temp_dir(L"agentdesk-update");
     fs::remove_all(work);
@@ -196,7 +196,7 @@ TEST(Updates, StagesNeedAReceiptAndAMatchingExecutable) {
     fs::remove_all(work);
 }
 
-// update.rs 264-325: a newer release is downloaded, checked, unpacked and staged with a receipt;
+// A newer release is downloaded, checked, unpacked and staged with a receipt;
 // a second look finds the stage; swap puts it in place.
 TEST(Updates, ANewerReleaseIsStagedThenSwapped) {
     const fs::path work = temp_dir(L"agentdesk-update-flow");
@@ -229,7 +229,7 @@ TEST(Updates, ANewerReleaseIsStagedThenSwapped) {
     fs::remove_all(work);
 }
 
-// update.rs 313-316: a damaged download is refused and nothing is staged.
+// A damaged download is refused and nothing is staged.
 TEST(Updates, AChecksumMismatchStagesNothing) {
     const fs::path work = temp_dir(L"agentdesk-update-damaged");
     fs::remove_all(work);
@@ -250,9 +250,8 @@ TEST(Updates, AChecksumMismatchStagesNothing) {
 }
 
 // ---------------------------------------------------------------- agent-host's own update
-// herdr: `hc update` / Settings > Updates "Update herdr-core" (update.rs 236-262, core_bin.rs
-// 242-265, frame/settings/main.js 794-805); here `agentctl update` and updates::update_core
-// (design doc 7.4 OQ-09). The release server is local; agent-host runs from a folder of its own.
+// `agentctl update` and Settings > Updates "Update agent-host" (updates::update_core, design doc
+// 7.4 OQ-09). The release server is local; agent-host runs from a folder of its own.
 
 namespace {
 
@@ -396,7 +395,7 @@ struct ReleasesUrl {
 
 }  // namespace
 
-// `agentctl update --json` (herdr `hc update --json`): finds the release, puts it in place, the
+// `agentctl update --json`: finds the release, puts it in place, the
 // running agent-host hands its terminals over, and it answers {"now": "agent-host 99.0.0"}.
 TEST(CoreUpdate, AgentctlUpdateHandsTheTerminalsToTheRelease) {
     HostInstall install(L"ctl");
@@ -434,7 +433,7 @@ TEST(CoreUpdate, AgentctlUpdateHandsTheTerminalsToTheRelease) {
 }
 
 // Settings > Updates: "Update agent-host" runs update_core: Updating... then the new version, or
-// "The update failed: <why>" (main.js 794-805) with everything left as it was.
+// "The update failed: <why>" with everything left as it was.
 TEST(CoreUpdate, UpdateCoreGoesFromUpdatingToDoneOrError) {
     HostInstall install(L"ui");
     ASSERT_FALSE(install.session.empty()) << "host did not start";
