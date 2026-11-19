@@ -225,16 +225,55 @@ Json node_to_json(const Node& n) {
     return {{"split", n.vertical ? "down" : "right"}, {"children", kids}, {"weights", copy.weights}};
 }
 
+// Fields of the ui.state document, type-checked: it comes from the host and is shared by every
+// window and AgentDesk version, so a field of the wrong type counts as missing (json::value
+// would throw).
+const Json& field(const Json& j, const char* key) {
+    static const Json kNull;
+    if (!j.is_object())
+        return kNull;
+    const auto it = j.find(key);
+    return it != j.end() ? *it : kNull;
+}
+std::string str_field(const Json& j, const char* key, const char* fallback = "") {
+    const Json& v = field(j, key);
+    return v.is_string() ? v.get<std::string>() : std::string(fallback);
+}
+int int_field(const Json& j, const char* key, int fallback) {
+    const Json& v = field(j, key);
+    if (v.is_number_integer())
+        return static_cast<int>(std::clamp<std::int64_t>(v.get<std::int64_t>(), INT_MIN, INT_MAX));
+    if (v.is_number_float() && std::isfinite(v.get<double>()))
+        return static_cast<int>(std::clamp<double>(v.get<double>(), INT_MIN, INT_MAX));
+    return fallback;
+}
+float float_field(const Json& j, const char* key, float fallback) {
+    const Json& v = field(j, key);
+    if (!v.is_number())
+        return fallback;
+    const auto x = v.get<float>();
+    return std::isfinite(x) ? x : fallback;
+}
+bool bool_field(const Json& j, const char* key) {
+    const Json& v = field(j, key);
+    return v.is_boolean() && v.get<bool>();
+}
+const Json& array_field(const Json& j, const char* key) {
+    static const Json kEmpty = Json::array();
+    const Json& v = field(j, key);
+    return v.is_array() ? v : kEmpty;
+}
+
 Node node_from_json(const Json& j, int depth = 0) {
     Node n;
     if (!j.is_object() || depth > 32)
         return n;
     if (j.contains("split") && j.contains("children") && j["children"].is_array()) {
-        n.vertical = j.value("split", "right") == "down";
+        n.vertical = str_field(j, "split", "right") == "down";
         for (const auto& c : j["children"])
             n.children.push_back(node_from_json(c, depth + 1));
-        for (const auto& w : j.value("weights", Json::array()))
-            if (w.is_number())
+        for (const auto& w : array_field(j, "weights"))
+            if (w.is_number() && std::isfinite(w.get<float>()))
                 n.weights.push_back(std::clamp(w.get<float>(), 0.01f, 100.0f));
         fix_weights(n);
         if (n.children.size() == 1) {
@@ -244,14 +283,14 @@ Node node_from_json(const Json& j, int depth = 0) {
         return n;
     }
     if (j.contains("split") && j.contains("a") && j.contains("b")) {  // documents from before
-        n.vertical = j.value("split", "right") == "down";
-        const float ratio = std::clamp(j.value("ratio", 0.5f), 0.05f, 0.95f);
+        n.vertical = str_field(j, "split", "right") == "down";
+        const float ratio = std::clamp(float_field(j, "ratio", 0.5f), 0.05f, 0.95f);
         n.children.push_back(node_from_json(j["a"], depth + 1));
         n.children.push_back(node_from_json(j["b"], depth + 1));
         n.weights = {ratio, 1.0f - ratio};
         return n;
     }
-    n.session = j.value("session", "");
+    n.session = str_field(j, "session");
     return n;
 }
 
@@ -757,27 +796,33 @@ Json Workspace::to_json() const {
 
 Workspace Workspace::from_json(const Json& j) {
     Workspace w;
-    if (!j.is_object() || j.value("version", 0) != 1)
+    if (!j.is_object() || int_field(j, "version", 0) != 1)
         return w;
-    for (const auto& s : j.value("spaces", Json::array())) {
+    for (const auto& s : array_field(j, "spaces")) {
+        if (!s.is_object())
+            continue;
         Space sp;
-        sp.id = s.value("id", "");
-        sp.name = s.value("name", "");
-        sp.machine = s.value("machine", "");
-        sp.color = s.value("color", "");
-        sp.panel = s.value("panel", "");
-        sp.folder = s.value("folder", "");
-        sp.active_tab = s.value("active_tab", 0);
-        for (const auto& t : s.value("tabs", Json::array())) {
+        sp.id = str_field(s, "id");
+        sp.name = str_field(s, "name");
+        sp.machine = str_field(s, "machine");
+        sp.color = str_field(s, "color");
+        sp.panel = str_field(s, "panel");
+        sp.folder = str_field(s, "folder");
+        sp.active_tab = int_field(s, "active_tab", 0);
+        for (const auto& t : array_field(s, "tabs")) {
+            if (!t.is_object())
+                continue;
             Tab tab;
-            tab.id = t.value("id", "");
-            tab.name = t.value("name", "");
-            tab.root = node_from_json(t.value("root", Json::object()));
-            tab.focused = t.value("focused", "");
-            tab.zoomed = t.value("zoomed", "");
-            tab.settled = t.value("settled", false);
-            if (const auto pn = t.find("pane_names"); pn != t.end() && pn->is_object())
-                tab.pane_names = pn->get<std::map<std::string, std::string>>();
+            tab.id = str_field(t, "id");
+            tab.name = str_field(t, "name");
+            tab.root = node_from_json(field(t, "root"));
+            tab.focused = str_field(t, "focused");
+            tab.zoomed = str_field(t, "zoomed");
+            tab.settled = bool_field(t, "settled");
+            if (const Json& pn = field(t, "pane_names"); pn.is_object())
+                for (const auto& [pane, name] : pn.items())
+                    if (name.is_string())
+                        tab.pane_names[pane] = name.get<std::string>();
             if (!w.sessions_in(tab).empty())
                 sp.tabs.push_back(std::move(tab));
         }
@@ -787,14 +832,14 @@ Workspace Workspace::from_json(const Json& j) {
             w.spaces.push_back(std::move(sp));
         }
     }
-    for (const auto& p : j.value("pinned", Json::array()))
+    for (const auto& p : array_field(j, "pinned"))
         if (p.is_string())
             w.pinned.insert(p.get<std::string>());
-    for (const auto& p : j.value("right_click_program", Json::array()))
+    for (const auto& p : array_field(j, "right_click_program"))
         if (p.is_string())
             w.right_click_program.insert(p.get<std::string>());
     w.active_space =
-        std::clamp(j.value("active_space", 0), 0, std::max(0, static_cast<int>(w.spaces.size()) - 1));
+        std::clamp(int_field(j, "active_space", 0), 0, std::max(0, static_cast<int>(w.spaces.size()) - 1));
     return w;
 }
 
