@@ -127,3 +127,4 @@ plan: docs/design/AgentDesk_Design.md 5.6
 | 2026-11-19 | 新增 space 或分頁時選擇 shell（亮點） | 使用者要求，AgentDesk 的亮點，herdr 沒有：側欄「+」列出偵測到的 shell（PowerShell 7、Windows PowerShell、Command Prompt、WSL），選了就用它開新 space；分頁列「+」選單也列出預設以外的 shell。快捷鍵維持開預設 shell。設計文件 ADR-20、使用手冊已更新 | 使用者 2026-11-19 | — |
 | 2026-11-19 | 版本 0.2.0 | 升版：這版改了 agent-host 的行為（提示字元刪除狀態、shell 提示鉤子），升版後 agent-host 才能用單獨更新把使用者執行中的終端機交接給新版 | src/update.rs 205-262 | — |
 | 2026-11-19 | 重開時出現很多舊的 space | 修正：照 herdr，終端機已結束（exited、killed）或遺失（Lost，跑它的 agent-host 已不在）時移除它的面板，分頁空了關分頁、space 空了關 space；已結束的 session 也不再被開成 space。使用者實機回報 | src/window.rs 2262-2283、2695-2719；src/model.rs 403-422 | — |
+| 2026-11-19 | 使用者實機驗收 | 使用者確認：Agent 狀態顯示與清除正常、重開後 space 正常、FreeType 字型可接受 | 使用者 2026-11-19 | — |
