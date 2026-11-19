@@ -121,6 +121,19 @@ float snap(float v) {
     return std::round(v);
 }
 
+double triangle_wave(double period_ms) {
+    const double t = std::fmod(ImGui::GetTime() * 1000.0, period_ms) / period_ms;
+    return t < 0.5 ? t * 2 : 2 - t * 2;
+}
+
+std::string trim_space(std::string t) {
+    while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back())))
+        t.pop_back();
+    while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front())))
+        t.erase(t.begin());
+    return t;
+}
+
 // Which game windows are open: {mines: "open" | "min", sol: ...}.
 std::string app_state(App::State& s, const std::string& name) {
     const Json& a = shared(s, "win98.apps");
@@ -226,8 +239,8 @@ float text_top(App::State& s, float top, float size, float line) {
 
 // One line of text in a line box of `line` px at (x, top). "&File" underlines the F unless
 // `access` is false. Returns its width.
-float label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col,
-            bool bold, float size, float line, bool access, ImFont* font) {
+float label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col, bool bold,
+            float size, float line, bool access, ImFont* font) {
     ImFont* f = font != nullptr ? font : face(s, bold);
     const float px_size = U(s, size);
     const float y = text_top(s, top, size, line);
@@ -250,11 +263,20 @@ float label(App::State& s, ImDrawList* dl, float x, float top, const std::string
     return f->CalcTextSizeA(px_size, FLT_MAX, 0, shown.c_str()).x;
 }
 
+float plain_label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col) {
+    return label(s, dl, x, top, text, col, false, 11, 13, false);
+}
+
+void underline(App::State& s, ImDrawList* dl, float x, float top, float w, ImU32 col) {
+    const float base = text_top(s, top) + face(s, false)->GetFontBaked(U(s, 11))->Ascent;
+    fill(dl, Box{snap(x), snap(base + 1), snap(x + w), snap(base + 1) + one(s)}, col);
+}
+
 namespace {
 // Text read bottom to top (the Start menu's banner): laid out level from (x, bottom), then turned
 // a quarter left about that point, its top toward x. Returns its length.
-float label_up(App::State& s, ImDrawList* dl, float x, float bottom, const std::string& text, ImU32 col, bool bold,
-               float size, float line) {
+float label_up(App::State& s, ImDrawList* dl, float x, float bottom, const std::string& text, ImU32 col,
+               bool bold, float size, float line) {
     dl->PushClipRectFullScreen();  // level, it runs past the banner; turned, it is inside it
     const int first = dl->VtxBuffer.Size;
     const float w = label(s, dl, x, bottom, text, col, bold, size, line, false);
@@ -276,8 +298,7 @@ float label_clipped(App::State& s, ImDrawList* dl, float x, float top, const std
 
 // The text's lines: one per "\n" (an empty one keeps its height), each wrapped at `width` on
 // spaces.
-std::vector<std::string> wrap(App::State& s, const std::string& text, float width, bool bold,
-                              float size) {
+std::vector<std::string> wrap(App::State& s, const std::string& text, float width, bool bold, float size) {
     std::vector<std::string> out;
     std::stringstream in(text);
     for (std::string para; std::getline(in, para, '\n');) {
@@ -397,8 +418,7 @@ void dither(App::State& s, ImDrawList* dl, Box b) {
 
 // ---------------------------------------------------------------- icons
 
-void image(App::State& s, ImDrawList* dl, const std::filesystem::path& file, Box b,
-           ImU32 tint, bool mono) {
+void image(App::State& s, ImDrawList* dl, const std::filesystem::path& file, Box b, ImU32 tint, bool mono) {
     const auto img = st(s).images.svg(file, static_cast<int>(b.w()), static_cast<int>(b.h()), mono);
     if (img.ok())
         dl->AddImage(img.tex, b.a(), b.b(), ImVec2(0, 0), ImVec2(1, 1), tint);
@@ -457,8 +477,9 @@ void glyph(App::State& s, ImDrawList* dl, const std::string& name, float w, floa
           true);
 }
 
-// A program's icon, from the app's program table (program_of in programs.cpp); shells, the generic shell entry and programs without an icon are MS-DOS. A tinted
-// glyph sits on its tile (navy without one), 4 px smaller, in its color (white without one).
+// A program's icon, from the app's program table (program_of in programs.cpp); shells, the generic shell
+// entry and programs without an icon are MS-DOS. A tinted glyph sits on its tile (navy without one), 4 px
+// smaller, in its color (white without one).
 void program_icon(App::State& s, ImDrawList* dl, const ui::Program& p, float size, ImVec2 at) {
     if (p.shell || p.key == "shell" || p.icon.empty()) {
         icon(s, dl, "dos", size, at);
@@ -619,9 +640,8 @@ Menu* find_menu(App::State& s, int id) {
 
 // Opens a popup menu at `at` (the pointer when not given), or above a box (the
 // Start menu over its button). Returns its id.
-int open_menu(App::State& s, MenuItems items, std::optional<ImVec2> at, bool start,
-              std::string owner, std::vector<int> parents,
-              std::optional<Box> above) {
+int open_menu(App::State& s, MenuItems items, std::optional<ImVec2> at, bool start, std::string owner,
+              std::vector<int> parents, std::optional<Box> above) {
     W98& w = st(s);
     std::vector<k98::MenuRowText> rows;
     for (const auto& it : items)
@@ -752,6 +772,25 @@ void move_menu(Menu& m, int d) {
     m.at = i;
 }
 
+// Enter on row i: opens its submenu, or chooses it. The item is copied because choosing it
+// closes (and frees) the menu.
+void activate_row(App::State& s, int menu_id, const Menu& m, int i) {
+    const MenuItem& it = m.items[static_cast<std::size_t>(i)];
+    if (!it.sub.empty())
+        open_sub(s, menu_id, i, std::nullopt);
+    else
+        choose(s, MenuItem(it));
+}
+
+// The first row, not a separator, whose access key is `c`; -1 when none.
+int access_row(const Menu& m, char c) {
+    for (int i = 0; i < static_cast<int>(m.items.size()); ++i)
+        if (!m.items[static_cast<std::size_t>(i)].sep &&
+            k98::access_matches(m.items[static_cast<std::size_t>(i)].label, c))
+            return i;
+    return -1;
+}
+
 // The keys of the menu opened last: arrows, Enter or Space, Escape, and access keys.
 void menu_keys(App::State& s, int menu_id) {
     Menu* m = find_menu(s, menu_id);
@@ -768,12 +807,8 @@ void menu_keys(App::State& s, int menu_id) {
     } else if (pressed(ImGuiKey_LeftArrow) || pressed(ImGuiKey_Escape)) {
         escape_menu(s, menu_id);
     } else if (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_KeypadEnter) || pressed(ImGuiKey_Space)) {
-        if (m->at >= 0) {
-            if (!m->items[static_cast<std::size_t>(m->at)].sub.empty())
-                open_sub(s, menu_id, m->at, std::nullopt);
-            else
-                choose(s, MenuItem(m->items[static_cast<std::size_t>(m->at)]));
-        }
+        if (m->at >= 0)
+            activate_row(s, menu_id, *m, m->at);
     } else {
         for (const ImWchar c : ImGui::GetIO().InputQueueCharacters) {
             if (c >= 128 || c == ' ')
@@ -781,18 +816,11 @@ void menu_keys(App::State& s, int menu_id) {
             Menu* mm = find_menu(s, menu_id);
             if (mm == nullptr)
                 break;
-            int found = -1;
-            for (int i = 0; i < static_cast<int>(mm->items.size()) && found < 0; ++i)
-                if (!mm->items[static_cast<std::size_t>(i)].sep &&
-                    k98::access_matches(mm->items[static_cast<std::size_t>(i)].label, static_cast<char>(c)))
-                    found = i;
+            const int found = access_row(*mm, static_cast<char>(c));
             if (found < 0)
                 continue;
             mm->at = found;
-            if (!mm->items[static_cast<std::size_t>(found)].sub.empty())
-                open_sub(s, menu_id, found, std::nullopt);
-            else
-                choose(s, MenuItem(mm->items[static_cast<std::size_t>(found)]));
+            activate_row(s, menu_id, *mm, found);
             break;
         }
     }
@@ -896,6 +924,94 @@ void keyboard_back(App::State& s) {
     s.focus_view(s.ws.focused_session());
 }
 
+namespace {
+// Closes every menu a press landed outside of, except menus opened by this very press.
+void close_menus_pressed_outside(App::State& s, ImVec2 mp) {
+    W98& w = st(s);
+    std::vector<int> doomed;
+    for (const auto& m : w.menus)
+        if (!box(m.pos, m.size).contains(mp) && m.opened_frame != ImGui::GetFrameCount())
+            doomed.push_back(m.id);
+    for (const int id : doomed) {
+        Menu* m = find_menu(s, id);
+        if (m == nullptr)
+            continue;
+        if (m->start && !shared(s, "win98.start").is_null())
+            set_shared(s, "win98.start", nullptr);
+        const Menu copy = *m;
+        release_owner(s, copy);
+        std::erase_if(w.menus, [&](const Menu& x) { return x.id == id; });
+        for (auto& x : w.menus)
+            if (x.sub_id == id) {
+                x.sub_id = 0;
+                x.sub_index = -1;
+            }
+    }
+}
+
+// The Start menu's banner: navy with a black-to-navy gradient, "AgentDesk 98" read upward at the
+// foot. Returns its right edge.
+float start_banner(App::State& s, ImDrawList* dl, Box in) {
+    const Box ban{in.x0, in.y0, in.x0 + U(s, k98::MenuMetrics::kBanner), in.y1};
+    fill(dl, ban, rgb(C::kNavy));
+    gradient(dl, ban, rgb(0x000000), rgb(C::kNavy), true);
+    const float bottom = ban.y1 - U(s, 3);
+    const auto line = static_cast<float>(k98::MenuMetrics::kBanner);
+    const float l = label_up(s, dl, ban.x0, bottom, "AgentDesk", rgb(C::kWhite), true, 16, line);
+    label_up(s, dl, ban.x0, bottom - l - U(s, 6), "98", rgb(0xdfdfdf), false, 16, line);
+    return ban.x1;
+}
+
+// One menu in its own ImGui window; the last one opened (`keys`) also reads the keyboard.
+void draw_menu(App::State& s, int id, bool keys) {
+    W98& w = st(s);
+    Menu* m = find_menu(s, id);
+    if (m == nullptr)
+        return;
+    const std::string name = "##w98menu" + std::to_string(id);
+    ImGui::SetNextWindowPos(m->pos);
+    ImGui::SetNextWindowSize(m->size);
+    // A menu takes the keyboard when it opens.
+    if (keys && w.menu_focus != id) {
+        ImGui::SetNextWindowFocus();
+        w.menu_focus = id;
+    }
+    begin_overlay(name, ImGuiWindowFlags_NoScrollWithMouse);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const bool start = m->start;
+    Box in = bevel(s, dl, box(m->pos, m->size), Bevel::kWindow, rgb(C::kFace)).inset(one(s));
+    if (start)
+        in.x0 = start_banner(s, dl, in);
+    float y = in.y0;
+    const std::size_t n = m->items.size();
+    for (std::size_t i = 0; i < n; ++i) {
+        m = find_menu(s, id);  // a row's action may have closed it
+        if (m == nullptr || i >= m->items.size())
+            break;
+        const float h = U(s, m->items[i].sep ? k98::MenuMetrics::kSep
+                             : start         ? k98::MenuMetrics::kStartRow
+                                             : k98::MenuMetrics::kRow);
+        menu_row(s, dl, id, static_cast<int>(i), Box{in.x0, snap(y), in.x1, snap(y + h)}, start);
+        y += h;
+    }
+    if (keys && find_menu(s, id) != nullptr && ImGui::IsWindowFocused())
+        menu_keys(s, id);
+    ImGui::End();
+    raise(name);
+}
+
+}  // namespace
+
+void begin_overlay(const std::string& name, ImGuiWindowFlags extra) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+    ImGui::Begin(name.c_str(), nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoBackground | extra);
+    ImGui::PopStyleVar(3);
+}
+
 // Draws every open menu, the last one opened on top with the keyboard.
 void draw_menus(App::State& s) {
     W98& w = st(s);
@@ -906,97 +1022,21 @@ void draw_menus(App::State& s) {
         }
         return;
     }
-    // A press outside a menu closes it.
     for (int b = 0; b < 3; ++b) {
         if (!ImGui::IsMouseClicked(b))
             continue;
-        const ImVec2 mp = ImGui::GetIO().MousePos;
-        std::vector<int> doomed;
-        for (const auto& m : w.menus)
-            if (!box(m.pos, m.size).contains(mp) && m.opened_frame != ImGui::GetFrameCount())
-                doomed.push_back(m.id);
-        for (const int id : doomed) {
-            Menu* m = find_menu(s, id);
-            if (m == nullptr)
-                continue;
-            if (m->start && !shared(s, "win98.start").is_null())
-                set_shared(s, "win98.start", nullptr);
-            const Menu copy = *m;
-            release_owner(s, copy);
-            std::erase_if(w.menus, [&](const Menu& x) { return x.id == id; });
-            for (auto& x : w.menus)
-                if (x.sub_id == id) {
-                    x.sub_id = 0;
-                    x.sub_index = -1;
-                }
-        }
+        close_menus_pressed_outside(s, ImGui::GetIO().MousePos);
         if (w.menus.empty()) {
             keyboard_back(s);
             return;
         }
     }
-    const std::vector<int> ids = [&] {
-        std::vector<int> v;
-        for (const auto& m : w.menus)
-            v.push_back(m.id);
-        return v;
-    }();
+    std::vector<int> ids;
+    for (const auto& m : w.menus)
+        ids.push_back(m.id);
     const int last = ids.back();
-    for (const int id : ids) {
-        Menu* m = find_menu(s, id);
-        if (m == nullptr)
-            continue;
-        const std::string name = "##w98menu" + std::to_string(id);
-        ImGui::SetNextWindowPos(m->pos);
-        ImGui::SetNextWindowSize(m->size);
-        // A menu takes the keyboard when it opens.
-        if (id == last && w.menu_focus != id) {
-            ImGui::SetNextWindowFocus();
-            w.menu_focus = id;
-        }
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
-        ImGui::Begin(name.c_str(), nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
-                         ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollWithMouse);
-        ImGui::PopStyleVar(3);
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const Box all = box(m->pos, m->size);
-        const bool start = m->start;
-        Box in = bevel(s, dl, all, Bevel::kWindow, rgb(C::kFace)).inset(one(s));
-        if (start) {
-            // The banner: 21 px, navy with a black-to-navy gradient, "AgentDesk 98" read upward at the foot.
-            const Box ban{in.x0, in.y0, in.x0 + U(s, k98::MenuMetrics::kBanner), in.y1};
-            fill(dl, ban, rgb(C::kNavy));
-            gradient(dl, ban, rgb(0x000000), rgb(C::kNavy), true);
-            {
-                const float bottom = ban.y1 - U(s, 3);
-                const float l = label_up(s, dl, ban.x0, bottom, "AgentDesk", rgb(C::kWhite), true, 16,
-                                         static_cast<float>(k98::MenuMetrics::kBanner));
-                label_up(s, dl, ban.x0, bottom - l - U(s, 6), "98", rgb(0xdfdfdf), false, 16,
-                         static_cast<float>(k98::MenuMetrics::kBanner));
-            }
-            in.x0 = ban.x1;
-        }
-        float y = in.y0;
-        const std::size_t n = m->items.size();
-        for (std::size_t i = 0; i < n; ++i) {
-            m = find_menu(s, id);
-            if (m == nullptr || i >= m->items.size())
-                break;
-            const float h = U(s, m->items[i].sep ? k98::MenuMetrics::kSep
-                                 : start         ? k98::MenuMetrics::kStartRow
-                                                 : k98::MenuMetrics::kRow);
-            menu_row(s, dl, id, static_cast<int>(i), Box{in.x0, snap(y), in.x1, snap(y + h)}, start);
-            y += h;
-        }
-        if (id == last && find_menu(s, id) != nullptr && ImGui::IsWindowFocused())
-            menu_keys(s, id);
-        ImGui::End();
-        raise(name);
-    }
+    for (const int id : ids)
+        draw_menu(s, id, id == last);
     if (w.menus.empty())
         keyboard_back(s);
 }

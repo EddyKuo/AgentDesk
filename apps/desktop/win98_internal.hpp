@@ -36,6 +36,10 @@ float U(App::State& s, float n);
 float U(App::State& s, int n);
 float one(App::State& s);
 float snap(float v);
+// 0 -> 1 -> 0 over each period of the UI clock (blinking carets and badges, bobbing).
+double triangle_wave(double period_ms);
+// Without leading and trailing white space (std::isspace).
+std::string trim_space(std::string t);
 std::string app_state(App::State& s, const std::string& name);
 void set_app(App::State& s, const std::string& name, const std::string& state);
 void sfx(App::State& s, const std::string& name);
@@ -47,6 +51,10 @@ float text_w(App::State& s, const std::string& t, bool bold = false, float size 
 float text_top(App::State& s, float top, float size = 11, float line = 13);
 float label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col,
             bool bold = false, float size = 11, float line = 13, bool access = true, ImFont* font = nullptr);
+// The common case: regular 11 px text in a 13 px line, "&" shown as is.
+float plain_label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col);
+// A 1 px underline under `w` px of regular text laid out at (x, top).
+void underline(App::State& s, ImDrawList* dl, float x, float top, float w, ImU32 col);
 float label_clipped(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col,
                     float max_w, bool bold = false);
 std::vector<std::string> wrap(App::State& s, const std::string& text, float width, bool bold = false,
@@ -127,12 +135,14 @@ TitleEvents title_bar(App::State& s, ImDrawList* dl, const char* id, Box b, cons
 Box field(App::State& s, ImDrawList* dl, Box b, float pad_y = 2, float pad_x = 3, ImU32 bg = 0);
 Box well(App::State& s, ImDrawList* dl, Box b, float pad_y = 1, float pad_x = 3);
 int open_menu(App::State& s, MenuItems items, std::optional<ImVec2> at, bool start = false,
-              std::string owner = {}, std::vector<int> parents = {},
-              std::optional<Box> above = std::nullopt);
+              std::string owner = {}, std::vector<int> parents = {}, std::optional<Box> above = std::nullopt);
 void close_all_menus(App::State& s);
 void raise(const std::string& name);
 void keyboard_back(App::State& s);
 void draw_menus(App::State& s);
+// Begins a borderless, undecorated ImGui window for an overlay; the caller sets its position and
+// size first and calls ImGui::End().
+void begin_overlay(const std::string& name, ImGuiWindowFlags extra);
 Window* find_window(App::State& s, int id);
 Window* find_key(App::State& s, const std::string& key);
 int open_window(App::State& s, std::unique_ptr<Window> win);
@@ -174,7 +184,16 @@ Dialog prompt(const std::string& title, const std::string& text, const std::stri
               std::optional<std::string> value = {}, bool machines = false);
 Dialog message(const std::string& title, const std::string& text, const std::string& icon = {});
 Dialog kind_dialog(const std::string& kind);
+Dialog new_space_prompt(App::State& s);
+Dialog new_tab_prompt(App::State& s);
+Dialog rename_tab_prompt(App::State& s, const std::string& id, const std::string& current);
+Dialog rename_space_prompt(App::State& s, const std::string& id, const std::string& current);
 Dialog close_space_ask(App::State& s, int index);
+// The badge icon for an agent status word ("" for none).
+std::string status_badge(const std::string& status);
+// Where a session lives: "<space> \ <tab>" (both empty when it is in no tab).
+std::string session_place(App::State& s, const std::string& id,
+                          const std::map<std::string, std::string>& cwds);
 std::vector<Task> tasks(App::State& s);
 void set_desktop(App::State& s, const std::string& c);
 float pane_border(App::State& s);
