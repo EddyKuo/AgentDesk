@@ -6,6 +6,7 @@ agentdesk_library(agentdesk_ui
     src/imgui_adapter.cpp
     src/fonts.cpp
     src/terminal_view.cpp
+    src/sprites.cpp
     src/workspace.cpp
     src/chrome_logic.cpp
     src/keymap.cpp
