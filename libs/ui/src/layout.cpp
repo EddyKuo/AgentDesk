@@ -1,0 +1,1701 @@
+// herdr-app's layout engine, ported (see layout.hpp). Every rule cites the herdr file it comes
+// from (herdr-app, Apache-2.0; third_party/herdr/LICENSE).
+#include "agentdesk/ui/layout.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
+namespace agentdesk::ui::layout {
+
+namespace detail {
+// Generated from third_party/herdr/layouts/*.json (libs/ui/CMakeLists.txt).
+extern const char* const kHerdrMain;
+extern const char* const kHerdrTerminals;
+extern const char* const kHerdrWin98;
+}  // namespace detail
+
+namespace {
+
+// ---------------------------------------------------------------- reading (serde's rules)
+struct Reader {
+    std::string* error;
+    bool fail(const std::string& where, const std::string& what) const {
+        if (error != nullptr && error->empty())
+            *error = where.empty() ? what : where + ": " + what;
+        return false;
+    }
+};
+
+bool absent(const Json& j, const char* k) {
+    return !j.contains(k) || j.at(k).is_null();
+}
+
+// f32 fields: serde reads a JSON number into f32 and writes it back as f64.
+float f32(const Json& v) {
+    return static_cast<float>(v.get<double>());
+}
+Json num(float v) {
+    return Json(static_cast<double>(v));
+}
+
+bool read_float(const Json& j, const char* k, std::optional<float>& out, const Reader& r,
+                const std::string& at) {
+    if (absent(j, k))
+        return true;
+    if (!j.at(k).is_number())
+        return r.fail(at, std::string("`") + k + "` must be a number");
+    out = f32(j.at(k));
+    return true;
+}
+
+bool read_string(const Json& j, const char* k, std::optional<std::string>& out, const Reader& r,
+                 const std::string& at) {
+    if (absent(j, k))
+        return true;
+    if (!j.at(k).is_string())
+        return r.fail(at, std::string("`") + k + "` must be a string");
+    out = j.at(k).get<std::string>();
+    return true;
+}
+
+bool read_bool(const Json& j, const char* k, bool& out, const Reader& r, const std::string& at) {
+    if (absent(j, k))
+        return true;
+    if (!j.at(k).is_boolean())
+        return r.fail(at, std::string("`") + k + "` must be true or false");
+    out = j.at(k).get<bool>();
+    return true;
+}
+
+bool read_opt_bool(const Json& j, const char* k, std::optional<bool>& out, const Reader& r,
+                   const std::string& at) {
+    if (absent(j, k))
+        return true;
+    if (!j.at(k).is_boolean())
+        return r.fail(at, std::string("`") + k + "` must be true or false");
+    out = j.at(k).get<bool>();
+    return true;
+}
+
+// layout.rs 86-99.
+std::optional<Line> read_line(const Json& v, const Reader& r, const std::string& at) {
+    if (!v.is_object()) {
+        r.fail(at, "a line is {\"width\", \"color\"}");
+        return std::nullopt;
+    }
+    Line l;
+    std::optional<float> w;
+    std::optional<std::string> c;
+    if (!read_float(v, "width", w, r, at) || !read_string(v, "color", c, r, at))
+        return std::nullopt;
+    if (w)
+        l.width = *w;
+    if (c)
+        l.color = *c;
+    return l;
+}
+
+bool read_opt_line(const Json& j, const char* k, std::optional<Line>& out, const Reader& r,
+                   const std::string& at) {
+    if (absent(j, k))
+        return true;
+    out = read_line(j.at(k), r, at + "." + k);
+    return out.has_value();
+}
+
+// layout.rs 101-130: a color, a gradient (angle 180 unless said) or an image (cover unless said).
+bool read_background(const Json& j, const char* k, Json& out, const Reader& r, const std::string& at) {
+    if (absent(j, k))
+        return true;
+    const Json& v = j.at(k);
+    const std::string where = at + "." + k;
+    if (v.is_string()) {
+        out = v;
+        return true;
+    }
+    if (v.is_object() && v.contains("gradient")) {
+        const Json& g = v.at("gradient");
+        if (!g.is_array() || g.size() != 2 || !g[0].is_string() || !g[1].is_string())
+            return r.fail(where, "`gradient` is two colors");
+        std::optional<float> angle;
+        if (!read_float(v, "angle", angle, r, where))
+            return false;
+        out = Json{{"gradient", g}, {"angle", num(angle.value_or(180.0f))}};
+        return true;
+    }
+    if (v.is_object() && v.contains("image") && v.at("image").is_string()) {
+        std::string fit = "cover";
+        if (!absent(v, "fit")) {
+            if (!v.at("fit").is_string() || (v.at("fit") != "cover" && v.at("fit") != "contain"))
+                return r.fail(where, "`fit` is \"cover\" or \"contain\"");
+            fit = v.at("fit").get<std::string>();
+        }
+        out = Json{{"image", v.at("image")}, {"fit", fit}};
+        return true;
+    }
+    return r.fail(where, "a background is a color, {\"gradient\"} or {\"image\"}");
+}
+
+// layout.rs 221-256.
+std::optional<Header> read_header(const Json& v, const Reader& r, const std::string& at) {
+    if (!v.is_object() || absent(v, "content")) {
+        r.fail(at, "a header needs `content`");
+        return std::nullopt;
+    }
+    Header h;
+    const Json& c = v.at("content");
+    if (c.is_string()) {
+        h.content = c;
+    } else if (c.is_object() && c.contains("mod") && c.at("mod").is_string()) {
+        h.content = Json{{"mod", c.at("mod")}};
+        if (!absent(c, "props"))
+            h.content["props"] = c.at("props");
+    } else {
+        r.fail(at, "a header's `content` is \"tabs\" or {\"mod\"}");
+        return std::nullopt;
+    }
+    if (!read_string(v, "reveal", h.reveal, r, at) || !read_float(v, "height", h.height, r, at) ||
+        !read_string(v, "position", h.position, r, at))
+        return std::nullopt;
+    return h;
+}
+
+// layout.rs 258-282.
+std::optional<PaneFrame> read_pane(const Json& v, const Reader& r, const std::string& at) {
+    if (!v.is_object()) {
+        r.fail(at, "`pane` is an object");
+        return std::nullopt;
+    }
+    PaneFrame f;
+    if (!absent(v, "header")) {
+        f.header = read_header(v.at("header"), r, at + ".header");
+        if (!f.header)
+            return std::nullopt;
+    }
+    if (!read_background(v, "background", f.background, r, at) ||
+        !read_string(v, "shadow", f.shadow, r, at) || !read_opt_line(v, "border", f.border, r, at) ||
+        !read_opt_line(v, "focus", f.focus, r, at) || !read_float(v, "radius", f.radius, r, at) ||
+        !read_float(v, "gap", f.gap, r, at) || !read_bool(v, "lone", f.lone, r, at))
+        return std::nullopt;
+    return f;
+}
+
+// layout.rs 9-31: untagged, tried in order; a variant whose fields don't fit gives way to the next.
+std::optional<Content> read_content(const Json& v, const Reader& r, const std::string& at) {
+    const std::string bad = "`content` matches none of {\"terminal\"}, {\"mod\"}, {\"tab\"}, {\"agent\"}";
+    if (!v.is_object()) {
+        r.fail(at, bad);
+        return std::nullopt;
+    }
+    Content c;
+    if (v.contains("terminal") && v.at("terminal").is_string()) {
+        c.type = Content::Type::kTerminal;
+        c.value = v.at("terminal").get<std::string>();
+        return c;
+    }
+    if (v.contains("mod") && v.at("mod").is_string()) {
+        c.type = Content::Type::kMod;
+        c.value = v.at("mod").get<std::string>();
+        if (v.contains("props"))
+            c.props = v.at("props");
+        return c;
+    }
+    // `context`: 0.1.0's word for `tab` (layout.rs 23-24).
+    const char* tab = v.contains("tab") ? "tab" : v.contains("context") ? "context" : nullptr;
+    if (tab != nullptr && v.at(tab).is_string()) {
+        bool ok = true;
+        if (!absent(v, "pane")) {
+            std::string ignored;
+            const Reader quiet{&ignored};
+            c.pane = read_pane(v.at("pane"), quiet, at);
+            if (!c.pane)
+                ok = false;
+        }
+        if (ok) {
+            c.type = Content::Type::kTab;
+            c.value = v.at(tab).get<std::string>();
+            return c;
+        }
+        c.pane.reset();
+    }
+    if (v.contains("agent") && v.at("agent").is_string()) {
+        c.type = Content::Type::kAgent;
+        c.value = v.at("agent").get<std::string>();
+        return c;
+    }
+    r.fail(at, bad);
+    return std::nullopt;
+}
+
+std::optional<Edge> edge_of(std::string_view s) {
+    if (s == "top")
+        return Edge::kTop;
+    if (s == "right")
+        return Edge::kRight;
+    if (s == "bottom")
+        return Edge::kBottom;
+    if (s == "left")
+        return Edge::kLeft;
+    return std::nullopt;
+}
+
+std::optional<Align> align_of(std::string_view s) {
+    if (s == "start")
+        return Align::kStart;
+    if (s == "center")
+        return Align::kCenter;
+    if (s == "end")
+        return Align::kEnd;
+    return std::nullopt;
+}
+
+// layout.rs 61-77.
+std::optional<Float> read_float_block(const Json& v, const Reader& r, const std::string& at) {
+    if (!v.is_object() || !v.contains("id") || !v.at("id").is_string()) {
+        r.fail(at, "a floating block needs an `id`");
+        return std::nullopt;
+    }
+    Float f;
+    f.id = v.at("id").get<std::string>();
+    if (absent(v, "content")) {
+        r.fail(at, "missing field `content`");
+        return std::nullopt;
+    }
+    auto c = read_content(v.at("content"), r, at + ".content");
+    if (!c)
+        return std::nullopt;
+    f.content = std::move(*c);
+    if (!absent(v, "edge")) {
+        const auto e = v.at("edge").is_string() ? edge_of(v.at("edge").get<std::string>()) : std::nullopt;
+        if (!e) {
+            r.fail(at, "`edge` is top, right, bottom or left");
+            return std::nullopt;
+        }
+        f.edge = *e;
+    }
+    if (!absent(v, "align")) {
+        const auto a = v.at("align").is_string() ? align_of(v.at("align").get<std::string>()) : std::nullopt;
+        if (!a) {
+            r.fail(at, "`align` is start, center or end");
+            return std::nullopt;
+        }
+        f.align = *a;
+    }
+    if (!read_float(v, "peek", f.peek, r, at) || !read_bool(v, "hidden", f.hidden, r, at))
+        return std::nullopt;
+    return f;
+}
+
+// layout.rs 150-195: the look, flattened into the node.
+bool read_look(const Json& v, Json& look, const Reader& r, const std::string& at) {
+    look = Json::object();
+    if (!absent(v, "theme")) {
+        const Json& t = v.at("theme");
+        if (t.is_string())
+            look["theme"] = t;
+        else if (t.is_object() && t.contains("light") && t.at("light").is_string() && t.contains("dark") &&
+                 t.at("dark").is_string())
+            look["theme"] = Json{{"light", t.at("light")}, {"dark", t.at("dark")}};
+        else
+            return r.fail(at, "`theme` is a name or {\"light\", \"dark\"}");
+    }
+    if (!absent(v, "colors")) {
+        const Json& c = v.at("colors");
+        if (!c.is_object())
+            return r.fail(at, "`colors` maps names to colors");
+        for (const auto& [k, x] : c.items())
+            if (!x.is_string())
+                return r.fail(at, "`colors." + k + "` must be a string");
+        look["colors"] = c;
+    }
+    for (const char* k : {"font", "ui_font"}) {
+        std::optional<std::string> s;
+        if (!read_string(v, k, s, r, at))
+            return false;
+        if (s)
+            look[k] = *s;
+    }
+    for (const char* k : {"font_size", "terminal_line_height", "terminal_cell_width", "terminal_scroll_speed",
+                          "terminal_opacity"}) {
+        std::optional<float> f;
+        if (!read_float(v, k, f, r, at))
+            return false;
+        if (f)
+            look[k] = num(*f);
+    }
+    if (!absent(v, "font_weight")) {
+        const Json& w = v.at("font_weight");
+        if (!w.is_number_unsigned() || w.get<std::uint64_t>() > 65535)
+            return r.fail(at, "`font_weight` is a whole number, 100 to 900");
+        look["font_weight"] = w;
+    }
+    if (!absent(v, "terminal_padding")) {
+        const Json& p = v.at("terminal_padding");
+        if (!p.is_array() || p.size() != 2 || !p[0].is_number() || !p[1].is_number())
+            return r.fail(at, "`terminal_padding` is [x, y]");
+        look["terminal_padding"] = Json::array({num(f32(p[0])), num(f32(p[1]))});
+    }
+    return true;
+}
+
+std::optional<Node> read_node(const Json& v, const Reader& r, const std::string& at) {
+    if (!v.is_object()) {
+        r.fail(at, "a node is an object");
+        return std::nullopt;
+    }
+    Node n;
+    if (!absent(v, "id")) {
+        if (!v.at("id").is_string()) {
+            r.fail(at, "`id` must be a string");
+            return std::nullopt;
+        }
+        n.id = v.at("id").get<std::string>();
+    }
+    const std::string here = at + (n.id.empty() ? std::string() : "(" + n.id + ")");
+    if (!v.contains("type") || !v.at("type").is_string()) {
+        r.fail(here, "missing field `type`");
+        return std::nullopt;
+    }
+    const std::string type = v.at("type").get<std::string>();
+    if (type == "block") {
+        n.kind = Kind::kBlock;
+        if (absent(v, "content")) {
+            r.fail(here, "missing field `content`");
+            return std::nullopt;
+        }
+        auto c = read_content(v.at("content"), r, here + ".content");
+        if (!c)
+            return std::nullopt;
+        n.content = std::move(*c);
+    } else if (type == "row" || type == "column" || type == "stack") {
+        n.kind = type == "row" ? Kind::kRow : type == "column" ? Kind::kColumn : Kind::kStack;
+        if (!v.contains("children") || !v.at("children").is_array()) {
+            r.fail(here, "missing field `children`");
+            return std::nullopt;
+        }
+        int i = 0;
+        for (const auto& c : v.at("children")) {
+            auto child = read_node(c, r, here + ".children[" + std::to_string(i++) + "]");
+            if (!child)
+                return std::nullopt;
+            n.children.push_back(std::move(*child));
+        }
+        if (n.kind == Kind::kStack) {
+            if (!read_string(v, "active", n.active, r, here))
+                return std::nullopt;
+            if (!absent(v, "header")) {
+                n.header = read_header(v.at("header"), r, here + ".header");
+                if (!n.header)
+                    return std::nullopt;
+            }
+        }
+    } else {
+        r.fail(here, "unknown `type` \"" + type + "\" (block, row, column or stack)");
+        return std::nullopt;
+    }
+    if (!absent(v, "cloned_from")) {
+        const Json& c = v.at("cloned_from");
+        if (!c.is_object() || !c.contains("name") || !c.at("name").is_string() || !c.contains("version") ||
+            !c.at("version").is_string()) {
+            r.fail(here, "`cloned_from` is {\"name\", \"version\"}");
+            return std::nullopt;
+        }
+        n.cloned_from = Json{{"name", c.at("name")}, {"version", c.at("version")}};
+    }
+    if (!absent(v, "size")) {
+        const Json& s = v.at("size");
+        if (s.is_object() && s.contains("px") && s.at("px").is_number())
+            n.size = Span::pixels(f32(s.at("px")));
+        else if (s.is_object() && s.contains("weight") && s.at("weight").is_number())
+            n.size = Span::weight(f32(s.at("weight")));
+        else {
+            r.fail(here, "`size` is {\"px\": n} or {\"weight\": n}");
+            return std::nullopt;
+        }
+    }
+    if (!read_float(v, "min", n.min, r, here) || !read_float(v, "max", n.max, r, here) ||
+        !read_bool(v, "hidden", n.hidden, r, here) || !read_string(v, "title", n.title, r, here) ||
+        !read_background(v, "background", n.background, r, here) ||
+        !read_opt_line(v, "border", n.border, r, here) || !read_float(v, "radius", n.radius, r, here) ||
+        !read_string(v, "shadow", n.shadow, r, here))
+        return std::nullopt;
+    if (!absent(v, "padding")) {
+        const Json& p = v.at("padding");
+        if (p.is_number())
+            n.padding = Padding{f32(p), f32(p), false};
+        else if (p.is_array() && p.size() == 2 && p[0].is_number() && p[1].is_number())
+            n.padding = Padding{f32(p[0]), f32(p[1]), true};
+        else {
+            r.fail(here, "`padding` is a number or [vertical, horizontal]");
+            return std::nullopt;
+        }
+    }
+    if (!absent(v, "focus")) {
+        const Json& f = v.at("focus");
+        if (!f.is_object()) {
+            r.fail(here, "`focus` is {\"border\", \"background\"}");
+            return std::nullopt;
+        }
+        n.focus = Json::object();
+        std::optional<Line> line;
+        std::optional<std::string> bg;
+        if (!read_opt_line(f, "border", line, r, here + ".focus") ||
+            !read_string(f, "background", bg, r, here + ".focus"))
+            return std::nullopt;
+        if (line)
+            n.focus["border"] = Json{{"width", num(line->width)}, {"color", line->color}};
+        if (bg)
+            n.focus["background"] = *bg;
+    }
+    if (!read_look(v, n.look, r, here) || !read_float(v, "gap", n.gap, r, here) ||
+        !read_opt_line(v, "divider", n.divider, r, here) ||
+        !read_opt_bool(v, "movable", n.movable, r, here) ||
+        !read_opt_bool(v, "closable", n.closable, r, here) ||
+        !read_opt_bool(v, "resizable", n.resizable, r, here))
+        return std::nullopt;
+    if (!absent(v, "floating")) {
+        if (!v.at("floating").is_array()) {
+            r.fail(here, "`floating` is a list");
+            return std::nullopt;
+        }
+        int i = 0;
+        for (const auto& f : v.at("floating")) {
+            auto fl = read_float_block(f, r, here + ".floating[" + std::to_string(i++) + "]");
+            if (!fl)
+                return std::nullopt;
+            n.floating.push_back(std::move(*fl));
+        }
+    }
+    if (!absent(v, "titlebar")) {
+        if (!v.at("titlebar").is_string() || (v.at("titlebar") != "system" && v.at("titlebar") != "none")) {
+            r.fail(here, "`titlebar` is \"system\" or \"none\"");
+            return std::nullopt;
+        }
+        n.titlebar = v.at("titlebar").get<std::string>();
+    }
+    if (!absent(v, "traffic_lights")) {
+        const Json& t = v.at("traffic_lights");
+        if (!t.is_array() || t.size() != 2 || !t[0].is_number() || !t[1].is_number()) {
+            r.fail(here, "`traffic_lights` is [x, y]");
+            return std::nullopt;
+        }
+        n.traffic_lights = Json::array({num(f32(t[0])), num(f32(t[1]))});
+    }
+    if (!read_string(v, "preview", n.preview, r, here) ||
+        !read_string(v, "terminal_menu", n.terminal_menu, r, here) ||
+        !read_string(v, "toast", n.toast, r, here) || !read_bool(v, "window_drag", n.window_drag, r, here) ||
+        !read_bool(v, "window_blur", n.window_blur, r, here))
+        return std::nullopt;
+    return n;
+}
+
+// ---------------------------------------------------------------- writing
+Json line_json(const Line& l) {
+    return Json{{"width", num(l.width)}, {"color", l.color}};
+}
+
+Json header_json(const Header& h) {
+    Json j{{"content", h.content}};
+    if (h.reveal)
+        j["reveal"] = *h.reveal;
+    if (h.height)
+        j["height"] = num(*h.height);
+    if (h.position)
+        j["position"] = *h.position;
+    return j;
+}
+
+Json pane_json(const PaneFrame& f) {
+    Json j = Json::object();
+    if (f.header)
+        j["header"] = header_json(*f.header);
+    if (!f.background.is_null())
+        j["background"] = f.background;
+    if (f.shadow)
+        j["shadow"] = *f.shadow;
+    if (f.border)
+        j["border"] = line_json(*f.border);
+    if (f.focus)
+        j["focus"] = line_json(*f.focus);
+    if (f.radius)
+        j["radius"] = num(*f.radius);
+    if (f.gap)
+        j["gap"] = num(*f.gap);
+    if (f.lone)
+        j["lone"] = true;
+    return j;
+}
+
+Json content_json(const Content& c) {
+    switch (c.type) {
+        case Content::Type::kTerminal:
+            return Json{{"terminal", c.value}};
+        case Content::Type::kMod: {
+            Json j{{"mod", c.value}};
+            if (!c.props.is_null())
+                j["props"] = c.props;
+            return j;
+        }
+        case Content::Type::kTab: {
+            Json j{{"tab", c.value}};
+            if (c.pane)
+                j["pane"] = pane_json(*c.pane);
+            return j;
+        }
+        case Content::Type::kAgent:
+            return Json{{"agent", c.value}};
+    }
+    return Json::object();
+}
+
+Json span_json(const Span& s) {
+    return s.px ? Json{{"px", num(s.value)}} : Json{{"weight", num(s.value)}};
+}
+
+const Node* active_child_of(const std::vector<Node>& children, const std::optional<std::string>& active) {
+    // layout.rs 672-675: the active one if shown, else the first shown.
+    if (active)
+        for (const auto& c : children)
+            if (!c.hidden && c.id == *active)
+                return &c;
+    for (const auto& c : children)
+        if (!c.hidden)
+            return &c;
+    return nullptr;
+}
+
+bool is_line(const Node& n) {
+    return n.kind == Kind::kRow || n.kind == Kind::kColumn;
+}
+
+std::optional<float> weight_of(const std::optional<Span>& s) {
+    if (!s)
+        return 1.0f;
+    if (s->px)
+        return std::nullopt;
+    return s->value;
+}
+
+std::optional<Node> remove_inner(Node& node, std::string_view id) {
+    if (node.is_block())
+        return std::nullopt;
+    auto& c = node.children;
+    for (std::size_t i = 0; i < c.size(); ++i) {
+        if (c[i].id != id)
+            continue;
+        Node removed = std::move(c[i]);
+        c.erase(c.begin() + static_cast<std::ptrdiff_t>(i));
+        // layout.rs 681-696: its share goes back to the neighbor it was split from (the one
+        // before it, else the next), not spread over everyone.
+        if (is_line(node)) {
+            const std::size_t at = i == 0 ? 0 : i - 1;
+            if (const auto gone = weight_of(removed.size); gone && at < c.size())
+                if (const auto w = weight_of(c[at].size))
+                    c[at].size = Span::weight(*w + *gone);
+        }
+        // layout.rs 697-702: the neighbor that slides into its place (or the last) becomes active.
+        if (node.kind == Kind::kStack && node.active && *node.active == id) {
+            if (i < c.size())
+                node.active = c[i].id;
+            else if (!c.empty())
+                node.active = c.back().id;
+            else
+                node.active.reset();
+        }
+        return removed;
+    }
+    for (auto& n : c)
+        if (auto r = remove_inner(n, id))
+            return r;
+    return std::nullopt;
+}
+
+// layout.rs 708-730.
+void collapse(Node& node) {
+    if (node.is_block())
+        return;
+    const bool in_stack = node.kind == Kind::kStack;
+    for (auto& n : node.children)
+        collapse(n);
+    if (in_stack)
+        return;
+    std::erase_if(node.children, [](const Node& n) { return is_line(n) && n.children.empty(); });
+    for (auto& n : node.children) {
+        if (is_line(n) && n.children.size() == 1) {
+            const auto size = n.size;
+            Node only = std::move(n.children[0]);
+            only.size = size;
+            n = std::move(only);
+        }
+    }
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------- names
+const char* edge_name(Edge e) {
+    switch (e) {
+        case Edge::kTop:
+            return "top";
+        case Edge::kRight:
+            return "right";
+        case Edge::kBottom:
+            return "bottom";
+        case Edge::kLeft:
+            return "left";
+    }
+    return "right";
+}
+
+const char* align_name(Align a) {
+    return a == Align::kStart ? "start" : a == Align::kEnd ? "end" : "center";
+}
+
+std::string Header::mod() const {
+    return content.is_object() ? content.value("mod", std::string()) : std::string();
+}
+
+Json Header::props() const {
+    return content.is_object() && content.contains("props") ? content.at("props") : Json();
+}
+
+// ---------------------------------------------------------------- Node
+Node Node::block(std::string id, Content content) {
+    Node n;
+    n.id = std::move(id);
+    n.kind = Kind::kBlock;
+    n.content = std::move(content);
+    return n;
+}
+
+Node Node::container(std::string id, Axis axis, std::vector<Node> children) {
+    Node n;
+    n.id = std::move(id);
+    n.kind = axis == Axis::kRow ? Kind::kRow : Kind::kColumn;
+    n.children = std::move(children);
+    return n;
+}
+
+Node Node::stack(std::string id, std::vector<Node> children, std::optional<std::string> active) {
+    Node n;
+    n.id = std::move(id);
+    n.kind = Kind::kStack;
+    n.children = std::move(children);
+    n.active = std::move(active);
+    return n;
+}
+
+std::optional<Axis> Node::axis() const {
+    if (kind == Kind::kRow)
+        return Axis::kRow;
+    if (kind == Kind::kColumn)
+        return Axis::kColumn;
+    return std::nullopt;
+}
+
+bool Node::is_pane() const {
+    return is_block() && (content.type == Content::Type::kTerminal || content.type == Content::Type::kMod);
+}
+
+bool Node::closable_or() const {
+    return closable.value_or(true);
+}
+
+bool Node::resizable_or() const {
+    return resizable.value_or(true);
+}
+
+std::optional<float> Node::font_size() const {
+    if (look.is_object() && look.contains("font_size") && look.at("font_size").is_number())
+        return f32(look.at("font_size"));
+    return std::nullopt;
+}
+
+std::string Node::mod() const {
+    return is_block() && content.type == Content::Type::kMod ? content.value : std::string();
+}
+
+std::string Node::role() const {
+    if (mod().empty() || !content.props.is_object())
+        return {};
+    return content.props.value("role", std::string());
+}
+
+void Node::fill_ids(const std::function<std::string()>& fresh) {
+    if (id.empty())
+        id = fresh();
+    for (auto& c : children)
+        c.fill_ids(fresh);
+}
+
+std::vector<const Node*> Node::walk() const {
+    std::vector<const Node*> out{this};
+    for (const auto& c : children) {
+        auto sub = c.walk();
+        out.insert(out.end(), sub.begin(), sub.end());
+    }
+    return out;
+}
+
+const Node* Node::find(std::string_view want) const {
+    if (id == want)
+        return this;
+    for (const auto& c : children)
+        if (const Node* f = c.find(want))
+            return f;
+    return nullptr;
+}
+
+Node* Node::find(std::string_view want) {
+    return const_cast<Node*>(std::as_const(*this).find(want));
+}
+
+const Float* Node::find_float(std::string_view want) const {
+    for (const auto& f : floating)
+        if (f.id == want)
+            return &f;
+    for (const auto& c : children)
+        if (const Float* f = c.find_float(want))
+            return f;
+    return nullptr;
+}
+
+Float* Node::find_float(std::string_view want) {
+    return const_cast<Float*>(std::as_const(*this).find_float(want));
+}
+
+std::optional<std::vector<std::string>> Node::path_to(std::string_view want) const {
+    if (id == want)
+        return std::vector<std::string>{id};
+    for (const auto& c : children)
+        if (auto p = c.path_to(want)) {
+            p->insert(p->begin(), id);
+            return p;
+        }
+    return std::nullopt;
+}
+
+const Node* Node::parent_of(std::string_view want) const {
+    const auto p = path_to(want);
+    if (!p || p->size() < 2)
+        return nullptr;
+    return find((*p)[p->size() - 2]);
+}
+
+std::vector<const Node*> Node::terminals() const {
+    std::vector<const Node*> out;
+    for (const Node* n : walk())
+        if (n->is_block() && n->content.type == Content::Type::kTerminal)
+            out.push_back(n);
+    return out;
+}
+
+std::vector<const Node*> Node::panes() const {
+    std::vector<const Node*> out;
+    for (const Node* n : walk())
+        if (n->is_pane())
+            out.push_back(n);
+    return out;
+}
+
+std::vector<const Node*> Node::visible_blocks() const {
+    if (hidden)
+        return {};
+    if (is_block())
+        return {this};
+    if (kind == Kind::kStack) {
+        const Node* c = active_child_of(children, active);
+        return c != nullptr ? c->visible_blocks() : std::vector<const Node*>{};
+    }
+    std::vector<const Node*> out;
+    for (const auto& c : children) {
+        auto sub = c.visible_blocks();
+        out.insert(out.end(), sub.begin(), sub.end());
+    }
+    return out;
+}
+
+const Node* Node::active_child() const {
+    return kind == Kind::kStack ? active_child_of(children, active) : nullptr;
+}
+
+std::optional<Node> Node::remove(std::string_view want) {
+    auto removed = remove_inner(*this, want);
+    if (removed)
+        collapse(*this);
+    return removed;
+}
+
+std::optional<Node> Node::remove_slot(std::string_view want) {
+    return remove_inner(*this, want);
+}
+
+// layout.rs 598-629.
+bool Node::split(std::string_view target, Axis ax, Node fresh, std::string container_id) {
+    const Node* parent = parent_of(target);
+    if (parent != nullptr && parent->axis() == ax) {
+        Node* p = find(parent->id);
+        auto& c = p->children;
+        const auto it = std::find_if(c.begin(), c.end(), [&](const Node& n) { return n.id == target; });
+        // The new pane takes half of the target's share.
+        const bool fixed = it->size && it->size->px;
+        const float share = it->size && !fixed ? it->size->value : 1.0f;
+        if (!fixed)
+            it->size = Span::weight(share / 2.0f);
+        fresh.size = Span::weight(share / 2.0f);
+        c.insert(it + 1, std::move(fresh));
+        return true;
+    }
+    Node* t = find(target);
+    if (t == nullptr)
+        return false;
+    Node old = std::move(*t);
+    const auto slot_size = old.size;
+    old.size.reset();
+    Node wrapper = Node::container(std::move(container_id), ax, {});
+    wrapper.children.push_back(std::move(old));
+    wrapper.children.push_back(std::move(fresh));
+    wrapper.size = slot_size;
+    *t = std::move(wrapper);
+    return true;
+}
+
+bool Node::select(std::string_view stack, std::string_view child) {
+    Node* s = find(stack);
+    if (s == nullptr || s->kind != Kind::kStack)
+        return false;
+    if (std::none_of(s->children.begin(), s->children.end(), [&](const Node& c) { return c.id == child; }))
+        return false;
+    s->active = std::string(child);
+    return true;
+}
+
+// layout.rs 651-670: sizes stay with the places.
+bool Node::swap(std::string_view a, std::string_view b) {
+    const Node* fa = find(a);
+    const Node* fb = find(b);
+    if (fa == nullptr || fb == nullptr)
+        return false;
+    if (fa->find(b) != nullptr || fb->find(a) != nullptr)
+        return false;
+    Node na = *fa;
+    Node nb = *fb;
+    const auto sa = na.size;
+    const auto sb = nb.size;
+    const std::string tmp = std::string("\x01swap-") + std::string(b);
+    Node* x = find(a);
+    *x = nb;
+    x->size = sa;
+    x->id = tmp;
+    Node* y = find(b);
+    *y = std::move(na);
+    y->size = sb;
+    find(tmp)->id = std::string(b);
+    return true;
+}
+
+bool Node::operator==(const Node& o) const {
+    return to_json(*this) == to_json(o);
+}
+
+// ---------------------------------------------------------------- JSON
+std::optional<Node> parse(const Json& j, std::string* error) {
+    if (error != nullptr)
+        error->clear();
+    return read_node(j, Reader{error}, "root");
+}
+
+std::optional<Node> parse_text(std::string_view text, std::string* error) {
+    const Json j = Json::parse(text, nullptr, false);
+    if (j.is_discarded()) {
+        if (error != nullptr)
+            *error = "not valid JSON";
+        return std::nullopt;
+    }
+    return parse(j, error);
+}
+
+// layout.rs 327-400, with serde's skip_serializing_if.
+Json to_json(const Node& n) {
+    Json j = Json::object();
+    j["id"] = n.id;
+    if (!n.cloned_from.is_null())
+        j["cloned_from"] = n.cloned_from;
+    switch (n.kind) {
+        case Kind::kBlock:
+            j["type"] = "block";
+            j["content"] = content_json(n.content);
+            break;
+        case Kind::kRow:
+        case Kind::kColumn:
+        case Kind::kStack: {
+            j["type"] = n.kind == Kind::kRow ? "row" : n.kind == Kind::kColumn ? "column" : "stack";
+            Json kids = Json::array();
+            for (const auto& c : n.children)
+                kids.push_back(to_json(c));
+            j["children"] = std::move(kids);
+            if (n.kind == Kind::kStack) {
+                if (n.active)
+                    j["active"] = *n.active;
+                if (n.header)
+                    j["header"] = header_json(*n.header);
+            }
+            break;
+        }
+    }
+    if (n.size)
+        j["size"] = span_json(*n.size);
+    if (n.min)
+        j["min"] = num(*n.min);
+    if (n.max)
+        j["max"] = num(*n.max);
+    if (n.hidden)
+        j["hidden"] = true;
+    if (n.title)
+        j["title"] = *n.title;
+    if (!n.background.is_null())
+        j["background"] = n.background;
+    if (n.border)
+        j["border"] = line_json(*n.border);
+    if (n.radius)
+        j["radius"] = num(*n.radius);
+    if (n.shadow)
+        j["shadow"] = *n.shadow;
+    if (n.padding)
+        j["padding"] =
+            n.padding->axes ? Json::array({num(n.padding->y), num(n.padding->x)}) : num(n.padding->y);
+    if (!n.focus.is_null())
+        j["focus"] = n.focus;
+    if (n.look.is_object())
+        for (const auto& [k, v] : n.look.items())
+            j[k] = v;
+    if (n.gap)
+        j["gap"] = num(*n.gap);
+    if (n.divider)
+        j["divider"] = line_json(*n.divider);
+    if (n.movable)
+        j["movable"] = *n.movable;
+    if (n.closable)
+        j["closable"] = *n.closable;
+    if (n.resizable)
+        j["resizable"] = *n.resizable;
+    if (!n.floating.empty()) {
+        Json fl = Json::array();
+        for (const auto& f : n.floating) {
+            Json x{{"id", f.id},
+                   {"content", content_json(f.content)},
+                   {"edge", edge_name(f.edge)},
+                   {"align", align_name(f.align)}};
+            if (f.peek)
+                x["peek"] = num(*f.peek);
+            if (f.hidden)
+                x["hidden"] = true;
+            fl.push_back(std::move(x));
+        }
+        j["floating"] = std::move(fl);
+    }
+    if (n.titlebar)
+        j["titlebar"] = *n.titlebar;
+    if (!n.traffic_lights.is_null())
+        j["traffic_lights"] = n.traffic_lights;
+    if (n.preview)
+        j["preview"] = *n.preview;
+    if (n.terminal_menu)
+        j["terminal_menu"] = *n.terminal_menu;
+    if (n.toast)
+        j["toast"] = *n.toast;
+    if (n.window_drag)
+        j["window_drag"] = true;
+    if (n.window_blur)
+        j["window_blur"] = true;
+    return j;
+}
+
+// layout_sync.rs 291-306.
+void normalize(Json& v) {
+    if (v.is_number_float()) {
+        const double f = v.get<double>();
+        if (std::isfinite(f) && f == std::trunc(f) && std::abs(f) < 1e15)
+            v = static_cast<std::int64_t>(f);
+    } else if (v.is_array() || v.is_object()) {
+        for (auto& x : v)
+            normalize(x);
+    }
+}
+
+std::string text_of(const Node& n) {
+    Json v = to_json(n);
+    normalize(v);
+    return v.dump(2) + "\n";
+}
+
+// ---------------------------------------------------------------- the shipped layouts
+std::vector<std::string> builtin_names() {
+    return {"workspace", "terminals", "win98"};
+}
+
+std::string_view herdr_name(std::string_view name) {
+    return name == "workspace" ? std::string_view("main") : name;
+}
+
+std::string_view builtin_text(std::string_view name) {
+    const std::string_view h = herdr_name(name);
+    if (h == "main")
+        return detail::kHerdrMain;
+    if (h == "terminals")
+        return detail::kHerdrTerminals;
+    if (h == "win98")
+        return detail::kHerdrWin98;
+    return {};
+}
+
+Node builtin(std::string_view name) {
+    std::string_view text = builtin_text(name);
+    if (text.empty())
+        text = detail::kHerdrMain;
+    auto n = parse_text(text);
+    return n ? *n : Node{};
+}
+
+bool is_legacy(const Json& j) {
+    if (!j.is_object() || j.contains("type"))
+        return false;
+    for (const char* k :
+         {"name", "sidebar", "details", "tab_bar", "status_bar", "theme", "style", "font_size"})
+        if (j.contains(k))
+            return true;
+    return false;
+}
+
+Node from_legacy(const Json& j) {
+    const std::string style =
+        j.contains("style") && j.at("style").is_string() ? j.at("style").get<std::string>() : "";
+    Node n = builtin(style == "terminals" ? "terminals" : style == "win98" ? "win98" : "workspace");
+    auto hide = [&](const char* key, const char* id) {
+        if (j.contains(key) && j.at(key).is_boolean() && !j.at(key).get<bool>())
+            if (Node* x = n.find(id))
+                x->hidden = true;
+    };
+    hide("sidebar", "sidebar");
+    hide("tab_bar", "tabs");
+    hide("status_bar", "status");
+    if (j.contains("theme") && j.at("theme").is_string() && !j.at("theme").get<std::string>().empty())
+        n.look["theme"] = j.at("theme");
+    if (j.contains("font_size") && j.at("font_size").is_number())
+        n.look["font_size"] = num(std::clamp(f32(j.at("font_size")), 6.0f, 72.0f));
+    return n;
+}
+
+// ---------------------------------------------------------------- sizes
+const Line* node_border(const Node& n, bool focused) {
+    // pane_size.rs 7-9: the focus border while focused, else the border.
+    static thread_local Line focus_line;
+    if (focused && n.focus.is_object() && n.focus.contains("border")) {
+        const Json& b = n.focus.at("border");
+        focus_line.width = f32(b.at("width"));
+        focus_line.color = b.at("color").get<std::string>();
+        return &focus_line;
+    }
+    return n.border ? &*n.border : nullptr;
+}
+
+std::pair<float, float> padding_of(const Node& n) {
+    return n.padding ? std::pair{n.padding->y, n.padding->x} : std::pair{0.0f, 0.0f};
+}
+
+float header_height(const Header& h) {
+    return h.height.value_or(30.0f);  // window.rs 32 HEADER_HEIGHT
+}
+
+float separator_width(const Node& n, float gap) {
+    return gap + (n.divider ? n.divider->width : 0.0f);
+}
+
+float weight(const Node& n) {
+    if (!n.size)
+        return 1.0f;
+    return n.size->px ? 0.0f : n.size->value;
+}
+
+// pane_size.rs 49-85.
+std::vector<float> shares(const std::vector<const Node*>& children, float available, float zoom, bool whole) {
+    const auto z = [&](float v) { return whole ? std::round(v * zoom) : v * zoom; };
+    constexpr float kInf = std::numeric_limits<float>::infinity();
+    constexpr float kEps = std::numeric_limits<float>::epsilon();
+    std::vector<float> sizes(children.size(), 0.0f);
+    std::vector<std::size_t> pending;
+    float left = available;
+    for (std::size_t i = 0; i < children.size(); ++i) {
+        const Node& n = *children[i];
+        if (n.size && n.size->px) {
+            sizes[i] =
+                std::min(std::max(z(n.size->value), z(n.min.value_or(0.0f))), n.max ? z(*n.max) : kInf);
+            left -= sizes[i];
+        } else {
+            pending.push_back(i);
+        }
+    }
+    float total_weight = 0.0f;
+    for (const auto i : pending)
+        total_weight += weight(*children[i]);
+    total_weight = std::max(total_weight, kEps);
+    const float initial_free = std::max(left, 0.0f);
+    while (!pending.empty()) {
+        float total = 0.0f;
+        for (const auto i : pending)
+            total += weight(*children[i]);
+        total = std::max(total, kEps);
+        // Grow factors stay normalized to the original siblings after an item freezes.
+        const float free = std::min(std::max(left, 0.0f), initial_free * (total / total_weight));
+        std::vector<std::pair<std::size_t, float>> violations;
+        for (const auto i : pending) {
+            const Node& n = *children[i];
+            const float share = free * weight(n) / total;
+            sizes[i] = std::max(std::min(share, n.max ? z(*n.max) : kInf), z(n.min.value_or(0.0f)));
+            violations.emplace_back(i, sizes[i] - share);
+        }
+        float total_violation = 0.0f;
+        for (const auto& [i, v] : violations)
+            total_violation += v;
+        if (total_violation == 0.0f)
+            break;
+        for (const auto& [i, v] : violations) {
+            if ((total_violation > 0.0f && v <= 0.0f) || (total_violation < 0.0f && v >= 0.0f))
+                continue;
+            left -= sizes[i];
+            std::erase(pending, i);
+        }
+    }
+    return sizes;
+}
+
+const Placed* Placement::at(std::string_view id) const {
+    const auto it = nodes.find(std::string(id));
+    return it == nodes.end() ? nullptr : &it->second;
+}
+
+namespace {
+
+Rect inset(Rect r, float x, float y) {
+    return Rect{r.x + x, r.y + y, std::max(0.0f, r.w - 2 * x), std::max(0.0f, r.h - 2 * y)};
+}
+
+constexpr float kHandle = 6.0f;  // window.rs 33 HANDLE
+
+// window.rs 4439-4502 render_node with sized() (5184-5209); pane_size.rs 87-118 block_bounds.
+void place_node(const Node& n, Rect b, float zoom, const std::set<std::string>& focused, bool whole,
+                Placement& out) {
+    if (n.hidden)
+        return;
+    const auto z = [&](float v) { return whole ? std::round(v * zoom) : v * zoom; };
+    const Line* line = node_border(n, focused.count(n.id) > 0);
+    const float border = line != nullptr ? z(line->width) : 0.0f;
+    const Rect padded = inset(b, border, border);
+    const auto [py, px] = padding_of(n);
+    const Rect inner = inset(padded, z(px), z(py));
+    out.nodes[n.id] = Placed{b, inner, padded};
+    out.order.push_back(n.id);
+    if (n.kind == Kind::kRow || n.kind == Kind::kColumn) {
+        const bool row = n.kind == Kind::kRow;
+        std::vector<const Node*> shown;
+        for (const auto& c : n.children)
+            if (!c.hidden)
+                shown.push_back(&c);
+        const float sep = z(n.gap.value_or(0.0f)) + (n.divider ? z(n.divider->width) : 0.0f);
+        const float main = row ? inner.w : inner.h;
+        const float available = main - sep * static_cast<float>(shown.empty() ? 0 : shown.size() - 1);
+        const auto spans = shares(shown, available, zoom, whole);
+        float pos = row ? inner.x : inner.y;
+        for (std::size_t i = 0; i < shown.size(); ++i) {
+            const Rect slot =
+                row ? Rect{pos, inner.y, spans[i], inner.h} : Rect{inner.x, pos, inner.w, spans[i]};
+            place_node(*shown[i], slot, zoom, focused, whole, out);
+            pos += spans[i];
+            if (i + 1 < shown.size()) {
+                Separator s;
+                s.container = n.id;
+                s.index = static_cast<int>(i);
+                s.axis = row ? Axis::kRow : Axis::kColumn;
+                s.box = row ? Rect{pos, inner.y, sep, inner.h} : Rect{inner.x, pos, inner.w, sep};
+                const float hit = std::max(z(kHandle), sep);
+                s.hit = row ? Rect{pos + (sep - hit) / 2, inner.y, hit, inner.h}
+                            : Rect{inner.x, pos + (sep - hit) / 2, inner.w, hit};
+                s.resizable = n.resizable_or();
+                out.separators.push_back(std::move(s));
+                pos += sep;
+            }
+        }
+    } else if (n.kind == Kind::kStack) {
+        float h = n.header ? z(header_height(*n.header)) : 0.0f;
+        h = std::min(h, inner.h);
+        Rect body = inner;
+        if (n.header) {
+            const bool bottom = n.header->bottom();
+            out.headers[n.id] = Rect{inner.x, bottom ? inner.bottom() - h : inner.y, inner.w, h};
+            body.h -= h;
+            if (!bottom)
+                body.y += h;
+        }
+        if (const Node* c = n.active_child())
+            place_node(*c, body, zoom, focused, whole, out);
+    }
+}
+
+}  // namespace
+
+Placement place(const Node& root, Rect area, float zoom, const std::set<std::string>& focused, bool whole) {
+    Placement out;
+    place_node(root, area, zoom, focused, whole, out);
+    return out;
+}
+
+// window.rs 4671-4723.
+bool drag(Node& root, std::string_view container, int index, Axis axis, const Placement& placed,
+          float pointer, float zoom) {
+    Node* parent = root.find(container);
+    if (parent == nullptr || !parent->resizable_or())
+        return false;
+    std::vector<Node*> shown;
+    for (auto& c : parent->children)
+        if (!c.hidden)
+            shown.push_back(&c);
+    if (index < 0 || static_cast<std::size_t>(index) + 1 >= shown.size())
+        return false;
+    Node& a = *shown[static_cast<std::size_t>(index)];
+    Node& b = *shown[static_cast<std::size_t>(index) + 1];
+    const Placed* pa = placed.at(a.id);
+    const Placed* pb = placed.at(b.id);
+    if (pa == nullptr || pb == nullptr)
+        return false;
+    const bool row = axis == Axis::kRow;
+    // Measured on screen; sizes are stored as designed (unzoomed).
+    const float start = (row ? pa->outer.x : pa->outer.y) / zoom;
+    const float p = pointer / zoom;
+    const float la = (row ? pa->outer.w : pa->outer.h) / zoom;
+    const float lb = (row ? pb->outer.w : pb->outer.h) / zoom;
+    const float total = la + lb;
+    // Squeezed and zero-size siblings cannot both keep the drag minimum.
+    if (total <= 48.0f)
+        return false;
+    float new_a = std::clamp(p - start, 24.0f, total - 24.0f);
+    if (a.min)
+        new_a = std::max(new_a, *a.min);
+    if (a.max)
+        new_a = std::min(new_a, *a.max);
+    new_a = std::min(new_a, total - 24.0f);
+    const auto sa = a.size;
+    const auto sb = b.size;
+    if (sa && sa->px) {
+        a.size = Span::pixels(std::round(new_a));
+    } else if (sb && sb->px) {
+        b.size = Span::pixels(std::round(total - new_a));
+    } else {
+        const float wa = sa ? sa->value : 1.0f;
+        const float wb = sb ? sb->value : 1.0f;
+        const float sum = wa + wb;
+        a.size = Span::weight(sum * new_a / total);
+        b.size = Span::weight(sum * (total - new_a) / total);
+    }
+    return a.size != sa || b.size != sb;
+}
+
+// ---------------------------------------------------------------- floats
+std::pair<Edge, Align> snap(float x, float y, float w, float h) {
+    x = std::clamp(x, 0.0f, std::max(0.0f, w));
+    y = std::clamp(y, 0.0f, std::max(0.0f, h));
+    const float fx = x / std::max(w, 1.0f);
+    const float fy = y / std::max(h, 1.0f);
+    const std::pair<Edge, float> d[] = {
+        {Edge::kLeft, fx}, {Edge::kRight, 1.0f - fx}, {Edge::kTop, fy}, {Edge::kBottom, 1.0f - fy}};
+    Edge edge = d[0].first;
+    float best = d[0].second;
+    for (const auto& [e, v] : d)
+        if (v < best) {
+            best = v;
+            edge = e;
+        }
+    const float along = vertical(edge) ? fy : fx;
+    const Align align = along < 1.0f / 3.0f   ? Align::kStart
+                        : along > 2.0f / 3.0f ? Align::kEnd
+                                              : Align::kCenter;
+    return {edge, align};
+}
+
+std::array<float, 2> float_home(Rect owner, float bw, float bh, Edge edge, Align align, float margin) {
+    auto along = [&](float start, float room, float len) {
+        switch (align) {
+            case Align::kStart:
+                return start + margin;
+            case Align::kCenter:
+                return start + (room - len) / 2.0f;
+            case Align::kEnd:
+                return start + room - margin - len;
+        }
+        return start;
+    };
+    const float x = edge == Edge::kLeft    ? owner.x + margin
+                    : edge == Edge::kRight ? owner.right() - margin - bw
+                                           : along(owner.x, owner.w, bw);
+    const float y = edge == Edge::kTop      ? owner.y + margin
+                    : edge == Edge::kBottom ? owner.bottom() - margin - bh
+                                            : along(owner.y, owner.h, bh);
+    return {x, y};
+}
+
+// ---------------------------------------------------------------- clicks (layout_sync.rs)
+namespace {
+
+const PaneFrame* pane_of(const Node& n) {
+    return n.is_block() && n.content.type == Content::Type::kTab && n.content.pane ? &*n.content.pane
+                                                                                   : nullptr;
+}
+
+PaneFrame* pane_of(Node& n) {
+    return const_cast<PaneFrame*>(pane_of(std::as_const(n)));
+}
+
+const std::optional<std::string>& active_of(const Node& n) {
+    static const std::optional<std::string> kNone;
+    return n.kind == Kind::kStack ? n.active : kNone;
+}
+
+void set_active(Node& n, std::optional<std::string> to) {
+    if (n.kind == Kind::kStack)
+        n.active = std::move(to);
+}
+
+Json look_value(const Node& n, const char* k) {
+    return n.look.is_object() && n.look.contains(k) ? n.look.at(k) : Json();
+}
+
+void set_look(Node& n, const char* k, const Json& v) {
+    if (!n.look.is_object())
+        n.look = Json::object();
+    if (v.is_null())
+        n.look.erase(k);
+    else
+        n.look[k] = v;
+}
+
+std::optional<float> opt_float(const Json& v) {
+    return v.is_number() ? std::optional<float>(f32(v)) : std::nullopt;
+}
+
+Json opt_json(const std::optional<float>& v) {
+    return v ? num(*v) : Json();
+}
+
+std::vector<Float> floats_of(const Node& root) {
+    std::vector<Float> out;
+    for (const Node* n : root.walk())
+        out.insert(out.end(), n->floating.begin(), n->floating.end());
+    return out;
+}
+
+}  // namespace
+
+// layout_sync.rs 63-78.
+std::optional<PaneClick> PaneClick::of(const Node& n) {
+    const PaneFrame* p = pane_of(n);
+    if (p == nullptr)
+        return std::nullopt;
+    PaneClick c;
+    if (p->header)
+        c.header_height = p->header->height;
+    c.border = p->border;
+    c.focus = p->focus;
+    return c;
+}
+
+void PaneClick::apply(Node& n) const {
+    if (PaneFrame* p = pane_of(n)) {
+        if (p->header)
+            p->header->height = header_height;
+        p->border = border;
+        p->focus = focus;
+    }
+}
+
+bool NodeState::empty() const {
+    return !size && !hidden && !active && background.is_null() && !font_size && !pane;
+}
+
+bool FloatState::empty() const {
+    return !edge && !align && !hidden;
+}
+
+bool State::empty() const {
+    return nodes.empty() && floats.empty() && theme.is_null();
+}
+
+void State::forget_since_saved(const Node& file_now) {
+    if (file.is_null())
+        return;
+    const auto then = parse(file);
+    file = Json();
+    if (then)
+        forget_edited(*then, file_now);
+}
+
+// layout_sync.rs 127-170.
+State State::between(const Node& file, const Node& now) {
+    State s;
+    for (const Node* n : now.walk()) {
+        const Node* f = file.find(n->id);
+        if (f == nullptr)
+            continue;
+        NodeState ns;
+        if (n->size != f->size)
+            ns.size = n->size;
+        if (n->hidden != f->hidden)
+            ns.hidden = n->hidden;
+        if (active_of(*n) != active_of(*f))
+            ns.active = active_of(*n);
+        if (n->background != f->background)
+            ns.background = n->background;
+        if (look_value(*n, "font_size") != look_value(*f, "font_size"))
+            ns.font_size = n->font_size();
+        if (PaneClick::of(*n) != PaneClick::of(*f))
+            ns.pane = PaneClick::of(*n);
+        if (!ns.empty())
+            s.nodes[n->id] = std::move(ns);
+        for (const auto& fl : n->floating) {
+            const auto ff = std::find_if(f->floating.begin(), f->floating.end(),
+                                         [&](const Float& x) { return x.id == fl.id; });
+            if (ff == f->floating.end())
+                continue;
+            FloatState fs;
+            if (fl.edge != ff->edge)
+                fs.edge = fl.edge;
+            if (fl.align != ff->align)
+                fs.align = fl.align;
+            if (fl.hidden != ff->hidden)
+                fs.hidden = fl.hidden;
+            if (!fs.empty())
+                s.floats[fl.id] = fs;
+        }
+    }
+    if (look_value(now, "theme") != look_value(file, "theme"))
+        s.theme = look_value(now, "theme");
+    return s;
+}
+
+// layout_sync.rs 172-212.
+void State::apply(Node& root) const {
+    for (const auto& [id, ns] : nodes) {
+        Node* n = root.find(id);
+        if (n == nullptr)
+            continue;
+        if (ns.size)
+            n->size = ns.size;
+        if (ns.hidden)
+            n->hidden = *ns.hidden;
+        if (!ns.background.is_null())
+            n->background = ns.background;
+        if (ns.font_size)
+            set_look(*n, "font_size", num(*ns.font_size));
+        if (ns.pane)
+            ns.pane->apply(*n);
+        if (ns.active && std::any_of(n->children.begin(), n->children.end(),
+                                     [&](const Node& c) { return c.id == *ns.active; }))
+            set_active(*n, ns.active);
+    }
+    for (const auto& [id, fs] : floats) {
+        Float* f = root.find_float(id);
+        if (f == nullptr)
+            continue;
+        if (fs.edge)
+            f->edge = *fs.edge;
+        if (fs.align)
+            f->align = *fs.align;
+        if (fs.hidden)
+            f->hidden = *fs.hidden;
+    }
+    if (!theme.is_null())
+        set_look(root, "theme", theme);
+}
+
+// layout_sync.rs 214-257.
+void State::forget_edited(const Node& old_file, const Node& new_file) {
+    for (auto& [id, ns] : nodes) {
+        const Node* o = old_file.find(id);
+        const Node* n = new_file.find(id);
+        if (o == nullptr || n == nullptr)
+            continue;
+        if (o->size != n->size)
+            ns.size.reset();
+        if (o->hidden != n->hidden)
+            ns.hidden.reset();
+        if (active_of(*o) != active_of(*n))
+            ns.active.reset();
+        if (o->background != n->background)
+            ns.background = Json();
+        if (look_value(*o, "font_size") != look_value(*n, "font_size"))
+            ns.font_size.reset();
+        if (PaneClick::of(*o) != PaneClick::of(*n))
+            ns.pane.reset();
+    }
+    std::erase_if(nodes, [](const auto& kv) { return kv.second.empty(); });
+    const auto of = floats_of(old_file);
+    const auto nf = floats_of(new_file);
+    for (auto& [id, fs] : floats) {
+        const auto o = std::find_if(of.begin(), of.end(), [&](const Float& f) { return f.id == id; });
+        const auto n = std::find_if(nf.begin(), nf.end(), [&](const Float& f) { return f.id == id; });
+        if (o == of.end() || n == nf.end())
+            continue;
+        if (o->edge != n->edge)
+            fs.edge.reset();
+        if (o->align != n->align)
+            fs.align.reset();
+        if (o->hidden != n->hidden)
+            fs.hidden.reset();
+    }
+    std::erase_if(floats, [](const auto& kv) { return kv.second.empty(); });
+    if (look_value(old_file, "theme") != look_value(new_file, "theme"))
+        theme = Json();
+}
+
+State State::from_json(const Json& j) {
+    State s;
+    if (!j.is_object())
+        return s;
+    if (j.contains("nodes") && j.at("nodes").is_object()) {
+        for (const auto& [id, v] : j.at("nodes").items()) {
+            if (!v.is_object())
+                continue;
+            NodeState ns;
+            if (v.contains("size") && v.at("size").is_object()) {
+                const Json& z = v.at("size");
+                if (z.contains("px") && z.at("px").is_number())
+                    ns.size = Span::pixels(f32(z.at("px")));
+                else if (z.contains("weight") && z.at("weight").is_number())
+                    ns.size = Span::weight(f32(z.at("weight")));
+            }
+            if (v.contains("hidden") && v.at("hidden").is_boolean())
+                ns.hidden = v.at("hidden").get<bool>();
+            if (v.contains("active") && v.at("active").is_string())
+                ns.active = v.at("active").get<std::string>();
+            if (v.contains("background") &&
+                (v.at("background").is_string() || v.at("background").is_object()))
+                ns.background = v.at("background");
+            if (v.contains("font_size"))
+                ns.font_size = opt_float(v.at("font_size"));
+            if (v.contains("pane") && v.at("pane").is_object()) {
+                const Json& p = v.at("pane");
+                PaneClick c;
+                if (p.contains("header_height"))
+                    c.header_height = opt_float(p.at("header_height"));
+                std::string ignored;
+                const Reader quiet{&ignored};
+                if (p.contains("border") && p.at("border").is_object())
+                    c.border = read_line(p.at("border"), quiet, "");
+                if (p.contains("focus") && p.at("focus").is_object())
+                    c.focus = read_line(p.at("focus"), quiet, "");
+                ns.pane = c;
+            }
+            if (!ns.empty())
+                s.nodes[id] = std::move(ns);
+        }
+    }
+    if (j.contains("floats") && j.at("floats").is_object()) {
+        for (const auto& [id, v] : j.at("floats").items()) {
+            if (!v.is_object())
+                continue;
+            FloatState fs;
+            if (v.contains("edge") && v.at("edge").is_string())
+                fs.edge = edge_of(v.at("edge").get<std::string>());
+            if (v.contains("align") && v.at("align").is_string())
+                fs.align = align_of(v.at("align").get<std::string>());
+            if (v.contains("hidden") && v.at("hidden").is_boolean())
+                fs.hidden = v.at("hidden").get<bool>();
+            if (!fs.empty())
+                s.floats[id] = fs;
+        }
+    }
+    if (j.contains("theme") && (j.at("theme").is_string() || j.at("theme").is_object()))
+        s.theme = j.at("theme");
+    if (j.contains("file") && j.at("file").is_object())
+        s.file = j.at("file");
+    return s;
+}
+
+// layout_sync.rs 10-47 (PaneClick writes its three fields, null when unset).
+Json State::to_json() const {
+    Json j = Json::object();
+    if (!nodes.empty()) {
+        Json o = Json::object();
+        for (const auto& [id, ns] : nodes) {
+            Json x = Json::object();
+            if (ns.size)
+                x["size"] = span_json(*ns.size);
+            if (ns.hidden)
+                x["hidden"] = *ns.hidden;
+            if (ns.active)
+                x["active"] = *ns.active;
+            if (!ns.background.is_null())
+                x["background"] = ns.background;
+            if (ns.font_size)
+                x["font_size"] = num(*ns.font_size);
+            if (ns.pane)
+                x["pane"] = Json{{"header_height", opt_json(ns.pane->header_height)},
+                                 {"border", ns.pane->border ? line_json(*ns.pane->border) : Json()},
+                                 {"focus", ns.pane->focus ? line_json(*ns.pane->focus) : Json()}};
+            o[id] = std::move(x);
+        }
+        j["nodes"] = std::move(o);
+    }
+    if (!floats.empty()) {
+        Json o = Json::object();
+        for (const auto& [id, fs] : floats) {
+            Json x = Json::object();
+            if (fs.edge)
+                x["edge"] = edge_name(*fs.edge);
+            if (fs.align)
+                x["align"] = align_name(*fs.align);
+            if (fs.hidden)
+                x["hidden"] = *fs.hidden;
+            o[id] = std::move(x);
+        }
+        j["floats"] = std::move(o);
+    }
+    if (!theme.is_null())
+        j["theme"] = theme;
+    if (!file.is_null())
+        j["file"] = file;
+    return j;
+}
+
+// layout_sync.rs 260-287.
+Node without_clicks(const Node& file, const Node& now) {
+    Node out = now;
+    std::vector<std::string> ids;
+    for (const Node* n : out.walk())
+        ids.push_back(n->id);
+    for (const auto& id : ids) {
+        const Node* f = file.find(id);
+        Node* n = out.find(id);
+        if (f == nullptr || n == nullptr)
+            continue;
+        n->size = f->size;
+        n->hidden = f->hidden;
+        n->background = f->background;
+        set_look(*n, "font_size", look_value(*f, "font_size"));
+        if (const auto pane = PaneClick::of(*f))
+            pane->apply(*n);
+        set_active(*n, active_of(*f));
+        for (auto& fl : n->floating) {
+            const auto o = std::find_if(f->floating.begin(), f->floating.end(),
+                                        [&](const Float& x) { return x.id == fl.id; });
+            if (o != f->floating.end()) {
+                fl.edge = o->edge;
+                fl.align = o->align;
+                fl.hidden = o->hidden;
+            }
+        }
+    }
+    set_look(out, "theme", look_value(file, "theme"));
+    return out;
+}
+
+}  // namespace agentdesk::ui::layout
