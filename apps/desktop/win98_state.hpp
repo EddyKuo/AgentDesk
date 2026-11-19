@@ -1,7 +1,7 @@
 #pragma once
 // Herdr 98's state in agent-ui (herdr-app defaults/mods/win98, commit 321c9a8): the open menus,
 // dialogs and game windows that herdr opens as overlays, the shared values the mod keeps
-// (herdr's shared(), persisted: <data>\win98.json), and the games. Drawn by win98.inl.
+// (herdr's shared(), persisted: <data>\win98.json), and the games. Drawn by win98_*.cpp.
 #include <chrono>
 #include <functional>
 #include <map>

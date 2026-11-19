@@ -1,26 +1,13 @@
+// AgentDesk 98 dialogs (Run, Shut Down, Display, Find, ...).
+#include "win98_internal.hpp"
+
+namespace agentdesk::desktop {
+namespace detail::w98 {
+
 // Herdr 98, part 2: the dialogs (herdr-app defaults/mods/win98/dialog.js, commit 321c9a8).
 // Each kind is drawn top-down in Win98 px from dialog.js; the window's height is what it took.
 
-namespace w98 {
-
-void new_tab(App::State& s, const std::string& name, int space = -1, const std::string& profile = {},
-             const std::vector<std::string>& args = {});
-void new_space(App::State& s, const std::string& name, const std::string& machine);
-void select_space_id(App::State& s, const std::string& id);
-Dialog prompt(const std::string& title, const std::string& text, const std::string& icon,
-              std::function<void(const std::string&, const std::string&)> cmd,
-              std::optional<std::string> value = {}, bool machines = false);
-Dialog message(const std::string& title, const std::string& text, const std::string& icon = {});
-std::string user_name_now();
-struct Task {
-    std::string address;
-    std::string name;
-    ui::Program program;
-    std::string status;
-};
-std::vector<Task> tasks(App::State& s);
-std::string status_word(Attention a);
-
+namespace {
 // dialog.js 26-38.
 std::string kind_title(const std::string& kind) {
     static const std::map<std::string, std::string> kT = {{"run", "Run"},
@@ -38,14 +25,8 @@ std::string kind_title(const std::string& kind) {
     return it == kT.end() ? std::string("AgentDesk") : it->second;
 }
 
-// dialog.js 263-273: 75 x 23 buttons in a row, gap 6, at the end or in the middle. Returns the
-// index pressed, or -1.
-struct Btn {
-    std::string label;
-    bool def = false;
-    bool disabled = false;
-    float w = 75;
-};
+}  // namespace
+
 int buttons(App::State& s, ImDrawList* dl, float x0, float x1, float y, const std::vector<Btn>& list,
             bool end) {
     float total = 0;
@@ -69,6 +50,7 @@ int buttons(App::State& s, ImDrawList* dl, float x0, float x1, float y, const st
     return hit;
 }
 
+namespace {
 // dialog.js 275-285: the text box: the text (selected while fresh) and a blinking caret.
 void input(App::State& s, ImDrawList* dl, Box b, const Dialog& d) {
     const Box in = field(s, dl, b);
@@ -225,6 +207,8 @@ void ok(App::State& s, Window& w, Dialog& d) {
     }
 }
 
+}  // namespace
+
 // dialog.js 154-183: the keys of the dialog that has the keyboard.
 void dialog_keys(App::State& s, Window& w, Dialog& d) {
     auto pressed = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, true); };
@@ -324,6 +308,7 @@ void dialog_keys(App::State& s, Window& w, Dialog& d) {
     }
 }
 
+namespace {
 // ---------------------------------------------------------------- the kinds
 
 // dialog.js 333-360.
@@ -586,8 +571,6 @@ float render_taskman(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
     }
     return y + U(s, 23) + U(s, 10) - b.y0;
 }
-
-void set_desktop(App::State& s, const std::string& c);
 
 // dialog.js 544-653.
 float render_display(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
@@ -1095,6 +1078,8 @@ void render_screen(App::State& s, Dialog& d, ImDrawList* dl, Box b) {
           false);
 }
 
+}  // namespace
+
 // dialog.js 878-916: a dialog's frame (kit.js win: title bar, help unless Explorer-ish, close) and
 // its body. Returns the window's size.
 ImVec2 render_dialog(App::State& s, Window& w, ImDrawList* dl, ImVec2 at) {
@@ -1167,5 +1152,6 @@ ImVec2 render_dialog(App::State& s, Window& w, ImDrawList* dl, ImVec2 at) {
     split.Merge(dl);
     return ImVec2(width, height);
 }
+}  // namespace detail::w98
 
-}  // namespace w98
+}  // namespace agentdesk::desktop
