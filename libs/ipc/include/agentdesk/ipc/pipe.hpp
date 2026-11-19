@@ -16,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -127,7 +128,8 @@ public:
     void set_disconnect_handler(std::function<void()> handler);
 
     // Sends a request and waits for its response. Returns nullopt on timeout or disconnect
-    // (a timeout does not mean the request was not executed; design doc 3.3).
+    // (a timeout does not mean the request was not executed; design doc 3.3), and a
+    // BAD_REQUEST response without sending anything when the request does not fit one frame.
     std::optional<protocol::Response> call(const std::string& method, protocol::Json params,
                                            std::chrono::milliseconds timeout = std::chrono::seconds(5),
                                            std::string request_id = {});
@@ -147,6 +149,7 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     std::map<std::string, protocol::Response> responses_;
+    std::set<std::string> pending_;  // ids of calls still waiting; guarded by mutex_
     std::function<void(protocol::Event)> on_event_;
     std::function<void()> on_disconnect_;
     std::atomic<bool> connected_{true};

@@ -211,7 +211,8 @@ void Connection::run(const ServerHandlers& handlers) {
         ::GetOverlappedResult(pipe_.get(), &rov, &ignored, TRUE);
     if (write_pending)
         ::GetOverlappedResult(pipe_.get(), &wov, &ignored, TRUE);
-    ::FlushFileBuffers(pipe_.get());
+    // No FlushFileBuffers: it waits until the client has read everything, forever when the
+    // client stopped reading, and that would block PipeServer::stop and the handover.
     ::DisconnectNamedPipe(pipe_.get());
     if (handlers.on_close)
         handlers.on_close(self);
@@ -279,17 +280,24 @@ std::size_t PipeServer::connection_count() const {
 void PipeServer::accept_loop() {
     UniqueHandle connect_event = make_event(true);
     for (;;) {
-        // Reap finished connection threads.
+        // Reap finished connection threads. They are joined outside mutex_: a thread marked
+        // closed may still be finishing (on_close), and stop() and connection_count() need mutex_.
         {
-            std::lock_guard lock(mutex_);
-            for (auto it = connections_.begin(); it != connections_.end();) {
-                if (it->second.first->closed() && it->second.second.joinable()) {
-                    // The thread finishes right after marking closed; joining is short.
-                    it->second.second.join();
-                    it = connections_.erase(it);
-                } else {
-                    ++it;
+            std::vector<std::pair<ConnectionPtr, std::thread>> finished;
+            {
+                std::lock_guard lock(mutex_);
+                for (auto it = connections_.begin(); it != connections_.end();) {
+                    if (it->second.first->closed()) {
+                        finished.push_back(std::move(it->second));
+                        it = connections_.erase(it);
+                    } else {
+                        ++it;
+                    }
                 }
+            }
+            for (auto& [conn, thread] : finished) {
+                if (thread.joinable())
+                    thread.join();
             }
         }
         OVERLAPPED ov{};
@@ -465,7 +473,28 @@ std::optional<protocol::Response> PipeClient::call(const std::string& method, pr
     req.id = request_id.empty() ? id_prefix_ + std::to_string(next_request_++) : std::move(request_id);
     req.method = method;
     req.params = std::move(params);
-    if (!write_all(protocol::encode_frame(protocol::serialize(req))))
+    std::string frame;
+    try {
+        frame = protocol::encode_frame(protocol::serialize(req));
+    } catch (const std::length_error&) {
+        return protocol::fail(req.id, protocol::ErrorCode::kBadRequest, "request too large for one message");
+    }
+    {
+        std::lock_guard lock(mutex_);
+        pending_.insert(req.id);
+    }
+    // Whatever happens next, the id stops being awaited: a response that arrives after a
+    // timeout is dropped by the reader instead of staying in responses_ forever.
+    struct Forget {
+        PipeClient& self;
+        const std::string& id;
+        ~Forget() {
+            std::lock_guard lock(self.mutex_);
+            self.pending_.erase(id);
+            self.responses_.erase(id);
+        }
+    } forget{*this, req.id};
+    if (!write_all(frame))
         return std::nullopt;
     std::unique_lock lock(mutex_);
     if (!cv_.wait_for(lock, timeout, [&] { return responses_.contains(req.id) || !connected_; })) {
@@ -476,6 +505,7 @@ std::optional<protocol::Response> PipeClient::call(const std::string& method, pr
         return std::nullopt;
     auto resp = std::move(it->second);
     responses_.erase(it);
+    lock.unlock();  // Forget takes mutex_ again
     return resp;
 }
 
@@ -510,7 +540,8 @@ void PipeClient::reader_loop() {
             if (auto* resp = std::get_if<protocol::Response>(&*parsed.message)) {
                 {
                     std::lock_guard lock(mutex_);
-                    responses_[resp->id] = std::move(*resp);
+                    if (pending_.contains(resp->id))  // else its call already gave up
+                        responses_[resp->id] = std::move(*resp);
                 }
                 cv_.notify_all();
             } else if (auto* ev = std::get_if<protocol::Event>(&*parsed.message)) {

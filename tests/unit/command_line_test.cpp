@@ -55,6 +55,19 @@ TEST(IsBatchFile, DetectsCmdAndBatCaseInsensitive) {
     EXPECT_FALSE(is_batch_file(L"noext"));
 }
 
+// Windows ignores trailing dots and spaces and accepts the ::$DATA stream name: all of these
+// start the batch file, so none may slip past the check.
+TEST(IsBatchFile, TrailingDotsSpacesAndDataStreamDoNotHideTheExtension) {
+    EXPECT_TRUE(is_batch_file(L"run.bat."));
+    EXPECT_TRUE(is_batch_file(L"run.cmd "));
+    EXPECT_TRUE(is_batch_file(L"C:\\x\\run.Bat. . ."));
+    EXPECT_TRUE(is_batch_file(L"run.bat::$DATA"));
+    EXPECT_TRUE(is_batch_file(L"run.cmd::$data."));
+    EXPECT_FALSE(is_batch_file(L"run.exe."));
+    EXPECT_FALSE(is_batch_file(L"..."));
+    EXPECT_FALSE(is_batch_file(L""));
+}
+
 TEST(CommandLine, LaunchableFileAcceptsFilesAndAppAliasesOnly) {
     wchar_t sys[MAX_PATH]{};
     ASSERT_GT(::GetSystemDirectoryW(sys, MAX_PATH), 0u);

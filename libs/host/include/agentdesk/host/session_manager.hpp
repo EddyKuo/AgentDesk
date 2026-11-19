@@ -51,6 +51,7 @@ bool await_handover_go(HANDLE from_old, HANDLE old_process);
 // Locking rule: mutex_ guards the session table and subscribers. Session actor threads call
 // back into the manager (snapshot/info listeners) and take mutex_, so while holding mutex_ we
 // never call a blocking Session method (history(), wait_exit()) or destroy a Session.
+// Code that uses a Session after releasing mutex_ copies Managed::session while holding it.
 class SessionManager {
 public:
     explicit SessionManager(HostConfig config);
@@ -89,7 +90,10 @@ private:
     };
     struct Managed {
         SessionRecord record;
-        std::unique_ptr<Session> session;  // null for Lost records from a previous host
+        // null for Lost records from a previous host. Shared: a request that uses it without
+        // mutex_ (history, input, wait) copies it under mutex_, so prune_exited cannot destroy
+        // it underneath; the last copy is always dropped outside mutex_.
+        std::shared_ptr<Session> session;
         std::optional<std::uint64_t> controller;
         std::map<std::uint64_t, Subscriber> subscribers;
         std::string last_process_state;

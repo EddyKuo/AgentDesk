@@ -62,7 +62,10 @@ std::optional<nlohmann::json> read_json_with_backup(const std::filesystem::path&
         std::stringstream ss;
         ss << in.rdbuf();
         auto j = nlohmann::json::parse(ss.str(), nullptr, false);
-        if (j.is_discarded() || !j.is_object() || j.value("schema_version", 0) != kSchemaVersion)
+        if (j.is_discarded() || !j.is_object())
+            return std::nullopt;
+        // Compared as JSON: a wrongly typed version is a mismatch, not an exception.
+        if (const auto v = j.find("schema_version"); v == j.end() || *v != kSchemaVersion)
             return std::nullopt;
         return j;
     };
@@ -91,6 +94,7 @@ nlohmann::json to_json(const Profile& p) {
         {"id", p.id}, {"name", p.name}, {"executable", win::to_utf8(p.executable.native())}, {"args", args}};
 }
 
+// Throws (nlohmann::json::exception, std::system_error) on a damaged entry; callers skip it.
 Profile profile_from_json(const nlohmann::json& j) {
     Profile p;
     p.id = j.at("id").get<std::string>();
@@ -175,6 +179,7 @@ nlohmann::json to_json(const SessionRecord& r) {
             {"labels", r.labels}};
 }
 
+// Throws (nlohmann::json::exception) on a damaged entry; callers skip it.
 SessionRecord session_record_from_json(const nlohmann::json& j) {
     SessionRecord r;
     r.id = j.at("id").get<std::string>();
