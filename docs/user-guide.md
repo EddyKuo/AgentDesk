@@ -10,7 +10,7 @@ AgentDesk 是 Windows 11 x64 的 AI coding agent 工作台：在可分割的終�
 
 ## 畫面
 
-執行 `agent-ui.exe`。它會在背景啟動 `agent-host.exe`，所有工作都跑在 host 裡。視窗的外觀與操作和 herdr 桌面版（herdr-app）的預設版面相同：沒有系統標題列，最小化、最大化、關閉按鈕在分頁列右端；拖曳分頁列或左上的品牌列可以移動視窗，雙擊切換最大化，也能用 Windows 的貼齊功能。
+執行 `agent-ui.exe`。它會在背景啟動 `agent-host.exe`，所有工作都跑在 host 裡。視窗沒有系統標題列，最小化、最大化、關閉按鈕在分頁列右端；拖曳分頁列或左上的品牌列可以移動視窗，雙擊切換最大化，也能用 Windows 的貼齊功能。
 
 - **側欄**：預設寬 268 px，拖曳右緣可在 44～480 px 之間調整。窄於 160 px 時改成只顯示編號與狀態的窄欄；品牌列的收合鈕在兩者之間切換，Ctrl+Shift+B 整個隱藏。
 - **Spaces**：一個工作地點，通常是一個 repo。每列是彩色字母頭像、名稱，靠右是 `repo · 分支`，再加上領先／落後遠端的 ↑N／↓N（名稱已經說明的部分、main／master 會省略）。沒取名的 space 以第一個終端機所在的 repo 頂層資料夾命名，家目錄顯示 `~`；在 shell 裡 `cd` 之後會跟著變。linked worktree 的 space 以 `├─`／`└─` 掛在主 repo 的 space 下面。拖曳可調整順序；右鍵選單有改名、新增／開啟／移除 worktree、關閉。
@@ -24,7 +24,7 @@ AgentDesk 是 Windows 11 x64 的 AI coding agent 工作台：在可分割的終�
 
 ## 通知
 
-Agent 需要你時一定會播放提示音；你沒在看的 Agent 完成時也會。你沒在看那個 Agent 時，右下角會出現通知（5 秒，錯誤 8 秒），點一下就跳到那個 Agent。音效是 herdr 的兩段聲音，可在「設定 > Alerts」關閉、試聽，或在 `ui.json` 的 `sound_done`／`sound_blocked` 改成自己的 MP3。
+Agent 需要你時一定會播放提示音；你沒在看的 Agent 完成時也會。你沒在看那個 Agent 時，右下角會出現通知（5 秒，錯誤 8 秒），點一下就跳到那個 Agent。內建兩段提示音，可在「設定 > Alerts」關閉、試聽，或在 `ui.json` 的 `sound_done`／`sound_blocked` 改成自己的 MP3。
 
 程式剛啟動就以錯誤結束時，通知會附上結束碼和最後幾行輸出。
 
@@ -71,7 +71,7 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 { "global": { "ctrl-shift-t": "", "ctrl-alt-n": "tab.new" } }
 ```
 
-值為空字串表示取消綁定。格式與 herdr 的 keys.json 相同：
+值為空字串表示取消綁定。格式如下：
 
 - 區段：`global`（整個視窗）、`terminal`（終端機有焦點時）、`layout:<版面名稱>`（顯示該版面時）。同一個鍵在多個區段都有設定時，依 terminal、layout、global 的順序取用。
 - 動作可以是命令名稱、`命令:值`、`{"command": "layout.switch", "args": {"name": "terminals"}}`、`send:<文字>`（送進終端機），或 `terminal`（這個鍵交給程式）。
@@ -145,8 +145,8 @@ agentctl report "found 3 problems: ..."
 Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 
 - **workspace**（設定裡顯示為 AgentDesk）：預設，側欄＋分頁＋分割面板＋右側面板。
-- **terminals**：herdr 的第二個版面，沒有側欄與狀態列。上方的分頁列左邊是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是命令面板與新分頁按鈕。面板標題列的按鈕一直顯示。
-- **Herdr 98**（herdr 的 win98 版面）：Windows 98 的樣子，有工作列、開始選單、桌面圖示、踩地雷、接龍和小幫手。按鍵在 keys.json 的 `layout:win98` 區段；Ctrl+Esc 開開始選單、Ctrl+Shift+Esc 開工作管理員，只在 AgentDesk 位於最前面時由它接手，其他時候仍是 Windows 的功能。
+- **terminals**：沒有側欄與狀態列的版面。上方的分頁列左邊是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是命令面板與新分頁按鈕。面板標題列的按鈕一直顯示。
+- **AgentDesk 98**（win98 版面）：Windows 98 的樣子，有工作列、開始選單、桌面圖示、踩地雷、接龍和小幫手。按鍵在 keys.json 的 `layout:win98` 區段；Ctrl+Esc 開開始選單、Ctrl+Shift+Esc 開工作管理員，只在 AgentDesk 位於最前面時由它接手，其他時候仍是 Windows 的功能。
 
 自訂版面放在 `%LOCALAPPDATA%\AgentDesk\layouts\<名稱>.json`：
 
@@ -160,7 +160,7 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 
 Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy。每次修改都立即生效並儲存，沒有儲存鈕。
 
-- **Look**：版面與主題卡片（我們的 Midnight、Ember、Moss、Paper，加上 herdr 的 graphite、ink、moss、paper、atom one dark；把 herdr 格式的主題檔放進 `%LOCALAPPDATA%\AgentDesk\themes\` 也會列出來，每個版面各自記住深色與淺色主題）；整體縮放、介面文字大小（預設 15 px，覺得太小可以調大）、終端機字型與大小、行高、字寬、捲動速度；新終端機用的 shell、放開滑鼠就複製、keys.json、worktree 資料夾。
+- **Look**：版面與主題卡片（我們的 Midnight、Ember、Moss、Paper，加上 graphite、ink、moss、paper、atom one dark；把同樣格式的主題檔放進 `%LOCALAPPDATA%\AgentDesk\themes\` 也會列出來，每個版面各自記住深色與淺色主題）；整體縮放、介面文字大小（預設 15 px，覺得太小可以調大）、終端機字型與大小、行高、字寬、捲動速度；新終端機用的 shell、放開滑鼠就複製、keys.json、worktree 資料夾。
 - **Machines**：遠端機器清單與「Add a machine…」。
 - **Alerts**：提示音開關與試聽、右下角通知開關。
 - **Mods**：啟用或停用 mod、看錯誤、重新載入。
@@ -173,7 +173,7 @@ Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy
 
 ## 程式圖示
 
-面板、分頁和 Agent 清單的圖示與名稱來自 herdr 的程式表（執行檔旁的 `programs\programs.json`，125 個程式）。要改某個程式的名稱或圖示，在 `%LOCALAPPDATA%\AgentDesk\programs.json` 寫同樣格式的項目（只寫要改的欄位），存檔後立刻套用；檔案有錯時原因寫在 `programs.error`。
+面板、分頁和 Agent 清單的圖示與名稱來自內建的程式表（執行檔旁的 `programs\programs.json`，125 個程式）。要改某個程式的名稱或圖示，在 `%LOCALAPPDATA%\AgentDesk\programs.json` 寫同樣格式的項目（只寫要改的欄位），存檔後立刻套用；檔案有錯時原因寫在 `programs.error`。
 
 ## Mod
 

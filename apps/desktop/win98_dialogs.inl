@@ -24,18 +24,18 @@ std::string status_word(Attention a);
 // dialog.js 26-38.
 std::string kind_title(const std::string& kind) {
     static const std::map<std::string, std::string> kT = {{"run", "Run"},
-                                                          {"shutdown", "Shut Down Herdr"},
-                                                          {"logoff", "Log Off Herdr"},
-                                                          {"about", "About Herdr 98"},
+                                                          {"shutdown", "Shut Down AgentDesk"},
+                                                          {"logoff", "Log Off AgentDesk"},
+                                                          {"about", "About AgentDesk 98"},
                                                           {"taskman", "Close Program"},
                                                           {"display", "Display Properties"},
                                                           {"datetime", "Date/Time Properties"},
-                                                          {"welcome", "Welcome to Herdr 98"},
+                                                          {"welcome", "Welcome to AgentDesk 98"},
                                                           {"mycomputer", "My Computer"},
                                                           {"network", "Network Neighborhood"},
                                                           {"bin", "Recycle Bin"}};
     const auto it = kT.find(kind);
-    return it == kT.end() ? std::string("Herdr") : it->second;
+    return it == kT.end() ? std::string("AgentDesk") : it->second;
 }
 
 // dialog.js 263-273: 75 x 23 buttons in a row, gap 6, at the end or in the middle. Returns the
@@ -402,7 +402,7 @@ float render_run(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     const float tx = x0 + U(s, 32) + U(s, 12);
     const float th = lines(
         s, dl, tx, y,
-        wrap(s, "Type the name of a program, and Herdr will\nopen it for you in a new window.", x1 - tx),
+        wrap(s, "Type the name of a program, and AgentDesk\nwill open it for you in a new window.", x1 - tx),
         rgb(C::kText));
     y += std::max(U(s, 32), th) + U(s, 12);
     // "&Open:" in 32 px, gap 8, the text box and the history button (16 x 21).
@@ -490,7 +490,7 @@ float render_logoff(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) 
 float render_about(App::State& s, Window& w, Dialog& /*d*/, ImDrawList* dl, Box b) {
     const float x0 = b.x0 + U(s, 10), x1 = b.x1 - U(s, 10);
     float y = b.y0 + U(s, 10);
-    picture(s, dl, "img/about.png", box(ImVec2(x0, y), ImVec2(U(s, 356), U(s, 80))));
+    brand_header(s, dl, box(ImVec2(x0, y), ImVec2(U(s, 356), U(s, 80))));
     y += U(s, 80) + U(s, 10);
     icon(s, dl, "computer", 32, ImVec2(x0, y));
     const float cx = x0 + U(s, 32) + U(s, 14);
@@ -504,9 +504,9 @@ float render_about(App::State& s, Window& w, Dialog& /*d*/, ImDrawList* dl, Box 
         label(s, dl, cx + U(s, indent), cy, t, rgb(C::kText), false, 11, 13, false);
         cy += U(s, 13) + U(s, 2);
     };
-    row("Herdr 98");
+    row("AgentDesk 98");
     row(std::string("Version ") + AGENTDESK_VERSION_STRING + " Second Edition");
-    row("Copyright \xC2\xA9 1981-2026 The Herd Corp.");
+    row("Copyright \xC2\xA9 2026 AgentDesk");
     cy += U(s, 6) + U(s, 2);
     row("This product is licensed to:");
     row(user_name_now(), 12);
@@ -517,7 +517,7 @@ float render_about(App::State& s, Window& w, Dialog& /*d*/, ImDrawList* dl, Box 
     cy += U(s, 4) + U(s, 2);
     row("Terminals running:  " + std::to_string(terms));
     row("Agents at work:  " + std::to_string(agents));
-    row("herdr-core:  ?");
+    row("agent-host:  ?");
     row("Physical memory available to agents:  64.0 MB RAM");
     cy -= U(s, 2);
     y = std::max(y + U(s, 32), cy) + U(s, 10);
@@ -670,7 +670,7 @@ float render_display(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
         etch(s, dl, px0, cy, px1 - px0, false);
         cy += U(s, 2) + U(s, 10);
         cy += lines(s, dl, px0, cy,
-                    wrap(s, "Sounds also follow Herdr's own setting\n(Control Panel > Alerts).", px1 - px0),
+                    wrap(s, "Sounds also follow AgentDesk's own\nsetting (Control Panel > Alerts).", px1 - px0),
                     rgb(C::kGray));
         cy += U(s, 6);
     } else {
@@ -691,7 +691,7 @@ float render_display(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
         std::snprintf(zoom, sizeof zoom, "%g", s.settings.zoom);
         cy += lines(
             s, dl, px0, cy,
-            wrap(s, std::string("Herdr's zoom is ") + zoom + "x; Herdr 98 draws whole\npixels at any zoom.",
+            wrap(s, std::string("AgentDesk's zoom is ") + zoom + "x; AgentDesk 98 draws\nwhole pixels at any zoom.",
                  px1 - px0),
             rgb(C::kGray));
         cy += U(s, 6);
@@ -928,7 +928,7 @@ float render_welcome(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
     };
     const Item items[] = {
         {"programs", "Begin an Agent",
-         "Herdr runs your coding agents in windows,\nlike it's 1998 and the future at once.\n\nStart one "
+         "AgentDesk runs your coding agents in windows,\nlike it's 1998 and the future at once.\n\nStart one "
          "from Start > Programs > Agents,\nor open the Run box and type its name.",
          "&Run...",
          [&s] {
@@ -937,7 +937,7 @@ float render_welcome(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
              r.value = "claude";
              open_dialog(s, std::move(r));
          }},
-        {"help", "Discover Herdr 98",
+        {"help", "Discover AgentDesk 98",
          "The taskbar is your tabs. The folders on\nthe desktop are your spaces. Each window\nis a pane: "
          "double-click its title bar to\nmaximize it, or use _ to minimize the tab.\n\nCtrl+Esc opens the "
          "Start menu.",
@@ -946,7 +946,7 @@ float render_welcome(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
          "Your agent is thinking.\nYou've earned a break.\n\nSolitaire is on the desktop too.", "&Play",
          [&s] { set_app(s, "mines", "open"); }},
         {"taskman", "Maintain Your Computer",
-         "See every program Herdr runs, and end\nthe ones you don't need anymore.\n\nCtrl+Shift+Esc opens it "
+         "See every program AgentDesk runs, and end\nthe ones you don't need anymore.\n\nCtrl+Shift+Esc opens it "
          "anytime.",
          "&Open",
          [&s] {
@@ -954,8 +954,8 @@ float render_welcome(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
              t.kind = "taskman";
              open_dialog(s, std::move(t));
          }},
-        {"logoff", "Leave Herdr 98",
-         "Miss the future? Log Off takes you\nback to Herdr's normal layout.\nYour terminals keep running.",
+        {"logoff", "Leave AgentDesk 98",
+         "Miss the future? Log Off takes you\nback to AgentDesk's normal layout.\nYour terminals keep running.",
          "&Log Off",
          [&s] {
              Dialog l;
@@ -968,7 +968,7 @@ float render_welcome(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
         d.sel = 0;
     const Item& it = items[d.sel];
     std::function<void()> run;
-    // The header: 56 px, white to light blue, "Welcome to Herdr 98" at 22 px.
+    // The header: 56 px, white to light blue, "Welcome to AgentDesk 98" at 22 px.
     const Box hb{b.x0, b.y0, b.x1, snap(b.y0 + U(s, 56))};
     gradient(dl, hb, rgb(0xffffff), rgb(0x6aa6e8));
     {
@@ -978,7 +978,7 @@ float render_welcome(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
         x += U(s, 32) + U(s, 6);
         const float ty = base + U(s, 32) - U(s, 26);
         x += label(s, dl, x, ty, "Welcome to", rgb(C::kNavy), false, 22, 26, false) + U(s, 6);
-        x += label(s, dl, x, ty, "Herdr", rgb(C::kText), true, 22, 26, false) + U(s, 6);
+        x += label(s, dl, x, ty, "AgentDesk", rgb(C::kText), true, 22, 26, false) + U(s, 6);
         label(s, dl, x, ty, "98", rgb(0xd07000), false, 22, 26, false);
     }
     // The contents (190 px, navy) and the page (white).
@@ -1027,7 +1027,7 @@ float render_welcome(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
     const float row_h = U(s, 23);
     const bool show = shared_str(s, "win98.welcome") != "off";
     if (check(s, dl, "##wl-show", b.x0 + U(s, 8), fy + U(s, 8) + (row_h - U(s, 13)) * 0.5f,
-              "&Show this screen each time Herdr 98 starts", show))
+              "&Show this screen each time AgentDesk 98 starts", show))
         set_shared(s, "win98.welcome", show ? "off" : "on");
     ImGui::PushID("close");
     if (buttons(s, dl, b.x0, b.x1 - U(s, 8), fy + U(s, 8), {{"&Close"}}, true) == 0)
@@ -1087,9 +1087,9 @@ void render_screen(App::State& s, Dialog& d, ImDrawList* dl, Box b) {
         return;
     }
     const std::string msg =
-        d.mode == "shutdown" || d.stage == 0 ? "Herdr is shutting down..." : "Starting Herdr 98...";
+        d.mode == "shutdown" || d.stage == 0 ? "AgentDesk is shutting down..." : "Starting AgentDesk 98...";
     fill(dl, b, rgb(0x000000));
-    picture(s, dl, "img/splash.png", b);
+    brand_splash(s, dl, b);
     const float tw = text_w(s, msg, true, 14);
     label(s, dl, b.x0 + (b.w() - tw) * 0.5f, b.y1 - U(s, 40) - U(s, 14), msg, rgb(C::kWhite), true, 14, 14,
           false);

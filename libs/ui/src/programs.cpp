@@ -20,7 +20,7 @@ constexpr std::array<std::string_view, 9> kAgentsFirst = {"claude", "codex",   "
 
 // herdr remote_shell.rs 19 (a remote fish's wrapper).
 constexpr std::string_view kFishExec =
-    R"(if not command -q -- $argv[2]; printf '\e]2;%s\acannot start "%s": No such file or directory\n' "$HERDR_LAUNCH" $argv[2] >&2; exit 127; end; set -e HERDR_LAUNCH; set -l p $argv[2]; string match -q -- '-*/*' $p; and set p ./$p; exec $p $argv[3..])";
+    R"(if not command -q -- $argv[2]; printf '\e]2;%s\acannot start "%s": No such file or directory\n' "$AGENTDESK_LAUNCH" $argv[2] >&2; exit 127; end; set -e AGENTDESK_LAUNCH; set -l p $argv[2]; string match -q -- '-*/*' $p; and set p ./$p; exec $p $argv[3..])";
 
 std::string lower(std::string_view s) {
     std::string out(s);
