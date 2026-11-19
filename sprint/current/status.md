@@ -118,3 +118,4 @@ plan: docs/design/AgentDesk_Design.md 5.6
 | 2026-11-19 | 主題、文字大小、Ctrl+C 的決定 | 使用者決定：加入 herdr 的主題，和我們的四套並存；介面文字維持 15 px；有選取時 Ctrl+C 維持複製 | 使用者 2026-11-19 | — |
 | 2026-11-19 | 加入 herdr 的主題 | 照 herdr：內建的 graphite、ink、moss、paper，隨附的 atom-one-dark 主題檔，以及使用者放在資料夾 themes\ 的主題檔（背景、前景、選取、游標、16 色、colors 覆寫）；介面顏色照 herdr 的 resolve() 從主題推算。herdr 的 moss、paper 和我們的同名，內部 id 加上 herdr- 前綴，畫面上照 herdr 顯示小寫名稱 | src/settings.rs 19-113、256-375；frame/settings/main.js 354-390 | — |
 | 2026-11-19 | 分頁的 ✕ 按了沒反應 | 修正：整個分頁是一個按鈕，✕ 疊在上面；ImGui 預設把滑鼠交給先建立的分頁按鈕，✕ 收不到點擊。分頁按鈕改為允許上層元件接手（SetNextItemAllowOverlap）。使用者實機測試回報 | mods/tabs/main.js | — |
+| 2026-11-19 | 字型繪製改用 FreeType（分支，待使用者確認） | 字型本身和 herdr 相同（介面 Geist、終端機 JetBrains Mono Medium），使用者覺得不像 herdr：herdr 在 Windows 用 DirectWrite 繪字，較銳利。ImGui 改用 FreeType 繪字（vcpkg imgui[freetype]，FreeType 授權 FTL，與 MIT 相容），筆畫對齊像素、較清楚 | src/settings.rs 548-556 | — |
