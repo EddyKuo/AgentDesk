@@ -10,6 +10,7 @@
 
 #include "agentdesk/ui/clipboard.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
+#include "agentdesk/ui/sprites.hpp"
 
 namespace agentdesk::ui {
 
@@ -142,9 +143,54 @@ void draw_cell_text(ImDrawList* dl, ImFont* font, float size, ImFontBaked* baked
     dl->AddText(font, size, ImVec2(x + dx, y), fg, scratch.data(), scratch.data() + scratch.size());
 }
 
-// Plain-text line (history) laid out on the grid with the approximate width table.
+// A sprite cell (box drawing, blocks, braille, powerline, ⏺) painted as shapes filling the cell
+// bounds, never as a font glyph (herdr src/terminal.rs:1983-1986, 2213; src/sprites.rs:174).
+// Its colour is the cell's foreground; shades and ⏺ use the alpha / rounding of the shape.
+bool is_sprite_cell(const terminal::Cell& cell) {
+    return cell.chars[1] == 0 && sprites::is_sprite(cell.chars[0]);
+}
+
+ImU32 times_alpha(ImU32 color, float alpha) {
+    if (alpha >= 1.0f)
+        return color;
+    const auto a = static_cast<float>((color >> IM_COL32_A_SHIFT) & 0xFFu) * alpha;
+    return (color & ~IM_COL32_A_MASK) |
+           (static_cast<ImU32>(std::clamp(std::lround(a), 0L, 255L)) << IM_COL32_A_SHIFT);
+}
+
+void draw_sprite(ImDrawList* dl, char32_t c, float x, float y, float w, float h, ImU32 fg) {
+    const float scale = std::max(1.0f, ImGui::GetIO().DisplayFramebufferScale.x);
+    const sprites::Shapes shapes = sprites::paint(c, x, y, w, h, scale);
+    // herdr window.paint_quad(fill(...)) / corner_radii (src/sprites.rs:182, 198)
+    for (const sprites::Rect& r : shapes.rects)
+        dl->AddRectFilled(ImVec2(r.x0, r.y0), ImVec2(r.x1, r.y1), times_alpha(fg, r.alpha), r.rounding);
+    // herdr PathBuilder::fill / stroke + window.paint_path (src/sprites.rs:226-233, 306, 335-337)
+    for (const sprites::Path& p : shapes.paths) {
+        dl->PathClear();
+        for (const sprites::PathStep& s : p.steps) {
+            switch (s.kind) {
+                case sprites::PathStep::Kind::kMove:
+                case sprites::PathStep::Kind::kLine:
+                    dl->PathLineTo(ImVec2(s.to.x, s.to.y));
+                    break;
+                case sprites::PathStep::Kind::kCubic:
+                    dl->PathBezierCubicCurveTo(ImVec2(s.c1.x, s.c1.y), ImVec2(s.c2.x, s.c2.y),
+                                               ImVec2(s.to.x, s.to.y));
+                    break;
+            }
+        }
+        if (p.fill)
+            dl->PathFillConvex(fg);
+        else
+            dl->PathStroke(fg, p.closed ? ImDrawFlags_Closed : ImDrawFlags_None, p.thickness);
+    }
+}
+
+// Plain-text line (history) laid out on the grid with the approximate width table. `y` is the
+// row's top; text sits `text_dy` lower, sprites fill the whole cell_w × cell_h cell.
 void draw_text_line(ImDrawList* dl, ImFont* font, float size, ImFontBaked* baked, float x0, float y,
-                    float cell_w, int max_cols, ImU32 fg, const std::string& text, std::string& scratch) {
+                    float text_dy, float cell_w, float cell_h, int max_cols, ImU32 fg,
+                    const std::string& text, std::string& scratch) {
     int col = 0;
     for (std::size_t i = 0; i < text.size() && col < max_cols;) {
         const char32_t cp = next_cp(text, i);
@@ -152,9 +198,12 @@ void draw_text_line(ImDrawList* dl, ImFont* font, float size, ImFontBaked* baked
         c.chars[0] = cp;
         const int w = is_wide_codepoint(cp) ? 2 : 1;
         c.width = static_cast<std::uint8_t>(w);
-        if (cp != U' ')
-            draw_cell_text(dl, font, size, baked, x0 + static_cast<float>(col) * cell_w, y,
-                           cell_w * static_cast<float>(w), fg, c, scratch);
+        const float x = x0 + static_cast<float>(col) * cell_w;
+        if (sprites::is_sprite(cp))
+            draw_sprite(dl, cp, x, y, cell_w, cell_h, fg);
+        else if (cp != U' ')
+            draw_cell_text(dl, font, size, baked, x, y + text_dy, cell_w * static_cast<float>(w), fg, c,
+                           scratch);
         col += w;
     }
 }
@@ -916,8 +965,8 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     std::string run;
     for (int view_row = 0; view_row < offset && view_row < snap.rows; ++view_row) {
         const float y = origin.y + static_cast<float>(view_row) * cell_h;
-        draw_text_line(dl, font, font_size, baked, origin.x, y + text_dy, cell_w, snap.cols, theme.default_fg,
-                       (*hist)[static_cast<std::size_t>(top + view_row)].text, run);
+        draw_text_line(dl, font, font_size, baked, origin.x, y, text_dy, cell_w, cell_h, snap.cols,
+                       theme.default_fg, (*hist)[static_cast<std::size_t>(top + view_row)].text, run);
     }
     const int first_row =
         std::max(0, static_cast<int>((dl->GetClipRectMin().y - origin.y) / cell_h) - offset);
@@ -947,7 +996,11 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
             const float x = origin.x + static_cast<float>(col) * cell_w;
             if (cell.width != 0 && cell.chars[0] != 0) {
                 const ImU32 fg = colors_of(cell, theme).fg;
-                if (cell.chars[0] != U' ')
+                // Sprites never go through the text path: one cell's bounds, full line height
+                // (herdr src/terminal.rs:1983-1986, 2023, 2213).
+                if (is_sprite_cell(cell))
+                    draw_sprite(dl, cell.chars[0], x, y, cell_w, cell_h, fg);
+                else if (cell.chars[0] != U' ')
                     draw_cell_text(dl, font, font_size, baked, x, y + text_dy, cell_w * static_cast<float>(span), fg,
                                    cell, run);
                 if (cell.attrs & terminal::kAttrUnderline) {
