@@ -31,6 +31,22 @@ constexpr std::size_t kMaxRecords = 200;
 // read; only the newest few do, otherwise create/stop churn grows threads and memory forever
 // (design doc 1.5 stability target). Older ones keep metadata only.
 constexpr std::size_t kMaxExitedLive = 8;
+// git worktree add/remove may take minutes on a large repository (checkout, submodules).
+constexpr auto kWorktreeTimeout = std::chrono::seconds(600);
+constexpr auto kGitTimeout = std::chrono::seconds(60);
+// A reply must fit one IPC frame (kMaxFrameBytes, 4 MiB) after JSON escaping.
+constexpr std::size_t kMaxGitRunBytes = 3u * 1024u * 1024u;
+constexpr std::size_t kMaxGitErrorBytes = 64u * 1024u;
+// A session.create "task" waits this long for an agent without any status source, and twice
+// as long again at most for one that has a source but never says Idle.
+constexpr auto kTaskFallback = std::chrono::seconds(8);
+constexpr std::size_t kMaxTaskBytes = 64u * 1024u;
+constexpr std::size_t kMaxLabelKeyBytes = 64;
+
+// Sorts the session table's entries oldest first.
+constexpr auto kOldestFirst = [](const auto& a, const auto& b) {
+    return a->record.created_at < b->record.created_at;
+};
 
 // JSON strings must be UTF-8: invalid bytes become U+FFFD.
 std::string valid_utf8(const std::string& in) {
@@ -118,14 +134,18 @@ void add_wsl_folder_hook(platform::win::PtySpawnSpec& spec) {
     spec.env_overrides[L"WSLENV"] = wslenv;
 }
 
+std::wstring to_lower(std::wstring s) {
+    for (auto& c : s)
+        c = static_cast<wchar_t>(std::towlower(c));
+    return s;
+}
+
 // PowerShell's cd (Set-Location) does not change the process's Windows current folder, which is
 // what the host reads to follow the shell. So the prompt is wrapped: after the person's own
 // prompt runs, the location is copied into [Environment]::CurrentDirectory. Only for an interactive
 // PowerShell the profile starts without its own -Command/-File; cmd needs nothing.
 void add_folder_hook(platform::win::PtySpawnSpec& spec) {
-    std::wstring exe = spec.executable.filename().native();
-    for (auto& c : exe)
-        c = static_cast<wchar_t>(std::towlower(c));
+    const std::wstring exe = to_lower(spec.executable.filename().native());
     if (exe == L"wsl.exe") {
         add_wsl_folder_hook(spec);
         return;
@@ -143,9 +163,7 @@ void add_folder_hook(platform::win::PtySpawnSpec& spec) {
     if (exe != L"pwsh.exe" && exe != L"powershell.exe")
         return;
     for (const auto& a : spec.args) {
-        std::wstring l = a;
-        for (auto& c : l)
-            c = static_cast<wchar_t>(std::towlower(c));
+        const std::wstring l = to_lower(a);
         if (l == L"-command" || l == L"-c" || l == L"-file" || l == L"-f" || l == L"-encodedcommand" ||
             l == L"-ec" || l == L"-noninteractive")
             return;
@@ -222,10 +240,57 @@ bool has_control_chars(const std::string& s) {
     });
 }
 
-// git worktree add/remove may take minutes on a large repository (checkout, submodules).
-constexpr auto kWorktreeTimeout = std::chrono::seconds(600);
-// A reply must fit one IPC frame (kMaxFrameBytes, 4 MiB) after JSON escaping.
-constexpr std::size_t kMaxGitRunBytes = 3u * 1024u * 1024u;
+// A label as session.create and session.label accept it: a short printable key, a printable
+// string value.
+bool valid_label(const std::string& key, const Json& value) {
+    return value.is_string() && !key.empty() && key.size() <= kMaxLabelKeyBytes && !has_control_chars(key) &&
+           !has_control_chars(value.get<std::string>());
+}
+
+terminal::MouseAction mouse_action_from(const std::string& action) {
+    if (action == "press")
+        return terminal::MouseAction::kPress;
+    if (action == "release")
+        return terminal::MouseAction::kRelease;
+    return terminal::MouseAction::kMove;
+}
+
+bool busy(AgentState s) {
+    return s == AgentState::kWorking || s == AgentState::kBlocked;
+}
+
+// An absolute path from a request parameter; nullopt when missing, relative or not printable.
+std::optional<std::filesystem::path> absolute_path_param(const Request& req, const char* key) {
+    const std::string p = req.params.value(key, "");
+    if (p.empty() || has_control_chars(p))
+        return std::nullopt;
+    std::filesystem::path path(win::to_wide(p));
+    if (!path.is_absolute())
+        return std::nullopt;
+    return path;
+}
+
+// The git commands and options the remote Changes panel and worktree dialogs may run; nullptr
+// when `args` (without the safety prefix) is allowed, else why not.
+const char* refuse_git_args(const std::vector<std::wstring>& args) {
+    // The Changes panel, branch tails and the worktree dialogs (list, remove, submodule status).
+    static const std::set<std::wstring> kCommands = {L"status",   L"diff",         L"rev-parse", L"rev-list",
+                                                     L"add",      L"for-each-ref", L"commit",    L"log",
+                                                     L"worktree", L"submodule"};
+    if (!kCommands.contains(args.front()))
+        return "git command not allowed";
+    if ((args.front() == L"worktree" && (args.size() < 2 || (args[1] != L"list" && args[1] != L"remove"))) ||
+        (args.front() == L"submodule" && (args.size() < 2 || args[1] != L"status")))
+        return "git command not allowed";
+    for (const auto& x : args) {
+        if (x == L"--")
+            break;
+        if (x.starts_with(L"--ext-diff") || x.starts_with(L"--textconv") || x.starts_with(L"--output") ||
+            x.starts_with(L"--exec") || x == L"-c" || x.starts_with(L"--config"))
+            return "git option not allowed";
+    }
+    return nullptr;
+}
 
 // A damaged entry in profiles.json or sessions.json is skipped, never fatal: the host must start
 // even when a settings file is broken (store.cpp, read_json_with_backup). Diagnostics only: the
@@ -239,6 +304,45 @@ void log_skipped_entry(const std::filesystem::path& data_dir, std::string_view f
             << (dynamic_cast<const Json::exception*>(&e) != nullptr ? "malformed" : "unreadable") << ")\n";
     } catch (const std::exception&) {
     }
+}
+
+// The entries of a settings file's array, parsed one by one; damaged ones are logged and skipped.
+template <class T, class Parse>
+std::vector<T> read_entries(const Json& list, const std::filesystem::path& data_dir, std::string_view file,
+                            Parse parse) {
+    std::vector<T> out;
+    std::size_t index = 0;
+    for (const auto& j : list) {
+        try {
+            out.push_back(parse(j));
+        } catch (const std::exception& e) {
+            log_skipped_entry(data_dir, file, index, e);
+        }
+        ++index;
+    }
+    return out;
+}
+
+// Rows of `next` that differ from `prev` (same size and generation): cells, the wrap flag, or
+// the OSC 8 links on the row.
+std::vector<int> changed_rows(const terminal::ScreenSnapshot& prev, const terminal::ScreenSnapshot& next) {
+    const auto row_links = [](const terminal::ScreenSnapshot& s, int r) {
+        std::vector<terminal::Hyperlink> out;
+        for (const auto& l : s.links)
+            if (l.row == r)
+                out.push_back(l);
+        return out;
+    };
+    const bool any_links = !next.links.empty() || !prev.links.empty();
+    std::vector<int> changed;
+    for (int r = 0; r < next.rows; ++r) {
+        const auto a = prev.cells.begin() + static_cast<std::ptrdiff_t>(r) * next.cols;
+        const auto b = next.cells.begin() + static_cast<std::ptrdiff_t>(r) * next.cols;
+        if (!std::equal(a, a + next.cols, b) || next.row_wrapped(r) != prev.row_wrapped(r) ||
+            (any_links && row_links(next, r) != row_links(prev, r)))
+            changed.push_back(r);
+    }
+    return changed;
 }
 
 std::string line_text(const terminal::HistoryLine& line) {
@@ -267,16 +371,8 @@ SessionManager::SessionManager(HostConfig config) : config_(std::move(config)) {
     load_profiles();
     // Previous host's sessions: history only, never adopted by PID (design doc 2.2 step 6).
     if (const auto doc = read_json_with_backup(config_.data_dir / L"sessions.json")) {
-        std::vector<SessionRecord> records;
-        std::size_t index = 0;
-        for (const auto& j : doc->value("sessions", Json::array())) {
-            try {
-                records.push_back(session_record_from_json(j));
-            } catch (const std::exception& e) {
-                log_skipped_entry(config_.data_dir, "sessions.json", index, e);
-            }
-            ++index;
-        }
+        auto records = read_entries<SessionRecord>(doc->value("sessions", Json::array()), config_.data_dir,
+                                                   "sessions.json", session_record_from_json);
         for (auto& r : mark_orphans_lost(std::move(records))) {
             auto m = std::make_shared<Managed>();
             m->last_process_state = r.process_state;
@@ -317,22 +413,16 @@ SessionManager::~SessionManager() {
 void SessionManager::load_profiles() {
     const auto file = config_.data_dir / L"profiles.json";
     if (const auto doc = read_json_with_backup(file)) {
-        std::size_t index = 0;
-        for (const auto& j : doc->value("profiles", Json::array())) {
-            try {
-                profiles_.push_back(profile_from_json(j));
-            } catch (const std::exception& e) {
-                log_skipped_entry(config_.data_dir, "profiles.json", index, e);
-            }
-            ++index;
-        }
+        profiles_ = read_entries<Profile>(doc->value("profiles", Json::array()), config_.data_dir,
+                                          "profiles.json", profile_from_json);
         // Files written before WSL profiles existed get them once; a profile the person removes
         // afterwards stays removed ("wsl_detected").
         if (const auto wd = doc->find("wsl_detected");
             wd != doc->end() && wd->is_boolean() && wd->get<bool>())
             return;
         for (auto& p : detect_wsl_profiles())
-            if (std::none_of(profiles_.begin(), profiles_.end(), [&](const Profile& q) { return q.id == p.id; }))
+            if (std::none_of(profiles_.begin(), profiles_.end(),
+                             [&](const Profile& q) { return q.id == p.id; }))
                 profiles_.push_back(std::move(p));
         save_profiles(file);
         return;
@@ -425,8 +515,9 @@ Response SessionManager::dispatch(const ipc::ConnectionPtr& conn, const Request&
     // An update is moving every session to a new host (design doc 7.4 OQ-09): nothing may change
     // under it. Reads still answer; the client retries the rest against the new host.
     if (updating_ || handed_over_) {
-        static const std::set<std::string> kReadOnly = {"hello", "profile.list", "session.list", "session.get",
-                                                        "history.read", "ui.state.get", "fs.list", "fs.read"};
+        static const std::set<std::string> kReadOnly = {"hello",       "profile.list", "session.list",
+                                                        "session.get", "history.read", "ui.state.get",
+                                                        "fs.list",     "fs.read"};
         if (!kReadOnly.contains(m))
             return protocol::fail(req.id, ErrorCode::kOverloaded, "agent-host is updating", true);
     }
@@ -528,25 +619,12 @@ Response SessionManager::do_ui_state_set(const ipc::ConnectionPtr& conn, const R
     return protocol::ok(req.id, {{"rev", ui_state_rev_}});
 }
 
-// ---- Files / Changes panels for a client on another machine. The
-// pipe only admits this Windows user, so these read what that user can read; the UI on this
-// machine reads the same folders directly.
-namespace {
-
-std::optional<std::filesystem::path> absolute_folder_param(const Request& req, const char* key) {
-    const std::string p = req.params.value(key, "");
-    if (p.empty() || has_control_chars(p))
-        return std::nullopt;
-    std::filesystem::path path(win::to_wide(p));
-    if (!path.is_absolute())
-        return std::nullopt;
-    return path;
-}
-
-}  // namespace
+// ---- Files / Changes panels for a client on another machine. The pipe only admits this Windows
+// user, so these read what that user can read; the UI on this machine reads the same folders
+// directly.
 
 Response SessionManager::do_fs_list(const Request& req) {
-    const auto dir = absolute_folder_param(req, "path");
+    const auto dir = absolute_path_param(req, "path");
     if (!dir)
         return bad(req, "path must be an absolute folder");
     const std::size_t max = static_cast<std::size_t>(std::clamp(req.params.value("max", 500), 1, 5000));
@@ -555,7 +633,8 @@ Response SessionManager::do_fs_list(const Request& req) {
         return protocol::fail(req.id, ErrorCode::kNotFound, "not a folder");
     Json entries = Json::array();
     bool more = false;
-    std::filesystem::directory_iterator it(*dir, std::filesystem::directory_options::skip_permission_denied, ec);
+    std::filesystem::directory_iterator it(*dir, std::filesystem::directory_options::skip_permission_denied,
+                                           ec);
     for (; !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
         const std::string name = win::to_utf8(it->path().filename().native());
         if (name == ".git")
@@ -571,7 +650,7 @@ Response SessionManager::do_fs_list(const Request& req) {
 }
 
 Response SessionManager::do_fs_read(const Request& req) {
-    const auto file = absolute_folder_param(req, "path");
+    const auto file = absolute_path_param(req, "path");
     if (!file)
         return bad(req, "path must be absolute");
     std::error_code ec;
@@ -591,7 +670,7 @@ Response SessionManager::do_fs_read(const Request& req) {
 // git for the Changes panel: only the read and commit commands it uses, with the same safety
 // switches as the local panel (no index refresh, no fsmonitor, no external diff or textconv).
 Response SessionManager::do_git_run(const Request& req) {
-    const auto cwd = absolute_folder_param(req, "cwd");
+    const auto cwd = absolute_path_param(req, "cwd");
     if (!cwd)
         return bad(req, "cwd must be an absolute folder");
     const auto& a = req.params.value("args", Json::array());
@@ -603,29 +682,16 @@ Response SessionManager::do_git_run(const Request& req) {
             return bad(req, "args must be plain strings");
         args.push_back(win::to_wide(x.get<std::string>()));
     }
-    // The Changes panel, branch tails and the worktree dialogs (list, remove, submodule status).
-    static const std::set<std::wstring> kCommands = {L"status", L"diff", L"rev-parse", L"rev-list", L"add", L"for-each-ref",
-                                                      L"commit", L"log", L"worktree", L"submodule"};
-    if (!kCommands.contains(args.front()))
-        return bad(req, "git command not allowed");
-    if ((args.front() == L"worktree" && (args.size() < 2 || (args[1] != L"list" && args[1] != L"remove"))) ||
-        (args.front() == L"submodule" && (args.size() < 2 || args[1] != L"status")))
-        return bad(req, "git command not allowed");
-    for (const auto& x : args) {
-        if (x == L"--")
-            break;
-        if (x.starts_with(L"--ext-diff") || x.starts_with(L"--textconv") || x.starts_with(L"--output") ||
-            x.starts_with(L"--exec") || x == L"-c" || x.starts_with(L"--config"))
-            return bad(req, "git option not allowed");
-    }
+    if (const char* why = refuse_git_args(args))
+        return bad(req, why);
+    // worktree remove may take minutes.
+    const bool long_running = args.front() == L"worktree";
     args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-c", L"core.fsmonitor=false", L"-c",
                                L"diff.autoRefreshIndex=false", L"-C", cwd->native()});
     std::error_code ec;
     if (!std::filesystem::is_directory(*cwd, ec))
         return protocol::fail(req.id, ErrorCode::kNotFound, "not a folder");
-    // worktree remove may take minutes.
-    const bool long_running = args.size() > 8 && args[8] == L"worktree";
-    const auto r = run_tool(args, *cwd, long_running ? kWorktreeTimeout : std::chrono::seconds(60));
+    const auto r = run_tool(args, *cwd, long_running ? kWorktreeTimeout : kGitTimeout);
     if (!r.started)
         return protocol::fail(req.id, ErrorCode::kSpawnFailed, "git was not found on PATH");
     if (r.timed_out)
@@ -635,9 +701,10 @@ Response SessionManager::do_git_run(const Request& req) {
     std::string err = r.error;
     if (out.size() > kMaxGitRunBytes)
         out.resize(kMaxGitRunBytes);
-    if (err.size() > 64 * 1024)
-        err.resize(64 * 1024);
-    return protocol::ok(req.id, {{"exit_code", r.exit_code}, {"output", valid_utf8(out)}, {"error", valid_utf8(err)}});
+    if (err.size() > kMaxGitErrorBytes)
+        err.resize(kMaxGitErrorBytes);
+    return protocol::ok(
+        req.id, {{"exit_code", r.exit_code}, {"output", valid_utf8(out)}, {"error", valid_utf8(err)}});
 }
 
 Response SessionManager::do_worktree_add(const Request& req) {
@@ -659,10 +726,11 @@ Response SessionManager::do_worktree_add(const Request& req) {
     }
     const std::wstring wbranch = win::to_wide(branch);
     const std::wstring wpath = win::to_wide(path);
-    // A branch that exists is checked out; a new one starts from HEAD. Existence is asked of git, never read from its (translated) messages.
-    const auto known = run_tool({L"git", L"-C", repo_path.native(), L"show-ref", L"--verify", L"--quiet",
-                                 L"refs/heads/" + wbranch},
-                                repo_path, std::chrono::seconds(60));
+    // A branch that exists is checked out; a new one starts from HEAD. Existence is asked of git, never read
+    // from its (translated) messages.
+    const auto known = run_tool(
+        {L"git", L"-C", repo_path.native(), L"show-ref", L"--verify", L"--quiet", L"refs/heads/" + wbranch},
+        repo_path, kGitTimeout);
     if (!known.started)
         return protocol::fail(req.id, ErrorCode::kSpawnFailed, "git was not found on PATH");
     const bool exists = !known.timed_out && known.exit_code == 0;
@@ -682,14 +750,6 @@ Response SessionManager::do_worktree_add(const Request& req) {
     }
     return protocol::ok(req.id, {{"path", path}, {"branch", branch}, {"output", r.output}});
 }
-
-namespace {
-constexpr auto kTaskFallback = std::chrono::seconds(8);
-
-bool busy(AgentState s) {
-    return s == AgentState::kWorking || s == AgentState::kBlocked;
-}
-}  // namespace
 
 void SessionManager::deliver_pending() {
     struct Delivery {
@@ -788,8 +848,7 @@ Response SessionManager::do_label(const Request& req) {
         return bad(req, "labels must be an object");
     std::lock_guard lock(mutex_);
     for (const auto& [k, v] : it->items()) {
-        if (!v.is_string() || k.empty() || k.size() > 64 || has_control_chars(k) ||
-            has_control_chars(v.get<std::string>()))
+        if (!valid_label(k, v))
             return bad(req, "labels must be printable strings");
         if (v.get<std::string>().empty())
             m->record.labels.erase(k);
@@ -836,9 +895,7 @@ void SessionManager::prune_exited() {
                 exited.push_back(m);
         }
         if (exited.size() > kMaxExitedLive) {
-            std::sort(exited.begin(), exited.end(), [](const auto& a, const auto& b) {
-                return a->record.created_at < b->record.created_at;
-            });
+            std::sort(exited.begin(), exited.end(), kOldestFirst);
             for (std::size_t i = 0; i + kMaxExitedLive < exited.size(); ++i) {
                 exited[i]->subscribers.clear();
                 exited[i]->controller.reset();
@@ -852,9 +909,7 @@ void SessionManager::prune_exited() {
                 history_only.push_back(m);
         }
         if (history_only.size() > kMaxRecords) {
-            std::sort(history_only.begin(), history_only.end(), [](const auto& a, const auto& b) {
-                return a->record.created_at < b->record.created_at;
-            });
+            std::sort(history_only.begin(), history_only.end(), kOldestFirst);
             for (std::size_t i = 0; i + kMaxRecords < history_only.size(); ++i)
                 sessions_.erase(history_only[i]->record.id);
         }
@@ -888,6 +943,55 @@ Response SessionManager::do_profile_list(const Request& req) {
     for (const auto& p : profiles_)
         list.push_back(to_json(p));
     return protocol::ok(req.id, {{"profiles", list}});
+}
+
+namespace {
+
+// The labels of a session.create request; nullopt when one is not printable.
+std::optional<std::map<std::string, std::string>> labels_param(const Json& params) {
+    std::map<std::string, std::string> labels;
+    if (const auto it = params.find("labels"); it != params.end() && it->is_object()) {
+        for (const auto& [k, v] : it->items()) {
+            if (!valid_label(k, v))
+                return std::nullopt;
+            labels[k] = v.get<std::string>();
+        }
+    }
+    return labels;
+}
+
+// How a new session starts: the profile's program and arguments plus the request's extra
+// arguments, the folder hook, the size, and the variables that let it reach agentctl.
+SessionConfig new_session_config(const HostConfig& host, const Profile& profile, const Json& p,
+                                 const std::string& session_id, const std::string& cwd) {
+    SessionConfig sc;
+    sc.api = host.conpty;
+    sc.spec.executable = profile.executable;
+    sc.spec.args = profile.args;
+    for (const auto& a : p.value("args", Json::array()))
+        sc.spec.args.push_back(win::to_wide(a.get<std::string>()));
+    add_folder_hook(sc.spec);
+    sc.spec.cwd = win::to_wide(cwd);  // never silently replaced (design doc 4.2)
+    const int cols = std::clamp(p.value("cols", 120), 2, 1000);
+    const int rows = std::clamp(p.value("rows", 40), 1, 500);
+    sc.spec.size = {static_cast<short>(cols), static_cast<short>(rows)};
+    sc.engine.cols = cols;
+    sc.engine.rows = rows;
+    sc.spec.env_overrides[L"AGENTDESK_SESSION_ID"] = win::to_wide(session_id);
+    sc.spec.env_overrides[L"AGENTDESK_CTL"] = host.ctl_path.native();
+    sc.spec.env_overrides[L"AGENTDESK_PIPE"] = host.pipe_name;
+    return sc;
+}
+
+}  // namespace
+
+SessionListener SessionManager::listener_for(const std::string& id) {
+    SessionListener listener;
+    listener.on_snapshot = [this, id](std::shared_ptr<const terminal::ScreenSnapshot> s) {
+        fanout(id, std::move(s));
+    };
+    listener.on_info = [this, id](const SessionInfo& info) { on_session_info(id, info); };
+    return listener;
 }
 
 Response SessionManager::do_create(const Request& req) {
@@ -933,45 +1037,19 @@ Response SessionManager::do_create(const Request& req) {
         if (!sessions_.contains(rec.parent))
             return protocol::fail(req.id, ErrorCode::kNotFound, "parent session not found: " + rec.parent);
     }
-    if (const auto it = p.find("labels"); it != p.end() && it->is_object()) {
-        for (const auto& [k, v] : it->items()) {
-            if (!v.is_string() || k.empty() || k.size() > 64 || has_control_chars(k) ||
-                has_control_chars(v.get<std::string>()))
-                return bad(req, "labels must be printable strings");
-            rec.labels[k] = v.get<std::string>();
-        }
-    }
+    auto labels = labels_param(p);
+    if (!labels)
+        return bad(req, "labels must be printable strings");
+    rec.labels = std::move(*labels);
     const std::string task = p.value("task", "");
-    if (task.size() > 64 * 1024)
+    if (task.size() > kMaxTaskBytes)
         return bad(req, "task larger than 64 KiB");
 
-    SessionConfig sc;
-    sc.api = config_.conpty;
-    sc.spec.executable = profile->executable;
-    sc.spec.args = profile->args;
-    for (const auto& a : p.value("args", Json::array()))
-        sc.spec.args.push_back(win::to_wide(a.get<std::string>()));
-    add_folder_hook(sc.spec);
-    sc.spec.cwd = win::to_wide(cwd);  // never silently replaced (design doc 4.2)
-    const int cols = std::clamp(p.value("cols", 120), 2, 1000);
-    const int rows = std::clamp(p.value("rows", 40), 1, 500);
-    sc.spec.size = {static_cast<short>(cols), static_cast<short>(rows)};
-    sc.engine.cols = cols;
-    sc.engine.rows = rows;
-    sc.spec.env_overrides[L"AGENTDESK_SESSION_ID"] = win::to_wide(rec.id);
-    sc.spec.env_overrides[L"AGENTDESK_CTL"] = config_.ctl_path.native();
-    sc.spec.env_overrides[L"AGENTDESK_PIPE"] = config_.pipe_name;
-
     const std::string id = rec.id;
-    SessionListener listener;
-    listener.on_snapshot = [this, id](std::shared_ptr<const terminal::ScreenSnapshot> s) {
-        fanout(id, std::move(s));
-    };
-    listener.on_info = [this, id](const SessionInfo& info) { on_session_info(id, info); };
-
     std::unique_ptr<Session> session;
     try {
-        session = Session::start(std::move(sc), std::move(listener));  // outside mutex_ (listeners lock it)
+        // Outside mutex_: the listeners lock it.
+        session = Session::start(new_session_config(config_, *profile, p, id, cwd), listener_for(id));
     } catch (const std::exception& e) {
         auto r = protocol::fail(req.id, ErrorCode::kSpawnFailed, error_text(e));
         std::lock_guard lock(mutex_);
@@ -985,7 +1063,7 @@ Response SessionManager::do_create(const Request& req) {
     m->session = std::move(session);
     if (!task.empty()) {
         m->pending_task = task;
-        m->task_after = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+        m->task_after = std::chrono::steady_clock::now() + kTaskFallback;
     }
     Response r = protocol::ok(req.id, {{"session_id", id}, {"process_state", m->record.process_state}});
     std::lock_guard lock(mutex_);
@@ -1062,8 +1140,7 @@ Response SessionManager::do_list(const Request& req) {
     std::vector<ManagedPtr> ordered;
     for (const auto& [id, m] : sessions_)
         ordered.push_back(m);
-    std::sort(ordered.begin(), ordered.end(),
-              [](const auto& a, const auto& b) { return a->record.created_at < b->record.created_at; });
+    std::sort(ordered.begin(), ordered.end(), kOldestFirst);
     for (const auto& m : ordered)
         list.push_back(describe(*m));
     return protocol::ok(req.id, {{"sessions", list}, {"host_instance_id", config_.host_instance_id}});
@@ -1176,10 +1253,8 @@ Response SessionManager::do_input(const ipc::ConnectionPtr& conn, const Request&
         const int button = p.value("button", 0);
         if (button < 0 || button > 5 || (action != "press" && action != "release" && action != "move"))
             return bad(req, "bad mouse event");
-        session->send(MouseInput{std::clamp(p.value("row", 0), 0, 10000), std::clamp(p.value("col", 0), 0, 10000), button,
-                                 action == "press"     ? terminal::MouseAction::kPress
-                                 : action == "release" ? terminal::MouseAction::kRelease
-                                                       : terminal::MouseAction::kMove,
+        session->send(MouseInput{std::clamp(p.value("row", 0), 0, 10000),
+                                 std::clamp(p.value("col", 0), 0, 10000), button, mouse_action_from(action),
                                  mods_from_json(p.value("mods", Json::object()))});
     } else {
         return bad(req, "unknown input kind");
@@ -1362,23 +1437,8 @@ void SessionManager::fanout(const std::string& id, std::shared_ptr<const termina
                 sub.needs_snapshot = true;  // resent from the newest snapshot once the queue drains
             }
         } else if (snap->seq != sub.last->seq) {
-            std::vector<int> changed;
-            for (int r = 0; r < snap->rows; ++r) {
-                const auto a = sub.last->cells.begin() + static_cast<std::ptrdiff_t>(r) * snap->cols;
-                const auto b = snap->cells.begin() + static_cast<std::ptrdiff_t>(r) * snap->cols;
-                auto row_links = [r](const terminal::ScreenSnapshot& s) {
-                    std::vector<terminal::Hyperlink> out;
-                    for (const auto& l : s.links)
-                        if (l.row == r)
-                            out.push_back(l);
-                    return out;
-                };
-                if (!std::equal(a, a + snap->cols, b) || snap->row_wrapped(r) != sub.last->row_wrapped(r) ||
-                    ((!snap->links.empty() || !sub.last->links.empty()) && row_links(*snap) != row_links(*sub.last)))
-                    changed.push_back(r);
-            }
             Json rows = Json::array();
-            for (const int r : changed) {
+            for (const int r : changed_rows(*sub.last, *snap)) {
                 for (auto& row : protocol::encode_rows(*snap, r, r + 1))
                     rows.push_back(std::move(row));
             }

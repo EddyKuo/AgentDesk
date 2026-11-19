@@ -4,13 +4,12 @@
 
 #include <windows.h>
 
-#include "agentdesk/terminal/cwd_uri.hpp"
-
 #include <algorithm>
 #include <stdexcept>
 
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/terminal/bytes.hpp"
+#include "agentdesk/terminal/cwd_uri.hpp"
 
 namespace agentdesk::host {
 
@@ -31,7 +30,25 @@ DWORD millis_until(Clock::time_point t) {
     return static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(t - now).count() + 1);
 }
 
+// A new agent state; the one it replaces becomes last_state when it differs.
+void set_agent_state(AgentStatus& a, AgentState next) {
+    if (next != a.state)
+        a.last_state = a.state;
+    a.state = next;
+}
+
 }  // namespace
+
+terminal::EngineEvents Session::engine_events() {
+    terminal::EngineEvents events;
+    events.on_status = [this](const terminal::StatusReport& r) { on_engine_status(r); };
+    events.on_shell_prompt = [this] { refresh_agent_from_engine(); };
+    return events;
+}
+
+platform::win::PtyOutputSink Session::output_sink() {
+    return [this](std::span<const char> b) { post_output(std::string(b.data(), b.size())); };
+}
 
 Session::Session(SessionConfig config, SessionListener listener)
     : config_(std::move(config)),
@@ -44,18 +61,12 @@ Session::Session(SessionConfig config, SessionListener listener)
 
 std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener listener) {
     std::unique_ptr<Session> self(new Session(std::move(config), std::move(listener)));
-    terminal::EngineEvents events;
-    events.on_status = [raw = self.get()](const terminal::StatusReport& r) { raw->on_engine_status(r); };
-    events.on_shell_prompt = [raw = self.get()] { raw->refresh_agent_from_engine(); };
-    self->engine_ = std::make_unique<terminal::VtEngine>(self->config_.engine, std::move(events));
+    self->engine_ = std::make_unique<terminal::VtEngine>(self->config_.engine, self->engine_events());
     self->snapshot_ = std::make_shared<const terminal::ScreenSnapshot>(self->engine_->snapshot());
 
     self->writer_ = std::thread([raw = self.get()] { raw->writer_loop(); });
     try {
-        auto process = win::PtyProcess::spawn(self->config_.api, self->config_.spec,
-                                              [raw = self.get()](std::span<const char> b) {
-                                                  raw->post_output(std::string(b.data(), b.size()));
-                                              });
+        auto process = win::PtyProcess::spawn(self->config_.api, self->config_.spec, self->output_sink());
         std::lock_guard lock(self->write_mutex_);  // the writer reads process_ under this lock
         self->process_ = std::move(process);
     } catch (...) {
@@ -119,9 +130,7 @@ void Session::post_output(std::string bytes) {
             // Backpressure (OQ-06): stop reading the PTY until the actor catches up. The child
             // blocks on its own writes; no terminal byte is ever dropped (design doc 3.3).
             ++backpressure_waits_;
-            overloaded_ = true;
             queue_space_cv_.wait(lock, has_room);
-            overloaded_ = false;
         }
         queued_output_bytes_ += bytes.size();
         queue_.push_back(OutputChunk{std::move(bytes)});
@@ -220,7 +229,7 @@ platform::win::Foreground Session::foreground() const {
 }
 
 std::string Session::foreground_program() const {
-    // process_ is set before create() returns and destroyed only with *this.
+    // process_ is set before start() or adopt() returns and destroyed only with *this.
     if (!process_ || info().process_state != ProcessState::kRunning)
         return {};
     try {
@@ -236,9 +245,19 @@ SessionInfo Session::info() const {
 }
 
 std::vector<terminal::HistoryLine> Session::history(std::uint64_t from, std::size_t max_lines) const {
+    return ask_history(from, max_lines, false);
+}
+
+std::vector<terminal::HistoryLine> Session::history_tail(std::size_t max_lines) const {
+    return ask_history(0, max_lines, true);
+}
+
+// History lives in the engine, so the actor copies it out; the caller waits for the copy.
+std::vector<terminal::HistoryLine> Session::ask_history(std::uint64_t from, std::size_t max_lines,
+                                                        bool tail) const {
     auto promise = std::make_shared<std::promise<std::vector<terminal::HistoryLine>>>();
     auto future = promise->get_future();
-    const_cast<Session*>(this)->post(HistoryCmd{from, max_lines, promise, false});
+    const_cast<Session*>(this)->post(HistoryCmd{from, max_lines, promise, tail});
     return future.get();
 }
 
@@ -343,9 +362,7 @@ void Session::on_root_exit() {
     // we join it, so backpressure is lifted first.
     release_backpressure();
     process_->close();
-    {
-        drain_queue();
-    }
+    drain_queue();
     engine_->on_process_exit();
     refresh_agent_from_engine();
     {
@@ -425,22 +442,13 @@ void Session::handle(ReportCmd& c) {
     {
         std::lock_guard lock(state_mutex_);
         auto& a = info_.agent;
-        if (a.state != c.state)
-            a.last_state = a.state;
-        a.state = c.state;
+        set_agent_state(a, c.state);
         a.source = "report:" + c.source;
         a.kind = c.state == AgentState::kBlocked ? c.kind : terminal::StatusKind::kNone;
         a.message = c.message;
         a.updated_at = std::chrono::system_clock::now();
     }
     publish_info();
-}
-
-std::vector<terminal::HistoryLine> Session::history_tail(std::size_t max_lines) const {
-    auto promise = std::make_shared<std::promise<std::vector<terminal::HistoryLine>>>();
-    auto future = promise->get_future();
-    const_cast<Session*>(this)->post(HistoryCmd{0, max_lines, promise, true});
-    return future.get();
 }
 
 void Session::handle(HistoryCmd& c) {
@@ -477,9 +485,7 @@ void Session::refresh_agent_from_engine() {
             const std::string app = engine_->status().effective_app(std::string());
             if (next != a.state || a.source != "osc7501" || a.message != root->report.msg || a.app != app) {
                 a.app = app;
-                if (next != a.state)
-                    a.last_state = a.state;
-                a.state = next;
+                set_agent_state(a, next);
                 a.source = "osc7501";
                 a.kind = root->report.kind;
                 a.message = root->report.msg;
@@ -488,8 +494,7 @@ void Session::refresh_agent_from_engine() {
             }
         } else if (a.source == "osc7501" && a.state != AgentState::kUnknown) {
             // Record dropped (clear, process exit, shell prompt): never guess Idle or Done.
-            a.last_state = a.state;
-            a.state = AgentState::kUnknown;
+            set_agent_state(a, AgentState::kUnknown);
             a.kind = terminal::StatusKind::kNone;
             a.message.clear();
             a.app.clear();
@@ -538,6 +543,61 @@ std::int64_t to_ticks(std::chrono::system_clock::time_point t) {
 }
 std::chrono::system_clock::time_point from_ticks(std::int64_t v) {
     return std::chrono::system_clock::time_point(std::chrono::system_clock::duration(v));
+}
+
+// SessionInfo in the handover format (the history fields are rebuilt from the engine).
+void write_info(terminal::ByteWriter& w, const SessionInfo& i) {
+    w.u8(static_cast<std::uint8_t>(i.process_state));
+    w.boolean(i.exit_code.has_value());
+    w.u32(i.exit_code.value_or(0));
+    w.u32(i.pid);
+    w.boolean(i.stop_requested);
+    w.boolean(i.still_running_after_interrupt);
+    w.u32(i.remaining_processes);
+    w.u8(static_cast<std::uint8_t>(i.agent.state));
+    w.str(i.agent.source);
+    w.i64(to_ticks(i.agent.updated_at));
+    w.u8(static_cast<std::uint8_t>(i.agent.kind));
+    w.str(i.agent.message);
+    w.u8(static_cast<std::uint8_t>(i.agent.last_state));
+    w.str(i.agent.app);
+    w.u64(i.bytes_from_program);
+    w.u64(i.backpressure_waits);
+    w.str(i.cwd_uri);
+}
+
+// The reverse of write_info; false when a state or kind is out of range.
+bool read_info(terminal::ByteReader& r, SessionInfo& i) {
+    const auto ps = r.u8();
+    if (ps > static_cast<std::uint8_t>(ProcessState::kLost))
+        return false;
+    i.process_state = static_cast<ProcessState>(ps);
+    const bool has_code = r.boolean();
+    const auto code = r.u32();
+    if (has_code)
+        i.exit_code = code;
+    i.pid = r.u32();
+    i.stop_requested = r.boolean();
+    i.still_running_after_interrupt = r.boolean();
+    i.remaining_processes = r.u32();
+    const auto as = r.u8();
+    i.agent.source = r.str();
+    i.agent.updated_at = from_ticks(r.i64());
+    const auto kind = r.u8();
+    i.agent.message = r.str();
+    const auto last = r.u8();
+    i.agent.app = r.str();
+    if (as > static_cast<std::uint8_t>(AgentState::kError) ||
+        last > static_cast<std::uint8_t>(AgentState::kError) ||
+        kind > static_cast<std::uint8_t>(terminal::StatusKind::kAuth))
+        return false;
+    i.agent.state = static_cast<AgentState>(as);
+    i.agent.kind = static_cast<terminal::StatusKind>(kind);
+    i.agent.last_state = static_cast<AgentState>(last);
+    i.bytes_from_program = r.u64();
+    i.backpressure_waits = r.u64();
+    i.cwd_uri = r.str();
+    return true;
 }
 
 }  // namespace
@@ -664,39 +724,23 @@ std::string Session::save_session_state() const {
     w.u32(kSessionMagic);
     w.u32(kSessionFormat);
     w.str(engine_->save_state());
-    const SessionInfo i = info();
-    w.u8(static_cast<std::uint8_t>(i.process_state));
-    w.boolean(i.exit_code.has_value());
-    w.u32(i.exit_code.value_or(0));
-    w.u32(i.pid);
-    w.boolean(i.stop_requested);
-    w.boolean(i.still_running_after_interrupt);
-    w.u32(i.remaining_processes);
-    w.u8(static_cast<std::uint8_t>(i.agent.state));
-    w.str(i.agent.source);
-    w.i64(to_ticks(i.agent.updated_at));
-    w.u8(static_cast<std::uint8_t>(i.agent.kind));
-    w.str(i.agent.message);
-    w.u8(static_cast<std::uint8_t>(i.agent.last_state));
-    w.str(i.agent.app);
-    w.u64(i.bytes_from_program);
-    w.u64(i.backpressure_waits);
-    w.str(i.cwd_uri);
+    write_info(w, info());
     w.u64(report_seq_.size());
     for (const auto& [source, seq] : report_seq_) {
         w.str(source);
         w.u64(seq);
     }
     w.boolean(interrupt_deadline_.has_value());
-    w.i64(interrupt_deadline_ ? std::chrono::duration_cast<std::chrono::milliseconds>(
-                                    *interrupt_deadline_ - Clock::now())
-                                    .count()
-                              : 0);
+    w.i64(interrupt_deadline_
+              ? std::chrono::duration_cast<std::chrono::milliseconds>(*interrupt_deadline_ - Clock::now())
+                    .count()
+              : 0);
     w.u32(kSessionMagic);
     return w.take();
 }
 
-std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener listener, std::string_view state,
+std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener listener,
+                                        std::string_view state,
                                         const std::optional<platform::win::PtyHandles>& handles) {
     std::unique_ptr<Session> self(new Session(std::move(config), std::move(listener)));
     terminal::ByteReader r(state);
@@ -706,39 +750,10 @@ std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener li
     const std::string engine_state = r.str();
     if (!r.ok())
         throw bad();
-    terminal::EngineEvents events;
-    events.on_status = [raw = self.get()](const terminal::StatusReport& rep) { raw->on_engine_status(rep); };
-    events.on_shell_prompt = [raw = self.get()] { raw->refresh_agent_from_engine(); };
-    self->engine_ = terminal::VtEngine::restore(self->config_.engine, std::move(events), engine_state);
+    self->engine_ = terminal::VtEngine::restore(self->config_.engine, self->engine_events(), engine_state);
     SessionInfo& i = self->info_;
-    const auto ps = r.u8();
-    if (ps > static_cast<std::uint8_t>(ProcessState::kLost))
+    if (!read_info(r, i))
         throw bad();
-    i.process_state = static_cast<ProcessState>(ps);
-    const bool has_code = r.boolean();
-    const auto code = r.u32();
-    if (has_code)
-        i.exit_code = code;
-    i.pid = r.u32();
-    i.stop_requested = r.boolean();
-    i.still_running_after_interrupt = r.boolean();
-    i.remaining_processes = r.u32();
-    const auto as = r.u8();
-    i.agent.source = r.str();
-    i.agent.updated_at = from_ticks(r.i64());
-    const auto kind = r.u8();
-    i.agent.message = r.str();
-    const auto last = r.u8();
-    i.agent.app = r.str();
-    if (as > static_cast<std::uint8_t>(AgentState::kError) || last > static_cast<std::uint8_t>(AgentState::kError) ||
-        kind > static_cast<std::uint8_t>(terminal::StatusKind::kAuth))
-        throw bad();
-    i.agent.state = static_cast<AgentState>(as);
-    i.agent.kind = static_cast<terminal::StatusKind>(kind);
-    i.agent.last_state = static_cast<AgentState>(last);
-    i.bytes_from_program = r.u64();
-    i.backpressure_waits = r.u64();
-    i.cwd_uri = r.str();
     const auto sources = r.count(16);
     for (std::uint64_t k = 0; k < sources && r.ok(); ++k) {
         std::string source = r.str();
@@ -747,7 +762,8 @@ std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener li
     const bool has_deadline = r.boolean();
     const auto remaining = r.i64();
     if (has_deadline)
-        self->interrupt_deadline_ = Clock::now() + std::chrono::milliseconds(std::max<std::int64_t>(remaining, 0));
+        self->interrupt_deadline_ =
+            Clock::now() + std::chrono::milliseconds(std::max<std::int64_t>(remaining, 0));
     if (r.u32() != kSessionMagic || !r.ok() || !r.at_end())
         throw bad();
     self->backpressure_waits_ = i.backpressure_waits;
@@ -755,10 +771,7 @@ std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener li
         if (handles->pid != i.pid)
             throw std::runtime_error("handed over process is not this session's");
         // Last step that can throw: once adopted, the process must be released, never closed.
-        self->process_ = win::PtyProcess::adopt(self->config_.api, *handles,
-                                                [raw = self.get()](std::span<const char> b) {
-                                                    raw->post_output(std::string(b.data(), b.size()));
-                                                });
+        self->process_ = win::PtyProcess::adopt(self->config_.api, *handles, self->output_sink());
     } else if (i.process_state != ProcessState::kExited && i.process_state != ProcessState::kFailed) {
         throw std::runtime_error("a running session came without its terminal");
     }

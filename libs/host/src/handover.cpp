@@ -23,6 +23,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <future>
 #include <set>
 #include <stdexcept>
@@ -109,8 +110,8 @@ win::UniqueHandle spawn_successor(const std::filesystem::path& exe, const std::w
     std::wstring takeover = std::to_wstring(handle_value(child_in)) + L"," +
                             std::to_wstring(handle_value(child_out)) + L"," +
                             std::to_wstring(handle_value(self_for_child));
-    const std::vector<std::wstring> args = {L"--takeover", takeover, L"--pipe", pipe_name, L"--data-dir",
-                                            data_dir.native()};
+    const std::vector<std::wstring> args = {L"--takeover", takeover,      L"--pipe",
+                                            pipe_name,     L"--data-dir", data_dir.native()};
     std::wstring cmdline = win::build_command_line(exe.native(), args);
     HANDLE inherit[3] = {child_in, child_out, self_for_child};
     win::AttributeList attrs(1);
@@ -129,9 +130,10 @@ win::UniqueHandle spawn_successor(const std::filesystem::path& exe, const std::w
     }
     PROCESS_INFORMATION pi{};
     const auto start = [&](DWORD flags) {
-        return ::CreateProcessW(exe.c_str(), cmdline.data(), nullptr, nullptr, TRUE,
-                                flags | EXTENDED_STARTUPINFO_PRESENT | DETACHED_PROCESS | CREATE_UNICODE_ENVIRONMENT,
-                                nullptr, cwd.c_str(), &si.StartupInfo, &pi) != FALSE;
+        return ::CreateProcessW(
+                   exe.c_str(), cmdline.data(), nullptr, nullptr, TRUE,
+                   flags | EXTENDED_STARTUPINFO_PRESENT | DETACHED_PROCESS | CREATE_UNICODE_ENVIRONMENT,
+                   nullptr, cwd.c_str(), &si.StartupInfo, &pi) != FALSE;
     };
     if (!start(CREATE_BREAKAWAY_FROM_JOB) && !start(0))
         win::throw_last_error("CreateProcessW(new agent-host)");
@@ -146,6 +148,86 @@ HANDLE duplicate_into(HANDLE target_process, HANDLE h) {
     return out;
 }
 
+// A live terminal's handles, in the order the handover format stores them.
+std::array<HANDLE*, 7> handle_slots(win::PtyHandles& h) {
+    return {&h.signal, &h.reference, &h.conhost, &h.input_write, &h.output_read, &h.process, &h.job};
+}
+
+void write_handles(ByteWriter& w, win::PtyHandles h) {
+    for (const HANDLE* x : handle_slots(h))
+        w.u64(handle_value(*x));
+    w.u32(h.pid);
+}
+
+win::PtyHandles read_handles(ByteReader& r) {
+    win::PtyHandles h;
+    for (HANDLE* x : handle_slots(h))
+        *x = handle_from(r.u64());
+    h.pid = r.u32();
+    return h;
+}
+
+// The two pipes between the hosts and this process's handle, as the new host inherits them.
+struct HandoverPipes {
+    win::UniqueHandle child_in;        // the new host reads the state here...
+    win::UniqueHandle to_new;          // ...that we write here
+    win::UniqueHandle from_new;        // we read its answers here...
+    win::UniqueHandle child_out;       // ...that it writes here
+    win::UniqueHandle self_for_child;  // SYNCHRONIZE on this process: the new host sees us exit
+};
+
+// nullopt with `why` when a pipe or the handle cannot be made.
+std::optional<HandoverPipes> create_handover_pipes(std::string& why) {
+    SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    HandoverPipes p;
+    HANDLE read_raw = nullptr;
+    HANDLE write_raw = nullptr;
+    if (!::CreatePipe(&read_raw, &write_raw, &inheritable, 0)) {
+        why = "cannot create the handover pipe";
+        return std::nullopt;
+    }
+    p.child_in.reset(read_raw);
+    p.to_new.reset(write_raw);
+    if (!::CreatePipe(&read_raw, &write_raw, &inheritable, 0)) {
+        why = "cannot create the handover pipe";
+        return std::nullopt;
+    }
+    p.from_new.reset(read_raw);
+    p.child_out.reset(write_raw);
+    // Our own ends stay out of the new host.
+    ::SetHandleInformation(p.to_new.get(), HANDLE_FLAG_INHERIT, 0);
+    ::SetHandleInformation(p.from_new.get(), HANDLE_FLAG_INHERIT, 0);
+    HANDLE self_raw = nullptr;
+    if (!::DuplicateHandle(::GetCurrentProcess(), ::GetCurrentProcess(), ::GetCurrentProcess(), &self_raw,
+                           SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, TRUE, 0)) {
+        why = "cannot share this process's handle";
+        return std::nullopt;
+    }
+    p.self_for_child.reset(self_raw);
+    return p;
+}
+
+// The instance ids this host's successor will name in hello: ours appended, newest last, at
+// most kMaxSucceeds.
+std::vector<std::string> successor_lineage(const HostConfig& config) {
+    std::vector<std::string> succeeds = config.succeeds;
+    succeeds.push_back(config.host_instance_id);
+    if (succeeds.size() > kMaxSucceeds)
+        succeeds.erase(succeeds.begin(), succeeds.end() - kMaxSucceeds);
+    return succeeds;
+}
+
+// The new host's "ready <instance id> <version>" line, split.
+struct ReadyLine {
+    std::string instance;
+    std::string version;
+};
+ReadyLine parse_ready(const std::string& line) {
+    const std::string rest = line.substr(6);
+    const auto space = rest.find(' ');
+    return {rest.substr(0, space), space == std::string::npos ? std::string() : rest.substr(space + 1)};
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- old host
@@ -158,7 +240,8 @@ Response SessionManager::do_update(const Request& req) {
     const std::filesystem::path exe(win::to_wide(exe_param));
     std::error_code ec;
     if (exe_param.empty() || !exe.is_absolute() || !std::filesystem::is_regular_file(exe, ec))
-        return protocol::fail(req.id, ErrorCode::kBadRequest, "exe must be an agent-host.exe on this computer");
+        return protocol::fail(req.id, ErrorCode::kBadRequest,
+                              "exe must be an agent-host.exe on this computer");
 
     // Every live terminal must be movable before anything stops.
     std::vector<ManagedPtr> all;
@@ -174,36 +257,23 @@ Response SessionManager::do_update(const Request& req) {
     }
 
     // The handover pipes: we write state on `to_new`, read answers on `from_new`.
-    SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-    HANDLE child_in = nullptr;
-    HANDLE to_new_raw = nullptr;
-    HANDLE from_new_raw = nullptr;
-    HANDLE child_out = nullptr;
-    if (!::CreatePipe(&child_in, &to_new_raw, &inheritable, 0))
-        return protocol::fail(req.id, ErrorCode::kInternal, "cannot create the handover pipe");
-    win::UniqueHandle child_in_h(child_in);
-    win::UniqueHandle to_new(to_new_raw);
-    if (!::CreatePipe(&from_new_raw, &child_out, &inheritable, 0))
-        return protocol::fail(req.id, ErrorCode::kInternal, "cannot create the handover pipe");
-    win::UniqueHandle from_new(from_new_raw);
-    win::UniqueHandle child_out_h(child_out);
-    ::SetHandleInformation(to_new.get(), HANDLE_FLAG_INHERIT, 0);
-    ::SetHandleInformation(from_new.get(), HANDLE_FLAG_INHERIT, 0);
-    HANDLE self_raw = nullptr;
-    if (!::DuplicateHandle(::GetCurrentProcess(), ::GetCurrentProcess(), ::GetCurrentProcess(), &self_raw,
-                           SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, TRUE, 0))
-        return protocol::fail(req.id, ErrorCode::kInternal, "cannot share this process's handle");
-    win::UniqueHandle self_for_child(self_raw);
-
+    std::string pipe_error;
+    auto pipes = create_handover_pipes(pipe_error);
+    if (!pipes)
+        return protocol::fail(req.id, ErrorCode::kInternal, pipe_error);
     win::UniqueHandle successor;
     try {
-        successor = spawn_successor(exe, config_.pipe_name, config_.data_dir, child_in, child_out, self_raw);
+        successor = spawn_successor(exe, config_.pipe_name, config_.data_dir, pipes->child_in.get(),
+                                    pipes->child_out.get(), pipes->self_for_child.get());
     } catch (const std::exception& e) {
         return protocol::fail(req.id, ErrorCode::kSpawnFailed, e.what());
     }
-    child_in_h.reset();
-    child_out_h.reset();
-    self_for_child.reset();
+    // The new host has its copies; ours would keep the pipes open after it ended.
+    pipes->child_in.reset();
+    pipes->child_out.reset();
+    pipes->self_for_child.reset();
+    win::UniqueHandle to_new = std::move(pipes->to_new);
+    const win::UniqueHandle from_new = std::move(pipes->from_new);
 
     // From here on nothing changes under the handover.
     updating_ = true;
@@ -222,10 +292,7 @@ Response SessionManager::do_update(const Request& req) {
     w.u32(kMagic);
     w.u32(kFormat);
     w.str(config_.host_instance_id);
-    std::vector<std::string> succeeds = config_.succeeds;
-    succeeds.push_back(config_.host_instance_id);
-    if (succeeds.size() > kMaxSucceeds)
-        succeeds.erase(succeeds.begin(), succeeds.end() - kMaxSucceeds);
+    const auto succeeds = successor_lineage(config_);
     w.u64(succeeds.size());
     for (const auto& s : succeeds)
         w.str(s);
@@ -243,14 +310,8 @@ Response SessionManager::do_update(const Request& req) {
             frozen.push_back(m);
             if (f->handles) {
                 // Duplicated into the new process: they are its handles, valid there only.
-                auto& h = *f->handles;
-                h.signal = duplicate_into(successor.get(), h.signal);
-                h.reference = duplicate_into(successor.get(), h.reference);
-                h.conhost = duplicate_into(successor.get(), h.conhost);
-                h.input_write = duplicate_into(successor.get(), h.input_write);
-                h.output_read = duplicate_into(successor.get(), h.output_read);
-                h.process = duplicate_into(successor.get(), h.process);
-                h.job = duplicate_into(successor.get(), h.job);
+                for (HANDLE* h : handle_slots(*f->handles))
+                    *h = duplicate_into(successor.get(), *h);
             }
             states.push_back(std::move(f));
         }
@@ -278,12 +339,8 @@ Response SessionManager::do_update(const Request& req) {
             w.str((*f)->state);
             const auto& h = (*f)->handles;
             w.boolean(h.has_value());
-            if (h) {
-                for (HANDLE x : {h->signal, h->reference, h->conhost, h->input_write, h->output_read, h->process,
-                                 h->job})
-                    w.u64(handle_value(x));
-                w.u32(h->pid);
-            }
+            if (h)
+                write_handles(w, *h);
         }
         w.boolean(ui_state_loaded_);
         w.str(ui_state_.dump());
@@ -318,11 +375,7 @@ Response SessionManager::do_update(const Request& req) {
                                                                 : std::string("the new agent-host stopped");
         return give_up(why);
     }
-    // "ready <instance id> <version>"
-    const std::string rest = line->substr(6);
-    const auto space = rest.find(' ');
-    const std::string instance = rest.substr(0, space);
-    const std::string version = space == std::string::npos ? std::string() : rest.substr(space + 1);
+    const auto [instance, version] = parse_ready(*line);
 
     handed_over_ = true;
     successor_ = Successor{std::move(successor), std::move(to_new), std::move(frozen)};
@@ -378,7 +431,8 @@ std::shared_ptr<SessionManager> receive_handover(HostConfig config, HANDLE from_
     for (std::uint64_t i = 0; i < n_succeeds && r.ok(); ++i)
         config.succeeds.push_back(r.str());
 
-    std::shared_ptr<SessionManager> manager(new SessionManager(std::move(config), SessionManager::Adopting{}));
+    std::shared_ptr<SessionManager> manager(
+        new SessionManager(std::move(config), SessionManager::Adopting{}));
     auto& self = *manager;
     try {
         const auto n = r.count(8);
@@ -397,27 +451,15 @@ std::shared_ptr<SessionManager> receive_handover(HostConfig config, HANDLE from_
             if (r.boolean()) {
                 const std::string state = r.str();
                 std::optional<win::PtyHandles> handles;
-                if (r.boolean()) {
-                    win::PtyHandles h;
-                    for (HANDLE* x :
-                         {&h.signal, &h.reference, &h.conhost, &h.input_write, &h.output_read, &h.process, &h.job})
-                        *x = handle_from(r.u64());
-                    h.pid = r.u32();
-                    handles = h;
-                }
+                if (r.boolean())
+                    handles = read_handles(r);
                 if (!r.ok())
                     refuse("the handover is damaged");
                 const std::string id = m->record.id;
                 SessionConfig sc;
                 sc.api = self.config_.conpty;
-                SessionListener listener;
-                SessionManager* raw = manager.get();
-                listener.on_snapshot = [raw, id](std::shared_ptr<const terminal::ScreenSnapshot> s) {
-                    raw->fanout(id, std::move(s));
-                };
-                listener.on_info = [raw, id](const SessionInfo& info) { raw->on_session_info(id, info); };
                 try {
-                    m->session = Session::adopt(std::move(sc), std::move(listener), state, handles);
+                    m->session = Session::adopt(std::move(sc), self.listener_for(id), state, handles);
                 } catch (const std::exception& e) {
                     refuse("terminal " + id.substr(0, 8) + ": " + e.what());
                 }
@@ -446,7 +488,8 @@ std::shared_ptr<SessionManager> receive_handover(HostConfig config, HANDLE from_
         manager->abandon_adopted();
         throw;
     }
-    if (!write_all(to_old, "ready " + self.config_.host_instance_id + " " + self.config_.host_version + "\n")) {
+    if (!write_all(to_old,
+                   "ready " + self.config_.host_instance_id + " " + self.config_.host_version + "\n")) {
         manager->abandon_adopted();
         throw std::runtime_error("the old agent-host went away");
     }

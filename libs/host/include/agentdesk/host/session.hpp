@@ -163,6 +163,11 @@ private:
                                  FreezeCmd, UnfreezeCmd>;
 
     explicit Session(SessionConfig config, SessionListener listener);
+    // The engine's callbacks and the reader's sink, both bound to *this.
+    terminal::EngineEvents engine_events();
+    platform::win::PtyOutputSink output_sink();
+    [[nodiscard]] std::vector<terminal::HistoryLine> ask_history(std::uint64_t from, std::size_t max_lines,
+                                                                 bool tail) const;
     void post(Command cmd);
     void post_output(std::string bytes);  // reader thread; may block (backpressure)
     void release_backpressure();
@@ -197,7 +202,6 @@ private:
     std::condition_variable queue_space_cv_;
     std::size_t queued_output_bytes_ = 0;   // guarded by queue_mutex_
     std::uint64_t backpressure_waits_ = 0;  // guarded by queue_mutex_
-    bool overloaded_ = false;               // guarded by queue_mutex_
     bool no_backpressure_ = false;          // guarded by queue_mutex_ (set while closing)
     std::atomic<bool> stopping_{false};
 
