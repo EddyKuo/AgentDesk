@@ -1089,8 +1089,8 @@ void menu_separator();
 float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a, bool compact, bool measure = false);
 void window_drag_area(App::State& s, ImVec2 a, ImVec2 b);
 
-// The space's git tail (spaces.js 425-442): "repo · branch" without the parts the name already
-// says, main/master dropped, then ahead/behind.
+// The space's git tail: "repo · branch" without the parts the name already says, main/master
+// dropped, then ahead/behind.
 struct GitTail {
     std::string text;
     int ahead = 0;
@@ -1104,7 +1104,7 @@ void confirm_close_space(App::State& s, int index);
 void draw_brand(App::State& s, ImVec2 pos, float w, bool rail);
 float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail);
 bool is_agent(const ui::SessionView& v);
-// herdr tabs.js 25-29: a tab is shown by its lead pane: the first agent, else the first pane.
+// A tab is shown by its lead pane: the first agent, else the first pane.
 std::string lead_pane(App::State& s, const std::vector<std::string>& ids);
 std::string agent_detail(App::State& s, const std::string& id, const ui::SessionView& v);
 long long now_ms();
