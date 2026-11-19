@@ -438,10 +438,13 @@ void VtEngine::paste(std::string_view utf8) {
     const bool bracketed = pty_input_.size() != before;
     std::string body(utf8);
     if (bracketed) {
-        // An embedded end marker would let pasted text escape the bracket: strip it.
+        // An embedded end marker would let pasted text escape the bracket: strip it until none is
+        // left. Removing one can join the bytes around it into a new one ("\x1b[20" + marker +
+        // "1~"), so the search steps back far enough to see that.
         static constexpr std::string_view kEnd = "\x1b[201~";
-        for (auto pos = body.find(kEnd); pos != std::string::npos; pos = body.find(kEnd, pos)) {
+        for (auto pos = body.find(kEnd); pos != std::string::npos;) {
             body.erase(pos, kEnd.size());
+            pos = body.find(kEnd, pos >= kEnd.size() - 1 ? pos - (kEnd.size() - 1) : 0);
         }
     } else {
         // herdr src/vt.rs:1631 (paste_bytes): without bracketed paste, line breaks are Enter (CR).
