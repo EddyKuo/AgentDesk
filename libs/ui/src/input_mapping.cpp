@@ -1,3 +1,6 @@
+// ImGui keys and characters to terminal input, grid hit-testing, selection text and paste
+// policy; pure functions, unit tested.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/input_mapping.hpp"
 
 #include <algorithm>

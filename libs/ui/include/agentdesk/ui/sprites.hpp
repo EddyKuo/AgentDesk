@@ -4,9 +4,9 @@
 // Ghostty does. Font glyphs for these rarely span the whole cell, so tables get gaps between
 // rows and block art gets seams.
 //
-// Ported from herdr-app src/sprites.rs (Apache-2.0, third_party/herdr/LICENSE). The geometry is
-// pure (no ImGui): `paint` returns rectangles and paths in pixel space for one cell, and
-// TerminalView hands them to an ImDrawList.
+// The geometry is pure (no ImGui): `paint` returns rectangles and paths in pixel space for one
+// cell, and TerminalView hands them to an ImDrawList.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 
 #include <array>
 #include <cstdint>
@@ -28,7 +28,7 @@ struct Point {
     float x = 0, y = 0;
 };
 
-// One path step, as gpui's PathBuilder: move_to, line_to, or cubic_bezier_to(to, c1, c2).
+// One path step: move to, line to, or a cubic Bézier to `to` with controls c1 then c2.
 struct PathStep {
     enum class Kind { kMove, kLine, kCubic } kind = Kind::kLine;
     Point to;
@@ -49,14 +49,14 @@ struct Shapes {
     std::vector<Path> paths;
 };
 
-// Per direction (up, right, down, left): 0 none, 1 light, 2 heavy, 3 double. herdr sprites.rs:8
+// Per direction (up, right, down, left): 0 none, 1 light, 2 heavy, 3 double.
 std::optional<std::array<std::uint8_t, 4>> lines(char32_t c);
 
 // Rounded corners (╭╮╯╰): which way their two arms leave the center, (right or left, down or
-// up). herdr sprites.rs:39
+// up).
 std::optional<std::array<float, 2>> arc(char32_t c);
 
-// Dashed lines: (dashes per cell, heavy, horizontal). herdr sprites.rs:50
+// Dashed lines: (dashes per cell, heavy, horizontal).
 struct Dashes {
     std::uint8_t count = 0;
     bool heavy = false;
@@ -65,26 +65,25 @@ struct Dashes {
 };
 std::optional<Dashes> dashes(char32_t c);
 
-// Rectangles in cell fractions (x0, y0, x1, y1) and an alpha, for block elements. herdr
-// sprites.rs:69
+// Rectangles in cell fractions (x0, y0, x1, y1) and an alpha, for block elements.
 struct Blocks {
     std::vector<std::array<float, 4>> rects;
     float alpha = 1.0f;
 };
 std::optional<Blocks> blocks(char32_t c);
 
-// Braille dots in whole pixels (x0, y0, x1, y1) for a width × height cell. herdr sprites.rs:112
+// Braille dots in whole pixels (x0, y0, x1, y1) for a width × height cell.
 std::optional<std::vector<std::array<int, 4>>> braille(char32_t c, int width, int height);
 
-// ⏺ (Claude Code marks every step with it). herdr sprites.rs:163
+// ⏺ (Claude Code marks every step with it).
 inline constexpr char32_t kRecord = U'⏺';
 
-// True when the cell's text is exactly one sprite character. herdr sprites.rs:165
+// True when the cell's text is exactly one sprite character.
 bool is_sprite(char32_t c);
 bool is_sprite(std::u32string_view text);
 
 // Shapes for `c` (one sprite character) in the cell at (x, y) sized w × h, snapped to device
-// pixels at `scale` device pixels per unit. Empty when `c` is not a sprite. herdr sprites.rs:174
+// pixels at `scale` device pixels per unit. Empty when `c` is not a sprite.
 Shapes paint(char32_t c, float x, float y, float w, float h, float scale);
 
 }  // namespace agentdesk::ui::sprites

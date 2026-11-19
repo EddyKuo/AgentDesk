@@ -1,19 +1,19 @@
 #pragma once
 
-// Anonymous usage data, ported from herdr-app src/telemetry.rs (Apache-2.0, commit 321c9a8):
-// one small report per install per UTC day. Never what's in a terminal, never free text: every
+// Anonymous usage data: one small report per install per UTC day. Never what's in a terminal, never free text: every
 // field is a number, a bucket, a yes/no or a name from a list the app ships (anything else is
 // `other`).
 //
 // The window tells this module what it sees now and then (observe, command, count); a thread of
 // its own keeps the day's counts in <data>\telemetry\today.json, freezes a finished day into
 // telemetry\queue\ and sends it. Nothing here may affect the app: it runs off the UI thread,
-// never waits on anything, and every error just loses data (telemetry.rs 1-10).
+// never waits on anything, and every error just loses data.
 //
 // On unless ui.json says "telemetry": false (that also deletes the id and anything not sent yet).
-// DO_NOT_TRACK, AGENTDESK_TELEMETRY=0 and CI turn it off for one run (telemetry.rs 12-14).
-// AgentDesk has no server of its own: like herdr's build from source it collects and shows but
-// never sends, unless AGENTDESK_TELEMETRY_URL points it at one (telemetry.rs 14-16, 100-106).
+// DO_NOT_TRACK, AGENTDESK_TELEMETRY=0 and CI turn it off for one run.
+// AgentDesk has no server of its own: it collects and shows but never sends, unless
+// AGENTDESK_TELEMETRY_URL points it at one.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 
 #include <cstddef>
 #include <cstdint>
@@ -31,16 +31,15 @@
 
 namespace agentdesk::ui::telemetry {
 
-// herdr's serde_json keeps keys in the order written (preserve_order, via indexmap in Cargo.lock):
-// the report shows and goes out in that order.
+// Keys stay in the order written: the report shows and goes out in that order.
 using Json = nlohmann::ordered_json;
 
-// telemetry.rs 27: the report format.
+// The report format.
 inline constexpr std::uint32_t kVersion = 1;
-// telemetry.rs 30: frozen reports older than this are dropped unsent.
+// Frozen reports older than this many days are dropped unsent.
 inline constexpr std::int64_t kKeepDays = 7;
 
-// What the window sees, every few seconds while telemetry is on (telemetry.rs 33-49).
+// What the window sees, every few seconds while telemetry is on.
 struct Observation {
     bool foreground = false;
     // Every terminal reporting an agent: its 7501 `app` (made safe in agent_name).
@@ -57,22 +56,22 @@ struct Observation {
     std::optional<std::string> welcome;
 };
 
-// What the app knows that this module doesn't (herdr reads these from its own modules).
+// What the app knows that this module doesn't.
 struct Config {
-    std::filesystem::path data_dir;            // telemetry\ goes in it (telemetry.rs 77-79)
-    std::string app_version;                   // CARGO_PKG_VERSION
-    std::vector<std::string> shipped_layouts;  // window::shipped_layouts()
-    std::vector<std::string> shipped_themes;   // settings::PRESETS + SHIPPED_THEMES
-    // mods::kinds: (shipped as shipped by name, shipped but edited, the person's own).
+    std::filesystem::path data_dir;            // telemetry\ goes in it
+    std::string app_version;                   // this build's version
+    std::vector<std::string> shipped_layouts;  // layout names the app ships
+    std::vector<std::string> shipped_themes;   // theme ids the app ships
+    // Sorts mod names: (shipped and unchanged, by name; shipped but edited; the person's own).
     std::function<std::tuple<std::vector<std::string>, std::size_t, std::size_t>(
         const std::set<std::string>&)>
         mod_kinds;
     std::function<bool()> keys_custom;                         // keys.json differs from the shipped one
-    std::function<std::optional<std::string>()> core_version;  // update::core().version
-    std::function<void()> refresh;                             // mods::request(Refresh): redraw
+    std::function<std::optional<std::string>()> core_version;  // agent-host's version (updates::core())
+    std::function<void()> refresh;                             // status changed: redraw
 };
 
-// One UTC day's counts, kept locally until the day is over (telemetry.rs 187-210).
+// One UTC day's counts, kept locally until the day is over.
 struct Day {
     std::string day;
     std::uint64_t open_secs = 0;
@@ -102,19 +101,19 @@ struct Day {
     static Day from_json(const Json& j);
 };
 
-// Pure helpers (telemetry.rs 273-344, programs.rs 212-237), public for the tests.
+// Pure helpers, public for the tests.
 std::string bucket(std::size_t n);
 std::string time_bucket(std::uint64_t secs);
 std::string startup_bucket(std::uint64_t ms);
 // A release version (0.2.0, 0.2.0-rc.1), else "other": never a free string.
 std::string version(std::string_view v);
-// An agent's 7501 `app` as a name herdr's programs table ships, else "other" ("unknown" when it
-// gave none).
+// An agent's 7501 `app` as a name from the shipped programs table, else "other" ("unknown" when
+// it gave none).
 std::string agent_name(const std::optional<std::string>& app);
 // YYYY-MM-DD for days since 1970-01-01 (Howard Hinnant's civil_from_days).
 std::string date(std::int64_t days);
 
-// --- the module (telemetry.rs 108-183)
+// --- the module
 bool collecting();
 void observe(Observation o);
 // A command the person ran (names from the command list).
@@ -133,7 +132,7 @@ void quit();
 void clock();
 // Starts the thread. `setting`: ui.json's `telemetry`.
 void start(Config config, bool setting);
-// Ends the thread (process exit; herdr's dies with the process).
+// Ends the thread at process exit, after it handled what was queued (at most 250 ms).
 void stop();
 
 }  // namespace agentdesk::ui::telemetry

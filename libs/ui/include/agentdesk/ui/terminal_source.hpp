@@ -1,5 +1,7 @@
 #pragma once
 
+// TerminalSource: the interface between a TerminalView and the session it shows.
+
 #include <cstdint>
 #include <memory>
 #include <string>

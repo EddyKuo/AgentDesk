@@ -1,5 +1,7 @@
 #pragma once
 
+// Git branch and repository top of a folder, read from the .git files without running git.
+
 #include <string>
 
 namespace agentdesk::ui {

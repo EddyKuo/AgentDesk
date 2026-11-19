@@ -1,5 +1,6 @@
-// Herdr 98's rules and numbers, ported from herdr-app defaults/mods/win98 (commit 321c9a8,
-// Apache-2.0); each piece names its file and lines.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
+// The win98 layout's rules and numbers: bevels, menu sizes, floats, DOS paths, clock texts, and
+// the Mines and Solitaire games. Nothing here draws.
 #include "agentdesk/ui/win98.hpp"
 
 #include <algorithm>
@@ -14,13 +15,13 @@ namespace agentdesk::ui::win98 {
 
 namespace {
 
-// Math.random when no source is given.
+// The random source when none is given: uniform in [0, 1).
 double default_random() {
     static std::mt19937_64 gen{std::random_device{}()};
     return std::uniform_real_distribution<double>(0.0, 1.0)(gen);
 }
 
-// JavaScript's Math.round: halves go up (toward +infinity).
+// Rounds halves up (toward +infinity), not away from zero: the clock dots depend on it.
 int js_round(double v) {
     return static_cast<int>(std::floor(v + 0.5));
 }
@@ -32,6 +33,18 @@ std::size_t utf8_length(std::string_view s) {
     return n;
 }
 
+std::string lower(std::string s) {
+    for (auto& c : s)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+std::string with_backslashes(std::string_view path) {
+    std::string s(path);
+    std::replace(s.begin(), s.end(), '/', '\\');
+    return s;
+}
+
 std::string pad(int v, int width) {
     std::string s = std::to_string(v);
     while (static_cast<int>(s.size()) < width)
@@ -41,9 +54,8 @@ std::string pad(int v, int width) {
 
 }  // namespace
 
-// ---------------------------------------------------------------- kit.js
+// ---------------------------------------------------------------- pixels, text, menus
 
-// kit.js 84-95.
 std::vector<BevelLayer> bevel_layers(Bevel kind) {
     using namespace color;
     switch (kind) {
@@ -69,18 +81,16 @@ std::vector<BevelLayer> bevel_layers(Bevel kind) {
     return {};
 }
 
-// kit.js 40-43.
 int scale_of(int shared_scale) {
     return shared_scale == 2 ? 2 : 1;
 }
 
-// kit.js 451-452: scale 2 gives want(16) (16 * 2 / zoom layout px, 32 px on screen); scale 1
+// Scale 2 asks for 32 screen px, so it divides by the zoom (16 * 2 / zoom layout px); scale 1
 // gives 16 layout px, which the zoom scales as usual.
 float terminal_font_px(int scale, float zoom) {
     return scale == 2 ? 32.0f / (zoom > 0 ? zoom : 1.0f) : 16.0f;
 }
 
-// kit.js 57-58.
 int access_index(std::string_view label) {
     const auto amp = label.find('&');
     if (amp == std::string_view::npos || amp + 1 >= label.size())
@@ -88,7 +98,7 @@ int access_index(std::string_view label) {
     return static_cast<int>(amp);
 }
 
-// kit.js 73-75: String.replace(/&(.)/, "$1"), the first one only.
+// Only the first "&" that has a character after it is dropped.
 std::string plain(std::string_view label) {
     std::string s(label);
     const auto amp = s.find('&');
@@ -97,16 +107,14 @@ std::string plain(std::string_view label) {
     return s;
 }
 
-// menu.js 326-327.
 bool access_matches(std::string_view label, char ch) {
-    std::string low(label);
-    for (auto& c : low)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    const std::string low = lower(std::string(label));
     const char want[3] = {'&', static_cast<char>(std::tolower(static_cast<unsigned char>(ch))), '\0'};
     return low.find(want) != std::string::npos;
 }
 
-// kit.js 326-344.
+// Widths: 6 px per character; the Start menu adds its banner and is at least 180 px wide, other
+// menus at least 120 px with room for the shortcut column when any item has one.
 MenuSize menu_size(const std::vector<MenuRowText>& items, bool start) {
     int rows = 0, seps = 0;
     std::size_t longest = 0, keys = 0;
@@ -128,7 +136,7 @@ MenuSize menu_size(const std::vector<MenuRowText>& items, bool start) {
     return {w, h};
 }
 
-// herdr src/layout.rs 732-751.
+// An ease-out-back curve with overshoot constant 1.25.
 float spring(float t) {
     const float c1 = 1.25f;
     t = std::clamp(t, 0.0f, 1.0f) - 1.0f;
@@ -156,7 +164,6 @@ FloatPlace snap_float(float x, float y, float w, float h) {
     return {edge, align};
 }
 
-// herdr src/window/floats.rs 78-96.
 std::array<float, 2> float_home(float ox, float oy, float w, float h, float bw, float bh, FloatPlace place,
                                 float margin) {
     auto along = [&](float start, float room, float len) {
@@ -179,7 +186,7 @@ std::array<float, 2> float_home(float ox, float oy, float w, float h, float bw, 
     return {x, y};
 }
 
-// layout.rs 36-59: the defaults are right and center.
+// Unknown or missing names fall back to right and center.
 FloatPlace parse_place(std::string_view edge, std::string_view align) {
     FloatPlace p;
     p.edge = edge == "top"      ? Edge::kTop
@@ -190,7 +197,6 @@ FloatPlace parse_place(std::string_view edge, std::string_view align) {
     return p;
 }
 
-// kit.js 373.
 float dialog_width(std::string_view kind) {
     static const std::map<std::string_view, int> kW = {
         {"prompt", 340},  {"confirm", 330}, {"run", 350},        {"shutdown", 330}, {"about", 380},
@@ -200,26 +206,14 @@ float dialog_width(std::string_view kind) {
     return it == kW.end() ? 340.0f : static_cast<float>(it->second);
 }
 
-// kit.js 431-437. herdr's paths start with "/" (no drive); a Windows path that has a drive keeps
-// it, one that does not gets herdr's "C:".
+// A path that has a drive keeps it; one without (such as "/x") gets "C:" in front.
 std::string dos_path(std::string_view path, std::string_view home) {
     if (path.empty())
         return "C:\\";
-    std::string p(path);
-    for (auto& c : p)
-        if (c == '/')
-            c = '\\';
-    std::string h(home);
-    for (auto& c : h)
-        if (c == '/')
-            c = '\\';
+    std::string p = with_backslashes(path);
+    std::string h = with_backslashes(home);
     while (!h.empty() && h.back() == '\\')
         h.pop_back();
-    auto lower = [](std::string s) {
-        for (auto& c : s)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        return s;
-    };
     const std::string lp = lower(p), lh = lower(h);
     if (!h.empty() &&
         (lp == lh || (lp.size() > lh.size() && lp.compare(0, lh.size(), lh) == 0 && lp[lh.size()] == '\\')))
@@ -231,7 +225,6 @@ std::string dos_path(std::string_view path, std::string_view home) {
     return p.empty() ? std::string("C:\\") : p;
 }
 
-// taskbar.js 61-65.
 std::string user_name(std::string_view home) {
     std::string last;
     std::string cur;
@@ -252,7 +245,7 @@ std::string user_name(std::string_view home) {
     return last;
 }
 
-// dialog.js 227: cmd.split(/\s+/)[0].split("/").pop(); "\" is a separator here too.
+// The first whitespace-separated word, after its last "/" or "\".
 std::string run_name(std::string_view command) {
     std::size_t a = 0;
     while (a < command.size() && std::isspace(static_cast<unsigned char>(command[a])) != 0)
@@ -265,7 +258,6 @@ std::string run_name(std::string_view command) {
     return slash == std::string::npos ? first : first.substr(slash + 1);
 }
 
-// dialog.js 224.
 std::vector<std::string> run_history(std::vector<std::string> history, const std::string& command) {
     std::vector<std::string> out = {command};
     for (auto& h : history)
@@ -278,7 +270,6 @@ std::vector<std::string> run_history(std::vector<std::string> history, const std
 
 // ---------------------------------------------------------------- time
 
-// taskbar.js 36-42.
 std::string clock_text(const DateTime& d) {
     int h = d.hour;
     const bool pm = h >= 12;
@@ -293,7 +284,6 @@ std::string month_name(int month) {
     return kMonths[std::clamp(month, 0, 11)];
 }
 
-// taskbar.js 44-46 (en-US long date).
 std::string long_date(const DateTime& d) {
     static const char* const kDays[] = {"Sunday",   "Monday", "Tuesday", "Wednesday",
                                         "Thursday", "Friday", "Saturday"};
@@ -301,21 +291,18 @@ std::string long_date(const DateTime& d) {
            std::to_string(d.day) + ", " + std::to_string(d.year);
 }
 
-// dialog.js 687: toLocaleTimeString("en-US").
 std::string time_text(const DateTime& d) {
     int h = d.hour % 12 == 0 ? 12 : d.hour % 12;
     return std::to_string(h) + ":" + pad(d.minute, 2) + ":" + pad(d.second, 2) +
            (d.hour >= 12 ? " PM" : " AM");
 }
 
-// dialog.js 688-691.
 std::string time_zone_text(const DateTime& d) {
     const int offset = d.utc_offset_minutes;
     const int a = std::abs(offset);
     return std::string("UTC") + (offset < 0 ? "-" : "+") + pad(a / 60, 2) + ":" + pad(a % 60, 2);
 }
 
-// dialog.js 656-666.
 std::vector<std::array<int, 7>> calendar(int year, int month) {
     // Day of the week of the 1st (Sakamoto), and the month's length.
     static const int kT[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
@@ -343,7 +330,8 @@ std::vector<std::array<int, 7>> calendar(int year, int month) {
     return weeks;
 }
 
-// dialog.js 927-958.
+// Twelve hour marks on a radius of 40 (every third navy), then the hands as rows of dots: hour
+// 24 px long in 3 px dots, minute 34 px in 2 px dots, second 36 px in red 1 px dots.
 std::vector<ClockDot> clock_face(const DateTime& d) {
     constexpr double kSize = 96;
     constexpr double kPi = std::numbers::pi;
@@ -369,17 +357,16 @@ std::vector<ClockDot> clock_face(const DateTime& d) {
     return out;
 }
 
-// ---------------------------------------------------------------- Mines (mines.js)
+// ---------------------------------------------------------------- Mines
 
 Mines::Mines(Options options, Random random) : options_(std::move(options)), random_(std::move(random)) {
     if (!random_)
         random_ = default_random;
-    if (!level(options_.level))  // mines.js 27
+    if (!level(options_.level))  // a saved level that no longer exists
         options_.level = "beginner";
     reset();
 }
 
-// mines.js 6.
 std::optional<std::array<int, 3>> Mines::level(std::string_view name) {
     if (name == "beginner")
         return std::array<int, 3>{9, 9, 10};
@@ -390,7 +377,6 @@ std::optional<std::array<int, 3>> Mines::level(std::string_view name) {
     return std::nullopt;
 }
 
-// mines.js 34-42.
 void Mines::reset() {
     timer_ = false;
     const auto l = *level(options_.level);
@@ -404,7 +390,6 @@ void Mines::reset() {
     boom_ = -1;
 }
 
-// mines.js 44-51.
 std::vector<int> Mines::neighbors(int i) const {
     std::vector<int> result;
     const int x = i % cols_, y = i / cols_;
@@ -415,7 +400,8 @@ std::vector<int> Mines::neighbors(int i) const {
     return result;
 }
 
-// mines.js 53-69.
+// Lays the mines with a partial Fisher-Yates shuffle over the cells outside i's neighbourhood,
+// so the first click never hits a mine, then counts each cell's neighbours.
 void Mines::start(int i, long long now_ms) {
     std::set<int> excluded = {i};
     for (const int n : neighbors(i))
@@ -441,7 +427,7 @@ void Mines::start(int i, long long now_ms) {
     timer_ = true;
 }
 
-// mines.js 71-104.
+// Flood-fills from i through cells with no mines around them.
 std::string Mines::reveal(int i, long long now_ms) {
     if (i < 0 || i >= static_cast<int>(cells_.size()))
         return {};
@@ -490,7 +476,6 @@ std::string Mines::reveal(int i, long long now_ms) {
     return {};
 }
 
-// mines.js 106-112.
 std::string Mines::chord(int i, long long now_ms) {
     if (i < 0 || i >= static_cast<int>(cells_.size()))
         return {};
@@ -509,7 +494,6 @@ std::string Mines::chord(int i, long long now_ms) {
     return sound;
 }
 
-// mines.js 173.
 void Mines::mark(int i) {
     if (i < 0 || i >= static_cast<int>(cells_.size()))
         return;
@@ -518,7 +502,6 @@ void Mines::mark(int i) {
         c.mark = (c.mark + 1) % (options_.marks ? 3 : 2);
 }
 
-// mines.js 64-68.
 bool Mines::tick(long long now_ms) {
     if (!timer_)
         return false;
@@ -529,7 +512,6 @@ bool Mines::tick(long long now_ms) {
     return seconds_ != before;
 }
 
-// mines.js 114-123.
 void Mines::request(const std::string& cmd) {
     if (level(cmd)) {
         options_.level = cmd;
@@ -557,7 +539,6 @@ int Mines::mines_left() const {
     return total_ - flags;
 }
 
-// mines.js 185.
 std::string Mines::face() const {
     if (state_ == State::kLost)
         return "dead";
@@ -566,14 +547,10 @@ std::string Mines::face() const {
     return held >= 0 ? "ooh" : "smile";
 }
 
-// mines.js 122.
 std::string Mines::best_text() const {
     std::string out;
     for (const char* name : {"Beginner", "Intermediate", "Expert"}) {
-        std::string key = name;
-        for (auto& c : key)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        const auto it = options_.best.find(key);
+        const auto it = options_.best.find(lower(name));
         if (!out.empty())
             out += "\n";
         out += std::string(name) + ": " + std::to_string(it == options_.best.end() ? 999 : it->second) +
@@ -582,14 +559,12 @@ std::string Mines::best_text() const {
     return out;
 }
 
-// mines.js 16.
 std::string counter_chars(int value) {
     if (value < 0)
         return "-" + pad(std::min(99, -value), 2);
     return pad(std::min(999, value), 3);
 }
 
-// mines.js 8, 18.
 std::array<bool, 7> segments_lit(char ch) {
     static const char* const kSegments[] = {"abcdef", "bc",     "abdeg", "abcdg",   "bcfg",
                                             "acdfg",  "acdefg", "abc",   "abcdefg", "abcdfg"};
@@ -619,7 +594,7 @@ std::uint32_t mines_number_color(int n) {
     return kColors[std::clamp(n, 0, 8)];
 }
 
-// ---------------------------------------------------------------- Solitaire (sol.js)
+// ---------------------------------------------------------------- Solitaire
 
 Solitaire::Solitaire(Random random) : random_(std::move(random)) {
     if (!random_)
@@ -627,7 +602,7 @@ Solitaire::Solitaire(Random random) : random_(std::move(random)) {
     deal();
 }
 
-// sol.js 223-234 (with stop(), 235-238).
+// Stops any victory animation, shuffles (Fisher-Yates) and lays out the seven columns.
 void Solitaire::deal() {
     animating = false;
     std::vector<int> cards(52);
@@ -664,7 +639,6 @@ std::size_t Solitaire::pile_size(const Loc& loc) const {
     return 0;
 }
 
-// sol.js 250.
 std::vector<int> Solitaire::cards(const Loc& loc) const {
     std::vector<int> out;
     const auto from = static_cast<std::size_t>(std::max(0, loc.n));
@@ -680,7 +654,8 @@ std::vector<int> Solitaire::cards(const Loc& loc) const {
     return out;
 }
 
-// sol.js 251-259.
+// A single top card from the waste or a foundation; from a column, a face-up run that
+// alternates colour and descends by one.
 bool Solitaire::valid_pick(const Loc& loc) const {
     const int size = static_cast<int>(pile_size(loc));
     if (loc.n < 0 || size == 0)
@@ -699,27 +674,27 @@ bool Solitaire::valid_pick(const Loc& loc) const {
     return true;
 }
 
-// sol.js 248.
+// Remembers the game for Undo; any change also starts the clock.
 void Solitaire::save() {
     undo = g;
     begin();
 }
 
-// sol.js 239-247: the clock starts (the caller ticks it every second).
+// The clock starts (the caller ticks it every second).
 void Solitaire::begin() {
     if (won)
         return;
     running = true;
 }
 
-// sol.js 242-246.
+// Standard scoring loses 2 points every 10 seconds.
 void Solitaire::tick_second() {
     ++seconds;
     if (scoring && seconds % 10 == 0)
         g.score -= 2;
 }
 
-// sol.js 260-275.
+// Scoring: +10 to a foundation, -15 from one, +5 from the waste to a column.
 bool Solitaire::move(const Loc& from, const Loc& to) {
     if (!valid_pick(from) || (from.type == to.type && (from.i == to.i || to.type == Pile::kHome)))
         return false;
@@ -768,7 +743,6 @@ bool Solitaire::move(const Loc& from, const Loc& to) {
     return true;
 }
 
-// sol.js 276-279.
 void Solitaire::foundation(const Loc& loc) {
     if (!valid_pick(loc) || cards(loc).size() != 1)
         return;
@@ -777,7 +751,8 @@ void Solitaire::foundation(const Loc& loc) {
             return;
 }
 
-// sol.js 280-288.
+// Draws `draw` cards to the waste; an empty stock turns the waste over (-100 points with draw
+// one, -20 with draw three).
 void Solitaire::stock() {
     if (animating) {
         animating = false;
@@ -800,7 +775,6 @@ void Solitaire::stock() {
     }
 }
 
-// sol.js 289-300.
 Solitaire::Down Solitaire::down(const Loc& loc) {
     if (animating) {
         animating = false;
@@ -828,7 +802,8 @@ Solitaire::Down Solitaire::down(const Loc& loc) {
     return Down::kPick;
 }
 
-// sol.js 305-309.
+// Foundations sit in the top row from x = 258, columns from y = 122 at x = 12; slots are 82 px
+// apart and a card is 71 px wide.
 std::optional<Solitaire::Loc> Solitaire::target(float x, float y) {
     if (y < 116) {
         for (int i = 0; i < 4; ++i)
@@ -843,7 +818,6 @@ std::optional<Solitaire::Loc> Solitaire::target(float x, float y) {
     return std::nullopt;
 }
 
-// sol.js 310-312.
 void Solitaire::victory() {
     running = false;
     won = true;
@@ -856,7 +830,8 @@ void Solitaire::victory() {
     animating = true;
 }
 
-// sol.js 313-327.
+// Cards leave the foundations one at a time (kings first) and bounce off the bottom edge,
+// leaving a trail of at most 300 images; the animation stops after 5200 frames at the latest.
 bool Solitaire::animate() {
     if (!animating)
         return false;
@@ -888,7 +863,7 @@ bool Solitaire::animate() {
     return true;
 }
 
-// sol.js 332-340 (the commands that change the game).
+// The menu commands that change the game.
 void Solitaire::command(const std::string& cmd) {
     if (cmd == "deal")
         deal();
@@ -915,7 +890,8 @@ void Solitaire::command(const std::string& cmd) {
     }
 }
 
-// sol.js 419-420.
+// Face-up cards are 18 px apart at most, closer when the column would run off the board
+// (face-down cards take 7 px each).
 float Solitaire::tab_step(int i) const {
     const auto& p = g.tab[static_cast<std::size_t>(i)];
     int face = 0;

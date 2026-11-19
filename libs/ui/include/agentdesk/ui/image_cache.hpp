@@ -1,7 +1,7 @@
 #pragma once
 // Pictures as ImGui textures: SVG files rasterised at the size they are drawn (lunasvg), PNG files
-// decoded once (Windows Imaging Component). Herdr 98 draws its icons, cards and pictures this way
-// (herdr renders the same files with its own SVG and image support). The textures go through
+// decoded once (Windows Imaging Component). The Win98 layout draws its icons, cards and pictures
+// this way. The textures go through
 // ImGui's own texture list (ImTextureData), so the renderer creates them and recreates them after
 // a lost device. UI thread only; the cache must outlive the ImGui context's last frame.
 #include <filesystem>

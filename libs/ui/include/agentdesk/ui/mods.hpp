@@ -59,7 +59,7 @@ struct ModCommand {
 
 struct ModInfo {
     std::string name;
-    std::string description;  // first comment line of main.lua
+    std::string description;  // mod.json "description", else the one the DLL gives
     bool enabled = false;
     bool loaded = false;
     std::string error;

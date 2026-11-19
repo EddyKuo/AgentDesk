@@ -1,5 +1,9 @@
 #pragma once
 
+// Font loading (bundled interface, terminal and icon fonts with CJK and symbol fallbacks), the
+// installed font families, and the icon glyphs used by the interface.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
+
 #include <map>
 #include <string>
 #include <vector>
@@ -12,8 +16,8 @@ struct FontSet {
     ImFont* mono = nullptr;       // terminal: JetBrains Mono Medium (integer advances) + CJK
     ImFont* mono_bold = nullptr;  // terminal bold text
     ImFont* ui = nullptr;         // interface text: Geist Regular + CJK
-    ImFont* ui_medium = nullptr;  // labels, tab names (herdr "medium")
-    ImFont* ui_bold = nullptr;    // headings, names (herdr "semibold")
+    ImFont* ui_medium = nullptr;  // labels, tab names (medium weight)
+    ImFont* ui_bold = nullptr;    // headings, names (semibold weight)
     ImFont* icons = nullptr;      // Symbols Nerd Font alone (icon glyphs)
     float mono_size = 14.0f;
     float ui_size = 13.0f;
@@ -22,7 +26,7 @@ struct FontSet {
     std::string cjk_source;
 };
 
-// Loads the bundled fonts from `fonts\` next to the executable (herdr's families: Geist for the
+// Loads the bundled fonts from `fonts\` next to the executable (Geist for the
 // interface, JetBrains Mono for terminals, Symbols Nerd Font for icons), each merged with
 // Microsoft JhengHei for CJK and Segoe UI Symbol/Emoji for the rest. Falls back to system fonts
 // (Segoe UI, Cascadia Mono) when the bundled files are missing.
@@ -34,7 +38,7 @@ ImFont* load_terminal_font(const std::wstring& file, float size_px);
 // Any font file with the same fallbacks; pixel_snap for terminal cells. nullptr if unreadable.
 ImFont* load_font_file(const std::wstring& file, float size_px, bool pixel_snap);
 
-// Installed font families (herdr lists every family in its font pickers): the per-user and
+// Installed font families, all listed in the font pickers: the per-user and
 // system font registrations plus the bundled fonts\ folder. Italic faces are left out.
 struct FontFamily {
     std::string name;
@@ -81,16 +85,16 @@ inline constexpr const char* kLayers = "\xEE\xAF\x92";  // U+EBD2 codicon layers
 inline constexpr const char* kClock = "\xEE\xAA\x82";  // U+EA82 codicon clock
 inline constexpr const char* kCommand = "\xEE\xAA\x93";  // U+EA93 codicon symbol-key
 inline constexpr const char* kComment = "\xEE\xA9\xAB";  // U+EA6B codicon comment
-inline constexpr const char* kBot = "\xEE\xAC\x88";  // U+EB08 codicon hubot (herdr lucide "bot")
+inline constexpr const char* kBot = "\xEE\xAC\x88";  // U+EB08 codicon hubot (stands in for lucide "bot")
 inline constexpr const char* kMessages = "\xEE\xAB\x87";  // U+EAC7 codicon comment-discussion (lucide "messages-square")
 inline constexpr const char* kExtensions = "\xEE\xAB\xA6";  // U+EAE6 codicon extensions
 inline constexpr const char* kPalette = "\xEE\xAD\x9C";  // U+EB5C codicon symbol-color
 inline constexpr const char* kWarning = "\xEE\xA9\xAC";  // U+EA6C codicon warning
 inline constexpr const char* kRefresh = "\xEE\xAC\xB7";  // U+EB37 codicon refresh
 inline constexpr const char* kShield = "\xEE\xAD\x93";   // U+EB53 codicon shield
-inline constexpr const char* kEdit = "\xEE\xA9\xB3";     // U+EA73 codicon edit (herdr lucide square-pen)
+inline constexpr const char* kEdit = "\xEE\xA9\xB3";     // U+EA73 codicon edit (stands in for lucide square-pen)
 inline constexpr const char* kBell = "\xEE\xAA\xA2";     // U+EAA2 codicon bell
-inline constexpr const char* kSquare = "\xEE\xA9\xB2";   // U+EA72 codicon primitive-square (herdr square)
+inline constexpr const char* kSquare = "\xEE\xA9\xB2";   // U+EA72 codicon primitive-square (lucide square)
 }  // namespace icon
 
 }  // namespace agentdesk::ui

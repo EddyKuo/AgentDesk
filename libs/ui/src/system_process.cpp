@@ -1,8 +1,14 @@
+// Child processes for the updater and telemetry: pipes, a handle list so concurrent children
+// never inherit each other's pipe ends, and a detached start for relaunching the app.
 #include "system_process.hpp"
 
 #include <windows.h>
 
+#include <cctype>
+#include <chrono>
+#include <fstream>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 
@@ -12,6 +18,21 @@
 namespace agentdesk::ui::detail {
 
 namespace win = agentdesk::platform::win;
+
+namespace {
+
+// One anonymous pipe; neither end is inheritable yet.
+bool make_pipe(win::UniqueHandle& read_end, win::UniqueHandle& write_end) {
+    HANDLE rd = nullptr;
+    HANDLE wr = nullptr;
+    if (!::CreatePipe(&rd, &wr, nullptr, 0))
+        return false;
+    read_end.reset(rd);
+    write_end.reset(wr);
+    return true;
+}
+
+}  // namespace
 
 std::string to_utf8(const std::wstring& w) {
     if (w.empty())
@@ -39,20 +60,14 @@ ProcessResult run_process(const std::filesystem::path& exe, const std::vector<st
     // inherits exactly those (handle list below). Children started at the same time from other
     // threads must not get each other's pipe ends: a write end held by another child keeps a
     // drain below from ever seeing EOF.
-    HANDLE rd = nullptr;
-    HANDLE wr = nullptr;
-    if (!::CreatePipe(&rd, &wr, nullptr, 0))
+    win::UniqueHandle out_read;
+    win::UniqueHandle out_write;
+    win::UniqueHandle err_read;
+    win::UniqueHandle err_write;
+    win::UniqueHandle in_read;
+    win::UniqueHandle in_write;
+    if (!make_pipe(out_read, out_write) || !make_pipe(err_read, err_write) || !make_pipe(in_read, in_write))
         return r;
-    win::UniqueHandle out_read(rd);
-    win::UniqueHandle out_write(wr);
-    if (!::CreatePipe(&rd, &wr, nullptr, 0))
-        return r;
-    win::UniqueHandle err_read(rd);
-    win::UniqueHandle err_write(wr);
-    if (!::CreatePipe(&rd, &wr, nullptr, 0))
-        return r;
-    win::UniqueHandle in_read(rd);
-    win::UniqueHandle in_write(wr);
     HANDLE inherit[3] = {out_write.get(), err_write.get(), in_read.get()};
     for (HANDLE h : inherit)
         if (!::SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
@@ -150,6 +165,53 @@ bool spawn_detached(const std::filesystem::path& exe, const std::vector<std::wst
     ::CloseHandle(pi.hThread);
     ::CloseHandle(pi.hProcess);
     return true;
+}
+
+std::filesystem::path system32_exe(std::wstring_view name) {
+    wchar_t root[MAX_PATH]{};
+    const DWORD n = ::GetEnvironmentVariableW(L"SystemRoot", root, MAX_PATH);
+    const std::wstring file = std::wstring(name) + L".exe";
+    if (n == 0 || n >= MAX_PATH)
+        return std::filesystem::path(file);
+    return std::filesystem::path(std::wstring(root, n)) / L"System32" / file;
+}
+
+std::optional<std::wstring> env_var(const wchar_t* name) {
+    const DWORD n = ::GetEnvironmentVariableW(name, nullptr, 0);
+    if (n == 0)
+        return std::nullopt;
+    std::wstring v(n, L'\0');
+    v.resize(::GetEnvironmentVariableW(name, v.data(), n));
+    return v;
+}
+
+std::string trim(std::string_view s) {
+    const auto a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string_view::npos)
+        return {};
+    return std::string(s.substr(a, s.find_last_not_of(" \t\r\n") - a + 1));
+}
+
+std::string lower(std::string_view s) {
+    std::string out(s);
+    for (auto& c : out)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+
+std::string read_file(const std::filesystem::path& p, bool* ok) {
+    std::ifstream in(p, std::ios::binary);
+    if (ok != nullptr)
+        *ok = static_cast<bool>(in);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+std::uint64_t unix_now() {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
+            .count());
 }
 
 }  // namespace agentdesk::ui::detail

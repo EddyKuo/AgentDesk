@@ -1,6 +1,7 @@
 #pragma once
-// Rules behind herdr's chrome overlays (context menus, the "Go to" picker), kept apart from the
-// drawing so they are unit-tested. Ported from herdr-app (Apache-2.0, commit 321c9a8).
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
+// Rules behind the chrome overlays (context menus, the "Go to" picker), kept apart from the
+// drawing so they can be unit-tested.
 #include <string>
 #include <vector>
 
@@ -8,7 +9,7 @@
 
 namespace agentdesk::ui {
 
-// Keyboard in a context menu (herdr defaults/mods/menu/main.js 131-137): the first row starts
+// Keyboard in a context menu: the first row starts
 // highlighted, Up/Down move with wrap-around, Enter runs the highlighted row. Rows are counted
 // as they are drawn, so a frame's keys use the count of the frame before.
 class MenuNav {
@@ -29,9 +30,9 @@ private:
     bool enter_ = false;
 };
 
-// One space as the picker sees it (herdr defaults/mods/picker/main.js 77-98).
+// One space as the picker sees it.
 struct PickerSpace {
-    bool status = false;   // any terminal in it has a status, idle included (herdr p.w.status)
+    bool status = false;   // any terminal in it has a status, idle included
     bool blocked = false;  // its status is "blocked" (one needs you)
     int tabs = 0;          // its tabs left after the filter
 };
@@ -43,12 +44,12 @@ struct PickerPlan {
     bool quiet_listed = false;   // the quiet spaces are listed under it
 };
 
-// herdr picker/main.js 86-98: busy = has a status and tabs left; quiet = no status and tabs left;
+// busy = has a status and tabs left; quiet = no status and tabs left;
 // busy sorted with blocked first (stable); the "earlier" row whenever there is a quiet space,
 // its spaces listed when expanded or while filtering.
 PickerPlan plan_picker(const std::vector<PickerSpace>& spaces, bool filtering, bool show_earlier);
 
-// The space and index of the tab with id `tab_id` (herdr closes and renames tabs by id).
+// The space and index of the tab with id `tab_id` (tabs are closed and renamed by id).
 PaneLoc find_tab(const Workspace& ws, const std::string& tab_id);
 
 }  // namespace agentdesk::ui

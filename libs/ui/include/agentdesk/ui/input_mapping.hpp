@@ -1,6 +1,7 @@
 #pragma once
 
 // Pure helpers between ImGui input and terminal input. No ImGui context needed: unit tested.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 
 #include <cstdint>
 #include <optional>
@@ -66,20 +67,20 @@ struct LineCells {
 LineCells cells_from_text(const std::string& utf8, bool wrapped);
 
 // Text of a linear selection between two cells (inclusive, any order) over consecutive lines
-// (CellPos::row indexes `lines`). As herdr copies (src/vt.rs:1158-1163, Ghostty's formatter with
-// unwrap and trim): soft-wrapped lines join without a break, trailing blanks of each line and
-// trailing blank lines are trimmed, lines end with "\r\n". Continuation cells of wide characters
+// (CellPos::row indexes `lines`), copied the way Ghostty's formatter does with unwrap and trim:
+// soft-wrapped lines join without a break, trailing blanks of each line and trailing blank lines
+// are trimmed, lines end with "\r\n". Continuation cells of wide characters
 // are skipped. Never contains control characters.
 std::string selection_text(const std::vector<LineCells>& lines, CellPos a, CellPos b);
 // The same over one snapshot's rows.
 std::string selection_text(const terminal::ScreenSnapshot& snap, CellPos a, CellPos b);
 
-// Lines to scroll while a selection drag is held past the edge (herdr src/terminal.rs:1280-1288):
+// Lines to scroll while a selection drag is held past the edge:
 // 0 inside; otherwise 1..5 lines toward the pointer (negative = up), every 50 ms.
 int selection_scroll_lines(float y, float cell_h, int rows);
 
 // Paths typed in as a paste, quoted the way PowerShell/cmd read them, joined by spaces with a
-// trailing space, never Enter (herdr src/terminal/drag_paths.rs quote_paths, Windows branch).
+// trailing space, never Enter.
 // Empty when there is no path or one has control characters.
 std::optional<std::string> quote_paths(const std::vector<std::string>& paths);
 

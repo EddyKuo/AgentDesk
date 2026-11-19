@@ -32,7 +32,8 @@ void disable_nav_windowing();
 void register_texture(ImTextureData* tex);
 void unregister_texture(ImTextureData* tex);
 
-// Puts a window above the others in drawing order (Herdr 98: the window pressed last is on top).
+// Puts a window above the others in drawing order (the Win98 layout keeps the window pressed last
+// on top).
 void bring_to_front(const char* window_name);
 
 }  // namespace agentdesk::ui::adapter

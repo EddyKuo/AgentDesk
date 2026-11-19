@@ -1,5 +1,6 @@
-// Port of herdr-app src/telemetry.rs (Apache-2.0, commit 321c9a8); line numbers below are that
-// file's unless another is named.
+// Usage telemetry: the worker thread that keeps the day's counts on disk, freezes finished days
+// into reports and sends them, plus the buckets and name tables that keep reports anonymous.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/telemetry.hpp"
 
 #include <windows.h>
@@ -9,13 +10,12 @@
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <deque>
 #include <fstream>
 #include <mutex>
-#include <sstream>
 #include <thread>
 #include <utility>
-#include <variant>
 
 #include <bcrypt.h>
 
@@ -25,42 +25,25 @@ namespace agentdesk::ui::telemetry {
 
 namespace fs = std::filesystem;
 using SteadyClock = std::chrono::steady_clock;
+using detail::lower;
+using detail::read_file;
+using detail::trim;
+using detail::unix_now;
 
 namespace {
 
-// 31: how often the thread looks at the clock, counts time and sends.
+// How often the thread looks at the clock, counts time and sends.
 constexpr auto kTick = std::chrono::seconds(30);
-// 176: sync_channel(512).
+// Events waiting for the thread; beyond this, new ones are dropped rather than waited on.
 constexpr std::size_t kQueueLimit = 512;
-
-std::string lower(std::string_view s) {
-    std::string out(s);
-    for (auto& c : out)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return out;
-}
-
-std::string trim(std::string_view s) {
-    const auto a = s.find_first_not_of(" \t\r\n");
-    if (a == std::string_view::npos)
-        return {};
-    return std::string(s.substr(a, s.find_last_not_of(" \t\r\n") - a + 1));
-}
+// HTTP answers that mean the server will never accept this report.
+constexpr int kRejected[] = {400, 404, 410, 413, 422};
 
 bool contains(const std::vector<std::string>& list, const std::string& v) {
     return std::find(list.begin(), list.end(), v) != list.end();
 }
 
-std::string read_file(const fs::path& p, bool* ok = nullptr) {
-    std::ifstream in(p, std::ios::binary);
-    if (ok != nullptr)
-        *ok = static_cast<bool>(in);
-    std::stringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
-}
-
-// 664-668
+// Writes a .tmp beside `path`, then moves it over `path`, so readers never see half a file.
 bool write_atomic(const fs::path& path, const std::string& text) {
     fs::path tmp = path;
     tmp.replace_extension(L".tmp");
@@ -75,35 +58,21 @@ bool write_atomic(const fs::path& path, const std::string& text) {
     return ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
 }
 
-// 656-662: random enough for an id (herdr: std's OS-seeded RandomState; here the OS's RNG).
+// 64 random bits from the OS's RNG, for the install id and send jitter.
 std::uint64_t random_u64() {
     std::uint64_t v = 0;
     ::BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&v), sizeof v, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
     return v;
 }
 
-std::uint64_t unix_now() {
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
-            .count());
-}
-
+// Days since 1970-01-01 UTC.
 std::int64_t today_index() {
     return static_cast<std::int64_t>(unix_now() / 86'400);
 }
 
-std::optional<std::wstring> env(const wchar_t* name) {
-    const DWORD n = ::GetEnvironmentVariableW(name, nullptr, 0);
-    if (n == 0)
-        return std::nullopt;
-    std::wstring v(n, L'\0');
-    v.resize(::GetEnvironmentVariableW(name, v.data(), n));
-    return v;
-}
-
-// 88: set and not blank.
+// An environment variable that is set and not blank.
 std::optional<std::string> set(const wchar_t* name) {
-    auto v = env(name);
+    auto v = detail::env_var(name);
     if (!v)
         return std::nullopt;
     std::string s = detail::to_utf8(*v);
@@ -112,7 +81,8 @@ std::optional<std::string> set(const wchar_t* name) {
     return s;
 }
 
-// 87-98: why it's off for this run, whatever the setting says.
+// Why it's off for this run, whatever the setting says: DO_NOT_TRACK, AGENTDESK_TELEMETRY=0, or
+// a CI machine.
 std::optional<std::string> read_env_off() {
     const auto truthy = [](const std::string& v) {
         const std::string t = lower(trim(v));
@@ -120,7 +90,6 @@ std::optional<std::string> read_env_off() {
     };
     if (const auto v = set(L"DO_NOT_TRACK"); v && truthy(*v))
         return "DO_NOT_TRACK";
-    // 93: HERDR_TELEMETRY, ours AGENTDESK_TELEMETRY.
     if (const auto v = set(L"AGENTDESK_TELEMETRY")) {
         const std::string t = lower(trim(*v));
         if (t == "0" || t == "false" || t == "off" || t == "no")
@@ -133,16 +102,16 @@ std::optional<std::string> read_env_off() {
     return std::nullopt;
 }
 
-// 82-85: read once.
+// Read once per run.
 const std::optional<std::string>& env_off() {
     static const std::optional<std::string> off = read_env_off();
     return off;
 }
 
-// 100-106: where reports go, if this build sends at all. herdr's release builds send to its own
-// server; AgentDesk has none, so only AGENTDESK_TELEMETRY_URL (herdr: HERDR_TELEMETRY_URL) sends.
+// Where reports go, if this build sends at all. AgentDesk has no server of its own, so only
+// AGENTDESK_TELEMETRY_URL makes it send.
 std::optional<std::string> endpoint() {
-    if (auto url = env(L"AGENTDESK_TELEMETRY_URL"); url && !url->empty())
+    if (auto url = detail::env_var(L"AGENTDESK_TELEMETRY_URL"); url && !url->empty())
         return detail::to_utf8(*url);
     return std::nullopt;
 }
@@ -154,7 +123,8 @@ struct Event {
     std::uint64_t ms = 0;
 };
 
-// 63-75. Kept on the heap and never freed: the thread may outlive main's statics at exit.
+// The module's state. Kept on the heap and never freed: the thread may outlive main's statics at
+// exit.
 struct Shared {
     std::mutex queue_mutex;
     std::condition_variable queue_cv;
@@ -176,7 +146,7 @@ Shared& g() {
     return *shared;
 }
 
-// 112-116: try_send, never waits.
+// Hands an event to the thread; never waits (a full queue drops it).
 void send(Event e) {
     std::lock_guard lock(g().queue_mutex);
     if (!g().started || g().stop || g().queue.size() >= kQueueLimit)
@@ -189,7 +159,7 @@ fs::path dir() {
     return g().config.data_dir / L"telemetry";
 }
 
-// 642-654: the random id, made on first use and kept until telemetry is turned off.
+// The random id (32 hex digits), made on first use and kept until telemetry is turned off.
 std::string install_id() {
     const fs::path path = dir() / L"id";
     bool ok = false;
@@ -205,16 +175,11 @@ std::string install_id() {
     return buf;
 }
 
-// 670-697: POSTs one report; the HTTP status, or none if it never got an answer. Turning
-// telemetry off stops a request still in flight.
+// POSTs one report with curl (20 s limit); the HTTP status, or none if it never got an answer.
+// Turning telemetry off stops a request still in flight.
 std::optional<int> post(const std::string& url, const std::string& body) {
-    const fs::path curl = [] {
-        wchar_t root[MAX_PATH]{};
-        const DWORD n = ::GetEnvironmentVariableW(L"SystemRoot", root, MAX_PATH);
-        return n > 0 && n < MAX_PATH ? fs::path(root) / L"System32" / L"curl.exe" : fs::path(L"curl.exe");
-    }();
     const auto r = detail::run_process(
-        curl,
+        detail::system32_exe(L"curl"),
         {L"-sS", L"--max-time", L"20", L"-X", L"POST", L"-H", L"content-type: application/json",
          L"--data-binary", L"@-", L"-o", L"NUL", L"-w", L"%{http_code}", detail::to_wide(url)},
         body, [] { return collecting(); });
@@ -229,7 +194,7 @@ std::optional<int> post(const std::string& url, const std::string& body) {
     return std::nullopt;
 }
 
-// ---- the thread (352-640)
+// ---- the thread
 class Worker {
 public:
     Worker()
@@ -255,7 +220,7 @@ public:
                     next = std::move(g().queue.front());
                     g().queue.pop_front();
                 } else if (g().stop) {
-                    return;  // Disconnected, after what was sent before it
+                    return;  // stop() was called and everything queued before it is handled
                 }
             }
             follow_consent();
@@ -269,7 +234,7 @@ public:
 private:
     static bool on() { return collecting(); }
 
-    // 413-435: starts or wipes when consent changed since last looked.
+    // Starts or wipes when consent changed since it last looked.
     void follow_consent() {
         const std::uint64_t epoch = g().epoch.load();
         bool changed = false;
@@ -295,7 +260,7 @@ private:
         }
     }
 
-    // 437-444: off: nothing kept, nothing sent. On again starts fresh, with a new id.
+    // Off: nothing kept, nothing sent. On again starts fresh, with a new id.
     void wipe() {
         std::error_code ec;
         fs::remove_all(dir(), ec);
@@ -304,7 +269,8 @@ private:
         dirty_ = false;
     }
 
-    // 446-465: picks up the day so far, counts this start, notes an unclean exit.
+    // Picks up the day so far, counts this start, and notes an unclean exit (the `running`
+    // marker of the previous run is still there).
     void begin() {
         const fs::path d = dir();
         std::error_code ec;
@@ -330,7 +296,7 @@ private:
         save();
     }
 
-    // 467-500
+    // Folds one event into the day.
     void event(Event e) {
         if (!on() || !was_on_)
             return;
@@ -368,7 +334,7 @@ private:
         dirty_ = true;
     }
 
-    // 502-513: a new UTC day: the finished one is frozen and the new one starts.
+    // A new UTC day: the finished one is frozen and the new one starts.
     void roll() {
         const std::string today = date(today_index());
         if (day_.day != today) {
@@ -381,7 +347,7 @@ private:
         }
     }
 
-    // 515-533
+    // Every kTick: counts open and foreground time, saves, sends and republishes.
     void tick() {
         const auto gap = SteadyClock::now() - last_tick_;
         last_tick_ = SteadyClock::now();
@@ -402,13 +368,12 @@ private:
         publish();
     }
 
-    // 535-542
     void save() {
         if (dirty_ && write_atomic(dir() / L"today.json", day_.to_json().dump()))
             dirty_ = false;
     }
 
-    // 544-556: a finished day becomes a report that never changes (retries send the same
+    // A finished day becomes a report that never changes (retries send the same
     // bytes). Each day is frozen once: `frozen` holds the latest.
     void freeze(const Day& day) const {
         if (!install_)
@@ -422,7 +387,7 @@ private:
                          day.report(*install_, g().config).dump());
     }
 
-    // 558-577: reports waiting, oldest first; ones too old to matter are dropped.
+    // Reports waiting, oldest first; ones older than kKeepDays are deleted.
     [[nodiscard]] std::vector<std::pair<fs::path, std::string>> queued() const {
         const std::string oldest = date(today_index() - kKeepDays);
         std::vector<std::pair<fs::path, std::string>> out;
@@ -441,7 +406,8 @@ private:
         return out;
     }
 
-    // 579-608
+    // Sends what is queued. Consecutive failures back off 2, 4, 8, 16, then 24 hours, plus up to
+    // 10 minutes of jitter.
     void send_queued() {
         const auto url = endpoint();
         if (!url)
@@ -464,7 +430,7 @@ private:
                 fs::remove(path, ec);
                 failures_ = 0;
             } else if (code &&
-                       (*code == 400 || *code == 404 || *code == 410 || *code == 413 || *code == 422)) {
+                       std::find(std::begin(kRejected), std::end(kRejected), *code) != std::end(kRejected)) {
                 // The server will never take this one (a bad or too old report).
                 std::error_code ec;
                 fs::remove(path, ec);
@@ -479,7 +445,7 @@ private:
         }
     }
 
-    // 610-639: refreshes what the settings screen shows; redraws only if it changed.
+    // Refreshes what the settings screen shows; redraws only if it changed.
     void publish() const {
         const bool now_on = on();
         Json queued_reports = Json::array();
@@ -507,7 +473,6 @@ private:
             {"setting", g().setting.load()},
             {"off_because", env_off() ? Json(*env_off()) : Json()},
             {"sends", url.has_value()},
-            // 624: herdr falls back to its own server's address; AgentDesk has none.
             {"endpoint", url ? Json(*url) : Json()},
             {"draft", install_ && now_on ? day_.report(*install_, g().config) : Json()},
             {"queued", queued_reports},
@@ -537,8 +502,8 @@ private:
     std::uint32_t failures_ = 0;
 };
 
-// herdr defaults/programs.json "programs": each key and its "match" names (programs.rs 212-237
-// reads the same table).
+// The program names a report may contain: each key of the shipped programs table and the other
+// names it matches. Anything else is reported as "other".
 struct ProgramNames {
     const char* key;
     std::vector<const char*> also;
@@ -678,11 +643,11 @@ const std::vector<ProgramNames>& programs() {
 
 // ---- names and buckets
 
-// programs.rs 212-237
 std::string agent_name(const std::optional<std::string>& app) {
     static const std::map<std::string, std::string> names = [] {
         std::map<std::string, std::string> m;
-        // programs.rs: the table is a BTreeMap (keys in order); aliases, then the key itself.
+        // Keys in sorted order; each key's aliases first, then the key itself, so a later key
+        // that names an earlier key's alias takes it over.
         std::vector<const ProgramNames*> sorted;
         for (const auto& p : programs())
             sorted.push_back(&p);
@@ -707,7 +672,7 @@ std::string agent_name(const std::optional<std::string>& app) {
     return it == names.end() ? std::string("other") : it->second;
 }
 
-// 273-281
+// Counts as coarse buckets: 0, 1, 2-5, 6-20, 21+.
 std::string bucket(std::size_t n) {
     if (n == 0)
         return "0";
@@ -720,7 +685,7 @@ std::string bucket(std::size_t n) {
     return "21+";
 }
 
-// 283-292
+// Durations as coarse buckets, in whole minutes.
 std::string time_bucket(std::uint64_t secs) {
     const std::uint64_t m = secs / 60;
     if (m == 0)
@@ -736,7 +701,7 @@ std::string time_bucket(std::uint64_t secs) {
     return "8h+";
 }
 
-// 294-302
+// Startup time buckets.
 std::string startup_bucket(std::uint64_t ms) {
     if (ms <= 499)
         return "<0.5s";
@@ -749,7 +714,9 @@ std::string startup_bucket(std::uint64_t ms) {
     return "5s+";
 }
 
-// 304-315
+// Only release-shaped versions pass: three numbers of up to four digits, optionally with an
+// alpha/beta/rc/preview label and a number. A program-name prefix (below) and a leading "v"
+// are dropped.
 std::string version(std::string_view in) {
     std::string v = trim(in);
     if (v.rfind("hc ", 0) == 0)
@@ -784,7 +751,6 @@ std::string version(std::string_view in) {
     return "other";
 }
 
-// 332-344
 std::string date(std::int64_t days) {
     const std::int64_t z = days + 719'468;
     const std::int64_t era = (z >= 0 ? z : z - 146'096) / 146'097;
@@ -803,7 +769,8 @@ std::string date(std::int64_t days) {
 
 // ---- the day
 
-// 217-232
+// Folds an observation into the day: maxima for counts, sets for names; unknown layouts count
+// as "custom" and frame mods are left out.
 void Day::observe(Observation o, const std::vector<std::string>& layout_names,
                   const std::vector<std::string>& themes) {
     for (const auto& a : o.agents)
@@ -822,7 +789,7 @@ void Day::observe(Observation o, const std::vector<std::string>& layout_names,
     theme_custom = theme_custom || !contains(themes, o.theme);
 }
 
-// 234-270
+// The keys are written in this order, and the report shows and is sent in that order.
 Json Day::report(const std::string& install, const Config& config) const {
     std::vector<std::string> builtin;
     std::size_t edited = 0;
@@ -838,8 +805,8 @@ Json Day::report(const std::string& install, const Config& config) const {
         {"app",
          {
              {"version", version(config.app_version)},
-             {"os", "windows"},   // std::env::consts::OS
-             {"arch", "x86_64"},  // std::env::consts::ARCH
+             {"os", "windows"},
+             {"arch", "x86_64"},
              {"channel", "stable"},
          }},
         {"core", {{"version", core ? Json(version(*core)) : Json()}}},
@@ -888,7 +855,7 @@ Json Day::to_json() const {
                 {"events", events}};
 }
 
-// 189: #[serde(default)]: anything missing or of the wrong kind keeps its default.
+// Anything missing or of the wrong kind keeps its default.
 Day Day::from_json(const Json& j) {
     Day d;
     const auto str = [&](const char* k, std::string& into) {
@@ -957,7 +924,6 @@ void count(std::string name) {
         send(Event{Event::Kind::kCount, {}, std::move(name), 0});
 }
 
-// 138-145
 void window_open() {
     std::optional<SteadyClock::time_point> t;
     {
@@ -973,7 +939,7 @@ void window_open() {
                 std::chrono::duration_cast<std::chrono::milliseconds>(SteadyClock::now() - *t).count())});
 }
 
-// 147-155
+// Turning telemetry off moves to a new epoch: events from before are ignored by the thread.
 void set_setting(bool on) {
     g().setting.store(on);
     const bool now = on && !env_off().has_value();
@@ -998,7 +964,6 @@ void clock() {
         g().started_at = SteadyClock::now();
 }
 
-// 174-183
 void start(Config config, bool setting) {
     {
         std::lock_guard lock(g().queue_mutex);
@@ -1017,8 +982,8 @@ void start(Config config, bool setting) {
     }).detach();
 }
 
-// herdr's thread dies with the process. Here: what was handed over (a quit) is handled, waiting
-// no longer than herdr's quit deadline (main.rs 177: 250 ms), then the process may go.
+// What was already handed over (such as a quit) is handled first, waiting at most 250 ms so a
+// quit never feels slow; after that the process may go.
 void stop() {
     std::unique_lock lock(g().queue_mutex);
     if (!g().started)

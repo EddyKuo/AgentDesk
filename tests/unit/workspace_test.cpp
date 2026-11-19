@@ -1,3 +1,5 @@
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
+// Tests for the workspace model, attention tracking, keymap files and the agents-list helpers.
 #include "agentdesk/ui/workspace.hpp"
 
 #include <gtest/gtest.h>
@@ -95,7 +97,7 @@ TEST(Workspace, ResizeMovesBorderAndClamps) {
     EXPECT_FALSE(w.resize(Dir::kDown, 50, kArea));  // no stacked split
 }
 
-// herdr model.rs 131-133: focusing another pane of a zoomed tab moves the zoom to it.
+// Focusing another pane of a zoomed tab moves the zoom to it.
 TEST(Workspace, ZoomTogglesAndMovesWithFocus) {
     Workspace w;
     w.add_space("a");
@@ -222,7 +224,7 @@ TEST(Keymap, ParsesChordsAndAppliesOverrides) {
     auto k = Keymap::defaults();
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-shift-t")), "tab.new");
     EXPECT_EQ(*k.terminal(*Keymap::parse("ctrl-shift-f")), "terminal.search");
-    // A file with a problem installs nothing (herdr keys.rs): the defaults stay.
+    // A file with a problem installs nothing: the defaults stay.
     auto bad = k.apply({{"global", {{"ctrl-shift-t", nullptr}, {"??x", "a"}}}});
     ASSERT_EQ(bad.size(), 1u);
     EXPECT_NE(bad[0].find("??x"), std::string::npos);
@@ -233,9 +235,9 @@ TEST(Keymap, ParsesChordsAndAppliesOverrides) {
     EXPECT_EQ(*k.global(*Keymap::parse("ctrl-alt-n")), "space.new");
 }
 
-// herdr keys.json forms: layout sections win over global, "terminal" gives the key to the
+// keys.json forms: layout sections win over global, "terminal" gives the key to the
 // program, {"command","args"} objects, old names migrated, unknown sections/actions reported.
-TEST(Keymap, HerdrSectionsObjectsAndValidation) {
+TEST(Keymap, SectionsObjectsAndValidation) {
     auto k = Keymap::defaults();
     const auto known = [](std::string_view n) { return n != "no.such"; };
     const auto bad = k.apply(
@@ -258,7 +260,7 @@ TEST(Keymap, HerdrSectionsObjectsAndValidation) {
     EXPECT_EQ(errs.size(), 2u);
 }
 
-// herdr spaces: colours go to the least-used name, spaces move only within their machine.
+// Space colours go to the least-used name, spaces move only within their machine.
 TEST(Workspace, SpaceColorsAndMoves) {
     Workspace w;
     w.add_space("a");
@@ -282,7 +284,7 @@ TEST(Workspace, SpaceColorsAndMoves) {
     EXPECT_TRUE(back.pinned.contains("b"));
 }
 
-// herdr pane drag: drop on an edge moves the pane there; in the middle the two swap.
+// Pane drag: drop on an edge moves the pane there; in the middle the two swap.
 TEST(Workspace, MovePaneToEdgeOrSwap) {
     Workspace w;
     w.add_space("a");
@@ -303,9 +305,9 @@ TEST(Workspace, MovePaneToEdgeOrSwap) {
     EXPECT_FALSE(w.move_pane("a", "a", std::nullopt));
 }
 
-// herdr: needs-you alerts even while looking; error counts as needs you; a first listing that
+// Needs-you alerts even while looking; error counts as needs you; a first listing that
 // is already done shows done without alerting.
-TEST(Attention, HerdrAlertRules) {
+TEST(Attention, AlertRules) {
     AttentionTracker t;
     t.update("a", "Working", true);
     EXPECT_TRUE(t.update("a", "Blocked", true));
@@ -317,7 +319,7 @@ TEST(Attention, HerdrAlertRules) {
     EXPECT_EQ(t.get("b"), Attention::kIdle);
 }
 
-// herdr tab.settle: a settled tab leaves the bar and tab cycling, keeps its terminals, and comes
+// A settled tab leaves the bar and tab cycling, keeps its terminals, and comes
 // back when shown (focus, select) — the last shown tab of a space cannot be put away.
 TEST(Workspace, SettledTabsAreSkippedUntilShown) {
     Workspace w;
@@ -349,7 +351,7 @@ TEST(Workspace, SettledTabsAreSkippedUntilShown) {
     EXPECT_FALSE(back.spaces[0].tabs[1].settled);
 }
 
-// herdr writes its defaults as keys.json when the file is missing: that file must apply cleanly
+// The defaults are written as keys.json when the file is missing: that file must apply cleanly
 // and change nothing.
 TEST(Keymap, DefaultFileAppliesCleanly) {
     auto k = Keymap::defaults();
@@ -361,11 +363,11 @@ TEST(Keymap, DefaultFileAppliesCleanly) {
     EXPECT_EQ(Keymap::defaults().global_map(), k.global_map());
 }
 
-// herdr layout.rs / model.rs rules: splitting along the container's axis adds a sibling sharing
+// Split, close and tab rules: splitting along the container's axis adds a sibling sharing
 // the target's weight; closing gives the space back to all siblings; focus returns to the pane
 // focused before; new tabs go right after the shown one; closing the shown tab shows the one
 // that slides into its slot; moving a tab keeps the shown one.
-TEST(Workspace, HerdrSplitCloseAndTabRules) {
+TEST(Workspace, SplitCloseAndTabRules) {
     Workspace w;
     w.add_space("a");
     w.split("a", "b", Dir::kRight);
@@ -401,7 +403,7 @@ TEST(Workspace, HerdrSplitCloseAndTabRules) {
     EXPECT_EQ(t.spaces[0].tabs[t.spaces[0].active_tab].root.session, "x");
 }
 
-// herdr: focusing another pane of a zoomed tab moves the zoom; pane.go works while zoomed.
+// Focusing another pane of a zoomed tab moves the zoom; pane.go works while zoomed.
 TEST(Workspace, ZoomFollowsFocus) {
     Workspace w;
     w.add_space("a");
@@ -413,7 +415,7 @@ TEST(Workspace, ZoomFollowsFocus) {
     EXPECT_EQ(w.active_tab()->zoomed, "a");
 }
 
-// herdr model.rs 271-279: the first terminal's checkout top, else the space's own folder; home is "~".
+// Space title: the first terminal's checkout top, else the space's own folder; home is "~".
 TEST(Workspace, SpaceTitleUsesCheckoutTopThenCreationFolder) {
     Workspace w;
     w.add_space("a");
@@ -443,7 +445,7 @@ TEST(Workspace, HomeSpaceGetsNoColourUntilNamed) {
     EXPECT_EQ(w.spaces[0].color, "ansi3");
 }
 
-// herdr spaces.js 298-334: worktrees go right after their repo's main checkout, and the model
+// Worktrees go right after their repo's main checkout, and the model
 // order follows so numbers and keys match what is drawn.
 TEST(Workspace, WorktreesNestUnderMainCheckoutAndModelFollows) {
     const std::vector<SpaceRepo> info = {

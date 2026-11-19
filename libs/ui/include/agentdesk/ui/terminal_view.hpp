@@ -1,3 +1,5 @@
+// TerminalView: one terminal pane's grid drawing and input handling (ImGui, UI thread).
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #pragma once
 
 #include <chrono>
@@ -25,7 +27,7 @@ struct TerminalTheme {
     ImU32 match = IM_COL32(230, 182, 84, 110);
     ImU32 match_current = IM_COL32(240, 140, 60, 190);
     ImU32 scrollbar = IM_COL32(120, 120, 135, 120);
-    // A theme's own 16 ANSI colours (herdr themes "ansi"); null: the standard ones.
+    // A theme's own 16 ANSI colours (its "ansi" list); null: the standard ones.
     const std::array<ImU32, 16>* ansi = nullptr;
 };
 
@@ -44,7 +46,7 @@ public:
     [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> next_deadline() const;
     [[nodiscard]] bool has_selection() const { return sel_a_.has_value() && sel_b_.has_value(); }
     // Files dropped on this terminal: their paths are typed in, quoted, as a paste on the next
-    // draw (herdr src/terminal.rs:717-723).
+    // draw.
     void drop_paths(std::vector<std::string> paths) { dropped_.push_back(std::move(paths)); }
     // The pointer was over the terminal on the last draw.
     [[nodiscard]] bool hovered() const noexcept { return hovered_; }
@@ -63,24 +65,29 @@ public:
     bool copy_on_select = true;
     float scroll_speed = 1.0f;
     std::string parent_name;   // sub-agent: its parent's name ("Send back to ..." in the menu)
-    float line_height = 1.0f;  // cell height multiplier (herdr terminal_line_height)
-    float cell_width = 1.0f;   // cell width multiplier (herdr terminal_cell_width)
-    // herdr terminal.right_click: when the program reads the mouse, right-clicks go to it instead
+    float line_height = 1.0f;  // cell height multiplier, clamped to 0.8..2
+    float cell_width = 1.0f;   // cell width multiplier, clamped to 0.8..2
+    // When the program reads the mouse, right-clicks go to it instead
     // of opening the menu. Shift+right-click always opens the menu.
     bool right_click_to_program = false;
-    // Draws the right-click menu's rows inside the open popup (the app's herdr menu); empty uses
+    // Draws the right-click menu's rows inside the open popup (the app's own menu); empty uses
     // a plain built-in menu. Return true to close the menu.
     std::function<bool()> menu_rows;
 
 private:
+    struct Lines;  // history + screen rows of one frame (terminal_view.cpp)
+    struct Frame;  // geometry of one drawn frame (terminal_view.cpp)
+
     void handle_resize(TerminalSource& source, GridSize wanted, const terminal::ScreenSnapshot& snap);
     void handle_keyboard(const char* str_id, TerminalSource& source, const terminal::ScreenSnapshot& snap);
+    // Read-only view: only the keymap's global chords, reported to the app.
+    void report_global_chords(const char* str_id);
     // terminal.* commands and "send:<bytes>"; anything else goes to the app.
     void run_command(const std::string& cmd, TerminalSource& source, const terminal::ScreenSnapshot& snap);
     void copy_selection(const terminal::ScreenSnapshot& snap);
     void request_paste(TerminalSource& source, std::string text);
-    // herdr src/terminal.rs:788-815. full (terminal.paste): copied files as quoted paths, text,
-    // else an image alone as Ctrl+V. !full (terminal.paste_image, Ctrl+V): text, else Ctrl+V.
+    // full (terminal.paste): copied files as quoted paths, text, else an image alone as Ctrl+V.
+    // !full (terminal.paste_image, Ctrl+V): text, else Ctrl+V.
     void paste_clipboard(TerminalSource& source, bool full);
     void paste_paths(TerminalSource& source, const std::vector<std::string>& paths);
     void draw_paste_popup(TerminalSource& source);
@@ -88,8 +95,27 @@ private:
     void draw_search_bar(ImVec2 area_min, ImVec2 area_max);
     void update_search(const std::vector<HistoryLineText>* hist, const terminal::ScreenSnapshot& snap);
     void clear_selection();
-    // Program mouse reporting (DECSET 1000/1002/1003): returns true when the event went to it.
-    void forward_mouse(TerminalSource& source, const terminal::ScreenSnapshot& snap, bool hovered, CellPos cell);
+    // Program mouse reporting (DECSET 1000/1002/1003).
+    void forward_mouse(TerminalSource& source, const terminal::ScreenSnapshot& snap, bool hovered,
+                       CellPos cell);
+    // Wheel: arrow keys on an alternate screen that ignores the mouse, else history scrolling.
+    void scroll_with_wheel(TerminalSource& source, const terminal::ScreenSnapshot& snap, bool hovered,
+                           bool report_mouse);
+    void handle_scrollbar_drag(const Frame& f, float track_h, float thumb_h, bool start);
+    void start_selection(const Lines& lines, const Frame& f, const terminal::ScreenSnapshot& snap, CellPos p);
+    void extend_selection(const Lines& lines, const Frame& f, const terminal::ScreenSnapshot& snap,
+                          CellPos mouse_cell);
+    void paint_history_rows(ImDrawList* dl, const Frame& f, const terminal::ScreenSnapshot& snap,
+                            const std::vector<HistoryLineText>& hist, std::string& scratch) const;
+    void paint_screen_rows(ImDrawList* dl, const Frame& f, const terminal::ScreenSnapshot& snap,
+                           std::string& scratch) const;
+    void paint_matches(ImDrawList* dl, const Frame& f, int rows) const;
+    void paint_selection(ImDrawList* dl, const Frame& f, const Lines& lines,
+                         const terminal::ScreenSnapshot& snap) const;
+    void paint_link_underline(ImDrawList* dl, const Frame& f, int rows) const;
+    // Draws the cursor (live screen only) and returns its top-left, where the IME window goes.
+    ImVec2 paint_cursor(ImDrawList* dl, const Frame& f, const terminal::ScreenSnapshot& snap,
+                        bool active) const;
     std::uint8_t mouse_buttons_ = 0;  // bit per button 1..3 pressed inside and not yet released
     std::optional<CellPos> last_mouse_cell_;
 
@@ -116,6 +142,11 @@ private:
         std::vector<std::pair<int, std::pair<int, int>>> spans;  // line, [col0, col1)
     };
     HoverLink hover_link_;
+    // Looks the pointer's link up again when the pointer, the screen or the history changed.
+    void update_hover_link(TerminalSource& source, const terminal::ScreenSnapshot& snap, const Lines& lines,
+                           int mouse_line, int mouse_col);
+    static bool find_text_link(const Lines& lines, int first, int last, int mouse_line, int mouse_col,
+                               const std::string& cwd, HoverLink& h);
     std::optional<GridSize> pending_size_;
     std::chrono::steady_clock::time_point pending_since_{};
     std::optional<GridSize> requested_size_;
@@ -146,7 +177,6 @@ private:
     std::vector<Match> matches_;
     int match_index_ = -1;
     bool jump_to_match_ = false;
-    int last_available_ = 0;
 };
 
 }  // namespace agentdesk::ui

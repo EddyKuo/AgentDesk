@@ -1,7 +1,8 @@
 #pragma once
-// What runs in a terminal, as people see it: a name, an icon and a tile (herdr src/programs.rs,
-// ported). One table: herdr's defaults/programs.json (shipped next to agent-ui.exe in programs\),
-// with the person's programs.json in the data folder on top, entry by entry.
+// What runs in a terminal, as people see it: a name, an icon and a tile. One table: the shipped
+// programs.json (next to agent-ui.exe in programs\), with the person's programs.json in the data
+// folder on top, entry by entry.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -11,7 +12,7 @@
 
 namespace agentdesk::ui {
 
-// herdr programs.rs Entry.
+// One entry of programs.json; unset fields fall back to the shipped entry or a default.
 struct ProgramEntry {
     std::optional<std::string> name;
     std::optional<std::string> icon;  // a path relative to the table's folder ("icons/claude.svg")
@@ -22,7 +23,7 @@ struct ProgramEntry {
     std::vector<std::string> run;   // how to start it (agents people can start from a menu)
 };
 
-// herdr programs.rs shown(): { key, name, icon, tint, tile, color, shell, agent }.
+// A resolved entry, as the UI shows it.
 struct Program {
     std::string key;
     std::string name;
@@ -37,19 +38,19 @@ struct Program {
 
 class Programs {
 public:
-    // The built-in table from JSON text (herdr defaults/programs.json).
+    // The built-in table from JSON text (the shipped programs.json).
     static Programs parse(std::string_view json);
-    // The built-in table from `builtin`, the person's `mine` on top (herdr programs.rs load()).
+    // The built-in table from `builtin`, the person's `mine` on top, entry by entry.
     // A problem with the person's file goes to `error` ("programs.json: ..."); the built-in
     // table is used then.
     static Programs load(const std::filesystem::path& builtin, const std::filesystem::path& mine,
                          std::string* error = nullptr);
 
-    // herdr programs.rs of(): from the agent's own report (`app`), else the program it runs.
+    // What a terminal shows: from the agent's own report (`app`), else the program it runs.
     [[nodiscard]] Program of(std::string_view app, const std::vector<std::string>& argv) const;
-    // herdr programs.rs name(): how the app calls an agent, from its 7501 `app`.
+    // How the app calls an agent, from its 7501 `app`.
     [[nodiscard]] std::string name(std::string_view app) const;
-    // herdr programs.rs startable(): every entry with `run`, the most picked first.
+    // Every entry with `run`, the most picked first.
     [[nodiscard]] std::vector<Program> startable() const;
 
     // For tests and the person's overrides.
@@ -67,7 +68,7 @@ private:
     std::map<std::string, ProgramEntry> programs_;
 };
 
-// herdr programs.rs powershell_line(): `& 'prog' 'arg 1'`, each word quoted for -Command.
+// `& 'prog' 'arg 1'`, each word quoted for -Command.
 std::string powershell_line(const std::vector<std::string>& words);
 // The words back from powershell_line (none: not such a line).
 std::optional<std::vector<std::string>> powershell_words(std::string_view line);

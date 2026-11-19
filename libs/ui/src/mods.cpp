@@ -1,3 +1,5 @@
+// Loads mod DLLs and calls into them, every call guarded so a crashing mod is turned off instead
+// of taking agent-ui.exe down; also parses the panels mods return.
 #include "agentdesk/ui/mods.hpp"
 
 #include <windows.h>
@@ -6,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 #include "agentdesk/mod_api.h"
@@ -141,6 +144,17 @@ float num_field(const Json& j, const char* key) {
     return it != j.end() && it->is_number() ? it->get<float>() : 0.0f;
 }
 
+// A JSON object file in a mod folder; nullopt when it is missing or not an object.
+std::optional<Json> read_object(const std::filesystem::path& file) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(file, ec))
+        return std::nullopt;
+    auto j = Json::parse(read_file(file), nullptr, false);
+    if (!j.is_object())
+        return std::nullopt;
+    return j;
+}
+
 }  // namespace
 
 std::vector<ModPanel> parse_mod_panels(const std::string& mod, const std::string& where,
@@ -181,7 +195,7 @@ struct ModHost::Mod {
     HMODULE dll = nullptr;
     agentdesk_host api{};
     agentdesk_mod mod{};
-    bool ready = false;  // init succeeded and not crashed since
+    bool ready = false;    // init succeeded and not crashed since
     bool crashed = false;  // its code may still run (threads, callbacks): never unload it
     Json settings = Json::object();
     std::vector<ModCommand> commands;
@@ -239,7 +253,8 @@ void api_send(void* ctx, const char* session, const char* text, int enter) {
 }
 void api_notify(void* ctx, const char* title, const char* body) {
     if (title != nullptr)
-        ModHostAccess::output(*ModHost::Mod::of(ctx).host).notes.push_back({title, body != nullptr ? body : ""});
+        ModHostAccess::output(*ModHost::Mod::of(ctx).host)
+            .notes.push_back({title, body != nullptr ? body : ""});
 }
 void api_exec(void* ctx, const char* const* argv, int argc) {
     if (argv == nullptr || argc <= 0)
@@ -274,6 +289,43 @@ const char* api_setting(void* ctx, const char* key) {
     return m.scratch.c_str();
 }
 
+// Loads <folder>\mod.dll and runs its agentdesk_mod_init. Any failure is kept in m.info.error;
+// success sets m.ready.
+void start_mod(ModHost::Mod& m) {
+    // The mod's own folder first for its dependencies, then System32; never the current folder
+    // or PATH.
+    m.dll = ::LoadLibraryExW((m.folder / L"mod.dll").c_str(), nullptr,
+                             LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (m.dll == nullptr) {
+        m.info.error = "cannot load mod.dll (error " + std::to_string(::GetLastError()) + ")";
+        return;
+    }
+    const auto init = reinterpret_cast<agentdesk_mod_init_fn>(::GetProcAddress(m.dll, "agentdesk_mod_init"));
+    if (init == nullptr) {
+        m.info.error = "mod.dll does not export agentdesk_mod_init";
+        return;
+    }
+    m.api = {AGENTDESK_MOD_API_VERSION, &m,           api_run,    api_send, api_notify, api_exec,
+             api_add_command,           api_sessions, api_setting};
+    int rc = -1;
+    if (const Code c = seh_init(init, &m.api, &m.mod, &rc); c != 0) {
+        m.crashed = true;
+        m.info.error = crash_text(c);
+    } else if (rc != 0) {
+        m.info.error = "the mod refused to start (code " + std::to_string(rc) + ")";
+    } else if (m.mod.api_version != AGENTDESK_MOD_API_VERSION) {
+        m.info.error = "built for mod interface version " + std::to_string(m.mod.api_version) +
+                       ", this AgentDesk has " + std::to_string(AGENTDESK_MOD_API_VERSION);
+    } else {
+        m.ready = true;
+        m.info.loaded = true;
+        // The DLL's own description fills in only when mod.json gave none.
+        std::string d;
+        if (m.take(m.mod.description, d, 200) && !d.empty() && m.info.description.empty())
+            m.info.description = d;
+    }
+}
+
 }  // namespace
 
 ModHost::ModHost(std::filesystem::path dir) : dir_(std::move(dir)) {}
@@ -300,51 +352,14 @@ void ModHost::load(const std::set<std::string>& enabled) {
         const auto name8 = f.filename().u8string();
         m->info.name.assign(name8.begin(), name8.end());
         m->info.enabled = enabled.contains(m->info.name);
-        if (std::filesystem::is_regular_file(f / L"mod.json", ec)) {
-            const auto j = Json::parse(read_file(f / L"mod.json"), nullptr, false);
-            if (j.is_object())
-                m->info.description = str_field(j, "description");
-        }
-        if (std::filesystem::is_regular_file(f / L"settings.json", ec)) {
-            const auto j = Json::parse(read_file(f / L"settings.json"), nullptr, false);
-            if (j.is_object())
-                m->settings = j;
-        }
-        if (!has_dll) {
+        if (const auto j = read_object(f / L"mod.json"))
+            m->info.description = str_field(*j, "description");
+        if (auto j = read_object(f / L"settings.json"))
+            m->settings = std::move(*j);
+        if (!has_dll)
             m->info.error = "Lua mods are no longer supported: build it as mod.dll (see the user guide)";
-        } else if (m->info.enabled) {
-            // The mod's own folder first for its dependencies, then System32; never the
-            // current folder or PATH.
-            m->dll = ::LoadLibraryExW((f / L"mod.dll").c_str(), nullptr,
-                                      LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
-            const auto init = m->dll != nullptr ? reinterpret_cast<agentdesk_mod_init_fn>(
-                                                      ::GetProcAddress(m->dll, "agentdesk_mod_init"))
-                                                : nullptr;
-            if (m->dll == nullptr) {
-                m->info.error = "cannot load mod.dll (error " + std::to_string(::GetLastError()) + ")";
-            } else if (init == nullptr) {
-                m->info.error = "mod.dll does not export agentdesk_mod_init";
-            } else {
-                m->api = {AGENTDESK_MOD_API_VERSION, m.get(), api_run,     api_send,   api_notify,
-                          api_exec,                  api_add_command,      api_sessions, api_setting};
-                int rc = -1;
-                if (const Code c = seh_init(init, &m->api, &m->mod, &rc); c != 0) {
-                    m->crashed = true;
-                    m->info.error = crash_text(c);
-                } else if (rc != 0) {
-                    m->info.error = "the mod refused to start (code " + std::to_string(rc) + ")";
-                } else if (m->mod.api_version != AGENTDESK_MOD_API_VERSION) {
-                    m->info.error = "built for mod interface version " + std::to_string(m->mod.api_version) +
-                                    ", this AgentDesk has " + std::to_string(AGENTDESK_MOD_API_VERSION);
-                } else {
-                    m->ready = true;
-                    m->info.loaded = true;
-                    std::string d;
-                    if (m->take(m->mod.description, d, 200) && !d.empty() && m->info.description.empty())
-                        m->info.description = d;
-                }
-            }
-        }
+        else if (m->info.enabled)
+            start_mod(*m);
         mods_.push_back(std::move(m));
     }
 }

@@ -1,5 +1,6 @@
-// herdr-app's layout engine as ported to agentdesk::ui::layout. The tests named after herdr's are
-// ports of src/layout.rs 754-915, src/layout_sync.rs 315-420 and src/window/drag_tests.rs.
+// Tests for agentdesk::ui::layout: reading and writing layouts, tree edits, sizes, separator
+// drags, floats and the click state kept beside the file.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/layout.hpp"
 
 #include <fstream>
@@ -47,7 +48,6 @@ float w(const Node& n, const char* id) {
 
 }  // namespace
 
-// layout.rs 758-765
 TEST(Layout, FloatsSnapToTheNearestEdgeAndThird) {
     EXPECT_EQ(snap(10, 400, 1200, 800), std::pair(Edge::kLeft, Align::kCenter));
     EXPECT_EQ(snap(1190, 20, 1200, 800), std::pair(Edge::kRight, Align::kStart));
@@ -56,7 +56,6 @@ TEST(Layout, FloatsSnapToTheNearestEdgeAndThird) {
     EXPECT_EQ(snap(-50, 900, 1200, 800).second, Align::kEnd);
 }
 
-// layout.rs 767-776
 TEST(Layout, FloatsRoundTrip) {
     const Node n = node(R"({ "id": "root", "type": "block", "content": {"agent": "focused"},
       "floating": [ { "id": "team", "content": {"mod": "team"}, "edge": "left" } ] })");
@@ -67,7 +66,6 @@ TEST(Layout, FloatsRoundTrip) {
     EXPECT_EQ(round_trip(n), n);
 }
 
-// layout.rs 782-798
 TEST(Layout, NodesCarryLooksBackgroundsPaddingAndShadows) {
     const Node n = node(
         R"({ "id": "root", "type": "column", "theme": "ink", "font": "Berkeley Mono", "font_size": 13, "font_weight": 300,
@@ -86,7 +84,6 @@ TEST(Layout, NodesCarryLooksBackgroundsPaddingAndShadows) {
     EXPECT_EQ(round_trip(n), n);
 }
 
-// layout.rs 800-812
 TEST(Layout, TabBlocksSayHowTheirPanesAreFramed) {
     const Node n = node(R"({ "id": "main", "type": "block", "content": { "tab": "active",
       "pane": { "header": { "content": { "mod": "pane" }, "height": 28, "reveal": "hover", "position": "bottom" },
@@ -102,7 +99,6 @@ TEST(Layout, TabBlocksSayHowTheirPanesAreFramed) {
     EXPECT_EQ(round_trip(n), n);
 }
 
-// layout.rs 814-828
 TEST(Layout, DocumentsParseWithTypesSizesAndLooks) {
     const Node n = node(
         R"({ "id": "root", "type": "row", "divider": {"width": 1, "color": "border"}, "window_blur": true,
@@ -118,7 +114,6 @@ TEST(Layout, DocumentsParseWithTypesSizesAndLooks) {
     EXPECT_EQ(round_trip(n), n);
 }
 
-// layout.rs 830-840
 TEST(Layout, SplitsReuseASameAxisParentAndWrapOtherwise) {
     Node n = Node::stack("tab", {term("a")});
     EXPECT_TRUE(n.split("a", Axis::kRow, term("b"), "r1"));
@@ -131,7 +126,6 @@ TEST(Layout, SplitsReuseASameAxisParentAndWrapOtherwise) {
     EXPECT_EQ(ids(n.terminals()), (std::vector<std::string>{"a", "b", "c", "d"}));
 }
 
-// layout.rs 842-861
 TEST(Layout, ClosingASplitGivesItsShareBackToThePaneItCameFrom) {
     Node a = term("a");
     a.size = Span::weight(0.7f);
@@ -148,7 +142,6 @@ TEST(Layout, ClosingASplitGivesItsShareBackToThePaneItCameFrom) {
     EXPECT_FLOAT_EQ(w(n, "b"), 0.3f);
 }
 
-// layout.rs 863-883
 TEST(Layout, RemovingCollapsesSingleChildrenButKeepsStacksAndTheRoot) {
     Node tab = Node::container("t1", Axis::kRow, {term("a"), term("b")});
     Node n = Node::stack("tabs", {tab, term("solo")}, "solo");
@@ -169,7 +162,6 @@ TEST(Layout, RemovingCollapsesSingleChildrenButKeepsStacksAndTheRoot) {
     EXPECT_EQ(root.children.size(), 1u);
 }
 
-// layout.rs 885-895
 TEST(Layout, RemovingACompositionSlotKeepsAuthoredContainers) {
     Node panel = Node::container("panel", Axis::kColumn, {term("panel-body")});
     panel.hidden = true;
@@ -181,7 +173,6 @@ TEST(Layout, RemovingACompositionSlotKeepsAuthoredContainers) {
     EXPECT_FALSE(root.remove_slot("missing").has_value());
 }
 
-// layout.rs 897-904
 TEST(Layout, StacksSelectAndHiddenChildrenFallBack) {
     Node n = Node::stack("s", {term("a"), term("b")});
     EXPECT_TRUE(n.select("s", "b"));
@@ -191,7 +182,6 @@ TEST(Layout, StacksSelectAndHiddenChildrenFallBack) {
     EXPECT_FALSE(n.select("s", "zzz"));
 }
 
-// layout.rs 906-914
 TEST(Layout, SwappingKeepsSizesWithPlaces) {
     Node n = Node::container("r", Axis::kRow, {term("a"), term("b"), term("c")});
     n.find("a")->size = Span::pixels(100);
@@ -214,14 +204,13 @@ TEST(Layout, MistakesSayWhatAndWhere) {
     EXPECT_NE(error.find("children[0](x)"), std::string::npos);
     EXPECT_FALSE(parse_text(R"({"type": "block", "content": {"mod": "a"}, "size": {"pct": 3}})", &error));
     EXPECT_FALSE(parse_text("{", &error));
-    // `context` is 0.1.0's word for `tab` (layout.rs 23-24); unknown keys are left out.
+    // `context` is the old (0.1.0) word for `tab`; unknown keys are left out.
     const Node n = node(R"({"type": "block", "content": {"context": "active"}, "colour": "red"})");
     EXPECT_EQ(n.content.type, Content::Type::kTab);
     EXPECT_FALSE(to_json(n).contains("colour"));
 }
 
-// window.rs 7568-7576 / layout_sync.rs 395-418: the shipped layouts parse, name every node, and
-// are the files in third_party/herdr/layouts.
+// The shipped layouts parse, name every node, and match the layout files they are built from.
 TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
     for (const auto& name : builtin_names()) {
         std::string error;
@@ -263,7 +252,6 @@ TEST(Layout, OldAgentDeskFilesReadAsTheShippedLayoutOfTheirStyle) {
     EXPECT_EQ(from_legacy(Json::parse(R"({"style": "terminals"})")).find("tabs")->mod(), "terminals-bar");
 }
 
-// pane_size.rs 49-85
 TEST(LayoutSize, PxFirstThenWeightsShareWhatIsLeftWithinMinAndMax) {
     Node a = term("a");
     a.size = Span::pixels(100);
@@ -275,7 +263,7 @@ TEST(LayoutSize, PxFirstThenWeightsShareWhatIsLeftWithinMinAndMax) {
     EXPECT_FLOAT_EQ(s[1], 100);
     EXPECT_FLOAT_EQ(s[2], 300);
     // b held at its max: c keeps its grow factor of the original siblings (3/4 of the 400 px
-    // free), as flexbox gives it (pane_size.rs 67-68), not all of what b left.
+    // free), as flexbox gives it, not all of what b left.
     b.max = 50.0f;
     s = shares({&a, &b, &c}, 500, 1);
     EXPECT_FLOAT_EQ(s[1], 50);
@@ -345,7 +333,6 @@ TEST(LayoutSize, BordersAndPaddingInsetTheInside) {
     EXPECT_EQ(p.at("b")->outer, (Rect{102, 10, 86, 80}));
 }
 
-// window.rs 4671-4723
 TEST(LayoutDrag, APxSideTakesTheDragAndWeightsSplitTheirSum) {
     Node main = builtin("workspace");
     Placement p = place(main, Rect{0, 0, 1400, 900}, 1.0f);
@@ -365,7 +352,7 @@ TEST(LayoutDrag, APxSideTakesTheDragAndWeightsSplitTheirSum) {
     EXPECT_FALSE(drag(main, "work", 0, Axis::kColumn, p, 500, 1.0f));
 }
 
-// drag_tests.rs: dragging squeezed layout blocks never crashes or leaves sizes out of range.
+// Dragging squeezed layout blocks never crashes or leaves sizes out of range.
 TEST(LayoutDrag, DraggingSqueezedLayoutBlocksNeverCrashes) {
     auto block = [](const char* id, float h) {
         return Json{
@@ -431,7 +418,6 @@ TEST(LayoutDrag, DraggingSqueezedLayoutBlocksNeverCrashes) {
     }
 }
 
-// floats.rs 77-96
 TEST(LayoutFloat, HomeSitsMarginInFromItsEdge) {
     const Rect owner{100, 50, 800, 600};
     EXPECT_EQ(float_home(owner, 80, 100, Edge::kLeft, Align::kEnd, 12), (std::array<float, 2>{112, 538}));
@@ -439,7 +425,6 @@ TEST(LayoutFloat, HomeSitsMarginInFromItsEdge) {
     EXPECT_EQ(float_home(owner, 80, 100, Edge::kRight, Align::kStart, 12), (std::array<float, 2>{808, 62}));
 }
 
-// layout_sync.rs 324-347
 TEST(LayoutSync, DesktopWallpaperAndPixelFitAreClicksNotStructureEdits) {
     const Node file = node(Json::parse(R"({
         "id":"root", "type":"column", "font_size":16, "background":"#008080",
@@ -463,7 +448,6 @@ TEST(LayoutSync, DesktopWallpaperAndPixelFitAreClicksNotStructureEdits) {
     EXPECT_NE(without_clicks(file, shown), file);
 }
 
-// layout_sync.rs 349-373
 TEST(LayoutSync, ClicksAreKeptApartAndAnEditWins) {
     const Node file = node(R"({ "id": "root", "type": "row", "children": [
         { "id": "side", "type": "block", "size": { "px": 240 }, "content": { "mod": "spaces" } },
@@ -490,7 +474,6 @@ TEST(LayoutSync, ClicksAreKeptApartAndAnEditWins) {
     EXPECT_EQ(State::from_json(s.to_json()), s);
 }
 
-// layout_sync.rs 375-393
 TEST(LayoutSync, AnEditMadeWhileClosedBeatsAnOlderClick) {
     const Node file = node(R"({ "id": "root", "type": "row", "children": [
         { "id": "side", "type": "block", "size": { "px": 240 }, "content": { "mod": "spaces" } },
