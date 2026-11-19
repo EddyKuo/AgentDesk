@@ -81,7 +81,7 @@ TEST(Win98Kit, MenuSize) {
     EXPECT_FLOAT_EQ(m.w, 28.0f + 7 * 6 + (6 * 6 + 24) + 20);
     EXPECT_FLOAT_EQ(m.h, 2 * 18 + 9 + 6);
     // The Start menu: rows 34, banner 21, at least 180.
-    const auto s = menu_size({{"Herdr Update", ""}, {"", "", true}, {"Sh&ut Down...", ""}}, true);
+    const auto s = menu_size({{"Update", ""}, {"", "", true}, {"Sh&ut Down...", ""}}, true);
     EXPECT_FLOAT_EQ(s.w, 180.0f);
     EXPECT_FLOAT_EQ(s.h, 2 * 34 + 9 + 6);
     EXPECT_FLOAT_EQ(dialog_width("welcome"), 560.0f);

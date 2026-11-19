@@ -256,6 +256,21 @@ float label(App::State& s, ImDrawList* dl, float x, float top, const std::string
     return f->CalcTextSizeA(px_size, FLT_MAX, 0, shown.c_str()).x;
 }
 
+// Text read bottom to top (the Start menu's banner): laid out level from (x, bottom), then turned
+// a quarter left about that point, its top toward x. Returns its length.
+float label_up(App::State& s, ImDrawList* dl, float x, float bottom, const std::string& text, ImU32 col, bool bold,
+               float size, float line) {
+    dl->PushClipRectFullScreen();  // level, it runs past the banner; turned, it is inside it
+    const int first = dl->VtxBuffer.Size;
+    const float w = label(s, dl, x, bottom, text, col, bold, size, line, false);
+    for (int i = first; i < dl->VtxBuffer.Size; ++i) {
+        ImVec2& p = dl->VtxBuffer[i].pos;
+        p = ImVec2(x + (p.y - bottom), bottom - (p.x - x));
+    }
+    dl->PopClipRect();
+    return w;
+}
+
 // A truncated line (GPUI truncate: an ellipsis).
 float label_clipped(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col,
                     float max_w, bool bold = false) {
@@ -418,6 +433,37 @@ void icon(App::State& s, ImDrawList* dl, const std::string& name, float size, Im
     const std::string file = size >= 24 ? name : size >= 12 ? name + "-sm" : name + "-xs";
     image(s, dl, root_dir() / L"icons" / win::to_wide(file + ".svg"), box(at, ImVec2(U(s, size), U(s, size))),
           IM_COL32(255, 255, 255, alpha));
+}
+
+// AgentDesk 98's name: the Start icon, "AgentDesk" and an orange "98" (the Welcome header's), at
+// the given size, starting at x; returns its width. measure: only the width.
+float brand_name(App::State& s, ImDrawList* dl, float x, float top, float size, bool measure = false) {
+    const float line = size * 26.0f / 22.0f;
+    const float ic = std::round(size * 32.0f / 22.0f);
+    const float gap = U(s, size * 6.0f / 22.0f);
+    const float name_w = text_w(s, "AgentDesk", true, size), nine_w = text_w(s, "98", false, size);
+    const float w = U(s, ic) + gap + name_w + gap + nine_w;
+    if (measure)
+        return w;
+    icon(s, dl, "start", ic, ImVec2(x, snap(top)));
+    const float ty = top + U(s, ic) - U(s, line);
+    x += U(s, ic) + gap;
+    x += label(s, dl, x, ty, "AgentDesk", rgb(C::kText), true, size, line, false) + gap;
+    label(s, dl, x, ty, "98", rgb(0xd07000), false, size, line, false);
+    return w;
+}
+
+// The About box's picture (art/generate.ts 120: white to #a4d2ee, the name at 32).
+void brand_header(App::State& s, ImDrawList* dl, Box b) {
+    gradient(dl, b, rgb(0xffffff), rgb(0xa4d2ee));
+    brand_name(s, dl, b.x0 + U(s, 12), b.y0 + (b.h() - U(s, 46)) * 0.5f, 32);
+}
+
+// The start-up and shut-down screen: the clouds, the name centered at twice the size.
+void brand_splash(App::State& s, ImDrawList* dl, Box b) {
+    picture(s, dl, "img/clouds.png", b);
+    const float w = brand_name(s, dl, 0, 0, 44, true);
+    brand_name(s, dl, snap(b.x0 + (b.w() - w) * 0.5f), snap(b.y0 + b.h() * 0.4f - U(s, 64) * 0.5f), 44);
 }
 
 // A one-color SVG of the mod (svg(...).text_color()): ctl-*, check, arrows.
@@ -959,13 +1005,17 @@ void draw_menus(App::State& s) {
         const bool start = m->start;
         Box in = bevel(s, dl, all, Bevel::kWindow, rgb(C::kFace)).inset(one(s));
         if (start) {
-            // The banner: 21 px, navy with a black-to-navy gradient, the Herdr98 picture at the foot.
+            // The banner: 21 px, navy with a black-to-navy gradient, "AgentDesk 98" read upward at the foot.
             const Box ban{in.x0, in.y0, in.x0 + U(s, k98::MenuMetrics::kBanner), in.y1};
             fill(dl, ban, rgb(C::kNavy));
             gradient(dl, ban, rgb(0x000000), rgb(C::kNavy), true);
-            picture(
-                s, dl, scale(s) == 2 ? "img/banner@2x.png" : "img/banner.png",
-                box(ImVec2(ban.x0, ban.y1 - U(s, 110)), ImVec2(U(s, k98::MenuMetrics::kBanner), U(s, 110))));
+            {
+                const float bottom = ban.y1 - U(s, 3);
+                const float l = label_up(s, dl, ban.x0, bottom, "AgentDesk", rgb(C::kWhite), true, 16,
+                                         static_cast<float>(k98::MenuMetrics::kBanner));
+                label_up(s, dl, ban.x0, bottom - l - U(s, 6), "98", rgb(0xdfdfdf), false, 16,
+                         static_cast<float>(k98::MenuMetrics::kBanner));
+            }
             in.x0 = ban.x1;
         }
         float y = in.y0;

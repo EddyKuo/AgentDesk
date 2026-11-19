@@ -179,7 +179,7 @@ constexpr Palette kPalettes[] = {
     // working #808000, idle #808080. Terminals: the pane's black (terminal_opacity 0 over
     // background #000000), foreground #c0c0c0, cursor #c0c0c0, selection #000080.
     {"win98",
-     "Herdr 98",
+     "AgentDesk 98",
      true,
      IM_COL32(0xc0, 0xc0, 0xc0, 255),
      IM_COL32(0xc0, 0xc0, 0xc0, 255),
@@ -385,6 +385,19 @@ std::filesystem::path shipped_themes_dir() {
 std::filesystem::file_time_type g_themes_mtime{};
 bool g_themes_loaded = false;
 
+// The preset themes' ids. Settings written by 0.2.0 and earlier named them with another prefix:
+// theme_id() reads "<anything>-<preset>" as the same preset.
+constexpr std::string_view kPresetPrefix = "preset-";
+std::string theme_id(std::string id) {
+    const auto dash = id.find('-');
+    if (dash == std::string::npos || id.starts_with(kPresetPrefix))
+        return id;
+    for (const auto& [name, pal] : herdr_presets())
+        if (id.compare(dash + 1, std::string::npos, name) == 0)
+            return std::string(kPresetPrefix) + name;
+    return id;
+}
+
 // Presets, then the shipped files, then the person's (sorted by name), as herdr themes() lists
 // them (settings.rs 272-286). win98 is Herdr 98's own and already one of ours.
 void load_herdr_themes() {
@@ -394,7 +407,7 @@ void load_herdr_themes() {
     if (!g_herdr_palettes.empty())
         return;  // addresses stay valid for g_pal; a changed file applies at the next start
     for (const auto& [name, pal] : herdr_presets())
-        add_herdr_palette(std::string("herdr-") + name, name, pal, {});
+        add_herdr_palette(std::string(kPresetPrefix) + name, name, pal, {});
     std::map<std::string, std::filesystem::path> files;
     for (const auto& dir : {shipped_themes_dir(), data_dir() / L"themes"})
         for (const auto& e : std::filesystem::directory_iterator(dir, ec))
@@ -640,20 +653,21 @@ Settings load_settings() {
         return s;
     s.close_notice_shown = j.value("close_notice_shown", false);
     s.last_cwd = j.value("last_cwd", "");
-    s.theme = j.value("theme", s.theme);
+    s.theme = theme_id(j.value("theme", s.theme));
     s.terminal_weight = std::clamp(j.value("terminal_weight", s.terminal_weight), 100, 900);
     s.ui_font = j.value("ui_font", "");
     // Appearance: files from before it existed keep their one theme as the fixed choice.
     {
         const bool light = std::string(palette_by_id(s.theme)->id) == s.theme && palette_by_id(s.theme)->light;
         s.appearance = j.value("appearance", j.contains("theme") ? (light ? "light" : "dark") : "system");
-        s.theme_dark = j.value("theme_dark", light ? std::string("midnight") : s.theme);
-        s.theme_light = j.value("theme_light", light ? s.theme : std::string("paper"));
+        s.theme_dark = theme_id(j.value("theme_dark", light ? std::string("midnight") : s.theme));
+        s.theme_light = theme_id(j.value("theme_light", light ? s.theme : std::string("paper")));
     }
     if (const auto lt = j.find("layout_themes"); lt != j.end() && lt->is_object())
         for (const auto& [name, pair] : lt->items())
             if (pair.is_object())
-                s.layout_themes[name] = {pair.value("dark", s.theme_dark), pair.value("light", s.theme_light)};
+                s.layout_themes[name] = {theme_id(pair.value("dark", s.theme_dark)),
+                                         theme_id(pair.value("light", s.theme_light))};
     s.zoom = std::clamp(j.value("zoom", 1.0f), 0.5f, 3.0f);
     s.font_size = std::clamp(j.value("font_size", 14.0f), 8.0f, 32.0f);  // the stepper's 8-32
     s.sounds = j.value("sounds", true);
@@ -2835,7 +2849,7 @@ ui::telemetry::Config telemetry_config(App::State& s) {
     for (const auto& p : kPalettes)
         c.shipped_themes.emplace_back(p.id);
     for (const auto& [name, pal] : herdr_presets())  // herdr's presets and shipped file
-        c.shipped_themes.emplace_back(std::string("herdr-") + name);
+        c.shipped_themes.emplace_back(std::string(kPresetPrefix) + name);
     c.shipped_themes.emplace_back("atom-one-dark");
     // mods.rs 281-299 kinds(): shipped ones as shipped (by name), shipped but edited, the
     // person's own. Shipped: the example mods next to agent-ui.exe (write_example_mods); as
@@ -8192,7 +8206,7 @@ void draw_palette(App::State& s) {
         {"space.next", "Next space", "Space", "workspace"},
         {"space.prev", "Previous space", "Space", "workspace"},
         {"layout.switch", "Next layout", "Layout", "look switch"},
-        {"layout.reset", "Reset layout", "Layout", "new version default restore herdr's"},
+        {"layout.reset", "Reset layout", "Layout", "new version default restore original"},
         {"layout.clone", "Duplicate layout", "Layout", "clone copy customize"},
         {"mod.clone", "Duplicate mod", "Layout", "clone copy customize"},
         {"terminal.open", "New terminal", "Terminal", "shell"},
@@ -8229,7 +8243,7 @@ void draw_palette(App::State& s) {
     for (const auto& l : s.layouts) {
         std::string t = l.name == "workspace"   ? std::string("AgentDesk")
                          : l.name == "terminals" ? std::string("Terminals")
-                         : l.name == "win98"     ? std::string("Herdr 98")
+                         : l.name == "win98"     ? std::string("AgentDesk 98")
                                                  : l.name;
         if (!t.empty())
             t[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(t[0])));
@@ -10414,7 +10428,7 @@ void draw_settings(App::State& s) {
             // win98 -> "Herdr 98" (settings/main.js 18).
             std::string label = l.name == "workspace" ? std::string("AgentDesk")
                                 : l.name == "terminals" ? std::string("Terminals")
-                                : l.name == "win98"     ? std::string("Herdr 98")
+                                : l.name == "win98"     ? std::string("AgentDesk 98")
                                                         : l.name;
             const ImVec2 lp(a.x + pad, a.y + pad + ph + px(6));
             const float tw = text_clipped(d, s.fonts.ui, fpx(12.5f), lp, on ? g_pal->text : g_pal->dim, label,
@@ -11272,7 +11286,7 @@ void draw_welcome(App::State& s) {
         ImGui::TextUnformatted("More examples in Settings");
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(0, px(2)));
-        ImGui::TextWrapped("Settings \xE2\x80\xBA Look has more layouts to try or start from, Herdr 98 among them. Your agent can "
+        ImGui::TextWrapped("Settings \xE2\x80\xBA Look has more layouts to try or start from, AgentDesk 98 among them. Your agent can "
                            "copy any of them and change anything.");
         ImGui::EndChild();
         ImGui::PopStyleVar(2);
@@ -11707,8 +11721,8 @@ void draw_machine_add(App::State& s) {
 // herdr app.whats_new (release notes, shown once after an update) and app.feedback (a draft the
 // person reviews). AgentDesk has no server: the draft is copied or saved for them to send.
 constexpr const char* kWhatsNew[] = {
-    "Looks and works like herdr's desktop app: sidebar with spaces and agents, tab bar with the window "
-    "buttons, Files and Changes panels, picker, command palette, settings and welcome.",
+    "A new look: sidebar with spaces and agents, tab bar with the window buttons, Files and Changes "
+    "panels, picker, command palette, settings and welcome.",
     "Bigger interface text by default (15 px), adjustable in Settings > Look; Geist and JetBrains Mono are "
     "bundled.",
     "New tabs, spaces and splits open a shell in the focused folder; spaces and branches follow cd.",

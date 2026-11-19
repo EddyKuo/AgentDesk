@@ -5,7 +5,8 @@ set(AGENTDESK_CONPTY_BIN "${PROJECT_SOURCE_DIR}/third_party/conpty/bin/conpty")
 function(agentdesk_bundle_conpty target)
     if(EXISTS "${AGENTDESK_CONPTY_BIN}/conpty.dll")
         add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${AGENTDESK_CONPTY_BIN}" "$<TARGET_FILE_DIR:${target}>/conpty"
+            # Only changed files: a running agent-host holds conpty.dll open.
+            COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${AGENTDESK_CONPTY_BIN}" "$<TARGET_FILE_DIR:${target}>/conpty"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${PROJECT_SOURCE_DIR}/third_party/conpty/LICENSE"
                 "${PROJECT_SOURCE_DIR}/third_party/conpty/NOTICE.md"

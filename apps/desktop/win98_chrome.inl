@@ -380,7 +380,7 @@ MenuItems start_items(App::State& s) {
     MenuItems layouts;
     for (const auto& l : s.layouts) {
         const std::string name = l.name;
-        MenuItem it{name == "win98" ? "Herdr 98" : name, "", "", "",
+        MenuItem it{name == "win98" ? "AgentDesk 98" : name, "", "", "",
                     [&s, name] { run_command(s, "layout:" + name); }};
         it.radio = name == "win98";
         layouts.push_back(it);
@@ -390,7 +390,7 @@ MenuItems start_items(App::State& s) {
     MenuItems accessories = {
         {"Games", "programs", "", "", nullptr, games},
         {"Office Assistant", "clippy", "", "", [&s] { set_shared(s, "win98.clippy", "on"); }},
-        {"Welcome to Herdr 98", "start", "", "", [&s] { open_dialog(s, kind_dialog("welcome")); }},
+        {"Welcome to AgentDesk 98", "start", "", "", [&s] { open_dialog(s, kind_dialog("welcome")); }},
         {"Command Palette", "find", "", "", [&s] { run_command(s, "app.palette"); }},
     };
     MenuItems programs = {
@@ -410,7 +410,7 @@ MenuItems start_items(App::State& s) {
         {"&Agents...", "find", "", "", [&s] { open_dialog(s, kind_dialog("taskman")); }},
     };
     return {
-        {"Herdr Update", "update", "", "", [&s] { run_command(s, "app.settings:Updates"); }},
+        {"AgentDesk Update", "update", "", "", [&s] { run_command(s, "app.settings:Updates"); }},
         {.sep = true},
         {"&Programs", "programs", "", "", nullptr, programs},
         {"&Spaces", "documents", "", "", nullptr, spaces},
@@ -1148,7 +1148,7 @@ MenuItems mines_menu(App::State& s, bool help) {
                 {.sep = true},
                 {"&About Mines...", "", "", "", [&s] {
                      open_dialog(s, message("About Mines",
-                                            "Mines\nHerdr 98\n\nFind all the mines without uncovering "
+                                            "Mines\nAgentDesk 98\n\nFind all the mines without uncovering "
                                             "one.\nRight-click to mark a mine. "
                                             "Double-click a number to clear its neighbors."));
                  }}};
@@ -1422,7 +1422,7 @@ void sol_command(App::State& s, const std::string& cmd) {
     }
     if (cmd == "about") {
         open_dialog(s, message("About Solitaire",
-                               "Solitaire\nHerdr 98\n\nKlondike. A little patience goes a long way."));
+                               "Solitaire\nAgentDesk 98\n\nKlondike. A little patience goes a long way."));
         return;
     }
     w.sol->command(cmd);
@@ -1731,15 +1731,15 @@ ImVec2 render_sol_dialog(App::State& s, Window& win, ImDrawList* dl, ImVec2 at) 
 
 const char* const kTips[] = {
     "It looks like you're herding agents.\n\nDid you know? Ctrl+Esc opens the Start menu.",
-    "Click a tab's taskbar button while it's\nshown to minimize it (Herdr settles it).\nClick again to bring "
+    "Click a tab's taskbar button while it's\nshown to minimize it (AgentDesk settles it).\nClick again to bring "
     "it back.",
-    "Ctrl+Shift+Esc opens Close Program:\nevery terminal Herdr runs, and End Task.",
+    "Ctrl+Shift+Esc opens Close Program:\nevery terminal AgentDesk runs, and End Task.",
     "Right-click a folder on the desktop to\nrename or close that space.",
     "Waiting on an agent? Mines is on\nthe desktop. I won't tell anyone.",
     "Double-click a window's title bar to\nmaximize it. Double-click again to restore.",
     "Start > Run... opens any command line\nin a new window, like it's 1998.",
     "Shut Down > Restart in DOS mode\ntakes you to the Terminals layout.",
-    "Log Off takes you back to Herdr's\nnormal layout. I'll miss you.",
+    "Log Off takes you back to AgentDesk's\nnormal layout. I'll miss you.",
 };
 
 struct News {

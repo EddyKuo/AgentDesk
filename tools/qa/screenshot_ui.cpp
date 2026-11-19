@@ -305,10 +305,12 @@ int wmain(int argc, wchar_t** argv) {
                 L"--start",         profile,
                 L"--exit-after-ms", std::to_wstring((wait_seconds + 1) * 1000),
                 L"--report",        report.native()};
-            if (!run_cmd.empty()) {
-                ui_args.push_back(L"--run");
-                ui_args.push_back(run_cmd);
-            }
+            // --run "a|b": several commands, in order.
+            for (const auto& c : split(run_cmd, L'|'))
+                if (!c.empty()) {
+                    ui_args.push_back(L"--run");
+                    ui_args.push_back(c);
+                }
             if (!input.empty()) {
                 // Steps time themselves; agent-ui stays open long enough (60 s at most) and the
                 // last step is the final capture.

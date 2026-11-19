@@ -130,3 +130,5 @@ plan: docs/design/AgentDesk_Design.md 5.6
 | 2026-11-19 | 使用者實機驗收 | 使用者確認：Agent 狀態顯示與清除正常、重開後 space 正常、FreeType 字型可接受 | 使用者 2026-11-19 | — |
 | 2026-11-19 | 使用者整體驗收 | 使用者確認 AgentDesk 已完整複刻 herdr，驗收完成。刻意保留的差異（不允許寫入剪貼簿、系統內建 ConPTY 不能交接、libvterm 修改、意見回饋只能複製或存檔）維持設計文件的紀錄 | 使用者 2026-11-19 | — |
 | 2026-11-19 | Release 執行檔縮小 | 使用者同意：Release preset 的連結參數改成 /debug /INCREMENTAL:NO /OPT:REF /OPT:ICF，保留 PDB。agent-ui.exe 9.01 MB → 4.22 MB、agent-host.exe 2.06 MB → 0.72 MB、agentctl.exe 1.85 MB → 0.37 MB；Release 273 個測試通過 | 使用者 2026-11-19 | — |
+| 2026-11-19 | 程式裡不出現 herdr 的名稱 | 使用者要求：顯示文字全部改成 AgentDesk（win98 版面叫 AgentDesk 98），開機、關於與開始選單側邊改由程式畫出，Start 與 Update 圖示換上 AgentDesk 的標誌，主題 id 改為 `preset-`（舊的 id 照樣讀得到），使用手冊同步修改。三個執行檔與建置輸出裡已找不到 herdr 字樣。THIRD_PARTY_NOTICES 的授權聲明與原始碼註解裡的出處依授權規定保留。設計文件 ADR-21 | 使用者 2026-11-19 | — |
+| 2026-11-19 | 執行檔能否再縮小 | 實測（agent-ui.exe）：加 /Gw 4.19 MB、再加 LTCG 4.13 MB、改 /O1 3.76 MB。前兩者只少 1～2%；/O1 少 11%，但會讓繪製終端機的程式變慢。剩下的大小約一半是 AgentDesk 自己的程式，一半是 FreeType、ImGui、lunasvg 等函式庫，所以不再改 | 使用者 2026-11-19 | — |
