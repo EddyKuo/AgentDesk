@@ -106,7 +106,7 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 | 命令面板「Stop the focused session」 | 送出 Ctrl+C。5 秒後仍未結束會出現「Force stop」 |
 | 命令面板「Exit and stop all sessions」 | 列出仍在執行的工作，確認後全部停止並結束 host |
 
-登出、重新開機或 host 異常結束後，原本的工作無法續接，會顯示為 Lost；AgentDesk 不會自動重跑任何 prompt。Lost 或已結束的面板有「Restart here」按鈕，可在同一個資料夾重新啟動同一個 profile。
+登出、重新開機或 host 異常結束後，原本的工作無法續接，會顯示為 Lost；AgentDesk 不會自動重跑任何 prompt。終端機結束或變成 Lost 時，它的面板會自動關掉；分頁空了就關分頁，space 空了就關 space。
 
 ## 子 Agent
 
@@ -154,7 +154,7 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 { "name": "wall", "sidebar": false, "tab_bar": false, "status_bar": true, "theme": "ember" }
 ```
 
-命令面板的「Duplicate layout」把目前的版面複製成 `<名稱>-copy.json` 並切換過去，之後直接改這個檔案。「Reset layout」把版面還原成隨附的樣子，並重設側欄與右側面板的寬度；你改過的檔案會改名成 `.json.aside` 保留。
+命令面板的「Duplicate layout」把目前的版面複製成 `<名稱>-copy.json` 並切換過去，之後直接改這個檔案。「Reset layout」把版面還原成隨附的樣子，並重設側欄與右側面板的寬度；你改過的檔案會改名成 `<名稱>.json.old-<時間>` 保留。
 
 ## 設定
 
