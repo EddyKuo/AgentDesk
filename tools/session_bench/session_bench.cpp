@@ -77,6 +77,44 @@ host::SessionConfig probe_config(const win::ConPtyApi& api, const std::filesyste
     return c;
 }
 
+// A history line's text: first code point of every cell, blanks as spaces, wide-character
+// continuation cells skipped.
+std::string history_line_text(const agentdesk::terminal::HistoryLine& line) {
+    std::string text;
+    for (const auto& cell : line.cells) {
+        if (cell.width == 0)
+            continue;
+        if (cell.chars[0] == 0)
+            text.push_back(' ');
+        else
+            agentdesk::terminal::append_utf8(text, cell.chars[0]);
+    }
+    return text;
+}
+
+struct HistoryCheck {
+    bool any_numbered = false;
+    long long gaps = 0;
+};
+
+// History continuity: consecutive kept lines must carry consecutive counters.
+HistoryCheck check_history(const host::Session& session, const std::regex& line_re) {
+    HistoryCheck check;
+    long long prev = -1;
+    for (const auto& line : session.history(0, 20000)) {
+        const std::string text = history_line_text(line);
+        std::smatch m;
+        if (std::regex_search(text, m, line_re)) {
+            const long long v = std::stoll(m[1]);
+            if (prev >= 0 && v != prev + 1)
+                ++check.gaps;
+            prev = v;
+        }
+    }
+    check.any_numbered = prev >= 0;
+    return check;
+}
+
 nlohmann::json run_flood(const win::ConPtyApi& api, const std::filesystem::path& probe, int seconds,
                          long long rate) {
     const auto start = Clock::now();
@@ -99,27 +137,7 @@ nlohmann::json run_flood(const win::ConPtyApi& api, const std::filesystem::path&
         if (std::regex_search(text, m, line_re))
             last_line = std::stoll(m[1]);
     }
-    // History continuity: consecutive kept lines carry consecutive counters.
-    long long gaps = 0;
-    long long prev = -1;
-    for (const auto& line : session->history(0, 20000)) {
-        std::string text;
-        for (const auto& cell : line.cells) {
-            if (cell.width == 0)
-                continue;
-            if (cell.chars[0] == 0)
-                text.push_back(' ');
-            else
-                agentdesk::terminal::append_utf8(text, cell.chars[0]);
-        }
-        std::smatch m;
-        if (std::regex_search(text, m, line_re)) {
-            const long long v = std::stoll(m[1]);
-            if (prev >= 0 && v != prev + 1)
-                ++gaps;
-            prev = v;
-        }
-    }
+    const HistoryCheck history = check_history(*session, line_re);
     return {{"seconds", seconds},
             {"target_rate_bytes_per_s", rate},
             {"exit_code", code ? nlohmann::json(*code) : nlohmann::json(nullptr)},
@@ -130,8 +148,8 @@ nlohmann::json run_flood(const win::ConPtyApi& api, const std::filesystem::path&
             {"lines_reported_by_probe", done_lines},
             {"last_numbered_line_on_screen", last_line},
             {"all_lines_arrived", done_lines > 0 && last_line == done_lines - 1},
-            {"history_lines_checked", prev >= 0},
-            {"history_gaps", gaps},
+            {"history_lines_checked", history.any_numbered},
+            {"history_gaps", history.gaps},
             {"history_truncated", info.history_truncated},
             {"backpressure_waits", info.backpressure_waits},
             {"memory_after", memory()}};
@@ -181,7 +199,8 @@ nlohmann::json run_snapshot_cost() {
     return {{"grid", "120x40"}, {"avg_snapshot_us", us}, {"cells", cells / kRounds}};
 }
 
-// Design doc 1.5 "互動延遲": key sent -> echoed character visible in the published snapshot.
+// Interaction latency (design doc 1.5): key sent -> echoed character visible in the published
+// snapshot.
 // cmd.exe echoes typed characters itself (cooked input), so no model is involved.
 nlohmann::json run_echo_latency(const win::ConPtyApi& api, int rounds) {
     host::SessionConfig c;
