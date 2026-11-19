@@ -1094,11 +1094,30 @@ const ui::Programs& programs() {
 
 // What runs in a terminal (herdr programs::of): the agent's 7501 `app` first, else the
 // foreground program's argv (its name alone from an older host).
+// herdr defaults/AGENTS.md 153: agents are terminals whose program reports a status. The OSC
+// 7501 record outlives the program by spec (done/idle are kept, design doc 3.4), so once the
+// terminal runs a shell again (the agent exited back to its prompt) it is no agent any more.
+bool agent_left(const ui::SessionView& v);
+
 ui::Program program_of(const ui::SessionView& v) {
     std::vector<std::string> argv = v.program_argv;
     if (argv.empty() && !v.program.empty())
         argv.push_back(v.program);
+    // A report left over from an agent that already exited names that agent; the terminal runs
+    // its shell now, so it shows as the shell (herdr: the report's app goes with the program).
+    if (!argv.empty())
+        if (ui::Program now = programs().of({}, argv); now.shell)
+            return now;
     return programs().of(v.agent_app, argv);
+}
+
+bool agent_left(const ui::SessionView& v) {
+    std::vector<std::string> argv = v.program_argv;
+    if (argv.empty() && !v.program.empty())
+        argv.push_back(v.program);
+    if (argv.empty())
+        return false;  // nothing known about what runs now (an older or remote host)
+    return programs().of({}, argv).shell;
 }
 
 // The program a profile starts.
@@ -2661,7 +2680,8 @@ struct App::State {
     }
     [[nodiscard]] Attention attention_of(const std::string& id) const {
         const auto it = views_by_id.find(id);
-        if (it != views_by_id.end() && (it->second.lost || it->second.process_state != "Running"))
+        if (it != views_by_id.end() &&
+            (it->second.lost || it->second.process_state != "Running" || agent_left(it->second)))
             return Attention::kNone;
         return attention.get(id);
     }
@@ -5415,6 +5435,13 @@ void refresh_git_facts(App::State& s) {
     }
 }
 
+// An agent as herdr's agents() lists it (window.rs 1855-1883, model.rs 597-605): a running
+// terminal in a pane of a space whose program reports a status now.
+bool live_agent(App::State& s, const std::string& id, const ui::SessionView& v) {
+    return !v.lost && v.process_state == "Running" && v.agent_state != "Unknown" && !s.hidden.contains(id) &&
+           !agent_left(v) && s.ws.find(id).space >= 0;
+}
+
 void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddLine(ImVec2(pos.x, pos.y), ImVec2(pos.x + w, pos.y), g_pal->border);
@@ -5440,9 +5467,10 @@ void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         const bool sub = !v.parent.empty() && s.views_by_id.count(v.parent) != 0;
         if (sub && v.process_state != "Exited")
             kids[v.parent].push_back(id);
-        if (!is_agent(v))
-            continue;
-        if (sub && s.ws.find(id).space < 0 && !s.ws.pinned.contains(id))
+        // herdr window.rs 1855-1883, model.rs 597-605: the list is built from the panes in the
+        // spaces, and a terminal is in it only while it has a status now. An agent that exited
+        // (its report dropped) or whose space or pane was closed is gone from the list.
+        if (!live_agent(s, id, v))
             continue;
         list.push_back(id);
     }
@@ -6605,7 +6633,7 @@ void draw_status_bar(App::State& s, ImVec2 pos, float width, float height) {
     }
     int agents = 0, need = 0;
     for (const auto& [id, v] : s.views_by_id) {
-        if (!is_agent(v) || v.lost || v.process_state != "Running")
+        if (!live_agent(s, id, v))  // the same agents the sidebar lists
             continue;
         ++agents;
         need += s.attention_of(id) == Attention::kBlocked ? 1 : 0;
