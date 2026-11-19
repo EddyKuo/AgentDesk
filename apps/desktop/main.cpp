@@ -541,6 +541,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_main_hwnd = nullptr;
     ::DestroyWindow(hwnd);
     ::UnregisterClassW(wc.lpszClassName, instance);
-    ::CloseHandle(g_wake);
+    // g_wake stays open: `app` (and its IPC threads, which may still signal it) is destroyed only
+    // after this return; Windows closes the handle when the process ends.
     return 0;
 }
