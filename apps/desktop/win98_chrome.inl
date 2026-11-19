@@ -1101,14 +1101,15 @@ k98::Mines::Options mines_options(App::State& s) {
     k98::Mines::Options o;
     const Json& j = shared(s, "win98.mines");
     if (j.is_object()) {
-        o.level = j.value("level", o.level);
-        o.marks = j.value("marks", o.marks);
-        o.color = j.value("color", o.color);
-        o.sound = j.value("sound", o.sound);
+        // win98.json is the person's file: a value of another type keeps the default.
+        o.level = safe::string_or(j, "level", o.level);
+        o.marks = safe::bool_or(j, "marks", o.marks);
+        o.color = safe::bool_or(j, "color", o.color);
+        o.sound = safe::bool_or(j, "sound", o.sound);
         if (const auto b = j.find("best"); b != j.end() && b->is_object())
             for (const auto& [k, v] : b->items())
-                if (v.is_number())
-                    o.best[k] = v.get<int>();
+                if (const auto secs = safe::int_in(v, 0, 999))  // mines.js: the clock stops at 999
+                    o.best[k] = *secs;
     }
     return o;
 }
@@ -1387,9 +1388,9 @@ void sol_card(App::State& s, ImDrawList* dl, int c, bool up, bool selected, ImVe
           box(at, ImVec2(U(s, Sol::kCW), U(s, Sol::kCH))));
 }
 
+// The card back: 0 or 1 (the two the Deck dialog offers); anything else in win98.json is the first.
 int sol_deck(App::State& s) {
-    const Json& j = shared(s, "win98.sol.deck");
-    return j.is_number() ? j.get<int>() : 0;
+    return safe::int_in(shared(s, "win98.sol.deck"), 0, 1).value_or(0);
 }
 
 void sol_command(App::State& s, const std::string& cmd) {
@@ -1436,8 +1437,8 @@ ImVec2 render_sol(App::State& s, Window& /*win*/, ImDrawList* dl, ImVec2 at) {
     // sol.js 371-375: the options from shared; the clock runs while the window is open.
     const Json& jd = shared(s, "win98.sol.draw");
     const Json& js = shared(s, "win98.sol.scoring");
-    if (jd.is_number())
-        g.draw = jd.get<int>();
+    if (const auto draw = safe::int_in(jd, 1, 3); draw == 1 || draw == 3)  // Draw One / Draw Three only
+        g.draw = *draw;
     if (js.is_boolean())
         g.scoring = js.get<bool>();
     const int deck = sol_deck(s);
@@ -1842,7 +1843,7 @@ void clippy(App::State& s, Box owner, ui::layout::Float& f) {
     const float m = px(ui::layout::kFloatMargin);
     if (const Json& pj = shared(s, "win98.float.clippy"); pj.is_object()) {
         // Where it was dropped before the layout kept it: now the float's click.
-        const auto old = k98::parse_place(pj.value("edge", ""), pj.value("align", ""));
+        const auto old = k98::parse_place(safe::string_or(pj, "edge"), safe::string_or(pj, "align"));
         f.edge = static_cast<ui::layout::Edge>(old.edge);
         f.align = static_cast<ui::layout::Align>(old.align);
         save_layout_state(s.layout());

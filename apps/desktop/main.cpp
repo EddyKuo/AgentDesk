@@ -380,8 +380,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"AgentDesk", WS_OVERLAPPEDWINDOW, 100, 100, 1400, 900,
                                 nullptr, nullptr, instance, nullptr);
     g_main_hwnd = hwnd;
-    // Only for Ctrl+Esc / Ctrl+Shift+Esc while a binding wants them (reserved_keys_hook).
-    HHOOK reserved_hook = ::SetWindowsHookExW(WH_KEYBOARD_LL, reserved_keys_hook, instance, 0);
+    // Only for Ctrl+Esc / Ctrl+Shift+Esc while a binding wants them (reserved_keys_hook). A
+    // low-level hook runs on this thread: while it is installed, every key anywhere in Windows
+    // waits for this loop. It is installed only while keys.json binds one of those chords, so a
+    // UI thread that is busy (a long git job) never holds up the keyboard otherwise.
+    HHOOK reserved_hook = nullptr;
     if (!create_device(hwnd)) {
         destroy_device();
         ::UnregisterClassW(wc.lpszClassName, instance);
@@ -406,7 +409,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     io.IniFilename = nullptr;  // layout lives in agent-host (ui.state), settings in ui.json
     ui::adapter::disable_nav_windowing();
     ImGui_ImplWin32_Init(hwnd);
-    ImGui_ImplDX11_Init(g_gfx.device, g_gfx.context);
+    bool dx11_backend = ImGui_ImplDX11_Init(g_gfx.device, g_gfx.context);
 
     ui::HostClientOptions hopts;
     hopts.host_exe = ipc::sibling_executable(L"agent-host.exe");
@@ -430,6 +433,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     bool running = true;
     bool exit_now = false;
     int frames_to_draw = 3;
+    auto last_tick = Clock::time_point{};
     while (running) {
         if (dev.exit_after_ms > 0 && Clock::now() - launched > std::chrono::milliseconds(dev.exit_after_ms))
             exit_now = true;
@@ -439,6 +443,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             app.on_focus_changed(f == 1);
         g_take_ctrl_esc = app.binds_chord(ImGuiMod_Ctrl | ImGuiKey_Escape);
         g_take_ctrl_shift_esc = app.binds_chord(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Escape);
+        if (const bool want_hook = g_take_ctrl_esc || g_take_ctrl_shift_esc; want_hook && reserved_hook == nullptr) {
+            reserved_hook = ::SetWindowsHookExW(WH_KEYBOARD_LL, reserved_keys_hook, instance, 0);
+        } else if (!want_hook && reserved_hook != nullptr) {
+            ::UnhookWindowsHookEx(reserved_hook);
+            reserved_hook = nullptr;
+        }
         if (const int r = g_reserved_chord.exchange(0); r != 0)  // the bound command, as its window chord
             app.run_chord(r == 2 ? (ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Escape) : (ImGuiMod_Ctrl | ImGuiKey_Escape));
         if (!g_dropped.empty())
@@ -449,6 +459,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         // Event-driven: sleep until input, an IPC wake-up or the app's next deadline.
         DWORD timeout =
             frames_to_draw > 0 ? 0 : static_cast<DWORD>(std::clamp<long long>(app.next_wakeup_ms(), 0, 1000));
+        if (g_gfx.occluded)  // nothing is drawn: the non-drawing work needs no tighter cadence
+            timeout = std::max<DWORD>(timeout, 100);
         if (dev.exit_after_ms > 0)
             timeout = std::min<DWORD>(timeout, 100);
         const DWORD r = ::MsgWaitForMultipleObjectsEx(1, &g_wake, timeout, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
@@ -464,6 +476,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         }
         if (!running)
             break;
+        // Sessions, attention (sounds, toasts, taskbar flash), mods and persistence run on every
+        // wake, drawn or not: minimized or locked is exactly when an alert matters. Occluded,
+        // a burst of IPC wake-ups runs it at most every 100 ms.
+        if (const auto now = Clock::now(); !g_gfx.occluded || now - last_tick >= std::chrono::milliseconds(100)) {
+            last_tick = now;
+            app.tick();
+        }
         if (frames_to_draw <= 0)
             continue;
 
@@ -498,10 +517,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         g_gfx.occluded = hr == DXGI_STATUS_OCCLUDED;
         if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             ImGui_ImplDX11_Shutdown();
+            dx11_backend = false;
             destroy_device();
             if (!create_device(hwnd))
                 break;
-            ImGui_ImplDX11_Init(g_gfx.device, g_gfx.context);
+            dx11_backend = ImGui_ImplDX11_Init(g_gfx.device, g_gfx.context);
+            if (!dx11_backend)
+                break;
         }
         --frames_to_draw;
     }
@@ -509,7 +531,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     app.on_quit();
     if (!dev.report.empty())
         std::ofstream(dev.report, std::ios::binary) << app.report().dump(2) << '\n';
-    ImGui_ImplDX11_Shutdown();
+    if (dx11_backend)  // a lost device whose re-creation failed has shut it down already
+        ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
     destroy_device();

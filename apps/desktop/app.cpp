@@ -2,6 +2,7 @@
 // attention, notifications, command palette, worktrees; observed from its public guide
 // defaults/AGENTS.md and keys.json), with AgentDesk's own look, names and code (ADR-12/ADR-13).
 #include "app.hpp"
+#include "safe_read.hpp"
 #include "win98_state.hpp"
 
 #include <algorithm>
@@ -60,6 +61,7 @@ namespace ipc = agentdesk::ipc;
 using Json = nlohmann::json;
 using Clock = std::chrono::steady_clock;
 using ui::Attention;
+namespace safe = agentdesk::desktop::safe;
 using ui::Dir;
 
 // ------------------------------------------------------------------ themes (our own palettes)
@@ -915,7 +917,7 @@ void derive_layout(LayoutSpec& l) {
         if (th.is_string())
             theme = th.get<std::string>();
         else if (th.is_object())  // layout.rs 197-210: the system's appearance picks
-            theme = th.value(system_light() ? "light" : "dark", std::string());
+            theme = safe::string_or(th, system_light() ? "light" : "dark");
     }
     l.look_applies = theme.empty() || palette_exists(theme);
     l.theme = palette_exists(theme) ? theme : std::string();
@@ -1033,7 +1035,7 @@ std::vector<LayoutSpec> load_layouts(const Settings& st) {
         const Json j = Json::parse(read_text_file(f), nullptr, false);
         if (lay::is_legacy(j)) {
             l.legacy = true;
-            l.name = j.value("name", l.name);
+            l.name = safe::string_or(j, "name", l.name);
             l.file = lay::from_legacy(j);
             if (j.contains("details") && j["details"].is_boolean())
                 l.details = j["details"].get<bool>();
@@ -1597,8 +1599,14 @@ private:
                 for (const auto& dir : wanted) {
                     if (handles.size() >= 62 || handles.contains(dir))
                         continue;
+                    std::wstring wide;
+                    try {  // git printed it: not always valid UTF-8; such a folder is not watched
+                        wide = win::to_wide(dir);
+                    } catch (const std::exception&) {
+                        continue;
+                    }
                     const HANDLE h = ::FindFirstChangeNotificationW(
-                            win::to_wide(dir).c_str(), TRUE,
+                            wide.c_str(), TRUE,
                             FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE);
                     if (h != INVALID_HANDLE_VALUE)
                         handles[dir] = h;
@@ -1665,9 +1673,9 @@ private:
                     a.push_back(win::to_utf8(x));
                 if (const auto res = remote ? remote(machine, "git.run", Json{{"cwd", dir}, {"args", a}}) : std::nullopt) {
                     r.started = true;
-                    r.exit_code = res->value("exit_code", 1ul);
-                    r.output = res->value("output", "");
-                    r.error = res->value("error", "");
+                    r.exit_code = static_cast<unsigned long>(safe::int_or(*res, "exit_code", 1));
+                    r.output = safe::string_or(*res, "output");
+                    r.error = safe::string_or(*res, "error");
                 }
                 return r;
             }
@@ -1712,7 +1720,12 @@ private:
                 dir = queue_.front();
                 queue_.pop_front();
             }
-            const GitInfo info = query(dir);
+            GitInfo info;
+            try {  // a path or git output that does not convert, an odd answer: not a repo
+                info = query(dir);
+            } catch (const std::exception&) {
+                info = {};
+            }
             std::lock_guard lock(mutex_);
             auto& e = entries_[dir];
             const bool new_dir = e.info.common_dir != info.common_dir;
@@ -1829,7 +1842,7 @@ public:
                                files_changed_.exchange(false))) {
             files_loading = true;
             files_at_ = now;
-            post([this, mc = machine, root, folders = expanded, preview = preview_path] {
+            post(Panel::kFiles, [this, mc = machine, root, folders = expanded, preview = preview_path] {
                 load_files(mc, root, folders, preview);
             });
         }
@@ -1857,7 +1870,8 @@ public:
              changes_changed_.exchange(false))) {
             changes_loading = true;
             changes_at_ = now;
-            post([this, mc = machine, cwd, open = open_diff, closed = user_closed] { load_changes(mc, cwd, open, closed); });
+            post(Panel::kChanges,
+                 [this, mc = machine, cwd, open = open_diff, closed = user_closed] { load_changes(mc, cwd, open, closed); });
         }
     }
     void toggle_folder(const std::string& rel) {
@@ -1875,7 +1889,7 @@ public:
             return;
         }
         expanded.insert(rel);
-        post([this, mc = files_machine, root = files_root, rel] {
+        post(Panel::kFiles, [this, mc = files_machine, root = files_root, rel] {
             auto entries = list_folder(mc, root, rel);
             std::lock_guard l(mutex);
             if (root == files_root && mc == files_machine)
@@ -1889,7 +1903,7 @@ public:
         preview_message = "Loading file\xE2\x80\xA6";
         sel_line_a = sel_line_b = -1;
         sel_dragging = false;
-        post([this, mc = files_machine, root = files_root, rel] { load_preview(mc, root, rel); });
+        post(Panel::kFiles, [this, mc = files_machine, root = files_root, rel] { load_preview(mc, root, rel); });
     }
     void close_preview() {
         std::lock_guard lock(mutex);
@@ -1912,7 +1926,7 @@ public:
         for (const auto& x : changes)
             if (x.path == path)
                 c = x;
-        post([this, mc = changes_machine, top = repo_top, c] { load_diff(mc, top, c); });
+        post(Panel::kChanges, [this, mc = changes_machine, top = repo_top, c] { load_diff(mc, top, c); });
     }
     void commit() {
         std::lock_guard lock(mutex);
@@ -1924,7 +1938,7 @@ public:
             return;
         committing = true;
         commit_note.clear();
-        post([this, mc = changes_machine, top = repo_top, msg] {
+        post(Panel::kChanges, [this, mc = changes_machine, top = repo_top, msg] {
             auto r = git_run(mc, top, {L"add", L"-A"});
             if (r.started && r.exit_code == 0)
                 r = git_run(mc, top, {L"commit", L"-m", win::to_wide(msg)});
@@ -1972,9 +1986,11 @@ private:
                     *failed = true;
                 return {out, false};
             }
-            for (const auto& e : r->value("entries", Json::array()))
-                out.push_back({e.value("name", ""), e.value("dir", false)});
-            more = r->value("more", false);
+            if (const Json* entries = safe::field(*r, "entries"); entries != nullptr && entries->is_array())
+                for (const auto& e : *entries)
+                    if (const std::string name = safe::string_or(e, "name"); !name.empty())
+                        out.push_back({name, safe::bool_or(e, "dir", false)});
+            more = safe::bool_or(*r, "more", false);
             std::sort(out.begin(), out.end(), [](const FileEntry& a, const FileEntry& b) {
                 if (a.dir != b.dir)
                     return a.dir;
@@ -1986,7 +2002,7 @@ private:
         std::filesystem::directory_iterator it(win::to_wide(join(root, rel)),
                                                std::filesystem::directory_options::skip_permission_denied, ec);
         for (; !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
-            const std::string name = win::to_utf8(it->path().filename().native());
+            const std::string name = safe::utf8_lossy(it->path().filename().native());
             if (name == ".git")
                 continue;
             if (out.size() >= kPerFolder) {
@@ -2014,9 +2030,9 @@ private:
             const auto res = remote ? remote(mc, "git.run", Json{{"cwd", cwd}, {"args", a}}) : std::nullopt;
             if (res) {
                 r.started = true;
-                r.exit_code = res->value("exit_code", 1ul);
-                r.output = res->value("output", "");
-                r.error = res->value("error", "");
+                r.exit_code = static_cast<unsigned long>(safe::int_or(*res, "exit_code", 1));
+                r.output = safe::string_or(*res, "output");
+                r.error = safe::string_or(*res, "error");
             }
             return r;
         }
@@ -2137,25 +2153,25 @@ private:
         files_limited = limited;
         files_loading = false;
         if (!preview.empty() && preview == preview_path && preview_text.empty())
-            post([this, mc, root, preview] { load_preview(mc, root, preview); });
+            post(Panel::kFiles, [this, mc, root, preview] { load_preview(mc, root, preview); });
     }
 
     bool read_text(const std::string& mc, const std::string& path, std::string& out, std::string& message) {
         if (!mc.empty()) {
             const auto r = remote ? remote(mc, "fs.read", Json{{"path", path}}) : std::nullopt;
-            if (!r || r->value("missing", false)) {
+            if (!r || safe::bool_or(*r, "missing", false)) {
                 message = r ? "This file is no longer available" : "No answer from " + mc;
                 return false;
             }
-            if (r->value("too_large", false)) {
+            if (safe::bool_or(*r, "too_large", false)) {
                 message = "Cannot preview this file (binary, too large, or unreadable)";
                 return false;
             }
-            if (r->value("binary", false)) {
+            if (safe::bool_or(*r, "binary", false)) {
                 message = "Binary file \xC2\xB7 no text preview";
                 return false;
             }
-            out = r->value("text", "");
+            out = safe::string_or(*r, "text");
             return true;
         }
         std::error_code ec;
@@ -2405,16 +2421,36 @@ private:
         cv_.notify_all();
     }
 
-    void post(std::function<void()> fn) {
-        tasks_.push_back(std::move(fn));
+    enum class Panel { kFiles, kChanges };
+    // Called with `mutex` held (from the public calls above).
+    void post(Panel panel, std::function<void()> fn) {
+        tasks_.push_back({panel, std::move(fn)});
         cv_.notify_all();
+    }
+    // A task that threw (a name that does not convert, an answer of an unexpected shape): its
+    // panel says so and stops loading, and the worker goes on.
+    void task_failed(Panel panel, const char* what) {
+        std::lock_guard lock(mutex);
+        const std::string note = std::string("Could not read this folder: ") + what;
+        if (panel == Panel::kFiles) {
+            files_loading = false;
+            files_error = note;
+            if (!preview_path.empty() && preview_text.empty())
+                preview_message = note;
+        } else {
+            changes_loading = false;
+            committing = false;
+            changes_error = note;
+            if (!open_diff.empty() && diff.empty())
+                diff_message = note;
+        }
     }
 
     void run(std::stop_token st) {
         std::string watching;
         HANDLE change = INVALID_HANDLE_VALUE;
         while (!st.stop_requested()) {
-            std::function<void()> task;
+            Task task;
             std::string want;
             {
                 std::unique_lock lock(mutex);
@@ -2430,11 +2466,15 @@ private:
             if (want != watching) {
                 if (change != INVALID_HANDLE_VALUE)
                     ::FindCloseChangeNotification(change);
-                change = want.empty() ? INVALID_HANDLE_VALUE
-                                      : ::FindFirstChangeNotificationW(
-                                            win::to_wide(want).c_str(), TRUE,
-                                            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
-                                                FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE);
+                change = INVALID_HANDLE_VALUE;
+                try {
+                    if (!want.empty())
+                        change = ::FindFirstChangeNotificationW(
+                            win::to_wide(want).c_str(), TRUE,
+                            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE |
+                                FILE_NOTIFY_CHANGE_SIZE);
+                } catch (const std::exception&) {  // not watched; the 10 s refresh still runs
+                }
                 watching = want;
             }
             if (change != INVALID_HANDLE_VALUE && ::WaitForSingleObject(change, 0) == WAIT_OBJECT_0) {
@@ -2442,8 +2482,15 @@ private:
                 changes_changed_ = true;
                 ::FindNextChangeNotification(change);
             }
-            if (task)
-                task();
+            if (task.fn) {
+                try {
+                    task.fn();
+                } catch (const std::exception& e) {
+                    task_failed(task.panel, e.what());
+                } catch (...) {
+                    task_failed(task.panel, "unexpected error");
+                }
+            }
         }
         if (change != INVALID_HANDLE_VALUE)
             ::FindCloseChangeNotification(change);
@@ -2455,7 +2502,11 @@ private:
     std::atomic<bool> files_changed_{false};
     std::atomic<bool> changes_changed_{false};
     std::string watch_dir_;
-    std::deque<std::function<void()>> tasks_;
+    struct Task {
+        Panel panel = Panel::kFiles;
+        std::function<void()> fn;
+    };
+    std::deque<Task> tasks_;
     std::condition_variable_any cv_;
     std::jthread worker_;
 };
@@ -2517,7 +2568,7 @@ struct App::State {
     ui::FontSet fonts;
     float dpi = 1.0f;
     bool window_focused = true;
-    bool exit_now = false;
+    std::atomic<bool> exit_now{false};  // also set by shutdown_host's answer (a HostClient thread)
     // Updates and Privacy (herdr update.rs, telemetry.rs, settings main.js 760-882).
     std::optional<Clock::time_point> updates_asked;  // main.js 65-71 `this.asked`
     bool show_data = false;                          // main.js 870 `this.showData`
@@ -2597,7 +2648,8 @@ struct App::State {
     bool show_help = false;
     bool show_settings = false;
     bool show_exit = false;
-    std::string exit_error;
+    std::string exit_error;     // guarded by placements_mutex (shutdown_host answers on its thread)
+    bool exit_pending = false;  // "Stop all and exit" sent, no answer yet; guarded by placements_mutex
     bool show_close_notice = false;
     bool show_launcher = false;
     LaunchTarget launch_target = LaunchTarget::kTab;
@@ -2688,6 +2740,16 @@ struct App::State {
     char wt_filter[128] = {};
     int wt_sel = 0;
     std::vector<std::string> chord_commands;  // window chords Windows reserves (main.cpp), run next frame
+    // Commands raised while the layout draws (pane header buttons, pane and window menus, a
+    // terminal's bound keys, the tab bar) wait until it is drawn: closing a pane can erase the
+    // tab or space being drawn, and layout.reset / mods.reload replace the layout in use.
+    struct DeferredCommand {
+        std::string cmd;
+        bool person = true;
+        std::string focused;  // the focused session when it was raised (it ran with that focus)
+    };
+    bool defer_commands = false;
+    std::vector<DeferredCommand> deferred_commands;
     ui::ImageCache program_images;  // herdr's program icons (programs\icons), as textures
     // Herdr 98 (win98_*.inl): its menus, dialogs, games and shared values.
     std::unique_ptr<w98state::W98> win98 = std::make_unique<w98state::W98>();
@@ -3102,6 +3164,16 @@ void App::run_chord(int chord) {
 }
 
 App::~App() {
+    // HostClient threads answer into State (session.create, worktree.add and shutdown_host lock
+    // placements_mutex and write its fields). Members go in reverse order, so host and remotes
+    // (declared first) would outlive that mutex: end them first, while everything is there.
+    std::vector<Remote> remotes;
+    {
+        std::lock_guard lock(s_->remotes_mutex);
+        remotes.swap(s_->remotes);
+    }
+    remotes.clear();
+    s_->host.reset();
     g_program_images = nullptr;
 }
 
@@ -3261,7 +3333,7 @@ void create_session(App::State& s, const std::string& profile, const std::string
                     st->async_errors.push_back(error);
                     return;
                 }
-                placement.session = result.value("session_id", "");
+                placement.session = safe::string_or(result, "session_id");
                 st->placements.push_back(placement);
             },
             std::chrono::seconds(15));
@@ -3589,9 +3661,9 @@ host::ToolResult git_at(App::State& s, const std::string& machine, const std::st
     if (const auto res = s.panels->remote ? s.panels->remote(machine, "git.run", Json{{"cwd", cwd}, {"args", a}})
                                           : std::nullopt) {
         r.started = true;
-        r.exit_code = res->value("exit_code", 1ul);
-        r.output = res->value("output", "");
-        r.error = res->value("error", "");
+        r.exit_code = static_cast<unsigned long>(safe::int_or(*res, "exit_code", 1));
+        r.output = safe::string_or(*res, "output");
+        r.error = safe::string_or(*res, "error");
     }
     return r;
 }
@@ -4361,6 +4433,7 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         s.toast("keys.json opened", "Saved changes apply right away.", "", g_pal->info);
     } else if (name == "app.exit_all") {
         s.show_exit = true;
+        std::lock_guard lock(s.placements_mutex);
         s.exit_error.clear();
     } else if (name == "theme") {
         // herdr app.theme (window.rs 3620-3635): the theme goes on the shown layout, as its light
@@ -4467,7 +4540,7 @@ std::string exec_command(App::State& s, const std::string& cmd) {
             const auto stem = f.stem().u8string();
             const std::string file_name(stem.begin(), stem.end());
             // An old AgentDesk file says its name inside.
-            const std::string n = lay::is_legacy(j) ? j.value("name", file_name) : file_name;
+            const std::string n = lay::is_legacy(j) ? safe::string_or(j, "name", file_name) : file_name;
             if (n != which)
                 continue;
             std::filesystem::path to;
@@ -4545,12 +4618,27 @@ std::string exec_command(App::State& s, const std::string& cmd) {
 // herdr window.rs 2931-2943: a command run for the person (a click, a key, a menu, a mod) has
 // nobody to read the reply, so a failure shows as an error toast "<command> failed".
 void run_command(App::State& s, const std::string& cmd, bool person) {
+    if (s.defer_commands) {
+        s.deferred_commands.push_back({cmd, person, s.ws.focused_session()});
+        return;
+    }
     // herdr window.rs 2995-2997 / telemetry.rs 124: a command the person ran, by its name.
     if (const std::string name = cmd.substr(0, cmd.find(':')); person && builtin_command(name))
         ui::telemetry::command(name);
     const std::string error = exec_command(s, cmd);
     if (!error.empty())
         s.toast(cmd.substr(0, cmd.find(':')) + " failed", error, "", g_pal->needs_you, 8);
+}
+
+// The commands draw_layout raised, now that nothing it drew is still referenced; each with the
+// focus it was raised with (a pane's buttons focus that pane first).
+void run_deferred_commands(App::State& s) {
+    s.defer_commands = false;
+    for (const auto& d : std::exchange(s.deferred_commands, {})) {
+        if (!d.focused.empty() && d.focused != s.ws.focused_session() && s.ws.find(d.focused).space >= 0)
+            s.ws.focus(d.focused);
+        run_command(s, d.cmd, d.person);
+    }
 }
 
 }  // namespace
@@ -5475,7 +5563,7 @@ void track_agents(App::State& s, const std::vector<std::string>& list) {
         s.changed_loaded = true;
         for (const auto& [id, c] : s.settings.agents_changed.items())
             if (c.is_object())
-                s.changed[id] = {c.value("s", ""), c.value("at", 0LL)};
+                s.changed[id] = {safe::string_or(c, "s"), safe::int_or(c, "at", 0)};
     }
     const long long now = now_ms();
     bool dirty = false;
@@ -9268,7 +9356,7 @@ void draw_launcher(App::State& s) {
         if (ImGui::IsItemHovered())
             s.launcher_sel = i;
         const auto& pid = profiles[static_cast<std::size_t>(i)].first;
-        program_icon(dl, program_of_profile(s.host->profile_executable(pid), pid), ImVec2(a.x + px(11), a.y + px(10)),
+        program_icon(dl, program_of_profile(lhost->profile_executable(pid), pid), ImVec2(a.x + px(11), a.y + px(10)),
                      px(14), g_pal->text);  // new-menu/main.js 65
         dl->AddText(s.fonts.ui_bold, fs, ImVec2(a.x + px(38), a.y + (px(34) - fs) * 0.5f), g_pal->text,
                     profiles[static_cast<std::size_t>(i)].second.c_str());
@@ -9460,8 +9548,10 @@ void draw_worktree(App::State& s) {
         create = worktree_input(s, "##branch", "branch name", s.wt_branch, sizeof s.wt_branch,
                                 ImGuiInputTextFlags_EnterReturnsTrue);
     }
+    bool busy = false;  // wt_busy and wt_error are written by the worktree.add answer (a HostClient thread)
     {
         std::lock_guard lock(s.placements_mutex);
+        busy = s.wt_busy;
         if (!s.wt_error.empty() && s.wt_error != "done") {
             ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->needs_you));
             ImGui::TextWrapped("%s", s.wt_error.c_str());
@@ -9469,16 +9559,19 @@ void draw_worktree(App::State& s) {
         }
     }
     ImGui::Dummy(ImVec2(0, px(4)));
-    ImGui::TextDisabled("%s", s.wt_busy ? "working\xE2\x80\xA6" : "\xE2\x86\xB5 create \xC2\xB7 esc cancel");
+    ImGui::TextDisabled("%s", busy ? "working\xE2\x80\xA6" : "\xE2\x86\xB5 create \xC2\xB7 esc cancel");
     cancel = cancel || ImGui::IsKeyPressed(ImGuiKey_Escape) || dialog_outside_click();
-    if (create && !s.wt_busy) {
+    if (create && !busy) {
         const std::string branch = trimmed(s.wt_branch);  // herdr create(): this.text.trim()
         if (branch.empty()) {
             std::lock_guard lock(s.placements_mutex);
             s.wt_error = "Type a branch name.";
         } else if (wthost->connected()) {
-            s.wt_busy = true;
-            s.wt_error.clear();
+            {
+                std::lock_guard lock(s.placements_mutex);
+                s.wt_busy = true;
+                s.wt_error.clear();
+            }
             Json params{{"repo", g.top}, {"branch", branch}};
             if (!root.empty())
                 params["path"] = root + "\\" + repo + "\\" + branch_slug(branch);
@@ -9492,7 +9585,7 @@ void draw_worktree(App::State& s) {
                         st->wt_busy = false;
                         return;
                     }
-                    Json p{{"profile_id", shell}, {"cwd", result.value("path", "")}};
+                    Json p{{"profile_id", shell}, {"cwd", safe::string_or(result, "path")}};
                     wthost->call(
                         "session.create", p,
                         [st, wt_machine](Json r, std::string e) {
@@ -9503,7 +9596,7 @@ void draw_worktree(App::State& s) {
                                 return;
                             }
                             Placement pl;  // the space stays unnamed: it follows the checkout
-                            pl.session = r.value("session_id", "");
+                            pl.session = safe::string_or(r, "session_id");
                             pl.target = LaunchTarget::kSpace;
                             pl.machine = wt_machine;
                             st->placements.push_back(pl);
@@ -10316,13 +10409,14 @@ bool settings_privacy(App::State& s) {
     // main.js 879-881
     if (const auto q = st.find("queued"); q != st.end() && q->is_array())
         for (const auto& r : *q)
-            settings_report(s, "Waiting to send: " + r.value("day", std::string()), "Sent as is, soon.", r);
+            if (r.is_object())
+                settings_report(s, "Waiting to send: " + safe::string_or(r, "day"), "Sent as is, soon.", r);
     if (const auto d = st.find("draft"); d != st.end() && d->is_object())
         settings_report(s, "Today so far", "A draft: it changes until the day ends (UTC), then goes out once.", *d);
     if (const auto l = st.find("last_sent"); l != st.end() && l->is_object() && l->contains("report")) {
         const auto& r = (*l)["report"];
         const std::uint64_t at = l->contains("at") && (*l)["at"].is_number_unsigned() ? (*l)["at"].get<std::uint64_t>() : 0;
-        settings_report(s, "Last sent: " + (r.is_object() ? r.value("day", std::string()) : std::string()),
+        settings_report(s, "Last sent: " + safe::string_or(r, "day"),
                         "Sent " + local_date_time(at) + ".", r);
     }
     return changed;
@@ -12043,23 +12137,39 @@ void draw_exit(App::State& s) {
     }
     if (running == 0)
         ImGui::TextDisabled("(no running sessions)");
-    if (!s.exit_error.empty())
-        ImGui::TextColored(v4(g_pal->needs_you), "%s", s.exit_error.c_str());
+    std::string error;
+    bool pending = false;
+    {
+        std::lock_guard lock(s.placements_mutex);
+        error = s.exit_error;
+        pending = s.exit_pending;
+    }
+    if (!error.empty())
+        ImGui::TextColored(v4(g_pal->needs_you), "%s", error.c_str());
     ImGui::PushStyleColor(ImGuiCol_Button, v4(alpha(g_pal->needs_you, 210)));
     ImGui::PushStyleColor(ImGuiCol_Text, v4(IM_COL32(255, 255, 255, 255)));
-    if (ImGui::Button("Stop all and exit")) {
-        auto* exit_now = &s.exit_now;
-        auto* error = &s.exit_error;
-        auto wake = s.config.wake;
-        s.host->shutdown_host(true, [exit_now, error, wake](std::string e) {
+    // One request at a time: the answer comes on a HostClient thread (exit_now, or the error).
+    ImGui::BeginDisabled(pending);
+    if (ImGui::Button(pending ? "Stopping\xE2\x80\xA6" : "Stop all and exit")) {
+        {
+            std::lock_guard lock(s.placements_mutex);
+            s.exit_pending = true;
+            s.exit_error.clear();
+        }
+        s.host->shutdown_host(true, [st = &s, wake = s.config.wake](std::string e) {
+            {
+                std::lock_guard lock(st->placements_mutex);
+                st->exit_pending = false;
+                if (!e.empty())
+                    st->exit_error = e;
+            }
             if (e.empty())
-                *exit_now = true;
-            else
-                *error = e;
+                st->exit_now = true;
             if (wake)
                 wake();
         });
     }
+    ImGui::EndDisabled();
     ImGui::PopStyleColor(2);
     ImGui::SameLine();
     if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape))
@@ -12242,13 +12352,13 @@ void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
         } else if (l.look_applies && n->background.is_string()) {
             if (const auto c = layout_color(n->background.get<std::string>()))
                 dl->AddRectFilled(a, b, *c, radius);
-        } else if (l.look_applies && n->background.is_object() && n->background.contains("gradient")) {
-            // layout.rs 107-112: two colors at an angle; drawn top to bottom or left to right.
-            const auto& g = n->background["gradient"];
-            const auto c0 = layout_color(g[0].get<std::string>());
-            const auto c1 = layout_color(g[1].get<std::string>());
+        } else if (const auto g = l.look_applies ? safe::gradient(n->background) : std::nullopt) {
+            // layout.rs 107-112: two colors at an angle; drawn top to bottom or left to right. A
+            // background from layouts\.state is checked here (the file loader checks its own).
+            const auto c0 = layout_color(g->from);
+            const auto c1 = layout_color(g->to);
             if (c0 && c1) {
-                const float angle = n->background.value("angle", 180.0f);
+                const float angle = g->angle;
                 const bool across = std::fmod(std::abs(angle), 180.0f) > 45.0f && std::fmod(std::abs(angle), 180.0f) < 135.0f;
                 if (across)  // 90 / 270: left to right
                     dl->AddRectFilledMultiColor(a, b, *c0, *c1, *c1, *c0);
@@ -12421,53 +12531,8 @@ void App::before_new_frame() {
         ImGui::GetIO().AddMousePosEvent(s_->input_mouse->x, s_->input_mouse->y);
 }
 
-void App::frame() {
+void App::tick() {
     State& s = *s_;
-    for (const auto& cmd : std::exchange(s.chord_commands, {}))
-        run_command(s, cmd);
-    g_scale = s.dpi * ui_scale(s.settings);
-    s.fonts.mono_size = s.layout().font_size.value_or(s.settings.font_size) / ui_text_factor(s.settings);
-    const bool win98 = s.layout().style == "win98";
-    if (win98)  // kit.js 451-452: the MS-DOS font, 32 px with Large Fonts
-        s.fonts.mono_size = w98::terminal_font_size(s) / ui_text_factor(s.settings);
-    if (s.fonts_win98 != win98) {  // a layout with fonts of its own (Herdr 98), or back from it
-        s.fonts_win98 = win98;
-        apply_terminal_font(s);
-        apply_ui_font(s);
-    }
-    if (!win98)
-        w98::hidden(s);
-    if (Clock::now() - s.keys_checked > std::chrono::milliseconds(400)) {
-        s.keys_checked = Clock::now();
-        std::error_code ec;
-        const auto t = std::filesystem::last_write_time(data_dir() / L"keys.json", ec);
-        if (!ec && t != s.keys_mtime) {
-            load_keys(s);
-            if (s.keymap_errors.empty())
-                s.toast("keys.json applied", "", "", g_pal->info, 2);
-            else
-                s.toast("keys.json not applied", s.keymap_errors.front(), "", g_pal->needs_you, 8);
-        }
-        // herdr window.rs 982-991: programs.json is read again when it changes.
-        const auto pt = std::filesystem::last_write_time(data_dir() / L"programs.json", ec);
-        if (ec)
-            ec.clear();
-        if (pt != g_programs_mtime)
-            if (const std::string problem = load_programs(); !problem.empty())
-                s.toast("programs.json not applied", problem, "", g_pal->needs_you, 8);
-    }
-    if (!g_settings_problem.empty()) {
-        s.toast(g_settings_problem, "", "", g_pal->needs_you, 8);
-        g_settings_problem.clear();
-    }
-    s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
-    const auto theme_pair = layout_theme_pair(s.settings);
-    if (const Palette* want = effective_palette(s.settings.appearance, theme_pair.first, theme_pair.second,
-                                                s.layout().theme);
-        want != g_pal) {
-        g_pal = want;
-        apply_style(s.dpi, ui_scale(s.settings));
-    }
     const bool connected = s.host->connected();
     // window.rs 879-887 note_core: on connect and every reconnect, what agent-host says it is.
     if (connected && s.host->host_instance_id() != s.noted_host) {
@@ -12525,6 +12590,57 @@ void App::frame() {
         observe(s);
     }
     run_mods(s);
+    persist(s);
+}
+
+void App::frame() {
+    State& s = *s_;
+    for (const auto& cmd : std::exchange(s.chord_commands, {}))
+        run_command(s, cmd);
+    g_scale = s.dpi * ui_scale(s.settings);
+    s.fonts.mono_size = s.layout().font_size.value_or(s.settings.font_size) / ui_text_factor(s.settings);
+    const bool win98 = s.layout().style == "win98";
+    if (win98)  // kit.js 451-452: the MS-DOS font, 32 px with Large Fonts
+        s.fonts.mono_size = w98::terminal_font_size(s) / ui_text_factor(s.settings);
+    if (s.fonts_win98 != win98) {  // a layout with fonts of its own (Herdr 98), or back from it
+        s.fonts_win98 = win98;
+        apply_terminal_font(s);
+        apply_ui_font(s);
+    }
+    if (!win98)
+        w98::hidden(s);
+    if (Clock::now() - s.keys_checked > std::chrono::milliseconds(400)) {
+        s.keys_checked = Clock::now();
+        std::error_code ec;
+        const auto t = std::filesystem::last_write_time(data_dir() / L"keys.json", ec);
+        if (!ec && t != s.keys_mtime) {
+            load_keys(s);
+            if (s.keymap_errors.empty())
+                s.toast("keys.json applied", "", "", g_pal->info, 2);
+            else
+                s.toast("keys.json not applied", s.keymap_errors.front(), "", g_pal->needs_you, 8);
+        }
+        // herdr window.rs 982-991: programs.json is read again when it changes.
+        const auto pt = std::filesystem::last_write_time(data_dir() / L"programs.json", ec);
+        if (ec)
+            ec.clear();
+        if (pt != g_programs_mtime)
+            if (const std::string problem = load_programs(); !problem.empty())
+                s.toast("programs.json not applied", problem, "", g_pal->needs_you, 8);
+    }
+    if (!g_settings_problem.empty()) {
+        s.toast(g_settings_problem, "", "", g_pal->needs_you, 8);
+        g_settings_problem.clear();
+    }
+    s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
+    const auto theme_pair = layout_theme_pair(s.settings);
+    if (const Palette* want = effective_palette(s.settings.appearance, theme_pair.first, theme_pair.second,
+                                                s.layout().theme);
+        want != g_pal) {
+        g_pal = want;
+        apply_style(s.dpi, ui_scale(s.settings));
+    }
+    const bool connected = s.host->connected();
     for (const auto& c : std::exchange(s.pending_mod_commands, {}))
         run_command(s, c, false);
     run_input_script(s);
@@ -12571,7 +12687,10 @@ void App::frame() {
     // The shown layout's tree (herdr main.json: the sidebar, a 1 px divider and the work column of
     // tabs, the panes with the panel, and the status bar; terminals.json; win98.json).
     ImGui::GetWindowDrawList()->AddRectFilled(origin, ImVec2(origin.x + full.x, origin.y + full.y), g_pal->bg);
+    // Commands raised inside wait for the end of it (State::deferred_commands).
+    s.defer_commands = true;
     draw_layout(s, origin, full, connected);
+    run_deferred_commands(s);
     ImGui::End();
     if (win98)  // its floats, windows and menus (herdr overlays)
         w98::overlays(s);
