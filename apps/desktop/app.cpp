@@ -1205,13 +1205,21 @@ std::string folder_name(const std::string& cwd) {
     return p == std::string::npos ? s : s.substr(p + 1);
 }
 
+// `p` is `dir` or a folder in it (case-insensitive, either slash): "C:\src\feat-2" is not in
+// "C:\src\feat".
+bool path_within(const std::string& p, const std::string& dir) {
+    return !dir.empty() && p.size() >= dir.size() && _strnicmp(p.c_str(), dir.c_str(), dir.size()) == 0 &&
+           (p.size() == dir.size() || p[dir.size()] == '\\' || p[dir.size()] == '/' || dir.back() == '\\' ||
+            dir.back() == '/');
+}
+
 std::string display_path(const std::string& cwd) {
     static const std::string home = [] {
         wchar_t buf[MAX_PATH]{};
         const DWORD n = ::GetEnvironmentVariableW(L"USERPROFILE", buf, MAX_PATH);
         return n > 0 ? win::to_utf8(std::wstring(buf, n)) : std::string();
     }();
-    if (!home.empty() && cwd.size() >= home.size() && _strnicmp(cwd.c_str(), home.c_str(), home.size()) == 0)
+    if (path_within(cwd, home))
         return "~" + cwd.substr(home.size());
     return cwd;
 }
@@ -2190,8 +2198,8 @@ private:
                 not_repo = true;
                 repo_top.clear();
                 changes.clear();
-                changes_loading = false;
             }
+            changes_loading = false;  // also when the folder changed meanwhile: the next load may start
             return;
         }
         bool ok = false;
@@ -2474,6 +2482,7 @@ struct Placement {
     std::string session;
     LaunchTarget target = LaunchTarget::kTab;
     int space = -1;
+    std::string space_id;  // the space by id: indices move while the create is pending
     std::string split_of;
     std::string replace;  // restart in place
     std::string space_name;
@@ -3277,10 +3286,14 @@ void place(App::State& s, const Placement& p) {
             }
             [[fallthrough]];
         case LaunchTarget::kTab: {
-            int sp = p.space >= 0 && p.space < static_cast<int>(s.ws.spaces.size()) &&
-                             s.ws.spaces[static_cast<std::size_t>(p.space)].machine == p.machine
-                         ? p.space
-                         : -1;
+            int sp = p.space_id.empty() ? p.space : -1;
+            for (int i = 0; i < static_cast<int>(s.ws.spaces.size()) && !p.space_id.empty(); ++i)
+                if (s.ws.spaces[static_cast<std::size_t>(i)].id == p.space_id)
+                    sp = i;
+            sp = sp >= 0 && sp < static_cast<int>(s.ws.spaces.size()) &&
+                             s.ws.spaces[static_cast<std::size_t>(sp)].machine == p.machine
+                     ? sp
+                     : -1;
             if (sp < 0) {
                 for (int i = 0; i < static_cast<int>(s.ws.spaces.size()) && sp < 0; ++i)
                     if (s.ws.spaces[static_cast<std::size_t>(i)].machine == p.machine)
@@ -3847,6 +3860,7 @@ std::string exec_command(App::State& s, const std::string& cmd) {
                                        : LaunchTarget::kTab;
         p.split_of = focused;
         p.space = s.ws.active_space;
+        p.space_id = s.ws.active() != nullptr ? s.ws.active()->id : std::string();
         p.machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
         const std::string cwd = s.focused_cwd().empty() ? std::string(s.launch_cwd) : s.focused_cwd();
         if (!profile.empty())
@@ -3861,6 +3875,7 @@ std::string exec_command(App::State& s, const std::string& cmd) {
                                                         : LaunchTarget::kSplitRight;
         p.split_of = focused;
         p.space = s.ws.active_space;
+        p.space_id = s.ws.active() != nullptr ? s.ws.active()->id : std::string();
         p.machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
         if (s.machine_of.count(focused) && p.target != LaunchTarget::kSpace)
             p.machine = s.machine_of[focused];
@@ -4206,7 +4221,7 @@ std::string exec_command(App::State& s, const std::string& cmd) {
             for (const auto& t : s.ws.spaces[static_cast<std::size_t>(i)].tabs)
                 for (const auto& id : s.ws.sessions_in(t))
                     if (s.views_by_id.count(id) && s.machine_of[id] == machine &&
-                        _strnicmp(s.views_by_id[id].cwd.c_str(), top.c_str(), top.size()) == 0)
+                        path_within(s.views_by_id[id].cwd, top))
                         inside = true;
             if (inside)
                 run_command(s, "space.close_now:" + s.ws.spaces[static_cast<std::size_t>(i)].id);
@@ -5241,7 +5256,8 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         // machine moves the space there (spaces.js 466-489).
         if (ImGui::IsItemActivated() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             s.drag_space = i;
-        if (s.drag_space >= 0 && s.drag_space != i && ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+        if (s.drag_space >= 0 && s.drag_space < static_cast<int>(s.ws.spaces.size()) && s.drag_space != i &&
+            ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
             mouse.y >= a.y && mouse.y < b.y &&
             s.ws.spaces[static_cast<std::size_t>(s.drag_space)].machine == sp.machine) {
             drop_target = i;
@@ -5328,7 +5344,8 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
         d->AddRectFilled(ImVec2(pos.x + pad, drop_y - px(1)), ImVec2(pos.x + pad + rw, drop_y + px(1)), g_pal->focus);
     }
     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-        if (s.drag_space >= 0 && drop_target >= 0)
+        // The dragged space may have closed meanwhile (its terminals ended).
+        if (s.drag_space >= 0 && s.drag_space < static_cast<int>(s.ws.spaces.size()) && drop_target >= 0)
             s.ws.move_space(s.drag_space, drop_target);
         s.drag_space = -1;
     }
@@ -9288,6 +9305,7 @@ void draw_launcher(App::State& s) {
         p.target = s.launch_target;
         p.split_of = s.launch_split_of;
         p.space = s.ws.active_space;
+        p.space_id = s.ws.active() != nullptr ? s.ws.active()->id : std::string();
         s.launch_error.clear();
         s.settings.last_cwd = s.launch_cwd;
         save_settings(s.settings);
