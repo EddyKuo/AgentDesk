@@ -6190,6 +6190,9 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
                 continue;
             ImGui::PushID(tab.id.c_str());
             ImGui::SetCursorScreenPos(a);
+            // The close button is drawn on top of the tab (herdr tabs/main.js): let it take the
+            // mouse, or the tab's own button keeps every press and ✕ never fires.
+            ImGui::SetNextItemAllowOverlap();
             ImGui::InvisibleButton("##tab", ImVec2(it.w, th));
             const bool hov = ImGui::IsItemHovered();
             if (ImGui::IsItemActivated())
