@@ -1,20 +1,19 @@
 #pragma once
 // Internal to agent-ui: the AgentDesk 98 layout's shared types and helpers (namespace
 // detail::w98), used by the win98_*.cpp files and the commands and panes that call into them.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail::w98 {
 
 // ------------------------------------------------------------ win98_kit.cpp
-// ------------------------------------------------------------------ Herdr 98 (herdr-app win98)
-// Herdr 98, part 1: the drawing kit, the shared values, the popup menus and the overlay windows.
-// Ported from herdr-app defaults/mods/win98 (commit 321c9a8, Apache-2.0): kit.js, menu.js; herdr's
-// overlays (herdr.d.ts 395-425). Uses the app's helpers from app_internal.hpp (run_command,
-// create_session, program_info, ...).
+// The drawing kit, the shared values, the popup menus and the overlay windows. Uses the app's
+// helpers from app_internal.hpp (run_command, create_session, program_info, ...).
 //
-// Pixels: kit.js 4-6 draws in whole Win98 pixels, u(n) = n * scale (Small Fonts 1, Large 2) at
-// the display's scale; herdr's zoom does not change them. Layout px (padding, gaps) are px().
+// Pixels: everything is drawn in whole Win98 pixels, U(n) = n * scale (Small Fonts 1, Large
+// Fonts 2) times the display's DPI scale; the app zoom does not change them. Layout px (padding,
+// gaps) are px().
 
 using namespace ::agentdesk::desktop::w98state;
 namespace k98 = agentdesk::ui::win98;
@@ -37,6 +36,10 @@ float U(App::State& s, float n);
 float U(App::State& s, int n);
 float one(App::State& s);
 float snap(float v);
+// 0 -> 1 -> 0 over each period of the UI clock (blinking carets and badges, bobbing).
+double triangle_wave(double period_ms);
+// Without leading and trailing white space (std::isspace).
+std::string trim_space(std::string t);
 std::string app_state(App::State& s, const std::string& name);
 void set_app(App::State& s, const std::string& name, const std::string& state);
 void sfx(App::State& s, const std::string& name);
@@ -48,6 +51,10 @@ float text_w(App::State& s, const std::string& t, bool bold = false, float size 
 float text_top(App::State& s, float top, float size = 11, float line = 13);
 float label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col,
             bool bold = false, float size = 11, float line = 13, bool access = true, ImFont* font = nullptr);
+// The common case: regular 11 px text in a 13 px line, "&" shown as is.
+float plain_label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col);
+// A 1 px underline under `w` px of regular text laid out at (x, top).
+void underline(App::State& s, ImDrawList* dl, float x, float top, float w, ImU32 col);
 float label_clipped(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col,
                     float max_w, bool bold = false);
 std::vector<std::string> wrap(App::State& s, const std::string& text, float width, bool bold = false,
@@ -55,7 +62,7 @@ std::vector<std::string> wrap(App::State& s, const std::string& text, float widt
 float lines(App::State& s, ImDrawList* dl, float x, float top, const std::vector<std::string>& ls, ImU32 col,
             bool bold = false);
 
-// ---------------------------------------------------------------- bevels (kit.js 82-137)
+// ---------------------------------------------------------------- boxes and bevels
 
 struct Box {
     float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
@@ -84,7 +91,7 @@ void brand_splash(App::State& s, ImDrawList* dl, Box b);
 void glyph(App::State& s, ImDrawList* dl, const std::string& name, float w, float h, ImVec2 at, ImU32 col);
 void program_icon(App::State& s, ImDrawList* dl, const ui::Program& p, float size, ImVec2 at);
 
-// ---------------------------------------------------------------- buttons (kit.js 139-174)
+// ---------------------------------------------------------------- buttons
 
 struct ButtonOpts {
     bool def = false;      // the thick outline
@@ -110,7 +117,7 @@ Pressed button(App::State& s, ImDrawList* dl, const char* id, Box b, const Butto
 Pressed text_button(App::State& s, ImDrawList* dl, const char* id, Box b, const std::string& text,
                     ButtonOpts o = {}, bool bold = false);
 
-// ---------------------------------------------------------------- title bars (kit.js 241-289)
+// ---------------------------------------------------------------- title bars, fields, menus, windows
 
 struct Control {
     std::string kind;
@@ -128,12 +135,14 @@ TitleEvents title_bar(App::State& s, ImDrawList* dl, const char* id, Box b, cons
 Box field(App::State& s, ImDrawList* dl, Box b, float pad_y = 2, float pad_x = 3, ImU32 bg = 0);
 Box well(App::State& s, ImDrawList* dl, Box b, float pad_y = 1, float pad_x = 3);
 int open_menu(App::State& s, MenuItems items, std::optional<ImVec2> at, bool start = false,
-              std::string owner = {}, std::vector<int> parents = {},
-              std::optional<Box> above = std::nullopt);
+              std::string owner = {}, std::vector<int> parents = {}, std::optional<Box> above = std::nullopt);
 void close_all_menus(App::State& s);
 void raise(const std::string& name);
 void keyboard_back(App::State& s);
 void draw_menus(App::State& s);
+// Begins a borderless, undecorated ImGui window for an overlay; the caller sets its position and
+// size first and calls ImGui::End().
+void begin_overlay(const std::string& name, ImGuiWindowFlags extra);
 Window* find_window(App::State& s, int id);
 Window* find_key(App::State& s, const std::string& key);
 int open_window(App::State& s, std::unique_ptr<Window> win);
@@ -148,8 +157,8 @@ struct Task {
     std::string status;
 };
 
-// dialog.js 263-273: 75 x 23 buttons in a row, gap 6, at the end or in the middle. Returns the
-// index pressed, or -1.
+// A row of push buttons (75 x 23 unless given, gap 6), right-aligned (`end`) or centered.
+// Returns the index pressed, or -1.
 struct Btn {
     std::string label;
     bool def = false;
@@ -175,7 +184,16 @@ Dialog prompt(const std::string& title, const std::string& text, const std::stri
               std::optional<std::string> value = {}, bool machines = false);
 Dialog message(const std::string& title, const std::string& text, const std::string& icon = {});
 Dialog kind_dialog(const std::string& kind);
+Dialog new_space_prompt(App::State& s);
+Dialog new_tab_prompt(App::State& s);
+Dialog rename_tab_prompt(App::State& s, const std::string& id, const std::string& current);
+Dialog rename_space_prompt(App::State& s, const std::string& id, const std::string& current);
 Dialog close_space_ask(App::State& s, int index);
+// The badge icon for an agent status word ("" for none).
+std::string status_badge(const std::string& status);
+// Where a session lives: "<space> \ <tab>" (both empty when it is in no tab).
+std::string session_place(App::State& s, const std::string& id,
+                          const std::map<std::string, std::string>& cwds);
 std::vector<Task> tasks(App::State& s);
 void set_desktop(App::State& s, const std::string& c);
 float pane_border(App::State& s);
@@ -193,7 +211,7 @@ void desktop(App::State& s, ImDrawList* dl, Box b);
 k98::Mines::Options mines_options(App::State& s);
 ImVec2 render_mines(App::State& s, Window& win, ImDrawList* dl, ImVec2 at);
 
-// ---------------------------------------------------------------- Solitaire (sol.js)
+// ---------------------------------------------------------------- Solitaire
 
 using Sol = k98::Solitaire;
 ImVec2 render_sol(App::State& s, Window& /*win*/, ImDrawList* dl, ImVec2 at);

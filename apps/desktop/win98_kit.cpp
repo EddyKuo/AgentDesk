@@ -1,5 +1,6 @@
 // AgentDesk 98 drawing kit: shared values, sounds, fonts, text, bevels, icons, buttons, title
 // bars and popup menus.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
@@ -55,7 +56,7 @@ k98::DateTime local_now() {
 }
 
 namespace {
-// ---------------------------------------------------------------- shared (herdr shared(), persisted)
+// ---------------------------------------------------------------- shared values (<data>\win98.json)
 
 std::filesystem::path shared_file() {
     return data_dir() / L"win98.json";
@@ -96,13 +97,13 @@ std::string shared_str(App::State& s, const std::string& key) {
     return j.is_string() ? j.get<std::string>() : std::string();
 }
 
-// kit.js 40-43.
+// The Win98 pixel scale: 1 (Small Fonts) or 2 (Large Fonts).
 int scale(App::State& s) {
     const Json& j = shared(s, "win98.scale");
     return k98::scale_of(j.is_number() ? j.get<int>() : 1);
 }
 
-// kit.js 45-51: one Win98 pixel on screen.
+// One Win98 pixel, in screen px.
 float K(App::State& s) {
     return static_cast<float>(scale(s)) * s.dpi;
 }
@@ -120,7 +121,20 @@ float snap(float v) {
     return std::round(v);
 }
 
-// kit.js 417-427: which game windows are open: {mines: "open" | "min", sol: ...}.
+double triangle_wave(double period_ms) {
+    const double t = std::fmod(ImGui::GetTime() * 1000.0, period_ms) / period_ms;
+    return t < 0.5 ? t * 2 : 2 - t * 2;
+}
+
+std::string trim_space(std::string t) {
+    while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back())))
+        t.pop_back();
+    while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front())))
+        t.erase(t.begin());
+    return t;
+}
+
+// Which game windows are open: {mines: "open" | "min", sol: ...}.
 std::string app_state(App::State& s, const std::string& name) {
     const Json& a = shared(s, "win98.apps");
     return a.is_object() && a.contains(name) && a[name].is_string() ? a[name].get<std::string>()
@@ -138,7 +152,7 @@ void set_app(App::State& s, const std::string& name, const std::string& state) {
 }
 
 namespace {
-// ---------------------------------------------------------------- sounds (kit.js 404-413)
+// ---------------------------------------------------------------- sounds
 
 void play_file(const std::filesystem::path& file) {
     static std::atomic<int> counter{0};
@@ -154,7 +168,7 @@ void play_file(const std::filesystem::path& file) {
 
 }  // namespace
 
-// Plays a Herdr 98 sound unless sounds are off (settings, or the speaker in the tray).
+// Plays an AgentDesk 98 sound unless sounds are off (settings, or the speaker in the tray).
 void sfx(App::State& s, const std::string& name) {
     if (!s.settings.sounds || s.config.automated)
         return;
@@ -166,7 +180,7 @@ void sfx(App::State& s, const std::string& name) {
         play_file(f);
 }
 
-// ---------------------------------------------------------------- fonts (README.md 8-10)
+// ---------------------------------------------------------------- fonts
 
 void ensure_fonts(App::State& s) {
     W98& w = st(s);
@@ -183,7 +197,7 @@ void ensure_fonts(App::State& s) {
         w.bold = w.font;
     if (w.dos == nullptr)
         w.dos = s.fonts.mono;
-    // mines.js 157: the numbers in Arial bold.
+    // The Mines numbers are Arial bold.
     if (const auto* f = find_family("Arial"))
         w.arial = ui::load_font_file(f->file_for(700), 14.0f, false);
     if (w.arial == nullptr)
@@ -197,7 +211,7 @@ void ensure_fonts(App::State& s) {
     ui::ImageCache::add_svg_font("DejaVu Serif", true, wf / L"timesbd.ttf");
 }
 
-// kit.js 451-452, at Herdr's zoom (the terminal font size at zoom 1).
+// The terminal font size in this layout, for the Win98 scale and the app zoom.
 float terminal_font_size(App::State& s) {
     return k98::terminal_font_px(scale(s), s.settings.zoom);
 }
@@ -207,7 +221,7 @@ ImFont* layout_font(App::State& s, int which) {
     return which == 0 ? st(s).dos : which == 1 ? st(s).font : st(s).bold;
 }
 
-// ---------------------------------------------------------------- text (kit.js 55-80)
+// ---------------------------------------------------------------- text
 
 ImFont* face(App::State& s, bool bold) {
     ensure_fonts(s);  // the layout may have switched in the middle of a frame
@@ -224,9 +238,9 @@ float text_top(App::State& s, float top, float size, float line) {
 }
 
 // One line of text in a line box of `line` px at (x, top). "&File" underlines the F unless
-// noAccess (kit.js 56-71). Returns its width.
-float label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col,
-            bool bold, float size, float line, bool access, ImFont* font) {
+// `access` is false. Returns its width.
+float label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col, bool bold,
+            float size, float line, bool access, ImFont* font) {
     ImFont* f = font != nullptr ? font : face(s, bold);
     const float px_size = U(s, size);
     const float y = text_top(s, top, size, line);
@@ -249,11 +263,20 @@ float label(App::State& s, ImDrawList* dl, float x, float top, const std::string
     return f->CalcTextSizeA(px_size, FLT_MAX, 0, shown.c_str()).x;
 }
 
+float plain_label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col) {
+    return label(s, dl, x, top, text, col, false, 11, 13, false);
+}
+
+void underline(App::State& s, ImDrawList* dl, float x, float top, float w, ImU32 col) {
+    const float base = text_top(s, top) + face(s, false)->GetFontBaked(U(s, 11))->Ascent;
+    fill(dl, Box{snap(x), snap(base + 1), snap(x + w), snap(base + 1) + one(s)}, col);
+}
+
 namespace {
 // Text read bottom to top (the Start menu's banner): laid out level from (x, bottom), then turned
 // a quarter left about that point, its top toward x. Returns its length.
-float label_up(App::State& s, ImDrawList* dl, float x, float bottom, const std::string& text, ImU32 col, bool bold,
-               float size, float line) {
+float label_up(App::State& s, ImDrawList* dl, float x, float bottom, const std::string& text, ImU32 col,
+               bool bold, float size, float line) {
     dl->PushClipRectFullScreen();  // level, it runs past the banner; turned, it is inside it
     const int first = dl->VtxBuffer.Size;
     const float w = label(s, dl, x, bottom, text, col, bold, size, line, false);
@@ -267,16 +290,15 @@ float label_up(App::State& s, ImDrawList* dl, float x, float bottom, const std::
 
 }  // namespace
 
-// A truncated line (GPUI truncate: an ellipsis).
+// One line, cut off with an ellipsis past max_w.
 float label_clipped(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, ImU32 col,
                     float max_w, bool bold) {
     return text_clipped(dl, face(s, bold), U(s, 11), ImVec2(snap(x), text_top(s, top)), col, text, max_w);
 }
 
-// The text's lines (dialog.js 40-44: one per "\n", an empty one keeps its height), wrapped at
-// `width` as GPUI wraps a div's text.
-std::vector<std::string> wrap(App::State& s, const std::string& text, float width, bool bold,
-                              float size) {
+// The text's lines: one per "\n" (an empty one keeps its height), each wrapped at `width` on
+// spaces.
+std::vector<std::string> wrap(App::State& s, const std::string& text, float width, bool bold, float size) {
     std::vector<std::string> out;
     std::stringstream in(text);
     for (std::string para; std::getline(in, para, '\n');) {
@@ -301,7 +323,7 @@ std::vector<std::string> wrap(App::State& s, const std::string& text, float widt
                 out.push_back(line);
                 line.clear();
             }
-            // A word wider than the line breaks between characters (GPUI's line wrapper).
+            // A word wider than the line breaks between characters.
             while (text_w(s, word, bold, size) > width && word.size() > 1) {
                 std::size_t n = 0;
                 while (n < word.size()) {
@@ -362,7 +384,7 @@ Box bevel(App::State& s, ImDrawList* dl, Box b, Bevel kind, std::optional<ImU32>
     return b;
 }
 
-// kit.js 176-181: an etched line, 2 px.
+// An etched line, 2 Win98 px: shadow, then highlight.
 void etch(App::State& s, ImDrawList* dl, float x, float y, float len, bool vertical) {
     const float o = one(s);
     if (vertical) {
@@ -374,7 +396,7 @@ void etch(App::State& s, ImDrawList* dl, float x, float y, float len, bool verti
     }
 }
 
-// kit.js 192-195: a left-to-right gradient (angle 90), or top to bottom (180).
+// A left-to-right gradient, or top to bottom when `down`.
 void gradient(ImDrawList* dl, Box b, ImU32 from, ImU32 to, bool down) {
     if (down)
         dl->AddRectFilledMultiColor(b.a(), b.b(), from, from, to, to);
@@ -382,7 +404,7 @@ void gradient(ImDrawList* dl, Box b, ImU32 from, ImU32 to, bool down) {
         dl->AddRectFilledMultiColor(b.a(), b.b(), from, to, to, from);
 }
 
-// kit.js 197-200: a 1 px dither (Win98's checked buttons): white on every other Win98 pixel.
+// A 1 px dither (Win98's checked buttons): white on every other Win98 pixel.
 void dither(App::State& s, ImDrawList* dl, Box b) {
     const float o = one(s);
     dl->PushClipRect(b.a(), b.b(), true);
@@ -394,10 +416,9 @@ void dither(App::State& s, ImDrawList* dl, Box b) {
     dl->PopClipRect();
 }
 
-// ---------------------------------------------------------------- icons (kit.js 202-225)
+// ---------------------------------------------------------------- icons
 
-void image(App::State& s, ImDrawList* dl, const std::filesystem::path& file, Box b,
-           ImU32 tint, bool mono) {
+void image(App::State& s, ImDrawList* dl, const std::filesystem::path& file, Box b, ImU32 tint, bool mono) {
     const auto img = st(s).images.svg(file, static_cast<int>(b.w()), static_cast<int>(b.h()), mono);
     if (img.ok())
         dl->AddImage(img.tex, b.a(), b.b(), ImVec2(0, 0), ImVec2(1, 1), tint);
@@ -437,7 +458,7 @@ float brand_name(App::State& s, ImDrawList* dl, float x, float top, float size, 
 
 }  // namespace
 
-// The About box's picture (art/generate.ts 120: white to #a4d2ee, the name at 32).
+// The About box's picture: white to #a4d2ee, the name at 32 px.
 void brand_header(App::State& s, ImDrawList* dl, Box b) {
     gradient(dl, b, rgb(0xffffff), rgb(0xa4d2ee));
     brand_name(s, dl, b.x0 + U(s, 12), b.y0 + (b.h() - U(s, 46)) * 0.5f, 32);
@@ -450,15 +471,15 @@ void brand_splash(App::State& s, ImDrawList* dl, Box b) {
     brand_name(s, dl, snap(b.x0 + (b.w() - w) * 0.5f), snap(b.y0 + b.h() * 0.4f - U(s, 64) * 0.5f), 44);
 }
 
-// A one-color SVG of the mod (svg(...).text_color()): ctl-*, check, arrows.
+// A one-color SVG drawn in `col`: ctl-*, check, arrows.
 void glyph(App::State& s, ImDrawList* dl, const std::string& name, float w, float h, ImVec2 at, ImU32 col) {
     image(s, dl, root_dir() / L"icons" / win::to_wide(name + ".svg"), box(at, ImVec2(U(s, w), U(s, h))), col,
           true);
 }
 
-// kit.js 208-225 programIcon: from the app's program table (herdr programs.json, programs_of in
-// programs.cpp); shells, the generic shell entry and programs without an icon are MS-DOS. A tinted
-// glyph sits on its tile (navy without one), 4 px smaller, in its color (white without one).
+// A program's icon, from the app's program table (program_of in programs.cpp); shells, the generic shell
+// entry and programs without an icon are MS-DOS. A tinted glyph sits on its tile (navy without one), 4 px
+// smaller, in its color (white without one).
 void program_icon(App::State& s, ImDrawList* dl, const ui::Program& p, float size, ImVec2 at) {
     if (p.shell || p.key == "shell" || p.icon.empty()) {
         icon(s, dl, "dos", size, at);
@@ -484,7 +505,7 @@ Pressed area(const char* id, Box b, bool on_down) {
     ImGui::SetCursorScreenPos(b.a());
     const bool released = ImGui::InvisibleButton(id, ImVec2(std::max(1.0f, b.w()), std::max(1.0f, b.h())),
                                                  ImGuiButtonFlags_MouseButtonLeft);
-    // on_mouse_down: the press itself; on_click: released over it.
+    // on_down: the press itself counts; otherwise a release over it.
     p.clicked = on_down ? ImGui::IsItemActivated() : released;
     p.hovered = ImGui::IsItemHovered();
     g_area_hovered = g_area_hovered || p.hovered;
@@ -514,7 +535,7 @@ Pressed button(App::State& s, ImDrawList* dl, const char* id, Box b, const Butto
     Box in =
         bevel(s, dl, face, pressed_look ? Bevel::kPressed : Bevel::kRaised, o.bg != 0 ? o.bg : rgb(C::kFace));
     in = in.inset(U(s, o.pad_y), U(s, o.pad_x), U(s, o.pad_y), U(s, o.pad_x));
-    if (p.held && !o.toggled && !o.disabled)  // kit.js 118: the face moves 1 px down and right
+    if (p.held && !o.toggled && !o.disabled)  // held: the face moves 1 px down and right
         in = in.inset(one(s), -one(s), -one(s), one(s));
     p.content = in;
     if (o.tooltip != nullptr && p.hovered)
@@ -522,7 +543,7 @@ Pressed button(App::State& s, ImDrawList* dl, const char* id, Box b, const Butto
     return p;
 }
 
-// A push button with a label, centered (kit.js 150-151).
+// A push button with a centered label.
 Pressed text_button(App::State& s, ImDrawList* dl, const char* id, Box b, const std::string& text,
                     ButtonOpts o, bool bold) {
     Pressed p = button(s, dl, id, b, o);
@@ -533,7 +554,7 @@ Pressed text_button(App::State& s, ImDrawList* dl, const char* id, Box b, const 
 }
 
 namespace {
-// kit.js 229-239: a title bar's little button, 16 x 14, its glyph 8 x 7.
+// A title bar's little button, 16 x 14, its glyph 8 x 7.
 bool control(App::State& s, ImDrawList* dl, const char* id, const std::string& kind, ImVec2 at,
              const char* tip) {
     static const std::map<std::string, std::string> kGlyph = {{"min", "ctl-min"},
@@ -596,7 +617,7 @@ TitleEvents title_bar(App::State& s, ImDrawList* dl, const char* id, Box b, cons
     return ev;
 }
 
-// kit.js 310-318: a sunken white field and a status bar panel.
+// A sunken white field, and a status bar panel.
 Box field(App::State& s, ImDrawList* dl, Box b, float pad_y, float pad_x, ImU32 bg) {
     return bevel(s, dl, b, Bevel::kField, bg != 0 ? bg : rgb(C::kWhite))
         .inset(U(s, pad_y), U(s, pad_x), U(s, pad_y), U(s, pad_x));
@@ -606,7 +627,7 @@ Box well(App::State& s, ImDrawList* dl, Box b, float pad_y, float pad_x) {
 }
 
 namespace {
-// ---------------------------------------------------------------- menus (menu.js, kit.js 322-371)
+// ---------------------------------------------------------------- menus
 
 Menu* find_menu(App::State& s, int id) {
     for (auto& m : st(s).menus)
@@ -617,11 +638,10 @@ Menu* find_menu(App::State& s, int id) {
 
 }  // namespace
 
-// kit.js 356-371: opens a popup menu at `at` (the pointer when not given), or above a box (the
+// Opens a popup menu at `at` (the pointer when not given), or above a box (the
 // Start menu over its button). Returns its id.
-int open_menu(App::State& s, MenuItems items, std::optional<ImVec2> at, bool start,
-              std::string owner, std::vector<int> parents,
-              std::optional<Box> above) {
+int open_menu(App::State& s, MenuItems items, std::optional<ImVec2> at, bool start, std::string owner,
+              std::vector<int> parents, std::optional<Box> above) {
     W98& w = st(s);
     std::vector<k98::MenuRowText> rows;
     for (const auto& it : items)
@@ -643,7 +663,7 @@ int open_menu(App::State& s, MenuItems items, std::optional<ImVec2> at, bool sta
     m.opened_frame = ImGui::GetFrameCount();
     m.owner = std::move(owner);
     m.parents = std::move(parents);
-    // menu.js 237: a top menu starts the list over.
+    // A top-level menu replaces every open menu.
     if (m.parents.empty())
         w.menus.clear();
     if (!m.owner.empty())
@@ -658,7 +678,7 @@ void release_owner(App::State& s, const Menu& m) {
         set_shared(s, "win98.menu.owner", nullptr);
 }
 
-// menu.js 216-223: closes a menu and every menu opened from it.
+// Closes a menu and every menu opened from it.
 void close_tree(App::State& s, int id) {
     W98& w = st(s);
     std::erase_if(w.menus, [&](const Menu& m) {
@@ -677,7 +697,7 @@ void close_tree(App::State& s, int id) {
 
 }  // namespace
 
-// menu.js 261-268: a choice closes the whole chain.
+// Closes every menu (a choice closes the whole chain).
 void close_all_menus(App::State& s) {
     W98& w = st(s);
     for (const auto& m : w.menus)
@@ -688,7 +708,7 @@ void close_all_menus(App::State& s) {
 }
 
 namespace {
-// menu.js 277-290: a submenu to the right of its row (at the pointer when opened by a key).
+// Opens a row's submenu to the right of its row (at the pointer when opened by a key).
 void open_sub(App::State& s, int menu_id, int i, std::optional<Box> row) {
     Menu* m = find_menu(s, menu_id);
     if (m == nullptr || i < 0 || i >= static_cast<int>(m->items.size()))
@@ -717,7 +737,7 @@ void open_sub(App::State& s, int menu_id, int i, std::optional<Box> row) {
     }
 }
 
-// menu.js 270-275.
+// Runs an item: every menu closes first. Separators, submenus and disabled rows do nothing.
 void choose(App::State& s, const MenuItem& it) {
     if (it.disabled || it.sep || !it.sub.empty())
         return;
@@ -727,7 +747,7 @@ void choose(App::State& s, const MenuItem& it) {
         act();
 }
 
-// menu.js 245-251: Escape (and Left) closes this menu and what hangs off it.
+// Escape (and Left) closes this menu and what hangs off it.
 void escape_menu(App::State& s, int menu_id) {
     Menu* m = find_menu(s, menu_id);
     if (m == nullptr)
@@ -738,7 +758,7 @@ void escape_menu(App::State& s, int menu_id) {
         set_shared(s, "win98.start", nullptr);
 }
 
-// menu.js 292-301: the next row that is not a separator.
+// Moves the highlight to the next row that is not a separator.
 void move_menu(Menu& m, int d) {
     const int n = static_cast<int>(m.items.size());
     if (n == 0)
@@ -752,7 +772,26 @@ void move_menu(Menu& m, int d) {
     m.at = i;
 }
 
-// menu.js 303-336: the keys of the menu opened last.
+// Enter on row i: opens its submenu, or chooses it. The item is copied because choosing it
+// closes (and frees) the menu.
+void activate_row(App::State& s, int menu_id, const Menu& m, int i) {
+    const MenuItem& it = m.items[static_cast<std::size_t>(i)];
+    if (!it.sub.empty())
+        open_sub(s, menu_id, i, std::nullopt);
+    else
+        choose(s, MenuItem(it));
+}
+
+// The first row, not a separator, whose access key is `c`; -1 when none.
+int access_row(const Menu& m, char c) {
+    for (int i = 0; i < static_cast<int>(m.items.size()); ++i)
+        if (!m.items[static_cast<std::size_t>(i)].sep &&
+            k98::access_matches(m.items[static_cast<std::size_t>(i)].label, c))
+            return i;
+    return -1;
+}
+
+// The keys of the menu opened last: arrows, Enter or Space, Escape, and access keys.
 void menu_keys(App::State& s, int menu_id) {
     Menu* m = find_menu(s, menu_id);
     if (m == nullptr)
@@ -768,12 +807,8 @@ void menu_keys(App::State& s, int menu_id) {
     } else if (pressed(ImGuiKey_LeftArrow) || pressed(ImGuiKey_Escape)) {
         escape_menu(s, menu_id);
     } else if (pressed(ImGuiKey_Enter) || pressed(ImGuiKey_KeypadEnter) || pressed(ImGuiKey_Space)) {
-        if (m->at >= 0) {
-            if (!m->items[static_cast<std::size_t>(m->at)].sub.empty())
-                open_sub(s, menu_id, m->at, std::nullopt);
-            else
-                choose(s, MenuItem(m->items[static_cast<std::size_t>(m->at)]));
-        }
+        if (m->at >= 0)
+            activate_row(s, menu_id, *m, m->at);
     } else {
         for (const ImWchar c : ImGui::GetIO().InputQueueCharacters) {
             if (c >= 128 || c == ' ')
@@ -781,24 +816,17 @@ void menu_keys(App::State& s, int menu_id) {
             Menu* mm = find_menu(s, menu_id);
             if (mm == nullptr)
                 break;
-            int found = -1;
-            for (int i = 0; i < static_cast<int>(mm->items.size()) && found < 0; ++i)
-                if (!mm->items[static_cast<std::size_t>(i)].sep &&
-                    k98::access_matches(mm->items[static_cast<std::size_t>(i)].label, static_cast<char>(c)))
-                    found = i;
+            const int found = access_row(*mm, static_cast<char>(c));
             if (found < 0)
                 continue;
             mm->at = found;
-            if (!mm->items[static_cast<std::size_t>(found)].sub.empty())
-                open_sub(s, menu_id, found, std::nullopt);
-            else
-                choose(s, MenuItem(mm->items[static_cast<std::size_t>(found)]));
+            activate_row(s, menu_id, *mm, found);
             break;
         }
     }
 }
 
-// menu.js 338-386: one row. Start menu rows are 34 px with 32 px icons.
+// One row. Start menu rows are 34 px with 32 px icons.
 void menu_row(App::State& s, ImDrawList* dl, int menu_id, int i, Box r, bool start) {
     Menu* m = find_menu(s, menu_id);
     const MenuItem it = m->items[static_cast<std::size_t>(i)];
@@ -813,7 +841,7 @@ void menu_row(App::State& s, ImDrawList* dl, int menu_id, int i, Box r, bool sta
     m = find_menu(s, menu_id);
     if (m == nullptr)
         return;
-    // on_mouse_move: the row under the pointer is the highlighted one; its submenu opens.
+    // When the pointer moves, the row under it is highlighted and its submenu opens.
     if (p.hovered && (ImGui::GetIO().MouseDelta.x != 0 || ImGui::GetIO().MouseDelta.y != 0)) {
         if (!(m->at == i && (m->sub_index == i || it.sub.empty()))) {
             m->at = i;
@@ -873,15 +901,15 @@ void menu_row(App::State& s, ImDrawList* dl, int menu_id, int i, Box r, bool sta
 
 }  // namespace
 
-// Puts a Herdr 98 window above the others, unless one of AgentDesk's own dialogs (an ImGui popup:
+// Puts an AgentDesk 98 window above the others, unless one of AgentDesk's own dialogs (an ImGui popup:
 // Settings, the palette) is open over everything.
 void raise(const std::string& name) {
     if (!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId))
         ui::adapter::bring_to_front(name.c_str());
 }
 
-// When a menu or a dialog closes, the keyboard goes to the dialog on top (dialogs focus
-// themselves, dialog.js 50-51), else back to the terminal.
+// When a menu or a dialog closes, the keyboard goes to the dialog on top (dialogs take the
+// keyboard), else back to the terminal.
 void keyboard_back(App::State& s) {
     W98& w = st(s);
     for (auto it = w.windows.rbegin(); it != w.windows.rend(); ++it)
@@ -896,7 +924,95 @@ void keyboard_back(App::State& s) {
     s.focus_view(s.ws.focused_session());
 }
 
-// menu.js 388-426: every open menu, the last one opened on top with the keyboard.
+namespace {
+// Closes every menu a press landed outside of, except menus opened by this very press.
+void close_menus_pressed_outside(App::State& s, ImVec2 mp) {
+    W98& w = st(s);
+    std::vector<int> doomed;
+    for (const auto& m : w.menus)
+        if (!box(m.pos, m.size).contains(mp) && m.opened_frame != ImGui::GetFrameCount())
+            doomed.push_back(m.id);
+    for (const int id : doomed) {
+        Menu* m = find_menu(s, id);
+        if (m == nullptr)
+            continue;
+        if (m->start && !shared(s, "win98.start").is_null())
+            set_shared(s, "win98.start", nullptr);
+        const Menu copy = *m;
+        release_owner(s, copy);
+        std::erase_if(w.menus, [&](const Menu& x) { return x.id == id; });
+        for (auto& x : w.menus)
+            if (x.sub_id == id) {
+                x.sub_id = 0;
+                x.sub_index = -1;
+            }
+    }
+}
+
+// The Start menu's banner: navy with a black-to-navy gradient, "AgentDesk 98" read upward at the
+// foot. Returns its right edge.
+float start_banner(App::State& s, ImDrawList* dl, Box in) {
+    const Box ban{in.x0, in.y0, in.x0 + U(s, k98::MenuMetrics::kBanner), in.y1};
+    fill(dl, ban, rgb(C::kNavy));
+    gradient(dl, ban, rgb(0x000000), rgb(C::kNavy), true);
+    const float bottom = ban.y1 - U(s, 3);
+    const auto line = static_cast<float>(k98::MenuMetrics::kBanner);
+    const float l = label_up(s, dl, ban.x0, bottom, "AgentDesk", rgb(C::kWhite), true, 16, line);
+    label_up(s, dl, ban.x0, bottom - l - U(s, 6), "98", rgb(0xdfdfdf), false, 16, line);
+    return ban.x1;
+}
+
+// One menu in its own ImGui window; the last one opened (`keys`) also reads the keyboard.
+void draw_menu(App::State& s, int id, bool keys) {
+    W98& w = st(s);
+    Menu* m = find_menu(s, id);
+    if (m == nullptr)
+        return;
+    const std::string name = "##w98menu" + std::to_string(id);
+    ImGui::SetNextWindowPos(m->pos);
+    ImGui::SetNextWindowSize(m->size);
+    // A menu takes the keyboard when it opens.
+    if (keys && w.menu_focus != id) {
+        ImGui::SetNextWindowFocus();
+        w.menu_focus = id;
+    }
+    begin_overlay(name, ImGuiWindowFlags_NoScrollWithMouse);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const bool start = m->start;
+    Box in = bevel(s, dl, box(m->pos, m->size), Bevel::kWindow, rgb(C::kFace)).inset(one(s));
+    if (start)
+        in.x0 = start_banner(s, dl, in);
+    float y = in.y0;
+    const std::size_t n = m->items.size();
+    for (std::size_t i = 0; i < n; ++i) {
+        m = find_menu(s, id);  // a row's action may have closed it
+        if (m == nullptr || i >= m->items.size())
+            break;
+        const float h = U(s, m->items[i].sep ? k98::MenuMetrics::kSep
+                             : start         ? k98::MenuMetrics::kStartRow
+                                             : k98::MenuMetrics::kRow);
+        menu_row(s, dl, id, static_cast<int>(i), Box{in.x0, snap(y), in.x1, snap(y + h)}, start);
+        y += h;
+    }
+    if (keys && find_menu(s, id) != nullptr && ImGui::IsWindowFocused())
+        menu_keys(s, id);
+    ImGui::End();
+    raise(name);
+}
+
+}  // namespace
+
+void begin_overlay(const std::string& name, ImGuiWindowFlags extra) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+    ImGui::Begin(name.c_str(), nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoBackground | extra);
+    ImGui::PopStyleVar(3);
+}
+
+// Draws every open menu, the last one opened on top with the keyboard.
 void draw_menus(App::State& s) {
     W98& w = st(s);
     if (w.menus.empty()) {
@@ -906,97 +1022,21 @@ void draw_menus(App::State& s) {
         }
         return;
     }
-    // on_mouse_down_out: a press beside a menu closes it (popup overlays).
     for (int b = 0; b < 3; ++b) {
         if (!ImGui::IsMouseClicked(b))
             continue;
-        const ImVec2 mp = ImGui::GetIO().MousePos;
-        std::vector<int> doomed;
-        for (const auto& m : w.menus)
-            if (!box(m.pos, m.size).contains(mp) && m.opened_frame != ImGui::GetFrameCount())
-                doomed.push_back(m.id);
-        for (const int id : doomed) {
-            Menu* m = find_menu(s, id);
-            if (m == nullptr)
-                continue;
-            if (m->start && !shared(s, "win98.start").is_null())
-                set_shared(s, "win98.start", nullptr);
-            const Menu copy = *m;
-            release_owner(s, copy);
-            std::erase_if(w.menus, [&](const Menu& x) { return x.id == id; });
-            for (auto& x : w.menus)
-                if (x.sub_id == id) {
-                    x.sub_id = 0;
-                    x.sub_index = -1;
-                }
-        }
+        close_menus_pressed_outside(s, ImGui::GetIO().MousePos);
         if (w.menus.empty()) {
             keyboard_back(s);
             return;
         }
     }
-    const std::vector<int> ids = [&] {
-        std::vector<int> v;
-        for (const auto& m : w.menus)
-            v.push_back(m.id);
-        return v;
-    }();
+    std::vector<int> ids;
+    for (const auto& m : w.menus)
+        ids.push_back(m.id);
     const int last = ids.back();
-    for (const int id : ids) {
-        Menu* m = find_menu(s, id);
-        if (m == nullptr)
-            continue;
-        const std::string name = "##w98menu" + std::to_string(id);
-        ImGui::SetNextWindowPos(m->pos);
-        ImGui::SetNextWindowSize(m->size);
-        // menu.js 229-230: a menu takes the keyboard when it opens.
-        if (id == last && w.menu_focus != id) {
-            ImGui::SetNextWindowFocus();
-            w.menu_focus = id;
-        }
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
-        ImGui::Begin(name.c_str(), nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
-                         ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollWithMouse);
-        ImGui::PopStyleVar(3);
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const Box all = box(m->pos, m->size);
-        const bool start = m->start;
-        Box in = bevel(s, dl, all, Bevel::kWindow, rgb(C::kFace)).inset(one(s));
-        if (start) {
-            // The banner: 21 px, navy with a black-to-navy gradient, "AgentDesk 98" read upward at the foot.
-            const Box ban{in.x0, in.y0, in.x0 + U(s, k98::MenuMetrics::kBanner), in.y1};
-            fill(dl, ban, rgb(C::kNavy));
-            gradient(dl, ban, rgb(0x000000), rgb(C::kNavy), true);
-            {
-                const float bottom = ban.y1 - U(s, 3);
-                const float l = label_up(s, dl, ban.x0, bottom, "AgentDesk", rgb(C::kWhite), true, 16,
-                                         static_cast<float>(k98::MenuMetrics::kBanner));
-                label_up(s, dl, ban.x0, bottom - l - U(s, 6), "98", rgb(0xdfdfdf), false, 16,
-                         static_cast<float>(k98::MenuMetrics::kBanner));
-            }
-            in.x0 = ban.x1;
-        }
-        float y = in.y0;
-        const std::size_t n = m->items.size();
-        for (std::size_t i = 0; i < n; ++i) {
-            m = find_menu(s, id);
-            if (m == nullptr || i >= m->items.size())
-                break;
-            const float h = U(s, m->items[i].sep ? k98::MenuMetrics::kSep
-                                 : start         ? k98::MenuMetrics::kStartRow
-                                                 : k98::MenuMetrics::kRow);
-            menu_row(s, dl, id, static_cast<int>(i), Box{in.x0, snap(y), in.x1, snap(y + h)}, start);
-            y += h;
-        }
-        if (id == last && find_menu(s, id) != nullptr && ImGui::IsWindowFocused())
-            menu_keys(s, id);
-        ImGui::End();
-        raise(name);
-    }
+    for (const int id : ids)
+        draw_menu(s, id, id == last);
     if (w.menus.empty())
         keyboard_back(s);
 }
@@ -1037,7 +1077,7 @@ void close_window(App::State& s, int id) {
         w->closing = true;
 }
 
-// kit.js 375-386: a dialog, a window dragged by its title, its width by kind.
+// Opens a dialog: a window dragged by its title, its width by kind.
 void open_dialog(App::State& s, Dialog d) {
     auto win = std::make_unique<Window>();
     win->role = "dialog";
@@ -1046,7 +1086,7 @@ void open_dialog(App::State& s, Dialog d) {
     d.opened = Clock::now();
     if (d.kind == "screen")
         win->modal = true;
-    // dialog.js 52-64: the text box starts with the value (Run: the last line run); the sounds.
+    // The text box starts with the value (Run: the last command line run); then the sound.
     if (d.value)
         d.input = *d.value;
     if (d.kind == "run" && !d.value) {
@@ -1058,7 +1098,7 @@ void open_dialog(App::State& s, Dialog d) {
         sfx(s, d.icon == "error" ? "chord" : "ding");
     if (d.kind == "shutdown" || d.kind == "logoff")
         sfx(s, "ding");
-    if (d.kind == "screen" && d.mode == "boot") {  // dialog.js 86-88: straight to "Starting"
+    if (d.kind == "screen" && d.mode == "boot") {  // the boot screen opens at "Starting"
         d.stage = 1;
         sfx(s, "startup");
     }
