@@ -66,7 +66,7 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 | `libs/protocol` | IPC 分幀（4-byte LE＋UTF-8 JSON）、訊息封包、錯誤碼、畫面編碼 |
 | `libs/host` | `Session` actor（程序＋引擎＋狀態），M1 的 host 由它組成 |
 | `libs/ui` | `TerminalView`（字元格、輸入、IME、選取、搜尋、捲動）、`Workspace`（space／分頁／分割樹、注意力）、`Keymap`、`ModHost`（載入 C++ DLL mod，ImGui 無關）、`git_info`、`HostClient`、唯一碰 `imgui_internal.h` 的 `imgui_adapter.cpp` |
-| `apps/desktop` | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列：`WM_NCCALCSIZE`／`WM_NCHITTEST`）與崩潰記錄，`app.cpp` 是整個介面（herdr 版面、側欄、分頁、面板、Files／Changes、picker、命令面板、設定、歡迎頁、worktree、mod 整合、遠端機器） |
+| `apps/desktop` | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列：`WM_NCCALCSIZE`／`WM_NCHITTEST`）與崩潰記錄，`app.cpp` 是 `App` 的建構與對外介面；介面依功能分檔（`sidebar.cpp`、`tab_bar.cpp`、`panes.cpp`、`files_changes.cpp`、`commands.cpp`、`settings_dialog.cpp`、`welcome.cpp`、`frame.cpp` 等，清單見設計文件 3.10），AgentDesk 98 在 `win98_*.cpp`。共用宣告在 `app_internal.hpp`（`detail` 命名空間） |
 | `third_party/fonts`、`third_party/herdr` | 隨附字型（Geist、JetBrains Mono、Symbols Nerd Font）與 herdr 的授權、提示音；建置時複製到執行檔旁的 `fonts\`、`sounds\` |
 | `libs/modapi`、`mods/` | mod 介面（純 C 的 `mod_api.h` 與 header-only 的 `mod_sdk.hpp`，ADR-17）與三個範例 mod（各自編成 `mods\<名稱>\mod.dll`，隨 zip 附上 SDK） |
 | `tools/` | 開發與量測工具（不出貨） |
@@ -122,6 +122,10 @@ skill 與設計文件衝突時，以設計文件為準，並記入 status 的「
 M 模式、standard 執行模式。Web 專用條目（JWT、CORS、HTTP 格式、API p95、禁用 any）不適用，替代門檻見 `.decisions/ADR_001_constitution_tailoring.md`；M 模式的寫入權限補充見 `ADR_002`。`project.type: desktop_app` 的框架層 ADR_004 仍是 proposed。
 
 Git：Conventional Commits；分支 `feature/sprint-N/...`；不要直接在 main 上開發。commit 訊息結尾加 Co-Authored-By 行。
+
+## 程式註解
+
+註解用英文、用自己的話寫，說明為什麼這樣做、不明顯的限制與單位，不寫 herdr 的出處或行號（使用者要求，2026-11-20，ADR-22）。要查某段程式當初照 herdr 哪裡寫，看 `docs/research/herdr-app/code-map.md`。例外：有轉寫 herdr 程式的檔案開頭保留一行 `// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.`，這是授權要求，不可刪。
 
 ## 回覆語言
 

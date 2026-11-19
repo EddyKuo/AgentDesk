@@ -1,7 +1,7 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.11  
-日期：2026-11-19｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；還沒做的人工驗收見 5.4、5.7  
+產品需求與系統設計文件 v2.12  
+日期：2026-11-20｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；還沒做的人工驗收見 5.4、5.7  
 技術基線：C++20、Windows 11 x64、Dear ImGui（FreeType 繪字）、Win32、DirectX 11、隨附 ConPTY
 
 > 產品名稱定為 AgentDesk，本身以 MIT License 釋出。介面與行為依 herdr-app 原始碼複刻（ADR-15），程式全部用 C++ 重寫，不宣稱與 herdr 的協定或程式相容；程式裡不出現 herdr 的名稱（ADR-21），本文件提到 herdr 是因為它是參考產品。第 1 章保留 MVP 時的需求，MVP 之後加上的功能主要寫在 2.4～2.8、3.7.2～3.7.3 與第 4 章；實機驗證結果見各 Sprint 的 TestReport（`contracts/inbox/TestReport_sprint*.md`）。
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.12 | 2026-11-20 | ADR-22：全面重構（行為不變），`apps/desktop` 由單一 `app.cpp` 拆成依功能分的檔案；程式註解改用自己的話，移除 herdr 出處與行號（對照表在 `docs/research/herdr-app/code-map.md`）；2.8、3.10 依新結構更新 |
 | 2.11 | 2026-11-19 | 依 0.2.0 的程式全面校正：2.1 元件與圖、2.2 生命週期（host 工作目錄、交接、結束面板的清除），新增 2.4 版面引擎、2.5 mod、2.6 遠端機器、2.7 更新與 agent-host 交接、2.8 AgentDesk 98；3.1 補 FreeType、lunasvg 與字型；3.2 改正隨附 ConPTY 缺少時的行為；3.5、3.6、3.9 依現況更新（版面引擎取代 docking、`agentctl hook`、不再用 imgui.ini）；3.7.2 移到 3.8 前面並新增 3.7.3；3.8 補 `hook`、`update`；3.10 改成實際的原始碼結構；第 4 章改寫為目前的主畫面；新增 5.7 Sprint 10 完成狀態與使用者驗收；5.4～5.6 標註已被取代的內容；7.1 依編號排列並標註被後續 ADR 取代的句子；7.2、7.3 補項目；7.4 的待決事項都已決定，清空；第 8 章結尾更新 |
 | 2.10 | 2026-11-19 | ADR-21：程式裡不出現 herdr 的名稱，win98 版面改名 AgentDesk 98；Release 連結參數改為 /OPT:REF /OPT:ICF |
 | 2.9 | 2026-11-19 | ADR-20：新增 space 或分頁時選擇 shell（AgentDesk 的亮點）；Agent 回到 shell 提示時刪除狀態（3.4、QA-22）；herdr 的主題、版面引擎、FreeType 繪字、框線與方塊字元填滿格子 |
@@ -242,7 +243,7 @@ sequenceDiagram
 
 移植自 herdr 的 Herdr 98，依 ADR-21 改名為 AgentDesk 98。桌面、工作列、開始選單、窗格標題列、對話框、踩地雷、接龍與小幫手都由程式自己畫。
 
-- 程式：繪製在 `apps/desktop/win98_*.inl`，純邏輯在 `libs/ui/src/win98.cpp`；素材（像素字型、圖示、圖片、音效、版面專用主題）在 `third_party/herdr/win98`。SVG 用 lunasvg 點陣化成 DX11 貼圖，PNG 用 WIC 解碼。
+- 程式：繪製在 `apps/desktop/win98_*.cpp`（kit、dialogs、chrome、desktop、games），純邏輯在 `libs/ui/src/win98.cpp`；素材（像素字型、圖示、圖片、音效、版面專用主題）在 `third_party/herdr/win98`。SVG 用 lunasvg 點陣化成 DX11 貼圖，PNG 用 WIC 解碼。
 - 開機畫面、關於與開始選單側邊的標題圖由程式用像素字型畫出，Start 與 Update 圖示換成 AgentDesk 的標誌（ADR-21）。
 - 狀態存在資料目錄的 `win98.json`（scale、mute、桌面、小幫手位置、遊戲設定等）。
 - 版面專用主題 win98 不列在主題清單；終端機用它的 16 色表（格子記住自己用的是哪一個 ANSI 色，3.7.3）。
@@ -522,7 +523,7 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 
 | 路徑 | 內容 |
 |---|---|
-| apps/desktop | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列、崩潰記錄），`app.cpp` 是整個介面（版面、側欄、分頁、面板、Files／Changes、picker、命令面板、設定、歡迎頁、worktree、mod 整合、遠端機器），`win98_*.inl` 是 AgentDesk 98 |
+| apps/desktop | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列、崩潰記錄），`app.cpp` 是 `App` 的建構與對外介面。介面依功能分檔：`themes`、`settings_store`（ui.json）、`layouts`、`programs`、`commands`（命令表與執行）、`sessions`、`git_cache`、`side_panels`、`chrome`、`sidebar`、`tab_bar`、`terminals_layout`、`panes`、`code_preview`、`files_changes`、`overlays`（命令面板、picker、說明）、`notices`、`notes`、`worktrees`、`settings_dialog`、`settings_pages`、`welcome`、`machine_add`、`frame`（版面繪製與每幀流程）；`win98_*.cpp` 是 AgentDesk 98。共用宣告在 `app_internal.hpp`（`detail` 命名空間）、`win98_internal.hpp`、`overlay_kit.hpp` |
 | apps/host | `agent-host.exe`：背景程序入口、單例 mutex、`--takeover` 交接入口 |
 | apps/cli | `agentctl.exe`：指令解析、JSON 輸出、`hook`、`bridge`、`update` |
 | libs/platform/windows | `PtyProcess`（ConPTY＋Job＋reader 執行緒）、ConPTY 載入、argv quoting、脫離 Job 的背景啟動、程序樹、RAII handle |
@@ -778,6 +779,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-18 | 版面只保留 herdr 有的 | 使用者決定（2026-11-19）：移除自己加的 Board、Grid、Focus，只留 workspace（herdr 的 main）與 terminals，另外補上 Herdr 98。原本刻意不做的 Herdr 98、線上更新檢查、使用統計都要做；更新與統計沒有預設伺服器，比照 herdr 從原始碼建置的版本，設定 AGENTDESK_RELEASES_URL、AGENTDESK_TELEMETRY_URL 才會連線。（Herdr 98 依 ADR-21 改名 AgentDesk 98） |
 | ADR-19 | agent-host 換版時接手終端機 | 使用者決定照 herdr 移植（2026-11-19，OQ-09）：herdr-core 更新時終端機繼續跑。舊 host 啟動 `agent-host --takeover`，凍結每個 session（解析器回到 ground 才停、沒讀的位元組留在原管線），把 ConPTY、子程序與 Job 的 handle 複製給新 host，並送出完整的終端機狀態；新 host 逐一核對 handle（PID、Job 成員、KILL_ON_JOB_CLOSE、OpenConsole），用隨附 ConPTY 的 `ConptyPackPseudoConsole` 重建後回報 ready，舊 host 才放手。ready 之前任何失敗都由舊 host 接回。代價：只支援隨附 ConPTY（內建版拒絕更新）；換版時連線會斷，client 重新連上；升級 ConPTY 時要重新確認 HPCON 結構 |
 | ADR-20 | 新增 space 或分頁時選擇 shell（AgentDesk 的亮點，herdr 沒有） | 使用者要求（2026-11-19）：按側欄的「+」時，列出程式啟動時在這台電腦偵測到的 shell（PowerShell 7、Windows PowerShell、Command Prompt、各個 WSL 發行版），選哪個就用哪個開新 space；分頁列的「+」選單也把預設以外的 shell 都列出來，直接開成新分頁。herdr 只開一種 shell，在 Windows 上就沒辦法同時用 cmd 與 PowerShell。快捷鍵 Ctrl+Shift+N、Ctrl+Shift+T 維持直接開預設 shell |
+| ADR-22 | 全面重構與程式註解（2026-11-20） | 使用者要求重構所有程式、註解改用自己的話、移除所有 herdr 的註解與對應行數。做法：行為不變的重構（拆長函式、合併重複、刪死碼），12,700 行的 `app.cpp` 依功能拆成約 30 個檔案；驗收依據是 292 個測試全過，以及重構前後 15 張介面截圖逐像素相同（只剩游標閃爍與 Changes 清單內容這類每次執行就會變的差異）。程式裡 herdr 的出處與行號全部移除，原本的對照整理在 `docs/research/herdr-app/code-map.md`（herdr-app commit 321c9a8；`sol.js` 原本多算 200 行，表中已更正）；名稱含 herdr 的識別字改名，存檔裡的資料字串（主題 id、舊值轉換）不變。例外：有轉寫 herdr 程式的檔案保留一行 `Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.`，這是 Apache-2.0 §4(b) 對修改檔案的要求。之後新寫的程式也不加 herdr 出處；要查 herdr 行為時查對照表或 herdr 原始碼，再用自己的話寫註解 |
 | ADR-21 | 程式裡不出現 herdr 的名稱 | 使用者要求（2026-11-19）：執行檔、畫面與跟著發布的檔案只寫 AgentDesk。win98 版面改名 AgentDesk 98；開機、關於與開始選單側邊的「Herdr 98」圖片改由程式用像素字型畫出；Start 與 Update 圖示的 herdr 標誌換成 AgentDesk 的標誌（依 herdr art/generate.ts 的畫法重新產生）；預設主題 id 改為 `preset-<名稱>`，舊設定照樣讀得到。保留的部分：THIRD_PARTY_NOTICES 裡 herdr-app 的授權聲明（Apache-2.0 第 4 條要求）、原始碼註解裡的出處、版本庫的 `third_party/herdr/` |
 
 ### 7.2 主要風險

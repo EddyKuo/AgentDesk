@@ -185,7 +185,7 @@ ready 之前任何一步失敗，都由舊 host 接回所有 session；新 host 
 
 ## 7. 複刻 herdr-app，但程式裡不說 herdr
 
-AgentDesk 的介面與行為依 herdr 桌面版（herdr-app）的原始碼複刻（ADR-15）。這是使用者的要求：「一定要完整複刻，有問題就去查 herdr 的 source code」。版面尺寸、互動、狀態與提醒規則、Files／Changes、picker、命令面板、設定、歡迎頁、worktree 對話框都照 herdr；逐項規格在 `docs/research/herdr-app/`，對照的原始碼位置記在 `sprint/current/status.md` 的「依據」欄。
+AgentDesk 的介面與行為依 herdr 桌面版（herdr-app）的原始碼複刻（ADR-15）。這是使用者的要求：「一定要完整複刻，有問題就去查 herdr 的 source code」。版面尺寸、互動、狀態與提醒規則、Files／Changes、picker、命令面板、設定、歡迎頁、worktree 對話框都照 herdr；逐項規格在 `docs/research/herdr-app/`。程式裡不寫 herdr 的出處（ADR-22）；某段程式對應 herdr 的哪裡，查 `docs/research/herdr-app/code-map.md`。
 
 我們用 C++／ImGui 重寫，不搬 herdr 的 JS 執行環境，也不追求協定相容。herdr 的模型（版面節點樹、分割樹、注意力規則）轉寫成 C++，放在 `libs/ui`。遇到不清楚的行為時，答案是去查 herdr 的原始碼，不是自己發明。
 
