@@ -86,6 +86,9 @@ inline constexpr const char* kPalette = "\xEE\xAD\x9C";  // U+EB5C codicon symbo
 inline constexpr const char* kWarning = "\xEE\xA9\xAC";  // U+EA6C codicon warning
 inline constexpr const char* kRefresh = "\xEE\xAC\xB7";  // U+EB37 codicon refresh
 inline constexpr const char* kShield = "\xEE\xAD\x93";   // U+EB53 codicon shield
+inline constexpr const char* kEdit = "\xEE\xA9\xB3";     // U+EA73 codicon edit (herdr lucide square-pen)
+inline constexpr const char* kBell = "\xEE\xAA\xA2";     // U+EAA2 codicon bell
+inline constexpr const char* kSquare = "\xEE\xA9\xB2";   // U+EA72 codicon primitive-square (herdr square)
 }  // namespace icon
 
 }  // namespace agentdesk::ui

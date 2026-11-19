@@ -328,6 +328,8 @@ struct Settings {
     float zoom = 1.0f;
     float font_size = 14.0f;
     bool sounds = true;
+    // Read from ui.json and written back, but ignored: herdr always shows the note (settings/main.js
+    // 751: "A note shows in the corner either way"), so Settings no longer offers it.
     bool toasts = true;
     bool copy_on_select = true;
     float scroll_speed = 1.0f;
@@ -2231,6 +2233,7 @@ struct App::State {
     char help_buf[128] = {};
     std::string settings_section;
     float settings_row_end = 0;
+    float settings_row_x = 0;
     bool show_welcome = false;
     bool welcome_panels_seen = false;
     bool welcome_copied = false;
@@ -2316,8 +2319,6 @@ struct App::State {
     }
     // herdr toasts: 5 s, 8 s for errors and warnings.
     void toast(std::string title, std::string body, std::string session, ImU32 color, int seconds = 0) {
-        if (!settings.toasts && !session.empty())
-            return;
         if (seconds <= 0)
             seconds = color == g_pal->needs_you || color == g_pal->working ? 8 : 5;
         // No cap: herdr stacks every toast (window.rs 4794-4796).
@@ -2358,6 +2359,26 @@ struct App::State {
     }
     [[nodiscard]] std::string machine_label(const std::string& machine) const {
         return machine.empty() ? std::string("This PC") : machine;
+    }
+    // herdr spaces/main.js 347-351 loading(): the machine's layout is still on its way. Here:
+    // the machine is connecting (not connected, no error yet), or this computer's document has
+    // not arrived. Disconnected or failed is not loading.
+    [[nodiscard]] bool machine_loading(const std::string& machine) const {
+        const ui::HostClient* h = host.get();
+        for (const auto& r : remotes)
+            if (r.cfg.name == machine && !machine.empty())
+                h = r.host.get();
+        if (!machine.empty() && h == host.get())
+            return false;  // a machine no longer configured
+        if (h->connected())
+            return machine.empty() && !doc_loaded;
+        return h->last_error().empty();
+    }
+    // The state herdr writes after a machine's name (spaces/main.js 370, 385).
+    [[nodiscard]] std::string machine_state(const std::string& machine) const {
+        if (machine_connected(machine))
+            return "connected";
+        return machine_loading(machine) ? "connecting" : "unreachable";
     }
     int space_for_cwd(const std::string& cwd, const std::string& machine = {}) {
         if (cwd.empty()) {
@@ -4284,7 +4305,8 @@ void open_confirm(App::State& s, std::string title, std::string detail, std::str
     s.show_confirm = true;
 }
 
-// "Close space?" (window.rs 3067-3080): "<name> — N tabs, M terminals".
+// "Close space?" (window.rs 3067-3080): "<name> — N tabs, M terminals", always plural as
+// window.rs 3075 writes it.
 void confirm_close_space(App::State& s, int index) {
     if (index < 0 || index >= static_cast<int>(s.ws.spaces.size()))
         return;
@@ -4293,9 +4315,8 @@ void confirm_close_space(App::State& s, int index) {
     for (const auto& t : sp.tabs)
         terms += s.ws.sessions_in(t).size();
     char detail[256];
-    std::snprintf(detail, sizeof detail, "%s \xE2\x80\x94 %zu tab%s, %zu terminal%s",
-                  s.ws.space_title(index, s.session_cwds()).c_str(), sp.tabs.size(), sp.tabs.size() == 1 ? "" : "s",
-                  terms, terms == 1 ? "" : "s");
+    std::snprintf(detail, sizeof detail, "%s \xE2\x80\x94 %zu tabs, %zu terminals",
+                  s.ws.space_title(index, s.session_cwds()).c_str(), sp.tabs.size(), terms);
     open_confirm(s, "Close space?", detail, "Close", "space.close_now:" + sp.id);
 }
 
@@ -4396,20 +4417,22 @@ void space_menu(App::State& s, int i) {
             break;
         }
     }
-    if (menu_row(s, ui::icon::kCommand, "Rename", s.keymap.chord_for("space.rename"))) {
+    // herdr menu/main.js 84 menuIcon(): ".rename" -> square-pen, "worktree" -> git-branch (all
+    // three), ".close" -> x.
+    if (menu_row(s, ui::icon::kEdit, "Rename", s.keymap.chord_for("space.rename"))) {
         s.ws.select_space(i);
         open_rename(s, "space", sp.id, sp.name);
     }
     if (g.repo) {
-        if (menu_row(s, ui::icon::kWorktree, "New worktree", s.keymap.chord_for("worktree.new"))) {
+        if (menu_row(s, ui::icon::kBranch, "New worktree", s.keymap.chord_for("worktree.new"))) {
             s.ws.select_space(i);
             run_command(s, "worktree.new");
         }
-        if (menu_row(s, ui::icon::kFolderOpen, "Open worktree")) {
+        if (menu_row(s, ui::icon::kBranch, "Open worktree")) {
             s.ws.select_space(i);
             run_command(s, "worktree.open");
         }
-        if (g.worktree && menu_row(s, ui::icon::kClose, "Remove worktree")) {
+        if (g.worktree && menu_row(s, ui::icon::kBranch, "Remove worktree")) {
             s.ws.select_space(i);
             run_command(s, "worktree.remove");
         }
@@ -4488,8 +4511,11 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
                 draw_icon(s, d, row.machine.empty() ? ui::icon::kMonitor : ui::icon::kServer, fpx(13),
                           ImVec2(a.x + rw * 0.5f, cy), g_pal->dim);
                 d->AddCircleFilled(ImVec2(a.x + rw * 0.5f + px(7), cy + px(5)), px(3), on ? g_pal->done : g_pal->faint);
+                // spaces/main.js 370: "<m> · connected", "<m> · <state>", or "This computer".
                 if (hov)
-                    ImGui::SetTooltip("%s", s.machine_label(row.machine).c_str());
+                    ImGui::SetTooltip("%s", row.machine.empty()
+                                                ? "This computer"
+                                                : (row.machine + " \xC2\xB7 " + s.machine_state(row.machine)).c_str());
             } else {
                 float x = a.x + px(8);
                 draw_icon(s, d, row.machine.empty() ? ui::icon::kMonitor : ui::icon::kServer, fpx(13),
@@ -4517,23 +4543,50 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
             }
             ImGui::PopID();
             ImGui::SetCursorScreenPos(ImVec2(a0.x, a.y + hh));
-            // herdr: an empty, unfolded machine shows "+ New space there" (or "Loading..." while
-            // it connects).
+            // herdr spaces/main.js 352, 396-402, 413: an empty, unfolded machine shows "Loading…"
+            // only while its layout loads; otherwise "New space there" with a 12 px plus (in the
+            // rail a cell with an 18 px plus box), which runs space.new on that machine.
             const bool empty = ri + 1 >= rows.size() || rows[ri + 1].index < 0;
-            if (empty && !rail && !s.folded_machines.contains(row.machine)) {
-                const ImVec2 e(a0.x + pad, a.y + hh);
+            if (empty && !s.folded_machines.contains(row.machine)) {
+                const bool loading = s.machine_loading(row.machine);
+                const float eh_h = px(28);
+                const float ew = rail ? px(32) : rw;  // RAIL_CELL
+                const ImVec2 e(rail ? a0.x + (ImGui::GetContentRegionAvail().x - ew) * 0.5f : a0.x + pad, a.y + hh);
                 ImGui::SetCursorScreenPos(e);
                 ImGui::PushID(("e:" + row.machine).c_str());
-                const bool clicked = ImGui::InvisibleButton("##empty", ImVec2(rw, px(28)));
-                const bool eh = on && ImGui::IsItemHovered();
+                const bool clicked = ImGui::InvisibleButton("##empty", ImVec2(ew, eh_h));
+                const bool eh = !loading && ImGui::IsItemHovered();
                 ImGui::PopID();
-                if (eh)
-                    d->AddRectFilled(e, ImVec2(e.x + rw, e.y + px(28)), g_pal->hover, px(6));
-                const std::string text = on ? std::string("+ New space there") : std::string("Loading\xE2\x80\xA6");
-                d->AddText(s.fonts.ui, fpx(12), ImVec2(e.x + px(28), e.y + px(14) - fpx(12) * 0.6f), g_pal->dim, text.c_str());
-                if (clicked && on)
-                    run_command(s, "space.new_on:" + row.machine);
-                ImGui::SetCursorScreenPos(ImVec2(a0.x, e.y + px(28)));
+                const float ecy = e.y + eh_h * 0.5f;
+                if (loading) {
+                    // 28 high, px 8 (0 in the rail, centred), 12 px dim: "Loading…" or "…".
+                    const char* text = rail ? "\xE2\x80\xA6" : "Loading\xE2\x80\xA6";
+                    const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(12), FLT_MAX, 0, text);
+                    d->AddText(s.fonts.ui, fpx(12),
+                               ImVec2(rail ? e.x + (ew - t.x) * 0.5f : e.x + px(8), ecy - t.y * 0.5f), g_pal->faint, text);
+                } else {
+                    const ImU32 c = eh ? g_pal->text : g_pal->faint;
+                    if (eh)
+                        d->AddRectFilled(e, ImVec2(e.x + ew, e.y + eh_h), g_pal->hover, rail ? px(6) : px(7));
+                    if (rail) {
+                        const float bs = px(18);
+                        const ImVec2 bp(e.x + (ew - bs) * 0.5f, ecy - bs * 0.5f);
+                        d->AddRect(bp, ImVec2(bp.x + bs, bp.y + bs), c, px(5));
+                        draw_icon(s, d, ui::icon::kPlus, fpx(10), ImVec2(bp.x + bs * 0.5f, ecy), c);
+                        if (eh)
+                            ImGui::SetTooltip("New space on %s",
+                                              row.machine.empty() ? "this computer" : row.machine.c_str());
+                    } else {
+                        // px 8, gap 7: the 12 px plus, then the words.
+                        draw_icon(s, d, ui::icon::kPlus, fpx(12), ImVec2(e.x + px(8) + px(6), ecy), c);
+                        const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(12), FLT_MAX, 0, "New space there");
+                        d->AddText(s.fonts.ui, fpx(12), ImVec2(e.x + px(8) + px(12) + px(7), ecy - t.y * 0.5f), c,
+                                   "New space there");
+                    }
+                    if (clicked)
+                        run_command(s, "space.new_on:" + row.machine);
+                }
+                ImGui::SetCursorScreenPos(ImVec2(a0.x, e.y + eh_h));
             }
             continue;
         }
@@ -5678,7 +5731,7 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
                 run_command(s, "tab.rename:" + tab.id);  // tabs/main.js 113
             // menu/main.js 58-63: Rename, New tab, Close, all by the tab's id.
             if (begin_menu("##tabctx")) {
-                if (menu_row(s, ui::icon::kCommand, "Rename", s.keymap.chord_for("tab.rename")))
+                if (menu_row(s, ui::icon::kEdit, "Rename", s.keymap.chord_for("tab.rename")))
                     run_command(s, "tab.rename:" + tab.id);
                 if (menu_row(s, ui::icon::kPlus, "New tab", s.keymap.chord_for("tab.new")))
                     run_command(s, "tab.new");
@@ -5934,7 +5987,7 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
             s.focus_view(s.ws.focused_session());
         }
         if (begin_menu("##tabctx")) {  // the tab menu (menu/main.js 58-63), by id
-            if (menu_row(s, ui::icon::kCommand, "Rename", s.keymap.chord_for("tab.rename")))
+            if (menu_row(s, ui::icon::kEdit, "Rename", s.keymap.chord_for("tab.rename")))
                 run_command(s, "tab.rename:" + tab.id);
             if (menu_row(s, ui::icon::kPlus, "New tab", s.keymap.chord_for("tab.new")))
                 run_command(s, "tab.new");
@@ -6320,11 +6373,11 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
                 run_command(s, "pane.split:down");
                 return true;
             }
-            if (pick(ui::icon::kZoom, "Zoom", "pane.zoom")) {
+            if (pick(ui::icon::kSquare, "Zoom", "pane.zoom")) {  // menu/main.js 84: square
                 run_command(s, "pane.zoom");
                 return true;
             }
-            if (pick(ui::icon::kCommand, "Rename", "pane.rename")) {
+            if (pick(ui::icon::kEdit, "Rename", "pane.rename")) {  // menu/main.js 84: square-pen
                 run_command(s, "pane.rename");
                 return true;
             }
@@ -6336,7 +6389,7 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
             }
             if (!parent.empty() && s.views_by_id.count(parent)) {
                 const std::string label = "Send back to " + s.pane_title(parent);
-                if (pick(ui::icon::kArrowLeft, label.c_str(), nullptr)) {
+                if (pick(ui::icon::kTerminal, label.c_str(), nullptr)) {  // menu/main.js 84: terminal
                     run_command(s, "pane.park");
                     return true;
                 }
@@ -7404,20 +7457,34 @@ void pop_overlay_style() {
     ImGui::PopStyleColor(3);
 }
 
-// Title row with a clickable "Esc" chip at the right; returns true when the chip is clicked.
-bool overlay_title(App::State& s, const char* title, float size = 15.0f) {
+// How a dialog's title row shows Esc.
+enum class EscChip {
+    kButton,  // help/main.js 61, picker 250, machine-add 305: px 6, py 2, rounded 5, 11 px dim,
+              // no border; hover: background + foreground; a click closes
+    kPlain,   // prompt/main.js 42, confirm/main.js 42: plain 11 px dim text
+};
+
+// Title row (15 px semibold) with "Esc" at the right; returns true when Esc is clicked.
+bool overlay_title(App::State& s, const char* title, EscChip esc = EscChip::kButton, float size = 15.0f) {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float w = ImGui::GetContentRegionAvail().x;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fpx(size), FLT_MAX, 0, title);
     dl->AddText(s.fonts.ui_bold, fpx(size), p, g_pal->text, title);
     const ImVec2 e = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, "Esc");
-    const ImVec2 ea(p.x + w - e.x - px(10), p.y + (t.y - e.y - px(4)) * 0.5f);
-    ImGui::SetCursorScreenPos(ea);
-    const bool clicked = ImGui::InvisibleButton("##esc", ImVec2(e.x + px(10), e.y + px(4)));
-    dl->AddRect(ea, ImVec2(ea.x + e.x + px(10), ea.y + e.y + px(4)), g_pal->border, px(4));
-    dl->AddText(s.fonts.ui, fpx(11), ImVec2(ea.x + px(5), ea.y + px(2)), ImGui::IsItemHovered() ? g_pal->text : g_pal->faint,
-                "Esc");
+    bool clicked = false;
+    if (esc == EscChip::kPlain) {
+        dl->AddText(s.fonts.ui, fpx(11), ImVec2(p.x + w - e.x, p.y + (t.y - e.y) * 0.5f), g_pal->faint, "Esc");
+    } else {
+        const ImVec2 cs(e.x + px(12), e.y + px(4));
+        const ImVec2 ea(p.x + w - cs.x, p.y + (t.y - cs.y) * 0.5f);
+        ImGui::SetCursorScreenPos(ea);
+        clicked = ImGui::InvisibleButton("##esc", cs);
+        const bool hov = ImGui::IsItemHovered();
+        if (hov)
+            dl->AddRectFilled(ea, ImVec2(ea.x + cs.x, ea.y + cs.y), g_pal->hover, px(5));
+        dl->AddText(s.fonts.ui, fpx(11), ImVec2(ea.x + px(6), ea.y + px(2)), hov ? g_pal->text : g_pal->faint, "Esc");
+    }
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + t.y + px(10)));
     return clicked;
 }
@@ -7587,9 +7654,13 @@ void draw_palette(App::State& s) {
                 if (!p.layout_only)
                     add(std::string("Theme: ") + p.label, std::string("theme:") + p.id, "App", "colors look");
     }
-    // palette/main.js 86-89: "Layout: <Name>", capitalised; win98 is "Herdr 98".
+    // palette/main.js 86-89: "Layout: <Name>", capitalised; main is "Herdr" (ours: the
+    // "workspace" layout, "AgentDesk"), terminals "Terminals", win98 "Herdr 98".
     for (const auto& l : s.layouts) {
-        std::string t = l.name == "win98" ? std::string("Herdr 98") : l.name;
+        std::string t = l.name == "workspace"   ? std::string("AgentDesk")
+                         : l.name == "terminals" ? std::string("Terminals")
+                         : l.name == "win98"     ? std::string("Herdr 98")
+                                                 : l.name;
         if (!t.empty())
             t[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(t[0])));
         add("Layout: " + t, "layout:" + l.name, "Layout", "look " + l.name);
@@ -8608,7 +8679,7 @@ void draw_rename(App::State& s) {
                         : s.rename_kind == "space" ? "Rename space"
                         : s.rename_kind == "tab"   ? "Rename tab"
                                                    : "Rename pane";
-    bool cancel = overlay_title(s, title);
+    bool cancel = overlay_title(s, title, EscChip::kPlain);  // prompt/main.js 42
     ImGui::PushFont(s.fonts.ui, 12);
     ImGui::TextDisabled(mod_clone ? "Which mod" : "Name");
     ImGui::PopFont();
@@ -8922,79 +8993,135 @@ void draw_worktree_open(App::State& s) {
 }
 
 // ------------------------------------------------------------------ settings (herdr settings.js)
-// Modal 620 px high, left navigation 190 px; every change applies and saves at once (no Save).
-void settings_section(App::State& s, const char* title) {
-    ImGui::Dummy(ImVec2(0, px(10)));
-    ImGui::PushFont(s.fonts.ui_medium, 11);
-    ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
-    std::string up;
-    for (const char* c = title; *c != 0; ++c)
-        up += static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
-    ImGui::TextUnformatted(up.c_str());
-    ImGui::PopStyleColor();
-    ImGui::PopFont();
-    ImGui::Dummy(ImVec2(0, px(2)));
+// Dialog 880 wide (window.rs 3594), 620 high, left navigation 190 px (settings/main.js 897-918);
+// every change applies and saves at once (no Save). The body has no item spacing: each gap is
+// herdr's own.
+float line_h(float size) {
+    return std::round(fpx(size) * 1.3f);
 }
 
-// A labelled row: label + optional note on the left, control on the right (call the control
-// after this returns, the cursor is placed for it).
-void settings_row(App::State& s, const char* label, const char* note, float control_w) {
+// Moves the cursor down by `h` (the body has no item spacing).
+void settings_gap(float h) {
+    ImGui::Dummy(ImVec2(0, std::max(0.0f, h)));
+}
+
+// Dim text wrapped to the body's width (herdr: 12.5 px with 18 px lines, or `size` and `lh`).
+void settings_wrapped(App::State& s, const char* text, ImU32 color, float size = 12.5f, float lh = 18.0f,
+                      ImFont* font = nullptr) {
+    ImFont* f = font != nullptr ? font : s.fonts.ui;
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float w = ImGui::GetContentRegionAvail().x;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddText(s.fonts.ui, fpx(13), ImVec2(p.x, p.y + px(4)), g_pal->text, label);
-    float h = px(30);
+    const char* t = text;
+    const char* end = text + std::strlen(text);
+    float y = p.y;
+    while (t < end) {
+        const char* brk = f->CalcWordWrapPosition(fpx(size), t, end, w);
+        if (brk == t)
+            brk = t + 1;
+        const float th = f->CalcTextSizeA(fpx(size), FLT_MAX, 0, t, brk).y;
+        dl->AddText(f, fpx(size), ImVec2(p.x, y + (px(lh) - th) * 0.5f), color, t, brk);
+        y += px(lh);
+        t = brk;
+        while (t < end && (*t == ' ' || *t == '\n'))
+            ++t;
+    }
+    ImGui::Dummy(ImVec2(w, y - p.y));
+}
+
+// settings/main.js 157: pt 6, pb 8, 12 px semibold, dim, upper case.
+void settings_section(App::State& s, const char* title) {
+    std::string up;
+    for (const char* c = title; *c != 0; ++c)
+        up += static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddText(s.fonts.ui_bold, fpx(12), ImVec2(p.x, p.y + px(6)), g_pal->faint, up.c_str());
+    settings_gap(px(6) + line_h(12) + px(8));
+}
+
+// settings/main.js 161-176 row(): gap 16, py 12, items centred, a 1 px bottom border; the
+// title 14 px foreground, then (gap 3) the note 12.5 px dim with 18 px lines; the control on
+// the right. Call the control after this returns: the cursor is placed for it.
+void settings_row(App::State& s, const char* label, const char* note, float control_w, float control_h = -1.0f) {
+    if (control_h < 0)
+        control_h = std::round(fpx(13) * 1.3f) + px(10) + 2.0f;  // a settings button
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float wrap = std::max(px(80), w - control_w - px(16));
+    std::vector<std::pair<const char*, const char*>> lines;
     if (note != nullptr && *note != 0) {
-        // herdr settings row(): the note wraps, 18 px a line, beside the control (gap 16).
-        const float wrap = std::max(px(80), w - control_w - px(16));
         const char* t = note;
         const char* end = note + std::strlen(note);
-        float y = p.y + px(22);
         while (t < end) {
-            const char* brk = s.fonts.ui->CalcWordWrapPosition(fpx(11.5f), t, end, wrap);
+            const char* brk = s.fonts.ui->CalcWordWrapPosition(fpx(12.5f), t, end, wrap);
             if (brk == t)
                 brk = t + 1;
-            dl->AddText(s.fonts.ui, fpx(11.5f), ImVec2(p.x, y), g_pal->faint, t, brk);
-            y += px(18);
+            lines.emplace_back(t, brk);
             t = brk;
             while (t < end && (*t == ' ' || *t == '\n'))
                 ++t;
         }
-        h = y - p.y + px(4);
     }
-    ImGui::SetCursorScreenPos(ImVec2(p.x + w - control_w, p.y + px(2)));
+    const float text_h = line_h(14) + (lines.empty() ? 0.0f : px(3) + px(18) * static_cast<float>(lines.size()));
+    const float inner = std::max(text_h, control_h);
+    float y = p.y + px(12) + (inner - text_h) * 0.5f;
+    dl->AddText(s.fonts.ui, fpx(14), ImVec2(p.x, y), g_pal->text, label);
+    y += line_h(14) + px(3);
+    for (const auto& [a, b] : lines) {
+        const float th = s.fonts.ui->CalcTextSizeA(fpx(12.5f), FLT_MAX, 0, a, b).y;
+        dl->AddText(s.fonts.ui, fpx(12.5f), ImVec2(p.x, y + (px(18) - th) * 0.5f), g_pal->faint, a, b);
+        y += px(18);
+    }
+    const float h = px(12) + inner + px(12);
+    dl->AddLine(ImVec2(p.x, p.y + h - 0.5f), ImVec2(p.x + w, p.y + h - 0.5f), g_pal->border);
+    ImGui::SetCursorScreenPos(ImVec2(p.x + w - control_w, p.y + px(12) + (inner - control_h) * 0.5f));
     ImGui::SetNextItemWidth(control_w);
     s.settings_row_end = p.y + h;
+    s.settings_row_x = p.x;
 }
 void settings_row_done(App::State& s) {
-    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, s.settings_row_end));
-    ImGui::SetCursorPosX(ImGui::GetStyle().WindowPadding.x);
-    ImGui::Dummy(ImVec2(0, px(2)));
+    ImGui::SetCursorScreenPos(ImVec2(s.settings_row_x, s.settings_row_end));
+    ImGui::Dummy(ImVec2(0, 0));
 }
 
-// "−  NN%  +" stepper (herdr zoom / size steppers). Returns true when the value changed.
+// settings/main.js 196-222 stepper(): one bordered group (rounded 7, raised): 28 x 28 cells
+// with "−" and "+" (15 px muted; hover: background + foreground) around a 54 px value (13 px).
+// 112 x 30 with the border. Returns true when the value changed.
+constexpr float kStepperW = 28 + 54 + 28 + 2;
+constexpr float kStepperH = 28 + 2;
 bool stepper(App::State& s, const char* id, float& v, float step, float lo, float hi, const char* fmt, float scale = 1.0f) {
     bool changed = false;
     ImGui::PushID(id);
-    ImGui::PushStyleColor(ImGuiCol_Button, v4(raised_color()));
-    if (ImGui::Button("\xE2\x88\x92", ImVec2(px(28), px(26)))) {
-        v = std::clamp(std::round((v - step) / step) * step, lo, hi);
-        changed = true;
-    }
-    ImGui::SameLine(0, px(4));
-    char b[32];
-    std::snprintf(b, sizeof b, fmt, v * scale);
-    const float tw = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, b).x;
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    ImGui::Dummy(ImVec2(px(56), px(26)));
-    ImGui::GetWindowDrawList()->AddText(s.fonts.ui, fpx(13), ImVec2(p.x + (px(56) - tw) * 0.5f, p.y + px(13) - fpx(13) * 0.6f),
-                                        g_pal->text, b);
-    ImGui::SameLine(0, px(4));
-    if (ImGui::Button("+", ImVec2(px(28), px(26)))) {
-        v = std::clamp(std::round((v + step) / step) * step, lo, hi);
-        changed = true;
-    }
-    ImGui::PopStyleColor();
+    const ImVec2 a = ImGui::GetCursorScreenPos();
+    const ImVec2 b(a.x + px(kStepperW), a.y + px(kStepperH));
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(a, b, raised_color(), px(7));
+    auto cell = [&](const char* key, const char* label, float x, float dir) {
+        const ImVec2 c(x, a.y + px(1));
+        ImGui::SetCursorScreenPos(c);
+        if (ImGui::InvisibleButton(key, ImVec2(px(28), px(28)))) {
+            v = std::clamp(std::round((v + dir * step) / step) * step, lo, hi);
+            changed = true;
+        }
+        const bool hov = ImGui::IsItemHovered();
+        if (hov)
+            dl->AddRectFilled(c, ImVec2(c.x + px(28), c.y + px(28)), g_pal->hover,
+                              px(6), dir < 0 ? ImDrawFlags_RoundCornersLeft : ImDrawFlags_RoundCornersRight);
+        const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(15), FLT_MAX, 0, label);
+        dl->AddText(s.fonts.ui, fpx(15), ImVec2(c.x + (px(28) - t.x) * 0.5f, c.y + (px(28) - t.y) * 0.5f),
+                    hov ? g_pal->text : g_pal->dim, label);
+    };
+    cell("##minus", "\xE2\x88\x92", a.x + px(1), -1.0f);
+    char buf[32];
+    std::snprintf(buf, sizeof buf, fmt, v * scale);
+    const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, buf);
+    dl->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(29) + (px(54) - t.x) * 0.5f, a.y + (px(kStepperH) - t.y) * 0.5f),
+                g_pal->text, buf);
+    cell("##plus", "+", a.x + px(29) + px(54), 1.0f);
+    dl->AddRect(a, b, g_pal->border, px(7));
+    ImGui::SetCursorScreenPos(a);
+    ImGui::Dummy(ImVec2(px(kStepperW), px(kStepperH)));
     ImGui::PopID();
     return changed;
 }
@@ -9551,7 +9678,7 @@ void draw_settings(App::State& s) {
         s.settings_tab.clear();
     }
     const ImGuiViewport* vp = ImGui::GetMainViewport();
-    const float w = std::min(px(820), vp->WorkSize.x - px(16));
+    const float w = std::min(px(880), vp->WorkSize.x - px(16));  // window.rs 3594: width 880
     const float h = std::min(px(620), vp->WorkSize.y - px(16));
     ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + (vp->WorkSize.y - h) * 0.5f));
     ImGui::SetNextWindowSize(ImVec2(w, h));
@@ -9570,70 +9697,104 @@ void draw_settings(App::State& s) {
     const float nav_w = px(190);
     dl->AddRectFilled(wp, ImVec2(wp.x + nav_w, wp.y + h), g_pal->sidebar, px(8), ImDrawFlags_RoundCornersLeft);
     dl->AddLine(ImVec2(wp.x + nav_w, wp.y), ImVec2(wp.x + nav_w, wp.y + h), g_pal->border);
-    dl->AddText(s.fonts.ui_bold, fpx(15), ImVec2(wp.x + px(18), wp.y + px(18)), g_pal->text, "Settings");
+    // settings/main.js 897-899: nav p 10; "Settings" px 10, pt 6, pb 12, 16 px semibold.
+    dl->AddText(s.fonts.ui_bold, fpx(16), ImVec2(wp.x + px(10) + px(10), wp.y + px(10) + px(6)), g_pal->text, "Settings");
     struct Section {
         const char* name;
         const char* glyph;
     };
+    // main.js 9-16: palette, server, bell, refresh, shield (Mods is ours: C++ DLL mods).
     static constexpr Section kSections[] = {{"Look", ui::icon::kPalette},  {"Machines", ui::icon::kServer},
-                                            {"Alerts", ui::icon::kWarning}, {"Mods", ui::icon::kExtensions},
+                                            {"Alerts", ui::icon::kBell},    {"Mods", ui::icon::kExtensions},
                                             {"Updates", ui::icon::kRefresh}, {"Privacy", ui::icon::kShield}};
     // main.js 888-889: something waits to be installed.
     const auto upd = ui::updates::status();
     const bool waiting = upd.app_ready.has_value() || (upd.core.ready.has_value() && !upd.core.managed);
     if (s.settings_section.empty())
         s.settings_section = "Look";
-    float ny = wp.y + px(56);
+    bool close = false;
+    // main.js 900-918: items px 10, py 7, gap 10, rounded 7, gap 2 between; a 15 px icon (accent
+    // when chosen, else dim), 13.5 px text (foreground when chosen, else muted); raised when
+    // chosen or hovered.
+    const float item_w = nav_w - px(20);
+    const float item_h = px(7) + line_h(13.5f) + px(7);
+    float ny = wp.y + px(10) + px(6) + line_h(16) + px(12);
     for (const auto& sec : kSections) {
-        const ImVec2 a(wp.x + px(8), ny);
+        const ImVec2 a(wp.x + px(10), ny);
         ImGui::SetCursorScreenPos(a);
         ImGui::PushID(sec.name);
-        if (ImGui::InvisibleButton("##nav", ImVec2(nav_w - px(16), px(30))))
+        if (ImGui::InvisibleButton("##nav", ImVec2(item_w, item_h)))
             s.settings_section = sec.name;
         const bool hov = ImGui::IsItemHovered();
         ImGui::PopID();
         const bool on = s.settings_section == sec.name;
         if (on || hov)
-            dl->AddRectFilled(a, ImVec2(a.x + nav_w - px(16), a.y + px(30)), on ? g_pal->selected : g_pal->hover, px(7));
-        draw_icon(s, dl, sec.glyph, fpx(14), ImVec2(a.x + px(17), a.y + px(15)), on || hov ? g_pal->text : g_pal->dim);
-        dl->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(34), a.y + px(15) - fpx(13) * 0.6f), on || hov ? g_pal->text : g_pal->dim,
-                    sec.name);
-        // main.js 921: a 7 px accent dot at the row's end.
+            dl->AddRectFilled(a, ImVec2(a.x + item_w, a.y + item_h), raised_color(), px(7));
+        const float cy = a.y + item_h * 0.5f;
+        draw_icon(s, dl, sec.glyph, fpx(15), ImVec2(a.x + px(10) + px(7.5f), cy), on ? g_pal->focus : g_pal->faint);
+        const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(13.5f), FLT_MAX, 0, sec.name);
+        dl->AddText(s.fonts.ui, fpx(13.5f), ImVec2(a.x + px(10) + px(15) + px(10), cy - t.y * 0.5f),
+                    on ? g_pal->text : g_pal->dim, sec.name);
+        // main.js 917: a 7 px accent dot at the row's end.
         if (std::string_view(sec.name) == "Updates" && waiting)
-            dl->AddCircleFilled(ImVec2(a.x + nav_w - px(16) - px(10) - px(3.5f), a.y + px(15)), px(3.5f), g_pal->focus);
-        ny += px(32);
+            dl->AddCircleFilled(ImVec2(a.x + item_w - px(10) - px(3.5f), cy), px(3.5f), g_pal->focus);
+        ny += item_h + px(2);
     }
-    // herdr: "Send feedback" at the bottom of the nav.
+    // main.js 967: "Send feedback", a settings button at the bottom of the nav; it closes
+    // Settings first, then opens the feedback window.
     {
-        const ImVec2 a(wp.x + px(8), wp.y + h - px(44));
-        ImGui::SetCursorScreenPos(a);
-        if (ImGui::InvisibleButton("##feedback", ImVec2(nav_w - px(16), px(30))))
+        const ImVec2 bs = settings_button_size(s, "Send feedback");
+        ImGui::SetCursorScreenPos(ImVec2(wp.x + px(10), wp.y + h - px(10) - bs.y));
+        if (settings_button(s, "##st-feedback", "Send feedback")) {
+            close = true;
             run_command(s, "app.feedback");
-        const bool hov = ImGui::IsItemHovered();
-        if (hov)
-            dl->AddRectFilled(a, ImVec2(a.x + nav_w - px(16), a.y + px(30)), g_pal->hover, px(7));
-        draw_icon(s, dl, ui::icon::kComment, fpx(14), ImVec2(a.x + px(17), a.y + px(15)), hov ? g_pal->text : g_pal->dim);
-        dl->AddText(s.fonts.ui, fpx(13), ImVec2(a.x + px(34), a.y + px(15) - fpx(13) * 0.6f), hov ? g_pal->text : g_pal->dim,
-                    "Send feedback");
+        }
     }
     // Content.
     ImGui::SetCursorScreenPos(ImVec2(wp.x + nav_w + 1, wp.y));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(24), px(18)));
+    // main.js 949-990: no title and no Esc in the body (Esc still closes); padding px 28, py 22
+    // inside the scroll area; the page starts with its first heading.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(28), px(22)));
     ImGui::BeginChild("##settings-body", ImVec2(w - nav_w - 1, h), ImGuiChildFlags_AlwaysUseWindowPadding,
                       ImGuiWindowFlags_NoBackground);
     ImGui::PopStyleVar();
-    bool close = overlay_title(s, s.settings_section.c_str());
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(px(8), 0));
     const std::string& sec = s.settings_section;
+    // Cards that wrap (flex_wrap, gap 8): the next card's place.
+    struct CardFlow {
+        float x0, right, x, y, row_h = 0;
+        ImVec2 next(float cw, float ch) {
+            if (x > x0 && x + cw > right) {
+                x = x0;
+                y += row_h + px(8);
+                row_h = 0;
+            }
+            const ImVec2 a(x, y);
+            x += cw + px(8);
+            row_h = std::max(row_h, ch);
+            return a;
+        }
+        void end() const {
+            ImGui::SetCursorScreenPos(ImVec2(x0, y + row_h));
+            ImGui::Dummy(ImVec2(0, 0));
+        }
+    };
+    auto flow = [] {
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        return CardFlow{p.x, p.x + ImGui::GetContentRegionAvail().x, p.x, p.y};
+    };
     if (sec == "Look") {
         settings_section(s, "Layout");
         // herdr frame/settings/main.js 272-320: cards 124 wide, p 6, rounded 10, a 2 px accent
         // border and raised fill when chosen (raised on hover), a 62 px preview, then the name
         // (12.5, muted; foreground and a check when chosen). Shipped ones first.
+        CardFlow lf = flow();
         for (const auto& l : s.layouts) {
             const bool on = l.name == s.settings.layout;
-            const ImVec2 a = ImGui::GetCursorScreenPos();
-            const float cw = px(124), pad = px(6), ph = px(62), lh = px(16);
+            const float cw = px(124), pad = px(6), ph = px(62), lh = line_h(12.5f);
             const float ch = pad + ph + px(6) + lh + pad;
+            const ImVec2 a = lf.next(cw, ch);
+            ImGui::SetCursorScreenPos(a);
             ImGui::PushID(l.name.c_str());
             if (ImGui::InvisibleButton("##lay", ImVec2(cw, ch)))
                 run_command(s, "layout:" + l.name);
@@ -9662,68 +9823,95 @@ void draw_settings(App::State& s) {
             if (on)
                 draw_icon(s, d, ui::icon::kCheck, fpx(12), ImVec2(lp.x + tw + px(5) + px(6), lp.y + fpx(12.5f) * 0.55f),
                           g_pal->focus);
-            ImGui::SameLine(0, px(8));
-            if (ImGui::GetContentRegionAvail().x < cw)
-                ImGui::NewLine();
         }
-        ImGui::NewLine();
+        lf.end();
+        settings_gap(px(18));  // main.js 520
         settings_section(s, "Theme");
-        settings_row(s, "Appearance", "Light or dark, or as your system is now.", px(240));
+        settings_row(s, "Appearance", "Light or dark, or as your system is now.", px(240), px(32));
         if (segmented(s, "##appearance", s.settings.appearance, {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}}))
             changed = true;
         settings_row_done(s);
-        ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
-        ImGui::PushFont(s.fonts.ui, 11.5f);
-        ImGui::TextWrapped("For the layout you're in: each layout keeps its own light and dark theme.");  // settings/main.js 523
-        ImGui::PopFont();
-        ImGui::PopStyleColor();
+        // main.js 523-527: the note (pt 12, pb 8, 12.5 dim), "Dark" (pb 6, 12.5 medium muted),
+        // the dark cards, "Light" (pt 10, pb 6), the light cards.
+        settings_gap(px(12));
+        settings_wrapped(s, "For the layout you're in: each layout keeps its own light and dark theme.", g_pal->faint);
+        settings_gap(px(8));
         for (const bool light_cards : {false, true}) {
-        ImGui::Dummy(ImVec2(0, px(4)));
-        ImGui::PushFont(s.fonts.ui_medium, 12);
-        ImGui::TextDisabled("%s", light_cards ? "Light" : "Dark");
-        ImGui::PopFont();
-        for (const auto& p : kPalettes) {
-            if (p.light != light_cards || p.layout_only)
-                continue;
-            const auto shown = layout_theme_pair(s.settings);
-            const bool on = (light_cards ? shown.second : shown.first) == p.id;
-            const ImVec2 a = ImGui::GetCursorScreenPos();
-            const float cw = px(120), ch = px(64);
-            ImGui::PushID(p.id);
-            if (ImGui::InvisibleButton("##theme", ImVec2(cw, ch))) {
-                run_command(s, std::string("theme:") + p.id);
-                changed = true;
+            if (light_cards)
+                settings_gap(px(10));
+            settings_wrapped(s, light_cards ? "Light" : "Dark", g_pal->dim, 12.5f, 12.5f * 1.3f, s.fonts.ui_medium);
+            settings_gap(px(6));
+            // main.js 353-405 themePicker(): cards 124 wide, gap 6, p 6, rounded 10, a 2 px
+            // border (accent when chosen), raised on hover; a 46 px preview (p 7, gap 6, rounded
+            // 6, 1 px border, the theme's background) with a 44 x 4 bar in its terminal
+            // foreground and 8 px dots (gap 4) in accent, ansi1, ansi2, ansi3, ansi5; under it
+            // the name (12.5 px, foreground when chosen, else muted) and a 12 px accent check.
+            CardFlow tf = flow();
+            for (const auto& p : kPalettes) {
+                if (p.light != light_cards || p.layout_only)
+                    continue;
+                const auto shown = layout_theme_pair(s.settings);
+                const bool on = (light_cards ? shown.second : shown.first) == p.id;
+                const float cw = px(124), pad = px(6), ph = px(46);
+                const float ch = pad + ph + px(6) + line_h(12.5f) + pad;
+                const ImVec2 a = tf.next(cw, ch);
+                ImGui::SetCursorScreenPos(a);
+                ImGui::PushID(p.id);
+                if (ImGui::InvisibleButton("##theme", ImVec2(cw, ch))) {
+                    run_command(s, std::string("theme:") + p.id);
+                    changed = true;
+                }
+                const bool hov = ImGui::IsItemHovered();
+                ImGui::PopID();
+                ImDrawList* d = ImGui::GetWindowDrawList();
+                if (hov)
+                    d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), raised_color(), px(10));
+                if (on)
+                    d->AddRect(a, ImVec2(a.x + cw, a.y + ch), g_pal->focus, px(10), 0, px(2));
+                const ImVec2 pa(a.x + pad, a.y + pad);
+                const ImVec2 pb(a.x + cw - pad, pa.y + ph);
+                d->AddRectFilled(pa, pb, p.bg, px(6));
+                d->AddRect(pa, pb, g_pal->border, px(6));
+                d->AddRectFilled(ImVec2(pa.x + px(7), pa.y + px(7)), ImVec2(pa.x + px(7) + px(44), pa.y + px(11)), p.term_fg,
+                                 px(2));
+                // The theme's ansi table, else libvterm's defaults (what its terminals show).
+                const auto ansi = [&](int i) {
+                    static constexpr ImU32 kVterm[] = {IM_COL32(0, 0, 0, 255),     IM_COL32(224, 0, 0, 255),
+                                                       IM_COL32(0, 224, 0, 255),   IM_COL32(224, 224, 0, 255),
+                                                       IM_COL32(0, 0, 224, 255),   IM_COL32(224, 0, 224, 255)};
+                    return p.ansi != nullptr ? (*p.ansi)[static_cast<std::size_t>(i)] : kVterm[i];
+                };
+                const ImU32 dots[] = {p.focus, ansi(1), ansi(2), ansi(3), ansi(5)};
+                float dx = pa.x + px(7);
+                const float dy = pa.y + px(7) + px(4) + px(6);
+                for (const ImU32 c : dots) {
+                    d->AddCircleFilled(ImVec2(dx + px(4), dy + px(4)), px(4), c);
+                    dx += px(8) + px(4);
+                }
+                const ImVec2 lp(a.x + pad, pb.y + px(6));
+                const float tw = text_clipped(d, s.fonts.ui, fpx(12.5f), lp, on ? g_pal->text : g_pal->dim, p.label,
+                                              cw - pad * 2 - (on ? px(17) : 0.0f));
+                if (on)
+                    draw_icon(s, d, ui::icon::kCheck, fpx(12), ImVec2(lp.x + tw + px(5) + px(6), lp.y + line_h(12.5f) * 0.5f),
+                              g_pal->focus);
             }
-            ImGui::PopID();
-            ImDrawList* d = ImGui::GetWindowDrawList();
-            d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), p.bg, px(8));
-            d->AddRectFilled(ImVec2(a.x, a.y), ImVec2(a.x + px(30), a.y + ch), p.sidebar, px(8), ImDrawFlags_RoundCornersLeft);
-            d->AddCircleFilled(ImVec2(a.x + px(46), a.y + px(16)), px(4), p.focus);
-            d->AddCircleFilled(ImVec2(a.x + px(58), a.y + px(16)), px(4), p.done);
-            d->AddCircleFilled(ImVec2(a.x + px(70), a.y + px(16)), px(4), p.needs_you);
-            d->AddRect(a, ImVec2(a.x + cw, a.y + ch), on ? g_pal->focus : g_pal->border, px(8), 0, on ? 2.0f : 1.0f);
-            d->AddText(s.fonts.ui_medium, fpx(12), ImVec2(a.x + px(38), a.y + ch - px(22)), p.text, p.label);
-            ImGui::SameLine(0, px(8));
-            if (ImGui::GetContentRegionAvail().x < cw)
-                ImGui::NewLine();
+            tf.end();
         }
-        ImGui::NewLine();
-        }
+        settings_gap(px(18));  // main.js 530
         settings_section(s, "Size and fonts");
-        settings_row(s, "Zoom", "Everything: terminals, panels, text.", px(180) + px(70));
+        // main.js 531-543: the Zoom stepper and a Reset button.
+        settings_row(s, "Zoom", "Everything: terminals, panels, text.",
+                     px(kStepperW) + px(8) + settings_button_size(s, "Reset").x, px(kStepperH));
         if (stepper(s, "zoom", s.settings.zoom, 0.1f, 0.5f, 3.0f, "%.0f%%", 100.0f)) {
             g_scale = s.dpi * ui_scale(s.settings);
             apply_style(s.dpi, ui_scale(s.settings));
             changed = true;
         }
         ImGui::SameLine(0, px(8));
-        ImGui::BeginDisabled(std::abs(s.settings.zoom - 1.0f) < 0.001f);
-        if (ImGui::Button("Reset", ImVec2(px(62), 0))) {  // herdr: Zoom stepper + Reset
+        if (settings_button(s, "##st-zoom-reset", "Reset"))
             run_command(s, "app.zoom_reset");
-        }
-        ImGui::EndDisabled();
         settings_row_done(s);
-        settings_row(s, "Interface text", "Sidebar, tabs, menus and panels, at 100% zoom.", px(180));
+        settings_row(s, "Interface text", "Sidebar, tabs, menus and panels, at 100% zoom.", px(kStepperW), px(kStepperH));
         if (stepper(s, "uitext", s.settings.ui_text, 1.0f, 11.0f, 24.0f, "%.0f px")) {
             g_scale = s.dpi * ui_scale(s.settings);
             apply_style(s.dpi, ui_scale(s.settings));
@@ -9731,18 +9919,20 @@ void draw_settings(App::State& s) {
         }
         settings_row_done(s);
         {
-            settings_row(s, "Terminal font", nullptr, px(200) + px(10) + px(120));
-            if (font_picker(s, "##tfont", s.settings.terminal_font, "Default (JetBrains Mono)", px(200))) {
+            // main.js 500-512 fontRow(): the font button (220 wide), gap 8, the size stepper
+            // with the bare number (`${Math.round(sizeNow)}`, 437 / 511).
+            settings_row(s, "Terminal font", nullptr, px(220) + px(8) + px(kStepperW), px(kStepperH));
+            if (font_picker(s, "##tfont", s.settings.terminal_font, "Default (JetBrains Mono)", px(220))) {
                 apply_terminal_font(s);
                 changed = true;
             }
-            ImGui::SameLine(0, px(10));
-            if (stepper(s, "tsize", s.settings.font_size, 1.0f, 8.0f, 32.0f, "%.0f px"))
+            ImGui::SameLine(0, px(8));
+            if (stepper(s, "tsize", s.settings.font_size, 1.0f, 8.0f, 32.0f, "%.0f"))
                 changed = true;
             settings_row_done(s);
             // herdr settings main.js:546-548: a 100-900 stepper (step 100); the family's nearest
             // face is used (FontFamily::file_for).
-            settings_row(s, "Terminal font weight", "Bold text stays at 700.", px(180));
+            settings_row(s, "Terminal font weight", "Bold text stays at 700.", px(kStepperW), px(kStepperH));
             float weight = static_cast<float>(s.settings.terminal_weight);
             if (stepper(s, "tweight", weight, 100.0f, 100.0f, 900.0f, "%.0f")) {
                 s.settings.terminal_weight = static_cast<int>(weight);
@@ -9751,21 +9941,22 @@ void draw_settings(App::State& s) {
             }
             settings_row_done(s);
         }
-        settings_row(s, "Terminal line height", nullptr, px(180));
+        settings_row(s, "Terminal line height", nullptr, px(kStepperW), px(kStepperH));
         changed |= stepper(s, "lh", s.settings.line_height, 0.1f, 0.8f, 2.0f, "%.0f%%", 100.0f);
         settings_row_done(s);
-        settings_row(s, "Terminal cell width", nullptr, px(180));
+        settings_row(s, "Terminal cell width", nullptr, px(kStepperW), px(kStepperH));
         changed |= stepper(s, "cw", s.settings.cell_width, 0.05f, 0.8f, 2.0f, "%.0f%%", 100.0f);
         settings_row_done(s);
-        settings_row(s, "Terminal scroll speed", nullptr, px(180));
+        settings_row(s, "Terminal scroll speed", nullptr, px(kStepperW), px(kStepperH));
         changed |= stepper(s, "ss", s.settings.scroll_speed, 0.1f, 0.1f, 5.0f, "%.0f%%", 100.0f);
         settings_row_done(s);
-        settings_row(s, "Interface font", nullptr, px(200));
-        if (font_picker(s, "##uifont", s.settings.ui_font, "Default (Geist)", px(200))) {
+        settings_row(s, "Interface font", nullptr, px(220), ImGui::GetFrameHeight());
+        if (font_picker(s, "##uifont", s.settings.ui_font, "Default (Geist)", px(220))) {
             apply_ui_font(s);
             changed = true;
         }
         settings_row_done(s);
+        settings_gap(px(18));
         settings_section(s, "Terminals");
         {
             const auto profiles = s.host->profiles();
@@ -9774,7 +9965,8 @@ void draw_settings(App::State& s) {
             for (const auto& [id, pname] : profiles)
                 if (id == cur)
                     label = pname;
-            settings_row(s, "Shell", "New spaces, tabs and splits open it in the focused folder.", px(220));
+            settings_row(s, "Shell", "New spaces, tabs and splits open it in the focused folder.", px(220),
+                         ImGui::GetFrameHeight());
             if (ImGui::BeginCombo("##shell", label.c_str())) {
                 for (const auto& [id, pname] : profiles)
                     if (ImGui::Selectable(pname.c_str(), id == cur)) {
@@ -9785,20 +9977,27 @@ void draw_settings(App::State& s) {
             }
             settings_row_done(s);
         }
-        settings_row(s, "Copy on select", "Copy the selection when the mouse is released.", px(40));
-        changed |= ImGui::Checkbox("##cos", &s.settings.copy_on_select);
+        // On and off as herdr's settings switch it (main.js 225-238 toggle()).
+        settings_row(s, "Copy on select", "Copy the selection when the mouse is released.", px(36), px(20));
+        if (settings_toggle("##cos", s.settings.copy_on_select)) {
+            s.settings.copy_on_select = !s.settings.copy_on_select;
+            changed = true;
+        }
         settings_row_done(s);
-        settings_row(s, "Keys", "keys.json: change any shortcut.", px(120));
-        if (ImGui::Button("Edit keys.json", ImVec2(px(120), 0)))
+        settings_row(s, "Keys", "keys.json: change any shortcut.", settings_button_size(s, "Edit keys.json").x);
+        if (settings_button(s, "##keys", "Edit keys.json"))
             run_command(s, "app.keys");
         settings_row_done(s);
-        for (const auto& e : s.keymap_errors)
-            ImGui::TextColored(v4(g_pal->needs_you), "keys.json: cannot use \"%s\"", e.c_str());
+        for (const auto& e : s.keymap_errors) {
+            const std::string msg = "keys.json: cannot use \"" + e + "\"";
+            settings_wrapped(s, msg.c_str(), g_pal->needs_you);
+        }
         {
             static char buf[512];
             if (ImGui::IsWindowAppearing() || buf[0] == '\0')
                 std::snprintf(buf, sizeof buf, "%s", s.settings.worktree_dir.c_str());
-            settings_row(s, "Worktrees folder", "Empty: %USERPROFILE%\\.agentdesk\\worktrees", px(260));
+            settings_row(s, "Worktrees folder", "Empty: %USERPROFILE%\\.agentdesk\\worktrees", px(260),
+                         ImGui::GetFrameHeight());
             if (ImGui::InputText("##wt", buf, sizeof buf)) {
                 s.settings.worktree_dir = buf;
                 changed = true;
@@ -9806,10 +10005,22 @@ void draw_settings(App::State& s) {
             settings_row_done(s);
         }
     } else if (sec == "Machines") {
-        ImGui::TextWrapped("Other computers reachable over ssh. AgentDesk runs \"ssh <target> agentctl bridge\" and "
-                           "shows that machine's spaces and agents here; they keep running there while this PC "
-                           "sleeps. The other computer needs AgentDesk and key-based ssh login.");
+        // main.js 725-736 machines(): the heading, the note (pb 8), a "This computer" row with a
+        // green 7 px dot, a row per machine, then (pt 16) an "Add a machine" button.
         settings_section(s, "Machines");
+        settings_wrapped(s, "Your computers, reached over ssh. Their terminals keep running when you disconnect.",
+                         g_pal->faint);
+        settings_gap(px(8));
+        {
+            // main.js 730: "Connected · hc <version>" (ours: agent-host).
+            const std::string v = s.host->host_version();
+            const std::string note = "Connected \xC2\xB7 " + (v.empty() ? std::string("agent-host version unknown")
+                                                                         : "agent-host " + v);
+            settings_row(s, "This computer", note.c_str(), px(7), px(7));
+            const ImVec2 dp = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(dp.x + px(3.5f), dp.y + px(3.5f)), px(3.5f), g_pal->done);
+            settings_row_done(s);
+        }
         // herdr settings main.js machineRow(): Rename and Remove; both ask inline first.
         static std::string edit_machine;   // the row being edited
         static std::string edit_action;    // "rename" or "rm"
@@ -9826,20 +10037,34 @@ void draw_settings(App::State& s) {
         for (int i = 0; i < static_cast<int>(s.settings.machines.size()); ++i) {
             const auto& m = s.settings.machines[static_cast<std::size_t>(i)];
             ImGui::PushID(i);
-            const bool on = s.machine_connected(m.name);
+            // main.js 637-662: py 12, gap 8, a bottom border; the head row (gap 10): a 7 px dot
+            // (green connected, working while it connects, else blocked), the name 14 px over
+            // "target · state · version" 12.5 px dim, then Rename and Remove (gap 6). The version
+            // is left out while it is not known.
+            const std::string state = s.machine_state(m.name);
+            const ImU32 dot = state == "connected"    ? g_pal->done
+                              : state == "connecting" ? g_pal->working
+                                                      : g_pal->needs_you;
+            const std::string version = state == "connected" ? s.host_for(m.name)->host_version() : std::string();
+            const std::string sub =
+                m.target + " \xC2\xB7 " + state + (version.empty() ? std::string() : " \xC2\xB7 agent-host " + version);
             const ImVec2 a = ImGui::GetCursorScreenPos();
             const float rw = ImGui::GetContentRegionAvail().x;
-            ImGui::Dummy(ImVec2(rw, px(40)));
             ImDrawList* d = ImGui::GetWindowDrawList();
-            draw_icon(s, d, ui::icon::kServer, fpx(14), ImVec2(a.x + px(10), a.y + px(20)), g_pal->dim);
-            d->AddText(s.fonts.ui_medium, fpx(13), ImVec2(a.x + px(28), a.y + px(6)), g_pal->text, m.name.c_str());
-            d->AddText(s.fonts.ui, fpx(11.5f), ImVec2(a.x + px(28), a.y + px(23)), g_pal->faint, m.target.c_str());
-            const float bw_rename = ImGui::CalcTextSize("Rename").x + ImGui::GetStyle().FramePadding.x * 2;
-            const float bw_remove = ImGui::CalcTextSize("Remove").x + ImGui::GetStyle().FramePadding.x * 2;
-            const float bx = a.x + rw - bw_remove - bw_rename - px(6);
-            d->AddCircleFilled(ImVec2(bx - px(14), a.y + px(20)), px(3), on ? g_pal->done : g_pal->faint);
-            ImGui::SetCursorScreenPos(ImVec2(bx, a.y + px(8)));
-            if (ImGui::SmallButton("Rename")) {
+            const ImVec2 bsz_rename = settings_button_size(s, "Rename");
+            const ImVec2 bsz_remove = settings_button_size(s, "Remove");
+            const float text_h = line_h(14) + px(3) + line_h(12.5f);
+            const float head_h = std::max(text_h, bsz_rename.y);
+            const float cy = a.y + px(12) + head_h * 0.5f;
+            d->AddCircleFilled(ImVec2(a.x + px(3.5f), cy), px(3.5f), dot);
+            const float tx = a.x + px(7) + px(10);
+            const float bx = a.x + rw - bsz_remove.x - px(6) - bsz_rename.x;
+            const float ty = cy - text_h * 0.5f;
+            text_clipped(d, s.fonts.ui, fpx(14), ImVec2(tx, ty), g_pal->text, m.name, bx - px(10) - tx);
+            text_clipped(d, s.fonts.ui, fpx(12.5f), ImVec2(tx, ty + line_h(14) + px(3)), g_pal->faint, sub,
+                         bx - px(10) - tx);
+            ImGui::SetCursorScreenPos(ImVec2(bx, cy - bsz_rename.y * 0.5f));
+            if (settings_button(s, "##rename-btn", "Rename")) {
                 edit_machine = m.name;
                 edit_action = "rename";
                 std::snprintf(rename_buf, sizeof rename_buf, "%s", m.name.c_str());
@@ -9847,35 +10072,56 @@ void draw_settings(App::State& s) {
                 focus_rename = true;
             }
             ImGui::SameLine(0, px(6));
-            if (ImGui::SmallButton("Remove")) {
+            if (settings_button(s, "##remove-btn", "Remove")) {
                 edit_machine = m.name;
                 edit_action = "rm";
                 machine_notice.clear();
             }
-            ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + px(40)));
+            float y = a.y + px(12) + head_h;
+            auto line = [&](const std::string& text, ImU32 color, float size) {
+                y += px(8);
+                d->AddText(s.fonts.ui, fpx(size), ImVec2(a.x, y), color, text.c_str());
+                y += line_h(size);
+            };
             if (edit_machine == m.name && edit_action == "rm") {
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(28));
-                ImGui::TextColored(v4(g_pal->dim), "Remove %s? Its terminals keep running there.", m.name.c_str());
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(28));
-                if (ImGui::Button("Cancel"))
+                // main.js 676-678: the question (12.5 muted), then Cancel and "Remove machine".
+                line("Remove " + m.name + "? Its terminals keep running there.", g_pal->dim, 12.5f);
+                y += px(8);
+                ImGui::SetCursorScreenPos(ImVec2(a.x, y));
+                if (settings_button(s, "##rm-cancel", "Cancel"))
                     edit_machine.clear();
                 ImGui::SameLine(0, px(6));
-                if (ImGui::Button("Remove machine"))
+                if (settings_button(s, "##rm-confirm", "Remove machine"))
                     remove = i;
+                y += bsz_rename.y;
             } else if (edit_machine == m.name && edit_action == "rename") {
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(28));
-                ImGui::TextDisabled("New name (addresses using the old name stop working)");
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + px(28));
-                ImGui::SetNextItemWidth(std::max(px(120), rw - px(28) - px(150)));
+                // main.js 679-683: "New name (...)" 12 px dim, then (gap 6) the input (h 32, px 10,
+                // rounded 7, accent border while focused, background, 13 px), Cancel and Save.
+                line("New name (addresses using the old name stop working)", g_pal->faint, 12);
+                y += px(6);  // gap 6 under the label
+                ImGui::SetCursorScreenPos(ImVec2(a.x, y));
+                const float buttons = settings_button_size(s, "Cancel").x + px(6) + settings_button_size(s, "Save").x;
+                ImGui::SetNextItemWidth(std::max(px(120), rw - buttons - px(6)));
                 if (std::exchange(focus_rename, false))
                     ImGui::SetKeyboardFocusHere();
+                ImGui::PushFont(s.fonts.ui, 13);
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(px(10), (px(32) - ImGui::GetFontSize()) * 0.5f));
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, px(7));
+                ImGui::PushStyleColor(ImGuiCol_FrameBg, v4(g_pal->bg));
                 const bool enter = ImGui::InputText("##rename", rename_buf, sizeof rename_buf,
                                                     ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+                ImGui::PopStyleColor();
+                ImGui::PopStyleVar(2);
+                ImGui::PopFont();
+                d->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+                           ImGui::IsItemActive() ? g_pal->focus : g_pal->border, px(7));
+                const float iy = ImGui::GetItemRectMin().y;
                 ImGui::SameLine(0, px(6));
-                if (ImGui::Button("Cancel"))
+                ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, iy + (px(32) - bsz_rename.y) * 0.5f));
+                if (settings_button(s, "##rn-cancel", "Cancel"))
                     edit_machine.clear();
                 ImGui::SameLine(0, px(6));
-                if (ImGui::Button("Save") || enter) {
+                if (settings_button(s, "##rn-save", "Save") || enter) {
                     const std::string name = trimmed(rename_buf);
                     const bool taken = std::any_of(s.settings.machines.begin(), s.settings.machines.end(),
                                                    [&](const MachineConfig& o) { return o.name == name; });
@@ -9886,17 +10132,30 @@ void draw_settings(App::State& s) {
                         edit_machine.clear();
                     }
                 }
+                y = iy + px(32);
             }
-            if (!on)
+            // main.js 685: what went wrong, 12.5 px in the blocked colour.
+            if (state != "connected")
                 for (const auto& r : s.remotes)
                     if (r.cfg.name == m.name && !r.host->last_error().empty())
-                        ImGui::TextColored(v4(g_pal->needs_you), "  %s", r.host->last_error().c_str());
+                        line(r.host->last_error(), g_pal->needs_you, 12.5f);
+            y += px(12);
+            d->AddLine(ImVec2(a.x, y - 0.5f), ImVec2(a.x + rw, y - 0.5f), g_pal->border);
+            ImGui::SetCursorScreenPos(ImVec2(a.x, y));
+            ImGui::Dummy(ImVec2(0, 0));
             ImGui::PopID();
         }
-        if (s.settings.machines.empty())
-            ImGui::TextDisabled("No other machines yet.");
-        if (!machine_notice.empty())
-            ImGui::TextColored(v4(g_pal->done), "%s", machine_notice.c_str());
+        // main.js 732-734: "No other machines yet." (py 14) and the notice (py 10), 12.5 px.
+        if (s.settings.machines.empty()) {
+            settings_gap(px(14));
+            settings_wrapped(s, "No other machines yet.", g_pal->faint, 12.5f, 12.5f * 1.3f);
+            settings_gap(px(14));
+        }
+        if (!machine_notice.empty()) {
+            settings_gap(px(10));
+            settings_wrapped(s, machine_notice.c_str(), g_pal->done, 12.5f, 12.5f * 1.3f);
+            settings_gap(px(10));
+        }
         if (remove >= 0) {
             machine_notice = "Removed " + s.settings.machines[static_cast<std::size_t>(remove)].name +
                              "; its terminals keep running there.";
@@ -9922,47 +10181,53 @@ void draw_settings(App::State& s) {
             changed = true;
             start_remotes(s);
         }
-        ImGui::Dummy(ImVec2(0, px(8)));
-        primary_button_style(true);
-        if (ImGui::Button("Add a machine\xE2\x80\xA6"))
+        // main.js 736: pt 16, a settings button.
+        settings_gap(px(16));
+        if (settings_button(s, "##st-m-add", "Add a machine"))
             s.show_machine_add = true;
-        primary_button_style(false);
     } else if (sec == "Alerts") {
+        // main.js 743-757 alerts(): Sounds; Play sounds (a toggle); the two sounds with Play; the
+        // footnote. No other section: a note shows in the corner either way.
         settings_section(s, "Sounds");
         settings_row(s, "Play sounds",
                      "When an agent needs you, and when one finishes while you're not looking. A note shows in the "
                      "corner either way.",
-                     px(40));
-        changed |= ImGui::Checkbox("##snd", &s.settings.sounds);
+                     px(36), px(20));
+        if (settings_toggle("##st-sounds", s.settings.sounds)) {
+            s.settings.sounds = !s.settings.sounds;
+            changed = true;
+        }
         settings_row_done(s);
         auto sound_row = [&](const char* label, const std::string& file, bool blocked) {
             // herdr settings main.js:743: the file's name, not its path.
             const auto slash = file.find_last_of("\\/");
             const std::string name = slash == std::string::npos ? file : file.substr(slash + 1);
-            settings_row(s, label, file.empty() ? "AgentDesk's sound" : name.c_str(), px(70));
-            if (ImGui::Button(blocked ? "Play##b" : "Play##d", ImVec2(px(70), 0)))
+            settings_row(s, label, file.empty() ? "AgentDesk's sound" : name.c_str(), settings_button_size(s, "Play").x);
+            if (settings_button(s, blocked ? "##st-play-blocked" : "##st-play-done", "Play"))
                 play_alert(s, blocked);
             settings_row_done(s);
         };
         sound_row("An agent needs you", s.settings.sound_blocked, true);
         sound_row("An agent finished", s.settings.sound_done, false);
-        ImGui::TextDisabled("Use your own: set sound_done / sound_blocked in ui.json to an MP3 file.");
-        settings_section(s, "Notes");
-        settings_row(s, "Show a note in the corner", "For agents in your spaces; click it to go there.", px(40));
-        changed |= ImGui::Checkbox("##toasts", &s.settings.toasts);
-        settings_row_done(s);
+        // main.js 757, with our file and keys (ui.json sound_done / sound_blocked).
+        settings_footnote(s, "Want your own sounds? Ask your agent to set sound_done and sound_blocked in ui.json to "
+                             "an MP3.");
     } else if (sec == "Mods") {
-        ImGui::TextWrapped("Mods are C++ DLLs in the mods folder (one folder per mod, mod.dll). They can react to "
-                           "agents, add commands, panels and tab text, and start programs. A mod runs with your "
-                           "rights like any program you install, so only turn on mods you trust; one that crashes "
-                           "is turned off. The sdk folder of the zip has the headers and the examples' sources.");
+        // Ours (C++ DLL mods), laid out like herdr's pages: heading, note, rows with toggles.
         settings_section(s, "Installed");
+        settings_wrapped(s,
+                         "Mods are C++ DLLs in the mods folder (one folder per mod, mod.dll). They can react to "
+                         "agents, add commands, panels and tab text, and start programs. A mod runs with your "
+                         "rights like any program you install, so only turn on mods you trust; one that crashes "
+                         "is turned off. The sdk folder of the zip has the headers and the examples' sources.",
+                         g_pal->faint);
+        settings_gap(px(8));
         for (const auto& m : s.mods->mods()) {
             ImGui::PushID(m.name.c_str());
-            bool on = s.settings.mods_enabled.contains(m.name);
-            settings_row(s, m.name.c_str(), m.description.c_str(), px(40));
-            if (ImGui::Checkbox("##on", &on)) {
-                if (on)
+            const bool on = s.settings.mods_enabled.contains(m.name);
+            settings_row(s, m.name.c_str(), m.description.c_str(), px(36), px(20));
+            if (settings_toggle("##on", on)) {
+                if (!on)
                     s.settings.mods_enabled.insert(m.name);
                 else
                     s.settings.mods_enabled.erase(m.name);
@@ -9970,23 +10235,28 @@ void draw_settings(App::State& s) {
                 s.mods->load(s.settings.mods_enabled);
             }
             settings_row_done(s);
-            if (!m.error.empty())
-                ImGui::TextColored(v4(g_pal->needs_you), "  %s", m.error.c_str());
+            if (!m.error.empty()) {
+                settings_gap(px(6));
+                settings_wrapped(s, m.error.c_str(), g_pal->needs_you);
+            }
             ImGui::PopID();
         }
-        if (s.mods->mods().empty())
-            ImGui::TextDisabled("No mods yet.");
-        ImGui::Dummy(ImVec2(0, px(6)));
-        if (ImGui::Button("Reload"))
+        if (s.mods->mods().empty()) {
+            settings_gap(px(14));
+            settings_wrapped(s, "No mods yet.", g_pal->faint, 12.5f, 12.5f * 1.3f);
+        }
+        settings_gap(px(16));
+        if (settings_button(s, "##mods-reload", "Reload"))
             run_command(s, "mods.reload");
-        ImGui::SameLine();
-        if (ImGui::Button("Open mods folder"))
+        ImGui::SameLine(0, px(8));
+        if (settings_button(s, "##mods-folder", "Open mods folder"))
             run_command(s, "mods.folder");
     } else if (sec == "Updates") {
         close = settings_updates(s) || close;
     } else if (sec == "Privacy") {
         changed |= settings_privacy(s);
     }
+    ImGui::PopStyleVar();  // ItemSpacing
     ImGui::EndChild();
     if (changed)
         save_settings(s.settings);
@@ -10748,7 +11018,7 @@ void draw_confirm(App::State& s) {
     pop_overlay_style();
     if (!open)
         return;
-    bool cancel = overlay_title(s, s.confirm_title.c_str());
+    bool cancel = overlay_title(s, s.confirm_title.c_str(), EscChip::kPlain);  // confirm/main.js 42
     if (!s.confirm_detail.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
         ImGui::TextWrapped("%s", s.confirm_detail.c_str());
