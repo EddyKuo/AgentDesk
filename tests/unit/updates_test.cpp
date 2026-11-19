@@ -37,6 +37,24 @@ TEST(Updates, VersionsCompareLikeSemver) {
     EXPECT_FALSE(up::newer("0.0.9", "0.1.0"));
 }
 
+// SemVer 11.4: prerelease identifiers compare one by one, numeric ones as numbers.
+TEST(Updates, PrereleaseIdentifiersCompareLikeSemver) {
+    EXPECT_TRUE(up::newer("1.0.0-rc.10", "1.0.0-rc.9"));
+    EXPECT_FALSE(up::newer("1.0.0-rc.9", "1.0.0-rc.10"));
+    EXPECT_TRUE(up::newer("1.0.0-rc.2", "1.0.0-rc.1"));
+    EXPECT_FALSE(up::newer("1.0.0-rc.1", "1.0.0-rc.1"));
+    EXPECT_FALSE(up::newer("1.0.0-rc.01", "1.0.0-rc.1"));  // equal numbers
+    // The SemVer 11 example order: each is newer than the one before it.
+    const char* order[] = {"1.0.0-alpha",  "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta",
+                           "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1",       "1.0.0"};
+    for (std::size_t i = 1; i < std::size(order); ++i) {
+        EXPECT_TRUE(up::newer(order[i], order[i - 1])) << order[i] << " > " << order[i - 1];
+        EXPECT_FALSE(up::newer(order[i - 1], order[i])) << order[i - 1] << " < " << order[i];
+    }
+    EXPECT_TRUE(up::newer("1.0.0-rc.100000000000000000000001", "1.0.0-rc.99999999999999999999999"));
+    EXPECT_FALSE(up::newer("1.0.0+build.2", "1.0.0+build.1"));  // build metadata does not count
+}
+
 // update.rs 899-902
 TEST(Updates, Sha256IsHex) {
     EXPECT_EQ(up::sha256("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
