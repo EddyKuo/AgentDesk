@@ -45,6 +45,25 @@ std::wstring build_command_line(std::wstring_view executable, const std::vector<
 }
 
 bool is_batch_file(std::wstring_view path) {
+    // Windows drops trailing dots and spaces from a file name, and "::$DATA" names a file's own
+    // data stream: "run.bat.", "run.cmd " and "run.bat::$DATA" all start run.bat.
+    for (;;) {
+        if (!path.empty() && (path.back() == L'.' || path.back() == L' ')) {
+            path.remove_suffix(1);
+            continue;
+        }
+        constexpr std::wstring_view kDataStream = L"::$data";
+        if (path.size() >= kDataStream.size()) {
+            const auto tail = path.substr(path.size() - kDataStream.size());
+            if (std::equal(tail.begin(), tail.end(), kDataStream.begin(), [](wchar_t a, wchar_t b) {
+                    return static_cast<wchar_t>(std::towlower(a)) == b;
+                })) {
+                path.remove_suffix(kDataStream.size());
+                continue;
+            }
+        }
+        break;
+    }
     const auto dot = path.find_last_of(L'.');
     if (dot == std::wstring_view::npos) {
         return false;
