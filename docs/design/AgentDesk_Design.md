@@ -549,7 +549,7 @@ M0～M4 已實作，驗收矩陣結果見 `contracts/inbox/TestReport_sprint5.md
 | 逐項比對後補齊（2026-11-18）：keys.json 的 layout／mod 區段、物件動作、`terminal` 與錯誤檢查；預設按鍵；命令面板標題與順序；面板右鍵選單與標題列；Appearance 與深淺主題；所有已安裝字型、終端機字重、介面字型；歡迎頁；機器標頭與空機器列；新增選單的未安裝 Agent；移除 worktree 的子模組與重新檢查；遠端 space 的分支 | 四份規格（docs/research/herdr-app/） | ✅ |
 | Herdr 98 版面、程式表與圖示、Updates／Privacy、Look 的版面卡片 | mods/win98、src/programs.rs、src/update.rs、src/telemetry.rs、frame/settings | ✅ |
 
-刻意保留的差異：配色除了 herdr 的主題，另外保留我們自己的四個主題；介面文字預設 15 px；有選取時 Ctrl+C 複製（3.5，herdr 一律交給程式）；mod 是 C++ DLL（ADR-17）；線上更新與使用統計沒有預設伺服器（ADR-18）。
+刻意保留的差異：配色除了 herdr 的主題，另外保留我們自己的四個主題；介面文字預設 15 px；有選取時 Ctrl+C 複製（3.5，herdr 一律交給程式）；mod 是 C++ DLL（ADR-17）；線上更新與使用統計沒有預設伺服器（ADR-18）；程式不能透過 OSC 52 寫入剪貼簿（herdr 預設允許，我們依安全規則不開放）。
 
 ## 6. 測試計畫與驗收（QA）
 

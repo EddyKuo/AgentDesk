@@ -122,3 +122,4 @@ plan: docs/design/AgentDesk_Design.md 5.6
 | 2026-11-19 | 字型繪製改用 FreeType（分支，待使用者確認） | 字型本身和 herdr 相同（介面 Geist、終端機 JetBrains Mono Medium），使用者覺得不像 herdr：herdr 在 Windows 用 DirectWrite 繪字，較銳利。ImGui 改用 FreeType 繪字（vcpkg imgui[freetype]，FreeType 授權 FTL，與 MIT 相容），筆畫對齊像素、較清楚 | src/settings.rs 548-556 | — |
 | 2026-11-19 | FreeType 合併 | 已合併：使用者說不喜歡原本的字，這個改動讓字更接近 herdr 的 DirectWrite 效果；使用者不要的話可以退回 | — | 162d555 |
 | 2026-11-19 | Agent 結束後還留在左下 | 修正：照 herdr，Agents 清單只列出各 space 面板裡、正在執行、而且現在有狀態的終端機。Agent 結束回到 shell 時，OSC 7501 紀錄依規格會留下 idle 或 done，所以改看終端機現在跑的程式：是 shell 就不算 Agent，左下清單、分頁與 space 的狀態點、狀態列的 Agent 數一起清掉，名稱與圖示也回到 shell；space 關掉後也不再列出。使用者實機回報 | defaults/AGENTS.md 153；src/window.rs 1855-1883；src/model.rs 597-605 | — |
+| 2026-11-19 | herdr 只能寫在設定檔的終端機選項 | 比對結果：最低對比預設 1（不調整）、連字預設關閉、面板捲動條預設開啟，三項與我們目前的行為相同。程式寫剪貼簿（OSC 52）herdr 預設允許，我們維持不允許：設計文件把「輸出內容不可寫剪貼簿」列為不可違反的安全規則，Agent 的輸出可能夾帶惡意內容 | src/settings.rs 455-490、658 | — |
