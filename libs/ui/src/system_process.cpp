@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <optional>
+#include <stdexcept>
 #include <thread>
 
 #include "agentdesk/platform/win/command_line.hpp"
@@ -33,35 +35,48 @@ std::wstring to_wide(const std::string& s) {
 ProcessResult run_process(const std::filesystem::path& exe, const std::vector<std::wstring>& args,
                           const std::string& input, const std::function<bool()>& keep_going) {
     ProcessResult r;
-    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+    // Created not inheritable; only the child's three ends are made inheritable, and the child
+    // inherits exactly those (handle list below). Children started at the same time from other
+    // threads must not get each other's pipe ends: a write end held by another child keeps a
+    // drain below from ever seeing EOF.
     HANDLE rd = nullptr;
     HANDLE wr = nullptr;
-    if (!::CreatePipe(&rd, &wr, &sa, 0))
+    if (!::CreatePipe(&rd, &wr, nullptr, 0))
         return r;
     win::UniqueHandle out_read(rd);
     win::UniqueHandle out_write(wr);
-    ::SetHandleInformation(out_read.get(), HANDLE_FLAG_INHERIT, 0);
-    if (!::CreatePipe(&rd, &wr, &sa, 0))
+    if (!::CreatePipe(&rd, &wr, nullptr, 0))
         return r;
     win::UniqueHandle err_read(rd);
     win::UniqueHandle err_write(wr);
-    ::SetHandleInformation(err_read.get(), HANDLE_FLAG_INHERIT, 0);
-    if (!::CreatePipe(&rd, &wr, &sa, 0))
+    if (!::CreatePipe(&rd, &wr, nullptr, 0))
         return r;
     win::UniqueHandle in_read(rd);
     win::UniqueHandle in_write(wr);
-    ::SetHandleInformation(in_write.get(), HANDLE_FLAG_INHERIT, 0);
+    HANDLE inherit[3] = {out_write.get(), err_write.get(), in_read.get()};
+    for (HANDLE h : inherit)
+        if (!::SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
+            return r;
 
     std::wstring cmdline = win::build_command_line(exe.native(), args);
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = out_write.get();
-    si.hStdError = err_write.get();
-    si.hStdInput = in_read.get();
+    std::optional<win::AttributeList> attrs;
+    try {
+        attrs.emplace(1);
+        attrs->update(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof(inherit));
+    } catch (const std::exception&) {
+        return r;
+    }
+    STARTUPINFOEXW si{};
+    si.StartupInfo.cb = sizeof(si);
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    si.StartupInfo.hStdOutput = out_write.get();
+    si.StartupInfo.hStdError = err_write.get();
+    si.StartupInfo.hStdInput = in_read.get();
+    si.lpAttributeList = attrs->get();
     PROCESS_INFORMATION pi{};
-    if (!::CreateProcessW(exe.c_str(), cmdline.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr,
-                          nullptr, &si, &pi))
+    if (!::CreateProcessW(exe.c_str(), cmdline.data(), nullptr, nullptr, TRUE,
+                          CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr, &si.StartupInfo,
+                          &pi))
         return r;
     r.started = true;
     win::UniqueHandle process(pi.hProcess);

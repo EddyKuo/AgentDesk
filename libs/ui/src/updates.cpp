@@ -36,6 +36,10 @@ constexpr std::uint64_t kGeneration = static_cast<std::uint64_t>(protocol::kProt
 struct Shared {
     Config config;
     std::mutex mutex;
+    // Held while <install>.new is checked, staged or swapped in: the checker thread stages while
+    // the UI thread may apply. Recursive: apply() holds it across staged_version() and swap().
+    // Taken before `mutex`, never after.
+    std::recursive_mutex stage_mutex;
     std::optional<std::string> ready;  // READY
     CoreInfo core;                     // CORE
     std::optional<std::uint64_t> checked;
@@ -279,6 +283,55 @@ void configure(Config config) {
 
 // ---- pure helpers
 
+namespace {
+
+// SemVer 11.4: dot-separated identifiers left to right; numeric ones compare numerically and
+// rank below alphanumeric ones; with equal leading identifiers, more identifiers rank higher.
+bool prerelease_greater(std::string_view a, std::string_view b) {
+    const auto split = [](std::string_view s) {
+        std::vector<std::string_view> ids;
+        for (std::size_t at = 0;;) {
+            const auto dot = s.find('.', at);
+            ids.push_back(s.substr(at, dot == std::string_view::npos ? std::string_view::npos : dot - at));
+            if (dot == std::string_view::npos)
+                return ids;
+            at = dot + 1;
+        }
+    };
+    const auto numeric = [](std::string_view id) {
+        return !id.empty() && std::all_of(id.begin(), id.end(), [](char c) { return c >= '0' && c <= '9'; });
+    };
+    const auto ia = split(a);
+    const auto ib = split(b);
+    for (std::size_t i = 0; i < ia.size() && i < ib.size(); ++i) {
+        const std::string_view x = ia[i];
+        const std::string_view y = ib[i];
+        const bool nx = numeric(x);
+        const bool ny = numeric(y);
+        if (nx && ny) {
+            // Compare as numbers of any length: strip leading zeros, then longer is larger.
+            const auto trim = [](std::string_view n) {
+                const auto first = n.find_first_not_of('0');
+                return first == std::string_view::npos ? std::string_view() : n.substr(first);
+            };
+            const std::string_view tx = trim(x);
+            const std::string_view ty = trim(y);
+            if (tx.size() != ty.size())
+                return tx.size() > ty.size();
+            if (tx != ty)
+                return tx > ty;
+            continue;
+        }
+        if (nx != ny)
+            return ny;  // the alphanumeric one is greater
+        if (x != y)
+            return x > y;  // ASCII order
+    }
+    return ia.size() > ib.size();
+}
+
+}  // namespace
+
 bool newer(std::string_view a, std::string_view b) {
     struct Parts {
         std::vector<std::uint64_t> core;
@@ -287,6 +340,7 @@ bool newer(std::string_view a, std::string_view b) {
     const auto parts = [](std::string_view v) {
         while (!v.empty() && v.front() == 'v')
             v.remove_prefix(1);
+        v = v.substr(0, v.find('+'));  // build metadata does not order versions (SemVer 10)
         Parts p;
         const auto dash = v.find('-');
         const std::string_view core = dash == std::string_view::npos ? v : v.substr(0, dash);
@@ -318,7 +372,7 @@ bool newer(std::string_view a, std::string_view b) {
         if (!pa.pre && pb.pre)
             return true;
         if (pa.pre && pb.pre)
-            return *pa.pre > *pb.pre;
+            return prerelease_greater(*pa.pre, *pb.pre);
         return false;
     }
     // Vec<u64> comparison: lexicographic.
@@ -419,9 +473,12 @@ Found check_from(const fs::path& root, const std::string& releases_url, const st
     // 277-282: release notes are fetched for What's new there; AgentDesk's What's new ships in the
     // build, so there is nothing to fetch.
     const fs::path staged = beside(root, L".new");
-    if (staged_version(root) == version) {
-        f.version = version;
-        return f;
+    {
+        std::lock_guard stage(g().stage_mutex);
+        if (staged_version(root) == version) {
+            f.version = version;
+            return f;
+        }
     }
     const Json* entry = nullptr;
     if (const auto t = manifest.find("targets"); t != manifest.end() && t->is_object())
@@ -449,6 +506,9 @@ Found check_from(const fs::path& root, const std::string& releases_url, const st
         done = false;
     }
     if (done) {
+        // The download (minutes) runs unlocked in .download; only putting it in place as .new
+        // waits for an apply() in progress.
+        std::lock_guard stage(g().stage_mutex);
         const fs::path receipt = beside(root, L".new.json");
         fs::remove(receipt, ec);
         fs::remove_all(staged, ec);
@@ -511,6 +571,7 @@ std::optional<std::string> staged_version(const fs::path& root) {
 }
 
 bool swap(const fs::path& root, std::string* error) {
+    std::lock_guard stage(g().stage_mutex);
     const fs::path staged = beside(root, L".new");
     const fs::path old = beside(root, L".old");
     std::error_code ec;
@@ -526,6 +587,11 @@ bool swap(const fs::path& root, std::string* error) {
         *error = os_error(ec);  // cannot put the new version in place
         std::error_code rollback;
         fs::rename(old, root, rollback);
+        if (rollback) {
+            // Neither version is in place: say where the old one is; callers do not relaunch.
+            *error += "; the previous version could not be put back either (" + os_error(rollback) +
+                      "): it is in " + u8(old);
+        }
         return false;
     }
     fs::remove(beside(root, L".new.json"), ec);
@@ -681,13 +747,18 @@ bool apply_on_startup() {
     const auto r = checks_app();
     if (!r)
         return false;
-    const auto staged = staged_version(*r);
-    const auto version = startup_target(g().config.version, staged, std::nullopt);
-    if (!version)
-        return false;
-    std::string error;
-    if (!swap(*r, &error))
-        return false;
+    std::optional<std::string> version;
+    {
+        // The stage checked is the stage swapped in (the checker thread may be staging).
+        std::lock_guard stage(g().stage_mutex);
+        const auto staged = staged_version(*r);
+        version = startup_target(g().config.version, staged, std::nullopt);
+        if (!version)
+            return false;
+        std::string error;
+        if (!swap(*r, &error))
+            return false;  // never relaunched: the install may not be the new version
+    }
     return relaunch_expected(version);
 }
 
@@ -695,6 +766,7 @@ bool apply(std::string* error) {
     const auto r = root();
     if (!r)
         return false;
+    std::lock_guard stage(g().stage_mutex);
     const auto staged = staged_version(*r);
     if (ready() != staged || !staged || !newer(*staged, g().config.version))
         return false;

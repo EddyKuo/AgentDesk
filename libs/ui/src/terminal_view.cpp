@@ -261,6 +261,12 @@ std::optional<Clock::time_point> TerminalView::next_deadline() const {
 
 void TerminalView::handle_resize(TerminalSource& source, GridSize wanted,
                                  const terminal::ScreenSnapshot& snap) {
+    // A read-only view's resize goes nowhere; once this view takes control, its size is sent
+    // again even if it was "requested" while read-only.
+    const bool controls = source.controls_size();
+    if (controls && !controlled_size_)
+        requested_size_.reset();
+    controlled_size_ = controls;
     const GridSize current{snap.rows, snap.cols};
     if (wanted == current && (!requested_size_ || *requested_size_ == wanted)) {
         pending_size_.reset();
@@ -273,8 +279,9 @@ void TerminalView::handle_resize(TerminalSource& source, GridSize wanted,
         return;
     }
     if (now - pending_since_ >= kResizeDebounce && requested_size_ != wanted) {
-        source.resize(wanted.rows, wanted.cols);
-        requested_size_ = wanted;
+        if (controls)
+            source.resize(wanted.rows, wanted.cols);
+        requested_size_ = wanted;  // read-only: settled until control comes back (above)
     }
 }
 
@@ -490,8 +497,8 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
         if (!text.empty()) {
             scroll_offset_ = 0;
             clear_selection();
+            source.send(host::TextInput{std::move(text), terminal::kModNone});
         }
-        source.send(host::TextInput{std::move(text), terminal::kModNone});
     }
 }
 
