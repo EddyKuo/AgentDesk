@@ -556,6 +556,45 @@ TEST_F(HostFixture, CorruptSettingsDoNotPreventStartup) {
     EXPECT_EQ(kept, 2);
 }
 
+// One damaged entry in profiles.json or sessions.json is skipped; the host starts with the rest.
+TEST_F(HostFixture, DamagedEntriesAreSkippedNotFatal) {
+    if (auto c = connect())
+        c->call("host.shutdown", {{"stop_sessions", true}});
+    ::WaitForSingleObject(host_.get(), 10000);
+    Json profiles = Json::array({
+        {{"id", 5}, {"executable", "x"}},  // id is not a string
+        {{"name", "no id"}},               // id and executable missing
+        {{"id", "echo"},
+         {"name", "probe echo"},
+         {"executable", win::to_utf8(AGENTDESK_VT_PROBE)},
+         {"args", {"echo"}}},
+    });
+    std::ofstream(data_dir_ / L"profiles.json", std::ios::trunc)
+        << Json{{"schema_version", 1}, {"wsl_detected", true}, {"profiles", profiles}}.dump(2);
+    Json sessions = Json::array({
+        {{"id", 42}},                   // id is not a string
+        {{"id", "ok-1"}, {"name", 7}},  // name is not a string
+        {{"id", "ok-2"}, {"name", "kept"}, {"cwd", "C:\\"}, {"process_state", "Exited"}},
+    });
+    std::ofstream(data_dir_ / L"sessions.json", std::ios::trunc)
+        << Json{{"schema_version", 1}, {"sessions", sessions}}.dump(2);
+    fs::remove(fs::path(data_dir_ / L"profiles.json").concat(L".bak"));
+    fs::remove(fs::path(data_dir_ / L"sessions.json").concat(L".bak"));
+    start_host();
+    auto c = connect();
+    ASSERT_TRUE(c);
+    const auto list = c->call("profile.list", Json::object());
+    ASSERT_TRUE(list && list->result);
+    std::set<std::string> ids;
+    for (const auto& p : list->result->at("profiles"))
+        ids.insert(p.value("id", ""));
+    EXPECT_EQ(ids, std::set<std::string>{"echo"});
+    const auto got = c->call("session.get", {{"session", "ok-2"}});
+    ASSERT_TRUE(got && got->result) << "the good session record was not kept";
+    EXPECT_EQ(got->result->value("name", ""), "kept");
+    EXPECT_TRUE(c->call("session.get", {{"session", "ok-1"}})->error.has_value());
+}
+
 // Fault case: sessions.json cannot be written (e.g. disk or permission problem); sessions work.
 TEST_F(HostFixture, PersistFailureKeepsHostRunning) {
     fs::create_directories(data_dir_ / L"sessions.json.tmp");  // makes the temp write fail
