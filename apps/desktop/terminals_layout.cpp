@@ -1,9 +1,12 @@
-// The Terminals layout: its tab strip and pane headers.
+// The Terminals layout: its top bar (space chip, tab tray, buttons) and pane headers.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
 
+// The hex values are what each step gives on the graphite theme (background #131619, text
+// #e8e9eb), the colours this layout was designed in.
 TerminalsLook terminals_look() {
     const ImU32 bg = g_pal->bg, fg = g_pal->text;
     TerminalsLook l{};
@@ -24,8 +27,7 @@ TerminalsLook terminals_look() {
 }
 
 namespace {
-// The pane a tab speaks for (terminals-bar/main.js 25-29): the focused one, else its agent, else
-// the first.
+// The pane a tab speaks for: the focused one, else its agent, else the first.
 std::string terminals_lead(App::State& s, const ui::Tab& tab) {
     const auto ids = s.ws.sessions_in(tab);
     if (std::find(ids.begin(), ids.end(), tab.focused) != ids.end())
@@ -36,11 +38,11 @@ std::string terminals_lead(App::State& s, const ui::Tab& tab) {
     return ids.empty() ? std::string() : ids.front();
 }
 
-// The program's tile (terminals-bar/main.js 31-53): 26 px, radius 7, a faint white edge, the
-// program's glyph; a status other than idle puts an 11 px dot at the top right.
+// The program's tile: 26 px, radius 7, the program's tile colour (else the chip colour), a faint
+// white edge (#ffffff14) and the program's glyph at 15 px in its own colour (else the text). A
+// status other than idle puts an 11 px dot at the top right, ringed in the tray's colour.
 void terminals_tile(App::State& s, ImDrawList* dl, ImVec2 a, const std::string& id, const TerminalsLook& l) {
     const float side = px(26);
-    // herdr: bg(g.tile ?? chip), border #ffffff14, the icon 15 px (tinted: g.color ?? text).
     std::optional<ui::Program> g;
     if (const auto it = s.views_by_id.find(id); it != s.views_by_id.end())
         g = program_of(it->second);
@@ -59,15 +61,16 @@ void terminals_tile(App::State& s, ImDrawList* dl, ImVec2 a, const std::string& 
 
 }  // namespace
 
-// The draggable top bar (terminals-bar/main.js 94-187): the space chip (opens the picker), the
-// tabs in a tray, then the palette, "+" (a new tab at once) and the window buttons.
+// The draggable top bar: the space chip (opens the picker), the tabs in a tray, then the palette,
+// "+" (a new tab at once) and the window buttons.
 void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const TerminalsLook l = terminals_look();
     auto* sp = s.ws.active();
     const float cy = pos.y + height * 0.5f;
     float right = pos.x + width;
-    // Window buttons: pl 6, pr 4, gap 8; 24 px round chips, 14 px icons; hover edge + text.
+    // Window buttons: 6 px left and 4 px right padding, 8 px apart; 24 px round chips with 14 px
+    // icons; hover uses the edge colour and the text colour.
     if (s.config.hwnd != nullptr) {
         const bool zoomed = ::IsZoomed(s.config.hwnd) != FALSE;
         struct B {
@@ -91,13 +94,13 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
                 run_command(s, b.cmd);
             right -= px(8);
         }
-        right += px(8) - px(6) - px(8);  // the group's pl 6, then the bar's gap 8
+        right += px(8) - px(6) - px(8);  // the group's 6 px left padding, then the bar's 8 px gap
     }
     if (sp == nullptr) {
         window_drag_area(s, pos, ImVec2(pos.x + width, pos.y + height));
         return;
     }
-    // Icon buttons: p 7, radius 8, 17 px icons, dim; hover chip + text.
+    // Icon buttons: 7 px padding, radius 8, 17 px dim icons; hover adds the chip and the text colour.
     auto icon_btn = [&](const char* id, const char* glyph, const char* cmd) {
         const float side = px(17) + px(14);
         right -= side;
@@ -112,9 +115,10 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
             run_command(s, cmd);
         right -= px(8);
     };
-    icon_btn("##tm-new", ui::icon::kPlus, "tab.new");  // "+" runs tab.new directly (:174)
-    icon_btn("##tm-keys", "\xF3\xB0\x98\xB3", "app.palette");  // nf-md-apple_keyboard_command (herdr command.svg)
-    // Space chip: h 30, pl 10, pr 12, gap 8, round; 15 px icon, the name (max 160) in text.
+    icon_btn("##tm-new", ui::icon::kPlus, "tab.new");             // no menu: a new tab at once
+    icon_btn("##tm-keys", "\xF3\xB0\x98\xB3", "app.palette");  // nf-md-apple_keyboard_command
+    // Space chip: 30 px high and round, 10 px left and 12 px right padding, 8 px gap; a 15 px icon
+    // and the space name (at most 160 px).
     float x = pos.x;
     const auto cwds = s.session_cwds();
     const std::string sname = s.ws.space_title(s.ws.active_space, cwds);
@@ -133,7 +137,7 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
             run_command(s, "app.picker");  // the picker drops from the top (popup at top, offset 40)
         x += chip_w + px(8);
     }
-    // The tray: h 36, p 3, gap 3, radius 16; tabs 260 wide that shrink to fit.
+    // The tray: 36 px high, 3 px padding and gap, radius 16; tabs 260 px wide that shrink to fit.
     const int n = static_cast<int>(sp->tabs.size());
     const float avail = std::max(0.0f, right - x);
     const float want = static_cast<float>(n) * px(260) + static_cast<float>(std::max(0, n - 1)) * px(3) + px(6);
@@ -159,7 +163,7 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
             s.ws.select_tab(i);
             s.focus_view(s.ws.focused_session());
         }
-        if (begin_menu("##tabctx")) {  // the tab menu (menu/main.js 58-63), by id
+        if (begin_menu("##tabctx")) {  // Rename, New tab, Close, acting on this tab by id
             if (menu_row(s, ui::icon::kEdit, "Rename", s.keymap.chord_for("tab.rename")))
                 run_command(s, "tab.rename:" + tab.id);
             if (menu_row(s, ui::icon::kPlus, "New tab", s.keymap.chord_for("tab.new")))
@@ -175,7 +179,8 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
         } else if (hov) {
             dl->AddRectFilled(a, b, l.hover, px(13));
         }
-        // pl 5, pr 12, gap 9: the tile, the name (flex_none), the folder (dim, truncated).
+        // 5 px left and 12 px right padding, 9 px gap: the tile, the full name, then the folder
+        // (dim, truncated).
         dl->PushClipRect(a, ImVec2(b.x - px(12), b.y), true);
         const std::string lead = terminals_lead(s, tab);
         terminals_tile(s, dl, ImVec2(a.x + px(5), a.y + px(2)), lead, l);
@@ -196,18 +201,19 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
     window_drag_area(s, pos, ImVec2(pos.x + width, pos.y + height));
 }
 
-// The pane header of the Terminals layout (terminals-pane/main.js 34-61): 38 px; pl 12, pr 8,
-// gap 8, 14 px text; the program icon, the terminal's title (semibold, max 320), its folder when
-// the title does not already say it, then split right, split down, zoom and close, always shown.
+// The pane header of the Terminals layout: 38 px, 12 px left and 8 px right padding, 8 px gaps,
+// 14 px text. The program icon, the terminal's title (semibold, at most 320 px), its folder when
+// the title does not already say it, then split right, split down, zoom and close: always shown,
+// no tooltips.
 void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::SessionView& v, ImVec2 pos,
                                 float w, float h, bool focused) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const TerminalsLook l = terminals_look();
     const float cy = pos.y + h * 0.5f;
     float x = pos.x + px(12);
-    program_icon(dl, program_of(v), ImVec2(x, cy - px(8)), px(16), IM_COL32(0xd6, 0xd8, 0xdb, 255));  // terminals-pane/main.js 53
+    program_icon(dl, program_of(v), ImVec2(x, cy - px(8)), px(16), IM_COL32(0xd6, 0xd8, 0xdb, 255));
     x += px(16) + px(8);
-    // const title = p.title || "shell"; dir unless the title holds it or starts with ~ or /.
+    // The folder is left out when the title already holds it or is itself a path.
     std::string title = s.pane_title(id);
     if (title.empty())
         title = "shell";
@@ -215,7 +221,8 @@ void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::
     const bool says = !where.empty() && (title.find(where) != std::string::npos || title[0] == '~' ||
                                          title[0] == '/' || (title.size() > 2 && title[1] == ':' && title[2] == '\\'));
     const std::string dir = says ? std::string() : where;
-    // Buttons from the right: p 4, radius 5, 15 px icons; #5d6168, hover #ffffff0d + #d6d8db.
+    // Buttons from the right: 4 px padding, radius 5, 15 px icons; hover adds a faint background
+    // and brightens the icon.
     float right = pos.x + w - px(8);
     const auto* tab = s.ws.active_tab();
     const bool zoomed = tab != nullptr && tab->zoomed == id;
@@ -224,7 +231,6 @@ void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::
         const char* glyph;
         const char* cmd;
     };
-    // terminals-pane/main.js 19-32: no tooltips.
     const B buttons[] = {{"##th-x", ui::icon::kClose, "pane.close"},
                          {"##th-z", zoomed ? ui::icon::kUnzoom : ui::icon::kZoom, "pane.zoom"},
                          {"##th-d", ui::icon::kSplitDown, "pane.split:down"},
