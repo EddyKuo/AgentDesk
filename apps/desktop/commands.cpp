@@ -1,13 +1,15 @@
-// Commands: the command table, run_command / exec_command (palette, keys.json, mods, --run)
-// and the layout commands.
+// Commands: the command names, run_command / exec_command (palette, keys.json, mods, --run,
+// clicks) and the layout commands.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
 
 namespace {
-// The commands AgentDesk itself has (herdr commands::COMMANDS).
+// Every command name AgentDesk runs itself; telemetry counts only these.
 bool builtin_command(std::string_view name) {
+    // clang-format off
     static const std::set<std::string, std::less<>> kNames = {
         "agent.focus", "agent.keep", "agent.new", "agent.next", "agent.peek", "agent.prev", "app.exit_all",
         "app.feedback", "app.help", "app.keys", "app.palette", "app.picker", "app.reset", "app.settings",
@@ -22,47 +24,42 @@ bool builtin_command(std::string_view name) {
         "terminal.paste", "terminal.paste_image", "terminal.peek", "terminal.pin", "terminal.right_click",
         "terminal.scroll", "terminal.search", "terminal.select_all", "theme", "window.close", "window.maximize",
         "window.minimize", "worktree.new", "worktree.open", "worktree.remove", "app.quit", "overlay.close",
-        // herdr commands.rs 98, 99, 105
         "app.check_updates", "app.update_core", "app.update"};
+    // clang-format on
     return kNames.contains(name);
+}
+
+// A "<mod>.<command>" name whose mod folder exists in <data>\mods.
+bool mod_folder_exists(std::string_view mod) {
+    std::error_code ec;
+    return std::filesystem::is_directory(data_dir() / L"mods" / win::to_wide(std::string(mod)), ec);
 }
 
 }  // namespace
 
-// Command names keys.json may bind (herdr validates actions and reports unknown ones). A
+// The command names keys.json may bind; an unknown one is reported in keys.error. A
 // "<mod>.<command>" action is accepted when that mod folder exists.
 bool known_command(std::string_view name) {
     if (builtin_command(name))
         return true;
-    // Herdr 98's commands (herdr-app defaults/mods/win98/README.md 12-17).
+    // The AgentDesk 98 layout's commands.
+    // clang-format off
     static const std::set<std::string, std::less<>> kWin98 = {
         "win98.start",       "win98.taskman", "win98.new_tab", "win98.new_space", "win98.rename_tab", "win98.rename_space",
         "win98.run",         "win98.shutdown", "win98.about",  "win98.display",   "win98.welcome",    "win98.boot",
         "win98.mines",       "win98.sol",     "win98.mycomputer", "win98.network", "win98.bin",       "win98.datetime",
         "win98.logoff",      "win98.small_fonts", "win98.large_fonts", "win98.close_tab", "win98.close_space"};
+    // clang-format on
     if (kWin98.contains(name))
         return true;
     const auto dot = name.find('.');
-    std::error_code ec;
-    return dot != std::string_view::npos &&
-           std::filesystem::is_directory(data_dir() / L"mods" / win::to_wide(std::string(name.substr(0, dot))), ec);
+    return dot != std::string_view::npos && mod_folder_exists(name.substr(0, dot));
 }
-
-namespace {
-const char* command_label(const std::string& id) {
-    for (const auto& c : kCommands)
-        if (id == c.id)
-            return c.label;
-    return nullptr;
-}
-
-}  // namespace
-
-// ------------------------------------------------------------------ commands
 
 // Profile used for new spaces/tabs/splits: the configured one if it exists, else the first
 // shell found (PowerShell 7, Windows PowerShell, Command Prompt), else empty.
-std::string pick_shell(const std::string& wanted, const std::vector<std::pair<std::string, std::string>>& profiles) {
+std::string pick_shell(const std::string& wanted,
+                       const std::vector<std::pair<std::string, std::string>>& profiles) {
     const auto has = [&](const std::string& id) {
         return std::any_of(profiles.begin(), profiles.end(), [&](const auto& p) { return p.first == id; });
     };
@@ -74,33 +71,7 @@ std::string pick_shell(const std::string& wanted, const std::vector<std::pair<st
     return {};
 }
 
-namespace {
-// git in `cwd` on `machine` ("" = here); other machines run it through their agent-host's
-// git.run (herdr worktree.js runs git on the space's machine).
-host::ToolResult git_at(App::State& s, const std::string& machine, const std::string& cwd, std::vector<std::wstring> args,
-                        std::chrono::seconds timeout = std::chrono::seconds(30)) {
-    if (machine.empty()) {
-        const std::filesystem::path p(win::to_wide(cwd));
-        args.insert(args.begin(), {L"git", L"-C", p.native()});
-        return host::run_tool(args, p, timeout);
-    }
-    host::ToolResult r;
-    Json a = Json::array();
-    for (const auto& x : args)
-        a.push_back(win::to_utf8(x));
-    if (const auto res = s.panels->remote ? s.panels->remote(machine, "git.run", Json{{"cwd", cwd}, {"args", a}})
-                                          : std::nullopt) {
-        r.started = true;
-        r.exit_code = static_cast<unsigned long>(safe::int_or(*res, "exit_code", 1));
-        r.output = safe::string_or(*res, "output");
-        r.error = safe::string_or(*res, "error");
-    }
-    return r;
-}
-
-}  // namespace
-
-// Text without surrounding whitespace (JavaScript's trim()).
+// Text without surrounding whitespace (spaces, tabs, line ends).
 std::string trimmed(const std::string& t) {
     const auto a = t.find_first_not_of(" \t\r\n");
     if (a == std::string::npos)
@@ -109,12 +80,29 @@ std::string trimmed(const std::string& t) {
 }
 
 namespace {
-// What removing a linked worktree would lose (herdr worktree.js): uncommitted changes, and
-// submodules with commits their upstream does not have. Plain git, no shell.
+// git in `cwd` on `machine` ("" = here); another machine runs it through its agent-host's git.run.
+host::ToolResult git_at(App::State& s, const std::string& machine, const std::string& cwd,
+                        std::vector<std::wstring> args,
+                        std::chrono::seconds timeout = std::chrono::seconds(30)) {
+    if (machine.empty()) {
+        const std::filesystem::path p(win::to_wide(cwd));
+        args.insert(args.begin(), {L"git", L"-C", p.native()});
+        return host::run_tool(args, p, timeout);
+    }
+    return remote_git(s.panels->remote, machine, cwd, args);
+}
+
+bool git_ok(const host::ToolResult& r) {
+    return r.started && r.exit_code == 0;
+}
+
+// What removing a linked worktree would lose: uncommitted changes, and submodules with commits
+// that exist nowhere else. Plain git, no shell.
 struct WorktreeRisk {
     bool dirty = false;
     bool submodules = false;
     std::vector<std::string> unpushed;  // submodule paths
+    // Compared when the removal is confirmed: a different signature means the risk changed.
     [[nodiscard]] std::string signature() const {
         std::string sig = std::string(dirty ? "d" : "-") + (submodules ? "s" : "-");
         for (const auto& u : unpushed)
@@ -123,16 +111,13 @@ struct WorktreeRisk {
     }
 };
 
-WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std::string& top) {
-    WorktreeRisk r;
-    const std::filesystem::path p(win::to_wide(top));
-    const auto st = git_at(s, machine, top, {L"status", L"--porcelain"});
-    r.dirty = st.started && st.exit_code == 0 && !st.output.empty();
+// Checked-out submodule paths ("<flag><sha> <path> (<describe>)"; '-' = never checked out).
+std::vector<std::string> checked_out_submodules(App::State& s, const std::string& machine,
+                                                const std::string& top) {
     const auto subs = git_at(s, machine, top, {L"submodule", L"status", L"--recursive"});
-    std::stringstream ss(subs.started && subs.exit_code == 0 ? subs.output : std::string());
+    std::stringstream ss(git_ok(subs) ? subs.output : std::string());
     std::vector<std::string> paths;
     for (std::string line; std::getline(ss, line);) {
-        // "<flag><sha> <path> (<describe>)"; '-': never checked out (herdr skips those too)
         if (line.empty() || line[0] == '-')
             continue;
         std::stringstream ls(line.substr(1));
@@ -141,15 +126,24 @@ WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std:
         if (!path.empty())
             paths.push_back(path);
     }
+    return paths;
+}
+
+WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std::string& top) {
+    WorktreeRisk r;
+    const std::filesystem::path p(win::to_wide(top));
+    const auto st = git_at(s, machine, top, {L"status", L"--porcelain"});
+    r.dirty = git_ok(st) && !st.output.empty();
+    const auto paths = checked_out_submodules(s, machine, top);
     for (const auto& path : paths) {
         r.submodules = true;
-        // herdr defaults/mods/worktree/main.js:100-110: commits that exist nowhere else, i.e. on
-        // no remote and not the commit the parent pins (git fetches that by hash, so it is often
-        // on no remote branch). The parent is the deepest other submodule containing it.
+        // At risk: commits on no remote that are not the commit the parent pins either (git fetches
+        // a pinned commit by hash, so it is often on no remote branch). The parent is the deepest
+        // other submodule containing this one, else the checkout itself.
         std::string parent;
         for (const auto& other : paths) {
-            if (other.size() > parent.size() && path.size() > other.size() && path.compare(0, other.size(), other) == 0 &&
-                path[other.size()] == '/')
+            if (other.size() > parent.size() && path.size() > other.size() &&
+                path.compare(0, other.size(), other) == 0 && path[other.size()] == '/')
                 parent = other;
         }
         const auto parent_dir = parent.empty() ? p : p / win::to_wide(parent);
@@ -157,11 +151,11 @@ WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std:
         const auto pinned = git_at(s, machine, win::to_utf8(parent_dir.native()),
                                    {L"rev-parse", L"HEAD:" + win::to_wide(inner)});
         std::vector<std::wstring> args = {L"rev-list", L"-n1", L"--all", L"--not", L"--remotes"};
-        std::string pin = pinned.started && pinned.exit_code == 0 ? trimmed(pinned.output) : std::string();
+        const std::string pin = git_ok(pinned) ? trimmed(pinned.output) : std::string();
         if (!pin.empty())
             args.push_back(win::to_wide(pin));
         const auto local = git_at(s, machine, win::to_utf8((p / win::to_wide(path)).native()), args);
-        if (!local.started || local.exit_code != 0 || !trimmed(local.output).empty())
+        if (!git_ok(local) || !trimmed(local.output).empty())
             r.unpushed.push_back(path);  // a check that failed counts as at risk
     }
     return r;
@@ -171,13 +165,97 @@ std::string worktree_remove_text(const std::string& top, const WorktreeRisk& r) 
     std::string t = "Closes the space and deletes " + display_path(top) + ". The branch stays.";
     if (r.dirty)
         t += "\n\nIt has uncommitted changes: they will be lost.";
-    if (!r.unpushed.empty()) {  // herdr worktree/main.js render()
+    if (!r.unpushed.empty()) {
         t += "\n\nSubmodule ";
         for (std::size_t i = 0; i < r.unpushed.size(); ++i)
             t += (i ? ", " : "") + r.unpushed[i];
         t += " has commits that aren't pushed anywhere: they will be lost.";
     }
     return t;
+}
+
+// Each local branch's last commit time (unix seconds).
+std::map<std::string, long long> branch_dates(App::State& s, const std::string& machine,
+                                              const std::string& cwd) {
+    std::map<std::string, long long> when;
+    const auto refs =
+        git_at(s, machine, cwd,
+               {L"for-each-ref", L"--format=%(refname:short)%09%(committerdate:unix)", L"refs/heads"});
+    std::stringstream rs(git_ok(refs) ? refs.output : std::string());
+    for (std::string l; std::getline(rs, l);) {
+        if (!l.empty() && l.back() == '\r')
+            l.pop_back();
+        const auto tab = l.find('\t');
+        if (tab != std::string::npos)
+            when[l.substr(0, tab)] = std::atoll(l.c_str() + tab + 1);
+    }
+    return when;
+}
+
+// "5m", "3h", "2d", "4mo": rounded to the nearest unit, at least one minute; "" without a time.
+std::string age_text(long long time) {
+    if (time <= 0)
+        return {};
+    const double d = static_cast<double>(static_cast<long long>(std::time(nullptr)) - time);
+    auto round_to = [](double v) { return std::to_string(static_cast<long long>(std::floor(v + 0.5))); };
+    if (d < 3600.0)
+        return std::to_string(std::max(1LL, static_cast<long long>(std::floor(d / 60.0 + 0.5)))) + "m";
+    if (d < 86400.0)
+        return round_to(d / 3600.0) + "h";
+    if (d < 86400.0 * 60.0)
+        return round_to(d / 86400.0) + "d";
+    return round_to(d / 86400.0 / 30.0) + "mo";
+}
+
+// The repo's worktrees (git worktree list --porcelain; bare and prunable ones skipped): the main
+// checkout first, then by their branch's last commit, newest first.
+std::vector<WorktreeEntry> list_worktrees(App::State& s, const std::string& machine, const std::string& cwd) {
+    std::vector<WorktreeEntry> list;
+    const auto when = branch_dates(s, machine, cwd);
+    const auto r = git_at(s, machine, cwd, {L"worktree", L"list", L"--porcelain"});
+    std::stringstream ss(r.output + "\n");
+    WorktreeEntry e;
+    bool skip = false;
+    for (std::string l; std::getline(ss, l);) {
+        if (!l.empty() && l.back() == '\r')
+            l.pop_back();
+        if (l.rfind("worktree ", 0) == 0) {
+            e = {};
+            skip = false;
+            e.path = l.substr(9);
+            std::replace(e.path.begin(), e.path.end(), '/', '\\');
+        } else if (l.rfind("branch ", 0) == 0) {
+            e.branch = l.substr(7);
+            if (e.branch.rfind("refs/heads/", 0) == 0)
+                e.branch = e.branch.substr(11);
+        } else if (l == "bare" || l.rfind("prunable", 0) == 0) {
+            skip = true;
+        } else if (l.empty() && !e.path.empty()) {
+            if (!skip) {
+                e.main = list.empty();  // git lists the main checkout first
+                // A detached checkout has no branch, so no date and no age.
+                const auto it = e.branch.empty() ? when.end() : when.find(e.branch);
+                e.time = it != when.end() ? it->second : 0;
+                e.age = age_text(e.time);
+                list.push_back(e);
+            }
+            e = {};
+        }
+    }
+    std::stable_sort(list.begin(), list.end(), [](const WorktreeEntry& a, const WorktreeEntry& b) {
+        if (a.main != b.main)
+            return a.main;
+        return a.time > b.time;
+    });
+    return list;
+}
+
+// "<machine>|<rest>"; without a bar the whole text is <rest> on this computer.
+std::pair<std::string, std::string> split_machine(const std::string& arg) {
+    const auto bar = arg.find('|');
+    if (bar == std::string::npos)
+        return {std::string(), arg};
+    return {arg.substr(0, bar), arg.substr(bar + 1)};
 }
 
 }  // namespace
@@ -202,8 +280,7 @@ void open_launcher(App::State& s, LaunchTarget target) {
 
 void open_rename(App::State& s, const std::string& kind, const std::string& target,
                  const std::string& current) {
-    // herdr window.rs 3047-3051: a second rename press closes the open prompt instead of
-    // stacking another.
+    // A second rename press closes the open prompt instead of stacking another.
     if (s.rename_open) {
         s.rename_close = true;
         return;
@@ -215,9 +292,8 @@ void open_rename(App::State& s, const std::string& kind, const std::string& targ
 }
 
 // ------------------------------------------------------------------ layout commands
-// herdr tabs/main.js 62-80 syncPanel: the side panel is remembered per space (here the space's
-// `panel`, kept in the UI document): the shown space's choice opens or closes the layout's
-// "panel" node and picks the "panel-body" child.
+// The side panel is chosen per space (the space's `panel`, kept in the UI document): the shown
+// space's choice opens or closes the layout's "panel" node and picks the "panel-body" child.
 void sync_panel(App::State& s, LayoutSpec& l) {
     lay::Node* panel = l.tree.find("panel");
     if (panel == nullptr)
@@ -229,7 +305,7 @@ void sync_panel(App::State& s, LayoutSpec& l) {
 }
 
 namespace {
-// The arguments herdr's layout.* commands take ({"id": ..., "px": ...}) as JSON, or the short
+// The arguments of the layout.* commands: a JSON object ({"id": ..., "px": ...}), or the short
 // spellings a key or the palette can carry: "id", "id=300" (px), "stack=child".
 Json layout_args(const std::string& arg, const char* first, const char* second) {
     if (!arg.empty() && arg.front() == '{') {
@@ -253,8 +329,9 @@ Json layout_args(const std::string& arg, const char* first, const char* second) 
     return j;
 }
 
-// herdr window.rs 3496-3538: layout.toggle / show / hide {id}, layout.resize {id, px | weight},
-// layout.select {stack, child}; the change is a click, kept in layouts/.state.
+// layout.toggle / layout.show / layout.hide {id}, layout.resize {id, px | weight} and
+// layout.select {stack, child}. The change counts as the person's click and is kept in
+// layouts\.state. nullopt: not a layout command.
 std::optional<std::string> layout_command(App::State& s, const std::string& name, const std::string& arg) {
     LayoutSpec& l = s.layout();
     if (name == "layout.toggle" || name == "layout.show" || name == "layout.hide") {
@@ -263,13 +340,12 @@ std::optional<std::string> layout_command(App::State& s, const std::string& name
         if (n == nullptr)
             return "no node \"" + id + "\" in the shown layout";
         const bool hide = name == "layout.toggle" ? !n->hidden : name == "layout.hide";
-        if (id == "panel") {  // the space's choice (tabs/main.js 136-141)
+        if (id == "panel") {  // the panel is the space's choice
             if (auto* sp = s.ws.active()) {
                 const lay::Node* body = l.tree.find("panel-body");
                 const lay::Node* shown = body != nullptr ? body->active_child() : nullptr;
                 sp->panel = hide ? std::string() : shown != nullptr ? shown->id : std::string("files");
-                s.doc_dirty = true;
-                s.doc_dirty_at = Clock::now();
+                s.doc_changed();
             }
         }
         n->hidden = hide;
@@ -292,8 +368,7 @@ std::optional<std::string> layout_command(App::State& s, const std::string& name
         if (st == "panel-body")
             if (auto* sp = s.ws.active(); sp != nullptr && !sp->panel.empty()) {
                 sp->panel = ch;
-                s.doc_dirty = true;
-                s.doc_dirty_at = Clock::now();
+                s.doc_changed();
             }
     } else {
         return std::nullopt;
@@ -303,83 +378,73 @@ std::optional<std::string> layout_command(App::State& s, const std::string& name
     return std::string();
 }
 
-// Runs a command and says why it failed ("" when it ran): herdr window.rs run_as() answers
-// {"error": ...} for an unknown command, a missing target, or a git step that failed.
-std::string exec_command(App::State& s, const std::string& cmd) {
-    const auto colon = cmd.find(':');
-    const std::string name = cmd.substr(0, colon);
-    const std::string arg = colon == std::string::npos ? std::string() : cmd.substr(colon + 1);
-    const std::string focused = s.ws.focused_session();
-    auto session = [&]() -> std::shared_ptr<ui::RemoteSession> {
-        const auto it = s.by_id.find(focused);
-        return it == s.by_id.end() ? nullptr : it->second;
-    };
-    // herdr command names (keys.json written for herdr keeps working).
-    static const std::map<std::string, std::string> kHerdrNames = {
-        {"terminal.park", "pane.park"}, {"terminal.peek", "agent.peek"}, {"terminal.open", "tab.new"},
-        {"app.quit", "window.close"}};  // herdr Quit: the window closes, agents keep running
-    if (name == "layout.toggle" && arg.empty())  // the panel (AgentDesk's older spelling)
-        return exec_command(s, "panel");
-    if (auto r = layout_command(s, name, arg))
-        return *r;
-    if (const auto al = kHerdrNames.find(name); al != kHerdrNames.end())
-        return exec_command(s, arg.empty() ? al->second : al->second + ":" + arg);
-    if (name == "mod.open" && arg == "picker")
-        return exec_command(s, "app.picker");
-    if (name == "overlay.close") {  // herdr: closes the overlays (here: the floating ones)
-        s.show_palette = s.show_picker = s.show_help = false;
-        s.peek.clear();
-        return {};
-    }
-    if (name == "terminal.pin") {  // herdr terminal.pin {pinned}: the focused agent
-        if (!focused.empty()) {
-            if (arg == "false")
-                s.ws.pinned.erase(focused);
-            else if (arg == "true" || !s.ws.pinned.erase(focused))
-                s.ws.pinned.insert(focused);
-            s.doc_dirty = true;
-            s.doc_dirty_at = Clock::now();
-        }
-        return {};
-    }
-    if (name == "space.move") {  // herdr space.move {index} (1 = first): the active space
-        const int to = std::atoi(arg.c_str()) - 1;
-        if (to >= 0 && s.ws.move_space(s.ws.active_space, to)) {
-            s.doc_dirty = true;
-            s.doc_dirty_at = Clock::now();
-        }
-        return {};
-    }
-    if (name == "launch") {
-        const auto c2 = arg.find(':');
-        const std::string target = arg.substr(0, c2);
-        const std::string profile = c2 == std::string::npos ? std::string() : arg.substr(c2 + 1);
-        Placement p;
-        p.target = target == "space"   ? LaunchTarget::kSpace
-                   : target == "right" ? LaunchTarget::kSplitRight
-                   : target == "down"  ? LaunchTarget::kSplitDown
-                                       : LaunchTarget::kTab;
-        p.split_of = focused;
-        p.space = s.ws.active_space;
-        p.space_id = s.ws.active() != nullptr ? s.ws.active()->id : std::string();
-        p.machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
+// ------------------------------------------------------------------ exec_command
+// One command, split into its name and its argument ("name:arg").
+struct Command {
+    const std::string& cmd;
+    std::string name;
+    std::string arg;
+    std::string focused;  // the focused session when it started
+};
+
+// What a command group answers: nullopt when the name is not one of its commands, else "" when
+// it ran or why it failed.
+using Outcome = std::optional<std::string>;
+const Outcome kDone = std::string();
+
+std::string exec_command(App::State& s, const std::string& cmd);
+
+std::shared_ptr<ui::RemoteSession> session_of(App::State& s, const std::string& id) {
+    const auto it = s.by_id.find(id);
+    return it == s.by_id.end() ? nullptr : it->second;
+}
+
+// Ends a terminal (forced: no wait for it to quit by itself).
+void end_terminal(App::State& s, const std::string& id) {
+    if (const auto r = session_of(s, id))
+        r->stop(true);
+}
+
+// A new terminal next to what is focused: in the active space, on its machine.
+Placement placement_here(App::State& s, const std::string& focused, LaunchTarget target) {
+    Placement p;
+    p.target = target;
+    p.split_of = focused;
+    p.space = s.ws.active_space;
+    p.space_id = s.ws.active() != nullptr ? s.ws.active()->id : std::string();
+    p.machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
+    return p;
+}
+
+std::string machine_of_session(App::State& s, const std::string& id) {
+    return s.machine_of.count(id) ? s.machine_of[id] : std::string();
+}
+
+// launch, tab.new / space.new / pane.split, agent.new, space.new_on, session.restart.
+Outcome exec_launch_command(App::State& s, const Command& c) {
+    if (c.name == "launch") {
+        // "<target>:<profile>", target space, right, down or (anything else) tab.
+        const auto c2 = c.arg.find(':');
+        const std::string target = c.arg.substr(0, c2);
+        const std::string profile = c2 == std::string::npos ? std::string() : c.arg.substr(c2 + 1);
+        const Placement p = placement_here(s, c.focused,
+                                           target == "space"   ? LaunchTarget::kSpace
+                                           : target == "right" ? LaunchTarget::kSplitRight
+                                           : target == "down"  ? LaunchTarget::kSplitDown
+                                                               : LaunchTarget::kTab);
         const std::string cwd = s.focused_cwd().empty() ? std::string(s.launch_cwd) : s.focused_cwd();
         if (!profile.empty())
             create_session(s, profile, cwd, "", p);
-    } else if (name == "tab.new" || name == "space.new" || name == "pane.split") {
+    } else if (c.name == "tab.new" || c.name == "space.new" || c.name == "pane.split") {
         // New spaces, tabs and splits open a shell in the focused folder: cd there, then run
         // claude / codex yourself (the pane follows the program running in it).
-        Placement p;
-        p.target = name == "space.new"                 ? LaunchTarget::kSpace
-                   : name == "tab.new" || focused.empty() ? LaunchTarget::kTab
-                   : arg == "down"                      ? LaunchTarget::kSplitDown
-                                                        : LaunchTarget::kSplitRight;
-        p.split_of = focused;
-        p.space = s.ws.active_space;
-        p.space_id = s.ws.active() != nullptr ? s.ws.active()->id : std::string();
-        p.machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
-        if (s.machine_of.count(focused) && p.target != LaunchTarget::kSpace)
-            p.machine = s.machine_of[focused];
+        Placement p = placement_here(s, c.focused,
+                                     c.name == "space.new"                      ? LaunchTarget::kSpace
+                                     : c.name == "tab.new" || c.focused.empty() ? LaunchTarget::kTab
+                                     : c.arg == "down"                          ? LaunchTarget::kSplitDown
+                                                                                : LaunchTarget::kSplitRight);
+        if (s.machine_of.count(c.focused) && p.target != LaunchTarget::kSpace)
+            p.machine = s.machine_of[c.focused];
         ui::HostClient* h = s.host_for(p.machine);
         const std::string shell = pick_shell(s.settings.shell_profile, h->profiles());
         if (!h->connected() || shell.empty()) {
@@ -390,91 +455,146 @@ std::string exec_command(App::State& s, const std::string& cmd) {
                 cwd = s.launch_cwd;
             create_session(s, shell, cwd, "", p);
         }
-    } else if (name == "agent.new") {
-        if (focused.empty())
-            open_launcher(s, LaunchTarget::kTab);
-        else
-            open_launcher(s, arg == "space" ? LaunchTarget::kSpace : LaunchTarget::kTab);
-    } else if (name == "pane.close") {
-        // herdr: ends the terminal; the last pane closes the tab (and maybe asks about the space).
-        if (focused.empty())
-            return "no pane to close";
-        {
-            const auto* t = s.ws.active_tab();
-            if (t != nullptr && s.ws.sessions_in(*t).size() == 1) {
-                return exec_command(s, "tab.close");
-            } else {
-                if (auto it = s.by_id.find(focused); it != s.by_id.end())
-                    it->second->stop(true);
-                s.hidden.insert(focused);
-                s.ws.remove(focused);
-                s.focus_view(s.ws.focused_session());
-            }
+    } else if (c.name == "agent.new") {
+        open_launcher(s, !c.focused.empty() && c.arg == "space" ? LaunchTarget::kSpace : LaunchTarget::kTab);
+    } else if (c.name == "space.new_on") {
+        // A new space on machine `arg`, in its default folder.
+        Placement p;
+        p.target = LaunchTarget::kSpace;
+        p.machine = c.arg;
+        ui::HostClient* h = s.host_for(c.arg);
+        const std::string shell = pick_shell(s.settings.shell_profile, h->profiles());
+        if (h->connected() && !shell.empty())
+            create_session(s, shell, "", "", p);
+    } else if (c.name == "session.restart") {
+        // A new session of the same profile in the same folder, in the old one's place.
+        const auto it = s.views_by_id.find(c.focused);
+        if (it != s.views_by_id.end()) {
+            Placement p;
+            p.replace = c.focused;
+            p.machine = machine_of_session(s, c.focused);
+            create_session(s, it->second.profile_id, it->second.cwd, it->second.name, p);
         }
-    } else if (name == "terminal.kill") {
-        // herdr: end a terminal and its sub-agents.
-        const std::string target = arg.empty() ? focused : arg;
+    } else {
+        return std::nullopt;
+    }
+    return kDone;
+}
+
+// The focused pane and its terminal: close, park, zoom, move focus, swap, resize, rename, search,
+// clipboard, right-click mode, pin, interrupt and stop.
+Outcome exec_pane_command(App::State& s, const Command& c) {
+    if (c.name == "pane.close") {
+        // Ends the terminal; the tab's last pane closes the tab (which may ask about the space).
+        if (c.focused.empty())
+            return "no pane to close";
+        const auto* t = s.ws.active_tab();
+        if (t != nullptr && s.ws.sessions_in(*t).size() == 1)
+            return exec_command(s, "tab.close");
+        end_terminal(s, c.focused);
+        s.hidden.insert(c.focused);
+        s.ws.remove(c.focused);
+        s.focus_view(s.ws.focused_session());
+    } else if (c.name == "terminal.kill") {
+        // A terminal (default: the focused one) and its sub-agents.
+        const std::string target = c.arg.empty() ? c.focused : c.arg;
         for (const auto& [id, v] : s.views_by_id)
             if (id == target || v.parent == target)
-                if (auto it = s.by_id.find(id); it != s.by_id.end())
-                    it->second->stop(true);
-    } else if (name == "app.reset") {
-        // herdr escape hatch: keys.json set aside, default layout, sidebar back.
-        const auto keys = data_dir() / L"keys.json";
-        std::error_code ec;
-        if (std::filesystem::exists(keys, ec))
-            std::filesystem::rename(keys, std::filesystem::path(keys).concat(L".aside"), ec);
-        s.keymap = ui::Keymap::defaults();
-        s.keymap_errors.clear();
-        s.settings.layout = "workspace";
-        save_settings(s.settings);
-        // The workspace's sidebar back as shipped (shown, 268 px).
-        if (lay::Node* side = s.layout().tree.find("sidebar")) {
-            const lay::Node* shipped = s.layout().file.find("sidebar");
-            side->hidden = shipped != nullptr && shipped->hidden;
-            side->size = shipped != nullptr ? shipped->size : side->size;
-            save_layout_state(s.layout());
-        }
-        s.toast("Back to the default screen", "keys.json was set aside as keys.json.aside.", "", g_pal->info);
-    } else if (name == "pane.park") {
-        // herdr terminal.park: a sub-agent's pane goes away; it keeps running under its parent
-        // (agents list, peek).
-        if (!focused.empty()) {
-            s.hidden.insert(focused);
-            s.ws.remove(focused);
+                end_terminal(s, id);
+    } else if (c.name == "pane.park") {
+        // A sub-agent's pane goes away; it keeps running under its parent (agents list, peek).
+        if (!c.focused.empty()) {
+            s.hidden.insert(c.focused);
+            s.ws.remove(c.focused);
             s.focus_view(s.ws.focused_session());
         }
-    } else if (name == "pane.zoom") {
+    } else if (c.name == "pane.zoom") {
         s.ws.toggle_zoom();
-    } else if (name == "pane.go") {
-        if (s.ws.focus_dir(parse_dir(arg), s.pane_area))
+    } else if (c.name == "pane.go") {
+        if (s.ws.focus_dir(parse_dir(c.arg), s.pane_area))
             s.focus_view(s.ws.focused_session());
-    } else if (name == "pane.swap") {
-        s.ws.swap_dir(parse_dir(arg), s.pane_area);
-    } else if (name == "pane.resize") {
-        s.ws.resize(parse_dir(arg), px(40), s.pane_area);
-    } else if (name == "pane.rename") {
-        if (focused.empty())
+    } else if (c.name == "pane.swap") {
+        s.ws.swap_dir(parse_dir(c.arg), s.pane_area);
+    } else if (c.name == "pane.resize") {
+        s.ws.resize(parse_dir(c.arg), px(40), s.pane_area);
+    } else if (c.name == "pane.rename") {
+        if (c.focused.empty())
             return "no pane to rename";
-        open_rename(s, "pane", focused, s.pane_title(focused));
-    } else if (name == "tab.rename") {
-        // herdr tab.rename {id}: that tab (default: the shown one), without selecting it.
+        open_rename(s, "pane", c.focused, s.pane_title(c.focused));
+    } else if (c.name == "terminal.search") {
+        if (!c.focused.empty())
+            s.views[c.focused].view.open_search();
+    } else if (c.name == "terminal.copy" || c.name == "terminal.paste" || c.name == "terminal.paste_image" ||
+               c.name == "terminal.select_all" || c.name == "terminal.scroll") {
+        // Run by the focused terminal on its next frame (palette, keys.json in global).
+        if (!c.focused.empty())
+            s.views[c.focused].view.request(c.cmd);
+    } else if (c.name == "terminal.right_click") {
+        // "program": right-clicks go to the program; anything else: AgentDesk's menu.
+        if (!c.focused.empty()) {
+            if (c.arg == "program")
+                s.ws.right_click_program.insert(c.focused);
+            else
+                s.ws.right_click_program.erase(c.focused);
+            s.doc_changed();
+        }
+    } else if (c.name == "terminal.pin") {
+        // Pins the focused agent ("true" / "false"; no argument toggles).
+        if (!c.focused.empty()) {
+            if (c.arg == "false")
+                s.ws.pinned.erase(c.focused);
+            else if (c.arg == "true" || !s.ws.pinned.erase(c.focused))
+                s.ws.pinned.insert(c.focused);
+            s.doc_changed();
+        }
+    } else if (c.name == "session.interrupt") {
+        if (const auto r = session_of(s, c.focused))
+            r->send(host::RawInput{std::string("\x03", 1)});
+    } else if (c.name == "session.stop" || c.name == "session.force_stop") {
+        if (const auto r = session_of(s, c.focused))
+            r->stop(c.name == "session.force_stop");
+    } else {
+        return std::nullopt;
+    }
+    return kDone;
+}
+
+// Closes the tab at `loc`; a space's last tab asks about closing the space instead.
+void close_tab_at(App::State& s, ui::PaneLoc loc) {
+    auto& sp = s.ws.spaces[static_cast<std::size_t>(loc.space)];
+    if (sp.tabs.size() == 1) {
+        confirm_close_space(s, loc.space);
+        return;
+    }
+    for (const auto& id : s.ws.sessions_in(sp.tabs[static_cast<std::size_t>(loc.tab)])) {
+        end_terminal(s, id);
+        s.hidden.insert(id);
+    }
+    s.ws.close_tab(loc.space, loc.tab);
+    s.focus_view(s.ws.focused_session());
+}
+
+// Tabs and spaces: rename, close, move, select, cycle, settle, and the per-space panel.
+Outcome exec_tab_space_command(App::State& s, const Command& c) {
+    const std::string& arg = c.arg;
+    if (c.name == "tab.rename") {
+        // The tab with id `arg` (default: the shown one), without selecting it.
         const auto loc = arg.empty() ? ui::PaneLoc{} : ui::find_tab(s.ws, arg);
         const ui::Tab* t = !arg.empty() ? (loc.space < 0 ? nullptr
-                                                          : &s.ws.spaces[static_cast<std::size_t>(loc.space)]
-                                                                 .tabs[static_cast<std::size_t>(loc.tab)])
+                                                         : &s.ws.spaces[static_cast<std::size_t>(loc.space)]
+                                                                .tabs[static_cast<std::size_t>(loc.tab)])
                                         : s.ws.active_tab();
         if (t == nullptr)
             return arg.empty() ? std::string("no tab to rename") : "no tab \"" + arg + "\"";
         open_rename(s, "tab", t->id, t->name);
-    } else if (name == "space.rename") {
+    } else if (c.name == "space.rename") {
         auto* sp = s.ws.active();
         if (sp == nullptr)
             return "no space to rename";
         open_rename(s, "space", sp->id, sp->name);
-    } else if (name == "tab.close") {
-        // herdr tab.close {id} (window.rs 3122-3132): by id, the shown tab and space stay; the
-        // last tab takes its space with it, so that asks like closing the space.
+    } else if (c.name == "tab.close") {
+        // The tab with id `arg` (the shown tab and space stay shown), default the shown tab. Its
+        // terminals end.
         ui::PaneLoc loc;
         if (arg.empty()) {
             if (s.ws.active_tab() != nullptr)
@@ -484,87 +604,285 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         }
         if (loc.space < 0)
             return arg.empty() ? std::string("no tab to close") : "no tab \"" + arg + "\"";
-        auto& sp = s.ws.spaces[static_cast<std::size_t>(loc.space)];
-        if (sp.tabs.size() == 1) {
-            confirm_close_space(s, loc.space);
-        } else {
-            for (const auto& id : s.ws.sessions_in(sp.tabs[static_cast<std::size_t>(loc.tab)])) {
-                if (auto it = s.by_id.find(id); it != s.by_id.end())  // herdr: ends the tab's terminals
-                    it->second->stop(true);
-                s.hidden.insert(id);
-            }
-            s.ws.close_tab(loc.space, loc.tab);
-            s.focus_view(s.ws.focused_session());
-        }
-    } else if (name == "space.close") {
-        // herdr asks first ("Close space?"), then ends its terminals.
+        close_tab_at(s, loc);
+    } else if (c.name == "space.close") {
+        // Asks first ("Close space?"); space.close_now does it.
         if (s.ws.active() == nullptr)
             return "no space to close";
         confirm_close_space(s, s.ws.active_space);
-    } else if (name == "space.close_now") {
+    } else if (c.name == "space.close_now") {
+        // The space with id `arg`, ending its terminals.
         for (int i = 0; i < static_cast<int>(s.ws.spaces.size()); ++i) {
             const auto& sp = s.ws.spaces[static_cast<std::size_t>(i)];
             if (sp.id != arg)
                 continue;
             for (const auto& t : sp.tabs)
                 for (const auto& id : s.ws.sessions_in(t))
-                    if (auto it = s.by_id.find(id); it != s.by_id.end())
-                        it->second->stop(true);
+                    end_terminal(s, id);
             s.ws.close_space(i);
             s.focus_view(s.ws.focused_session());
             break;
         }
-    } else if (name == "panel") {
-        // herdr layout.toggle:panel / the Files and Changes buttons: a per-space choice.
+    } else if (c.name == "space.move") {
+        // Moves the active space to position `arg` (1 = first).
+        const int to = std::atoi(arg.c_str()) - 1;
+        if (to >= 0 && s.ws.move_space(s.ws.active_space, to))
+            s.doc_changed();
+    } else if (c.name == "tab.goto" || c.name == "tab.close_at") {
+        // "<space index>:<tab index>", both from 0.
+        const auto colon = arg.find(':');
+        const int sp = std::atoi(arg.substr(0, colon).c_str());
+        const int t = colon == std::string::npos ? 0 : std::atoi(arg.substr(colon + 1).c_str());
+        if (sp < 0 || sp >= static_cast<int>(s.ws.spaces.size()) || t < 0 ||
+            t >= static_cast<int>(s.ws.spaces[static_cast<std::size_t>(sp)].tabs.size()))
+            return "no such tab";
+        if (c.name == "tab.close_at")  // by id, so the shown tab and space stay
+            return exec_command(
+                s, "tab.close:" +
+                       s.ws.spaces[static_cast<std::size_t>(sp)].tabs[static_cast<std::size_t>(t)].id);
+        s.ws.select_space(sp);
+        s.ws.select_tab(t);
+        s.focus_view(s.ws.focused_session());
+    } else if (c.name == "tab.move") {
+        if (auto* sp = s.ws.active())
+            s.ws.move_tab(s.ws.active_space, sp->active_tab, sp->active_tab + (arg == "left" ? -1 : 1));
+    } else if (c.name == "tab.settle" || c.name == "tab.unsettle") {
+        // Settling puts a tab away (out of the bar, still running) until it is shown again or
+        // needs the person.
+        if (auto* sp = s.ws.active()) {
+            if (c.name == "tab.unsettle") {
+                for (int i = 0; i < static_cast<int>(sp->tabs.size()); ++i)
+                    s.ws.unsettle_tab(s.ws.active_space, i);
+            } else if (!s.ws.settle_tab(s.ws.active_space, sp->active_tab)) {
+                s.toast("Nothing to put away", "The last tab shown in a space stays.", "", g_pal->info);
+            }
+            s.doc_changed();
+            s.focus_view(s.ws.focused_session());
+        }
+    } else if (c.name == "tab.next" || c.name == "tab.prev") {
+        s.ws.cycle_tab(c.name == "tab.next" ? 1 : -1);
+        s.focus_view(s.ws.focused_session());
+    } else if (c.name == "tab.select") {
+        s.ws.select_shown_tab(std::atoi(arg.c_str()));
+        s.focus_view(s.ws.focused_session());
+    } else if (c.name == "space.next" || c.name == "space.prev") {
+        s.ws.cycle_space(c.name == "space.next" ? 1 : -1);
+        s.focus_view(s.ws.focused_session());
+    } else if (c.name == "space.select") {
+        s.ws.select_space(std::atoi(arg.c_str()) - 1);
+        s.focus_view(s.ws.focused_session());
+    } else if (c.name == "panel") {
+        // The Files and Changes buttons: the panel `arg` (default files) for the active space,
+        // or none when it is already showing.
         if (auto* sp = s.ws.active()) {
             const std::string which = arg.empty() ? std::string("files") : arg;
             sp->panel = sp->panel == which ? std::string() : which;
-            s.doc_dirty = true;
-            s.doc_dirty_at = Clock::now();
+            s.doc_changed();
         }
-    } else if (name == "sidebar.rail") {
-        // herdr workspace-chrome/main.js 18-24 toggleSidebar(): remember the width and
-        // layout.resize the sidebar to 44, or back to it (a hidden one is shown first).
-        LayoutSpec& l = s.layout();
-        lay::Node* side = l.tree.find("sidebar");
-        if (side == nullptr)
-            return "no node \"sidebar\" in the shown layout";
-        const float width = side->size && side->size->px ? side->size->value : 268.0f;
-        if (side->hidden) {
-            side->hidden = false;
-        } else if (width >= 160) {
-            s.settings.sidebar_restore = width;
-            save_settings(s.settings);
-            side->size = lay::Span::pixels(44);
-        } else {
-            side->size = lay::Span::pixels(std::max(160.0f, s.settings.sidebar_restore));
+    } else {
+        return std::nullopt;
+    }
+    return kDone;
+}
+
+// Moving between agents, peeking at a sub-agent and giving it a pane.
+Outcome exec_agent_command(App::State& s, const Command& c) {
+    if (c.name == "agent.next" || c.name == "agent.prev") {
+        if (!s.agent_order.empty()) {
+            auto it = std::find(s.agent_order.begin(), s.agent_order.end(), c.focused);
+            int i = it == s.agent_order.end() ? -1 : static_cast<int>(it - s.agent_order.begin());
+            const int n = static_cast<int>(s.agent_order.size());
+            i = c.name == "agent.next" ? (i + 1) % n : (i <= 0 ? n - 1 : i - 1);
+            s.focus(s.agent_order[static_cast<std::size_t>(i)]);
         }
-        save_layout_state(l);
+    } else if (c.name == "agent.focus" || c.name == "session.focus") {
+        s.focus(c.arg);
+    } else if (c.name == "agent.peek") {
+        s.peek = c.arg;
+        s.views[c.arg].focus_next = true;
+    } else if (c.name == "agent.keep") {
+        // Gives a sub-agent a pane: beside its parent when the parent is shown, else a new tab.
+        const auto it = s.views_by_id.find(c.arg);
+        if (it != s.views_by_id.end() && s.ws.find(c.arg).space < 0) {
+            s.hidden.erase(c.arg);
+            if (!it->second.parent.empty() && s.ws.find(it->second.parent).space >= 0)
+                s.ws.split(it->second.parent, c.arg, Dir::kRight);
+            else
+                s.ws.add_tab(c.arg, s.space_for_cwd(it->second.cwd));
+        }
+        s.peek.clear();
+        s.focus(c.arg);
+    } else {
+        return std::nullopt;
+    }
+    return kDone;
+}
+
+// worktree.remove_now / worktree.remove_force "<machine>|<top>" (an older "<top>" means this
+// computer): ends the terminals of the spaces in that checkout (they hold the folder open), then
+// git worktree remove from the main checkout.
+std::string remove_worktree(App::State& s, const std::string& arg, bool force) {
+    const auto [machine, top] = split_machine(arg);
+    const auto g = s.git.get(top, machine);
+    const std::string main = g.common_top.empty() ? top : g.common_top;
+    for (int i = static_cast<int>(s.ws.spaces.size()) - 1; i >= 0; --i) {
+        bool inside = false;
+        for (const auto& t : s.ws.spaces[static_cast<std::size_t>(i)].tabs)
+            for (const auto& id : s.ws.sessions_in(t))
+                if (s.views_by_id.count(id) && s.machine_of[id] == machine &&
+                    path_within(s.views_by_id[id].cwd, top))
+                    inside = true;
+        if (inside)
+            run_command(s, "space.close_now:" + s.ws.spaces[static_cast<std::size_t>(i)].id);
+    }
+    std::vector<std::wstring> argv = {L"worktree", L"remove"};
+    if (force)
+        argv.push_back(L"--force");
+    argv.push_back(win::to_wide(top));
+    // Removing a worktree with large submodules can take minutes.
+    const auto r = git_at(s, machine, main, argv, std::chrono::seconds(600));
+    s.git.invalidate(top);
+    if (!git_ok(r))  // shown as "worktree.remove failed: ..."
+        return r.started ? r.message() : std::string("git did not run");
+    return {};
+}
+
+// Creating, opening and removing git worktrees.
+Outcome exec_worktree_command(App::State& s, const Command& c) {
+    if (c.name == "worktree.new") {
+        s.show_worktree = true;
+        s.wt_error.clear();
+        std::snprintf(s.wt_repo, sizeof s.wt_repo, "%s", s.focused_cwd().c_str());
+        s.wt_branch[0] = '\0';
+    } else if (c.name == "worktree.open") {
+        // The focused repo's worktrees, in a dialog; outside git the dialog says so.
+        s.worktree_list.clear();
+        s.worktree_not_repo.clear();
+        const std::string cwd = s.focused_cwd();
+        const std::string machine = s.machine_of[s.ws.focused_session()];
+        s.worktree_machine = machine;
+        s.git.get(cwd, machine);  // asks git about the folder now, if it has not yet
+        if (!cwd.empty())
+            s.worktree_list = list_worktrees(s, machine, cwd);
+        if (s.worktree_list.empty())
+            s.worktree_not_repo = cwd.empty() ? std::string("This folder") : display_path(cwd);
+        s.show_worktree_open = true;
+    } else if (c.name == "worktree.open_at") {
+        // "<machine>|<path>": a space on that machine already in the checkout, else a new one.
+        const auto [machine, path] = split_machine(c.arg);
+        for (int i = 0; i < static_cast<int>(s.ws.spaces.size()); ++i) {
+            const auto& sp = s.ws.spaces[static_cast<std::size_t>(i)];
+            if (sp.machine != machine || sp.tabs.empty())
+                continue;
+            const auto ids = s.ws.sessions_in(sp.tabs.front());
+            if (!ids.empty() && s.views_by_id.count(ids.front()) &&
+                _stricmp(s.git.get(s.views_by_id[ids.front()].cwd, machine).top.c_str(), path.c_str()) == 0) {
+                s.ws.select_space(i);
+                s.focus_view(s.ws.focused_session());
+                return kDone;
+            }
+        }
+        Placement p;
+        p.target = LaunchTarget::kSpace;
+        p.machine = machine;
+        const std::string shell = pick_shell(s.settings.shell_profile, s.host_for(machine)->profiles());
+        if (!shell.empty())
+            create_session(s, shell, path, "", p);
+    } else if (c.name == "worktree.remove") {
+        // Asks first, saying what would be lost.
+        const std::string machine = s.machine_of[s.ws.focused_session()];
+        const auto g = s.git.get(s.focused_cwd(), machine);
+        if (!g.repo)
+            return "not a git checkout";
+        if (!g.worktree)
+            return "not a worktree: this is the repository's main checkout";
+        const auto risk = worktree_risk(s, machine, g.top);
+        const auto loc = s.ws.find(s.ws.focused_session());
+        open_confirm(s,
+                     "Remove worktree " +
+                         (loc.space >= 0 ? s.ws.space_title(loc.space, s.session_cwds()) : g.top) + "?",
+                     worktree_remove_text(g.top, risk), "Remove",
+                     "worktree.remove_checked:" + risk.signature() + "|" + machine + "|" + g.top);
+    } else if (c.name == "worktree.remove_checked") {
+        // "<signature>|<machine>|<top>": confirmed. Checks again; a risk that appeared since the
+        // dialog opened asks once more ("Enter again removes it anyway").
+        const auto bar = c.arg.find('|');
+        const auto bar2 = bar == std::string::npos ? std::string::npos : c.arg.find('|', bar + 1);
+        const std::string seen = c.arg.substr(0, bar);
+        const std::string machine =
+            bar2 == std::string::npos ? std::string() : c.arg.substr(bar + 1, bar2 - bar - 1);
+        const std::string top = bar2 == std::string::npos ? std::string() : c.arg.substr(bar2 + 1);
+        const auto risk = worktree_risk(s, machine, top);
+        const std::string remove =
+            risk.dirty || risk.submodules ? "worktree.remove_force:" : "worktree.remove_now:";
+        if (risk.signature() == seen)
+            return exec_command(s, remove + machine + "|" + top);
+        open_confirm(s, "Remove worktree?",
+                     worktree_remove_text(top, risk) +
+                         "\n\nIt changed since this opened. Enter again removes it anyway.",
+                     "Remove", remove + machine + "|" + top);
+    } else if (c.name == "worktree.remove_now" || c.name == "worktree.remove_force") {
+        return remove_worktree(s, c.arg, c.name == "worktree.remove_force");
+    } else {
+        return std::nullopt;
+    }
+    return kDone;
+}
+
+// The escape hatch: keys.json set aside, the workspace layout with its sidebar as shipped.
+void reset_to_default_screen(App::State& s) {
+    const auto keys = data_dir() / L"keys.json";
+    std::error_code ec;
+    if (std::filesystem::exists(keys, ec))
+        std::filesystem::rename(keys, std::filesystem::path(keys).concat(L".aside"), ec);
+    s.keymap = ui::Keymap::defaults();
+    s.keymap_errors.clear();
+    s.settings.layout = "workspace";
+    save_settings(s.settings);
+    if (lay::Node* side = s.layout().tree.find("sidebar")) {
+        const lay::Node* shipped = s.layout().file.find("sidebar");
+        side->hidden = shipped != nullptr && shipped->hidden;
+        side->size = shipped != nullptr ? shipped->size : side->size;
+        save_layout_state(s.layout());
+    }
+    s.toast("Back to the default screen", "keys.json was set aside as keys.json.aside.", "", g_pal->info);
+}
+
+// Collapses the sidebar to a 44 px rail, remembering its width, or widens it back (at least
+// 160 px). A hidden sidebar is shown first.
+std::string toggle_sidebar_rail(App::State& s) {
+    LayoutSpec& l = s.layout();
+    lay::Node* side = l.tree.find("sidebar");
+    if (side == nullptr)
+        return "no node \"sidebar\" in the shown layout";
+    const float width = side->size && side->size->px ? side->size->value : 268.0f;
+    if (side->hidden) {
+        side->hidden = false;
+    } else if (width >= 160) {
+        s.settings.sidebar_restore = width;
+        save_settings(s.settings);
+        side->size = lay::Span::pixels(44);
+    } else {
+        side->size = lay::Span::pixels(std::max(160.0f, s.settings.sidebar_restore));
+    }
+    save_layout_state(l);
+    return {};
+}
+
+// Window, overlays, zoom, theme, keys.json and updates.
+Outcome exec_app_command(App::State& s, const Command& c) {
+    const std::string& name = c.name;
+    const std::string& arg = c.arg;
+    if (name == "overlay.close") {  // the floating overlays
+        s.show_palette = s.show_picker = s.show_help = false;
+        s.peek.clear();
+    } else if (name == "app.reset") {
+        reset_to_default_screen(s);
     } else if (name == "app.picker") {
         s.show_picker = !s.show_picker;
         s.picker_buf[0] = '\0';
         s.picker_sel = -1;
         s.picker_reset = true;
-    } else if (name == "tab.goto" || name == "tab.close_at") {
-        const auto c = arg.find(':');
-        const int sp = std::atoi(arg.substr(0, c).c_str());
-        const int t = c == std::string::npos ? 0 : std::atoi(arg.substr(c + 1).c_str());
-        if (sp < 0 || sp >= static_cast<int>(s.ws.spaces.size()) || t < 0 ||
-            t >= static_cast<int>(s.ws.spaces[static_cast<std::size_t>(sp)].tabs.size()))
-            return "no such tab";
-        if (name == "tab.close_at")  // by id: the shown tab and space stay (herdr picker ctrl+d)
-            return exec_command(s, "tab.close:" + s.ws.spaces[static_cast<std::size_t>(sp)].tabs[static_cast<std::size_t>(t)].id);
-        s.ws.select_space(sp);
-        s.ws.select_tab(t);
-        s.focus_view(s.ws.focused_session());
-    } else if (name == "space.new_on") {
-        Placement p;
-        p.target = LaunchTarget::kSpace;
-        p.machine = arg;
-        ui::HostClient* h = s.host_for(arg);
-        const std::string shell = pick_shell(s.settings.shell_profile, h->profiles());
-        if (h->connected() && !shell.empty())
-            create_session(s, shell, "", "", p);
     } else if (name == "window.minimize") {
         ::ShowWindow(s.config.hwnd, SW_MINIMIZE);
     } else if (name == "window.maximize") {
@@ -575,260 +893,10 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         s.show_machine_add = true;
     } else if (name == "app.welcome") {
         s.show_welcome = true;
-    } else if (name == "worktree.open") {
-        // Existing worktrees of the focused repo (git worktree list --porcelain, bare and prunable
-        // skipped): main checkout first, then by the branch's last commit, newest first.
-        s.worktree_list.clear();
-        s.worktree_not_repo.clear();
-        const std::string cwd = s.focused_cwd();
-        const std::string machine = s.machine_of[s.ws.focused_session()];
-        s.worktree_machine = machine;
-        const auto g = s.git.get(cwd, machine);
-        // herdr worktree/main.js checkouts(): each branch's last commit date, from its ref.
-        std::map<std::string, long long> when;
-        if (!cwd.empty()) {
-            const auto refs = git_at(s, machine, cwd,
-                                     {L"for-each-ref", L"--format=%(refname:short)%09%(committerdate:unix)", L"refs/heads"});
-            std::stringstream rs(refs.started && refs.exit_code == 0 ? refs.output : std::string());
-            for (std::string l; std::getline(rs, l);) {
-                if (!l.empty() && l.back() == '\r')
-                    l.pop_back();
-                const auto tab = l.find('\t');
-                if (tab != std::string::npos)
-                    when[l.substr(0, tab)] = std::atoll(l.c_str() + tab + 1);
-            }
-        }
-        if (!cwd.empty()) {
-            const auto r = git_at(s, machine, cwd, {L"worktree", L"list", L"--porcelain"});
-            std::stringstream ss(r.output + "\n");
-            WorktreeEntry e;
-            bool skip = false;
-            for (std::string l; std::getline(ss, l);) {
-                if (!l.empty() && l.back() == '\r')
-                    l.pop_back();
-                if (l.rfind("worktree ", 0) == 0) {
-                    e = {};
-                    skip = false;
-                    e.path = l.substr(9);
-                    for (auto& c : e.path)
-                        if (c == '/')
-                            c = '\\';
-                } else if (l.rfind("branch ", 0) == 0) {
-                    e.branch = l.substr(7);
-                    if (e.branch.rfind("refs/heads/", 0) == 0)
-                        e.branch = e.branch.substr(11);
-                } else if (l == "bare" || l.rfind("prunable", 0) == 0) {
-                    skip = true;
-                } else if (l.empty() && !e.path.empty()) {
-                    if (!skip) {
-                        e.main = s.worktree_list.empty();  // git lists the main checkout first
-                        // A detached checkout has no branch, so no date (herdr: at 0, no age).
-                        const auto it = e.branch.empty() ? when.end() : when.find(e.branch);
-                        e.time = it != when.end() ? it->second : 0;
-                        // herdr ago(): rounded, minutes at least 1.
-                        const double d = static_cast<double>(static_cast<long long>(std::time(nullptr)) - e.time);
-                        auto round_to = [](double v) { return std::to_string(static_cast<long long>(std::floor(v + 0.5))); };
-                        e.age = e.time <= 0           ? std::string()
-                                : d < 3600.0          ? std::to_string(std::max(1LL, static_cast<long long>(std::floor(d / 60.0 + 0.5)))) + "m"
-                                : d < 86400.0         ? round_to(d / 3600.0) + "h"
-                                : d < 86400.0 * 60.0  ? round_to(d / 86400.0) + "d"
-                                                      : round_to(d / 86400.0 / 30.0) + "mo";
-                        s.worktree_list.push_back(e);
-                    }
-                    e = {};
-                }
-            }
-            std::stable_sort(s.worktree_list.begin(), s.worktree_list.end(),
-                             [](const WorktreeEntry& a2, const WorktreeEntry& b2) {
-                                 if (a2.main != b2.main)
-                                     return a2.main;
-                                 return a2.time > b2.time;
-                             });
-        }
-        // Outside git the dialog itself says so (herdr renderOpen).
-        if (s.worktree_list.empty())
-            s.worktree_not_repo = cwd.empty() ? std::string("This folder") : display_path(cwd);
-        s.show_worktree_open = true;
-    } else if (name == "worktree.open_at") {
-        // arg: "<machine>|<path>": a space on that machine already in the checkout, else a new one.
-        const auto bar = arg.find('|');
-        const std::string machine = bar == std::string::npos ? std::string() : arg.substr(0, bar);
-        const std::string path = bar == std::string::npos ? arg : arg.substr(bar + 1);
-        int best = -1;
-        for (int i = 0; i < static_cast<int>(s.ws.spaces.size()) && best < 0; ++i) {
-            const auto& sp = s.ws.spaces[static_cast<std::size_t>(i)];
-            if (sp.machine != machine || sp.tabs.empty())
-                continue;
-            const auto ids = s.ws.sessions_in(sp.tabs.front());
-            if (!ids.empty() && s.views_by_id.count(ids.front())) {
-                const auto top = s.git.get(s.views_by_id[ids.front()].cwd, machine).top;
-                if (_stricmp(top.c_str(), path.c_str()) == 0)
-                    best = i;
-            }
-        }
-        if (best >= 0) {
-            s.ws.select_space(best);
-            s.focus_view(s.ws.focused_session());
-            return {};
-        }
-        Placement p;
-        p.target = LaunchTarget::kSpace;
-        p.machine = machine;
-        ui::HostClient* h = s.host_for(machine);
-        const std::string shell = pick_shell(s.settings.shell_profile, h->profiles());
-        if (!shell.empty())
-            create_session(s, shell, path, "", p);
-    } else if (name == "worktree.remove") {
-        const std::string machine = s.machine_of[s.ws.focused_session()];
-        const auto g = s.git.get(s.focused_cwd(), machine);
-        if (!g.repo)
-            return "not a git checkout";
-        if (!g.worktree) {
-            return "not a worktree: this is the repository's main checkout";
-        } else {
-            const auto risk = worktree_risk(s, machine, g.top);
-            const auto loc = s.ws.find(s.ws.focused_session());
-            open_confirm(s, "Remove worktree " + (loc.space >= 0 ? s.ws.space_title(loc.space, s.session_cwds()) : g.top) + "?",
-                         worktree_remove_text(g.top, risk), "Remove",
-                         "worktree.remove_checked:" + risk.signature() + "|" + machine + "|" + g.top);
-        }
-    } else if (name == "worktree.remove_checked") {
-        // herdr worktree.js 228-245: Enter re-checks; a risk that appeared since the dialog
-        // opened asks once more ("Enter again removes it anyway").
-        const auto bar = arg.find('|');
-        const auto bar2 = bar == std::string::npos ? std::string::npos : arg.find('|', bar + 1);
-        const std::string seen = arg.substr(0, bar);
-        const std::string machine = bar2 == std::string::npos ? std::string() : arg.substr(bar + 1, bar2 - bar - 1);
-        const std::string top = bar2 == std::string::npos ? std::string() : arg.substr(bar2 + 1);
-        const auto risk = worktree_risk(s, machine, top);
-        const std::string force = risk.dirty || risk.submodules ? "worktree.remove_force:" : "worktree.remove_now:";
-        if (risk.signature() != seen) {
-            open_confirm(s, "Remove worktree?",
-                         worktree_remove_text(top, risk) + "\n\nIt changed since this opened. Enter again removes it anyway.",
-                         "Remove", force + machine + "|" + top);
-        } else {
-            return exec_command(s, force + machine + "|" + top);
-        }
-    } else if (name == "worktree.remove_now" || name == "worktree.remove_force") {
-        // arg: "<machine>|<top>" (an older "<top>" means this computer)
-        const auto bar = arg.find('|');
-        const std::string machine = bar == std::string::npos ? std::string() : arg.substr(0, bar);
-        const std::string top = bar == std::string::npos ? arg : arg.substr(bar + 1);
-        const auto g = s.git.get(top, machine);
-        const std::string main = g.common_top.empty() ? top : g.common_top;
-        // End the terminals of spaces in that checkout first (they hold the folder open).
-        for (int i = static_cast<int>(s.ws.spaces.size()) - 1; i >= 0; --i) {
-            bool inside = false;
-            for (const auto& t : s.ws.spaces[static_cast<std::size_t>(i)].tabs)
-                for (const auto& id : s.ws.sessions_in(t))
-                    if (s.views_by_id.count(id) && s.machine_of[id] == machine &&
-                        path_within(s.views_by_id[id].cwd, top))
-                        inside = true;
-            if (inside)
-                run_command(s, "space.close_now:" + s.ws.spaces[static_cast<std::size_t>(i)].id);
-        }
-        std::vector<std::wstring> argv = {L"worktree", L"remove"};
-        if (name == "worktree.remove_force")
-            argv.push_back(L"--force");
-        argv.push_back(win::to_wide(top));
-        const auto r = git_at(s, machine, main, argv, std::chrono::seconds(600));  // herdr worktree.js 243
-        s.git.invalidate(top);
-        if (!r.started || r.exit_code != 0)  // shown as "worktree.remove failed: ..."
-            return r.started ? r.message() : std::string("git did not run");
-    } else if (name == "tab.move") {
-        if (auto* sp = s.ws.active())
-            s.ws.move_tab(s.ws.active_space, sp->active_tab, sp->active_tab + (arg == "left" ? -1 : 1));
-    } else if (name == "tab.settle" || name == "tab.unsettle") {
-        // herdr: put a tab away (out of the bar, still running) until shown or it needs you.
-        if (auto* sp = s.ws.active()) {
-            if (name == "tab.unsettle") {
-                for (int i = 0; i < static_cast<int>(sp->tabs.size()); ++i)
-                    s.ws.unsettle_tab(s.ws.active_space, i);
-            } else if (!s.ws.settle_tab(s.ws.active_space, sp->active_tab)) {
-                s.toast("Nothing to put away", "The last tab shown in a space stays.", "", g_pal->info);
-            }
-            s.doc_dirty = true;
-            s.doc_dirty_at = Clock::now();
-            s.focus_view(s.ws.focused_session());
-        }
-    } else if (name == "terminal.right_click") {
-        if (!focused.empty()) {
-            if (arg == "program")
-                s.ws.right_click_program.insert(focused);
-            else
-                s.ws.right_click_program.erase(focused);
-            s.doc_dirty = true;
-            s.doc_dirty_at = Clock::now();
-        }
-    } else if (name == "tab.next" || name == "tab.prev") {
-        s.ws.cycle_tab(name == "tab.next" ? 1 : -1);
-        s.focus_view(s.ws.focused_session());
-    } else if (name == "tab.select") {
-        s.ws.select_shown_tab(std::atoi(arg.c_str()));
-        s.focus_view(s.ws.focused_session());
-    } else if (name == "space.next" || name == "space.prev") {
-        s.ws.cycle_space(name == "space.next" ? 1 : -1);
-        s.focus_view(s.ws.focused_session());
-    } else if (name == "space.select") {
-        s.ws.select_space(std::atoi(arg.c_str()) - 1);
-        s.focus_view(s.ws.focused_session());
-    } else if (name == "agent.next" || name == "agent.prev") {
-        if (!s.agent_order.empty()) {
-            auto it = std::find(s.agent_order.begin(), s.agent_order.end(), focused);
-            int i = it == s.agent_order.end() ? -1 : static_cast<int>(it - s.agent_order.begin());
-            const int n = static_cast<int>(s.agent_order.size());
-            i = name == "agent.next" ? (i + 1) % n : (i <= 0 ? n - 1 : i - 1);
-            s.focus(s.agent_order[static_cast<std::size_t>(i)]);
-        }
-    } else if (name == "agent.focus" || name == "session.focus") {
-        s.focus(arg);
-    } else if (name == "agent.peek") {
-        s.peek = arg;
-        s.views[arg].focus_next = true;
-    } else if (name == "agent.keep") {
-        // Give a sub-agent a pane: beside its parent when the parent is shown, else a new tab.
-        const auto it = s.views_by_id.find(arg);
-        if (it != s.views_by_id.end() && s.ws.find(arg).space < 0) {
-            s.hidden.erase(arg);
-            if (!it->second.parent.empty() && s.ws.find(it->second.parent).space >= 0)
-                s.ws.split(it->second.parent, arg, Dir::kRight);
-            else
-                s.ws.add_tab(arg, s.space_for_cwd(it->second.cwd));
-        }
-        s.peek.clear();
-        s.focus(arg);
-    } else if (name == "terminal.search") {
-        if (!focused.empty())
-            s.views[focused].view.open_search();
-    } else if (name == "terminal.copy" || name == "terminal.paste" || name == "terminal.paste_image" ||
-               name == "terminal.select_all" || name == "terminal.scroll") {
-        // Run by the focused terminal on its next frame (palette, keys.json in global).
-        if (!focused.empty())
-            s.views[focused].view.request(cmd);
-    } else if (name == "worktree.new") {
-        s.show_worktree = true;
-        s.wt_error.clear();
-        std::snprintf(s.wt_repo, sizeof s.wt_repo, "%s", s.focused_cwd().c_str());
-        s.wt_branch[0] = '\0';
-    } else if (name == "session.interrupt") {
-        if (auto r = session())
-            r->send(host::RawInput{std::string("\x03", 1)});
-    } else if (name == "session.stop") {
-        if (auto r = session())
-            r->stop(false);
-    } else if (name == "session.force_stop") {
-        if (auto r = session())
-            r->stop(true);
-    } else if (name == "session.restart") {
-        const auto it = s.views_by_id.find(focused);
-        if (it != s.views_by_id.end()) {
-            Placement p;
-            p.replace = focused;
-            p.machine = s.machine_of.count(focused) ? s.machine_of[focused] : std::string();
-            create_session(s, it->second.profile_id, it->second.cwd, it->second.name, p);
-        }
+    } else if (name == "sidebar.rail") {
+        return toggle_sidebar_rail(s);
     } else if (name == "sidebar.toggle") {
-        // herdr ctrl-shift-b: layout.toggle {"id": "sidebar"} (nothing when the layout has none).
+        // layout.toggle on the "sidebar" node; nothing when the layout has none.
         if (s.layout().tree.find("sidebar") != nullptr)
             return *layout_command(s, "layout.toggle", "sidebar");
     } else if (name == "details.toggle") {
@@ -841,17 +909,19 @@ std::string exec_command(App::State& s, const std::string& cmd) {
     } else if (name == "app.help") {
         s.show_help = !s.show_help;
     } else if (name == "app.settings") {
+        // `arg` names the page to open on ("mods", "alerts", ...).
         s.show_settings = true;
-        // herdr app.settings {section}: open on that page ("mods", "alerts", ...).
         for (const char* sec : {"Look", "Machines", "Alerts", "Mods", "Updates", "Privacy"})
             if (_stricmp(arg.c_str(), sec) == 0)
                 s.settings_tab = sec;
     } else if (name == "app.zoom_in" || name == "app.zoom_out" || name == "app.zoom_reset") {
+        // Steps of 0.1 between 0.5 and 3.
         s.settings.zoom =
             name == "app.zoom_reset"
                 ? 1.0f
-                : std::clamp(std::round((s.settings.zoom + (name == "app.zoom_in" ? 0.1f : -0.1f)) * 10.0f) / 10.0f,
-                             0.5f, 3.0f);
+                : std::clamp(
+                      std::round((s.settings.zoom + (name == "app.zoom_in" ? 0.1f : -0.1f)) * 10.0f) / 10.0f,
+                      0.5f, 3.0f);
         save_settings(s.settings);
         g_scale = s.dpi * ui_scale(s.settings);
         apply_style(s.dpi, ui_scale(s.settings));
@@ -865,39 +935,26 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         std::lock_guard lock(s.placements_mutex);
         s.exit_error.clear();
     } else if (name == "theme") {
-        // herdr app.theme (window.rs 3620-3635): the theme goes on the shown layout, as its light
-        // or its dark half; the other half stays. Appearance is not changed.
+        // The theme goes on the shown layout, as its light or its dark half by the theme's kind;
+        // the other half and the Appearance setting stay.
         const Palette* p = palette_by_id(arg);
         auto pair = layout_theme_pair(s.settings);
         (p->light ? pair.second : pair.first) = p->id;
         s.settings.layout_themes[s.settings.layout] = pair;
         s.settings.theme = p->id;
         save_settings(s.settings);
-    } else if (name == "layout.switch" || name == "layout") {
-        std::string next = arg;
-        if (next.empty()) {  // cycle
-            for (std::size_t i = 0; i < s.layouts.size(); ++i)
-                if (s.layouts[i].name == s.settings.layout)
-                    next = s.layouts[(i + 1) % s.layouts.size()].name;
-        }
-        if (next.empty() && !s.layouts.empty())
-            next = s.layouts.front().name;
-        s.settings.layout = next;
-        save_settings(s.settings);
-        s.toast("Layout: " + next, "", "", g_pal->info, 2);
-        s.focus_view(s.ws.focused_session());
     } else if (name == "app.check_updates") {
-        ui::updates::check_now();  // window.rs 3603
+        ui::updates::check_now();
     } else if (name == "app.update_core") {
-        // window.rs 3604-3609: nothing waiting (and nothing failed) is an error; else
-        // `agentctl update` (herdr: `hc update`) in the background. agent-host hands its
-        // terminals to the new one; they keep running (design doc 7.4 OQ-09).
-        const auto c = ui::updates::core();
-        if (!c.ready && !c.error)
+        // `agentctl update` in the background when a new agent-host is waiting or the last try
+        // failed. agent-host hands its terminals to the new one; they keep running (design doc
+        // 7.4 OQ-09).
+        const auto core = ui::updates::core();
+        if (!core.ready && !core.error)
             return "agent-host is up to date";
         ui::updates::update_core();
     } else if (name == "app.update") {
-        // window.rs 3645-3657
+        // Puts the downloaded AgentDesk in place and starts it.
         std::string error;
         if (!ui::updates::apply(&error)) {
             if (error.empty())
@@ -914,146 +971,216 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         s.feedback_note.clear();
         if (name == "app.feedback" && !arg.empty() && s.feedback_buf[0] == '\0')
             std::snprintf(s.feedback_buf, sizeof s.feedback_buf, "%s", arg.c_str());
-    } else if (name == "layout.clone") {
-        // herdr window.rs 3443-3454 and 266-290 clone_layout: the layout (default: the shown one)
-        // as `as` (default <name>-copy), never over a file that is there, marked cloned_from, with
-        // its clicks; then shown. Ours is written in herdr's format, also from an old file.
-        const Json a = layout_args(arg, "name", "as");
-        const std::string from = a.value("name", std::string()).empty() ? s.settings.layout : a.value("name", std::string());
-        const std::string to = a.value("as", std::string()).empty() ? from + "-copy" : a.value("as", std::string());
-        auto valid = [](const std::string& n) {  // mods.rs valid_name: letters, digits, - or _
-            return !n.empty() && std::all_of(n.begin(), n.end(), [](char c) {
-                return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '-' || c == '_';
-            });
-        };
-        if (!valid(from) || !valid(to))
-            return "cannot clone layout: names use letters, digits, - or _";
-        const auto it =
-            std::find_if(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) { return l.name == from; });
-        if (it == s.layouts.end())
-            return "cannot clone layout: no layout \"" + from + "\"";
-        save_layout_state(*it);
-        std::error_code ec;
-        std::filesystem::create_directories(layouts_dir(), ec);
-        const auto dest = layouts_dir() / win::to_wide(to + ".json");
-        if (std::filesystem::exists(dest, ec) ||
-            std::any_of(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) { return l.name == to; }))
-            return "cannot clone layout: layouts\\" + to + ".json is already there";
-        lay::Node node = it->file;
-        node.cloned_from = Json{{"name", from}, {"version", AGENTDESK_VERSION_STRING}};
-        {
-            std::ofstream out(dest, std::ios::binary);
-            out << lay::text_of(node);
+    } else {
+        return std::nullopt;
+    }
+    return kDone;
+}
+
+// Letters, digits, - or _: a layout name that is also a safe file name.
+bool valid_layout_name(const std::string& n) {
+    return !n.empty() && std::all_of(n.begin(), n.end(), [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '-' || c == '_';
+    });
+}
+
+// layout.clone {name, as}: the layout (default: the shown one) as a new file `as` (default
+// <name>-copy), never over a file that is there, marked cloned_from, with its clicks; then shown.
+// An old-format layout is written in the current format.
+std::string clone_layout(App::State& s, const std::string& arg) {
+    const Json a = layout_args(arg, "name", "as");
+    const std::string from =
+        a.value("name", std::string()).empty() ? s.settings.layout : a.value("name", std::string());
+    const std::string to =
+        a.value("as", std::string()).empty() ? from + "-copy" : a.value("as", std::string());
+    if (!valid_layout_name(from) || !valid_layout_name(to))
+        return "cannot clone layout: names use letters, digits, - or _";
+    const auto it =
+        std::find_if(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) { return l.name == from; });
+    if (it == s.layouts.end())
+        return "cannot clone layout: no layout \"" + from + "\"";
+    save_layout_state(*it);
+    std::error_code ec;
+    std::filesystem::create_directories(layouts_dir(), ec);
+    const auto dest = layouts_dir() / win::to_wide(to + ".json");
+    if (std::filesystem::exists(dest, ec) ||
+        std::any_of(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) { return l.name == to; }))
+        return "cannot clone layout: layouts\\" + to + ".json is already there";
+    lay::Node node = it->file;
+    node.cloned_from = Json{{"name", from}, {"version", AGENTDESK_VERSION_STRING}};
+    {
+        std::ofstream out(dest, std::ios::binary);
+        out << lay::text_of(node);
+    }
+    if (std::filesystem::exists(layout_state_path(from), ec))
+        std::filesystem::copy_file(layout_state_path(from), layout_state_path(to),
+                                   std::filesystem::copy_options::overwrite_existing, ec);
+    s.layouts = load_layouts(s.settings);
+    run_command(s, "layout:" + to);
+    s.toast("Layout duplicated", "layouts\\" + to + ".json", "", g_pal->info);
+    return {};
+}
+
+// layout.reset [name]: only a layout AgentDesk ships. The person's file of that name is set
+// aside as <name>.json.old-<time> (never over an older one) and its clicks are dropped.
+std::string reset_layout(App::State& s, const std::string& arg) {
+    const std::string which = arg.empty() ? s.settings.layout : arg;
+    if (lay::builtin_text(which).empty())
+        return "\"" + which + "\" isn't a layout AgentDesk ships";
+    std::error_code ec;
+    int aside = 0;
+    std::vector<std::filesystem::path> files;
+    for (const auto& e : std::filesystem::directory_iterator(layouts_dir(), ec))
+        if (e.is_regular_file() && e.path().extension() == L".json")
+            files.push_back(e.path());
+    const long long stamp = static_cast<long long>(std::time(nullptr));
+    for (const auto& f : files) {
+        const auto j = Json::parse(read_text_file(f), nullptr, false);
+        const auto stem = f.stem().u8string();
+        const std::string file_name(stem.begin(), stem.end());
+        // An old AgentDesk file says its name inside.
+        const std::string n = lay::is_legacy(j) ? safe::string_or(j, "name", file_name) : file_name;
+        if (n != which)
+            continue;
+        std::filesystem::path to;
+        for (int i = 1;; ++i) {
+            to = f;
+            to += win::to_wide(".old-" + std::to_string(stamp) + (i == 1 ? "" : "-" + std::to_string(i)));
+            if (!std::filesystem::exists(to, ec))
+                break;
         }
-        if (std::filesystem::exists(layout_state_path(from), ec))
-            std::filesystem::copy_file(layout_state_path(from), layout_state_path(to),
-                                       std::filesystem::copy_options::overwrite_existing, ec);
-        s.layouts = load_layouts(s.settings);
-        run_command(s, "layout:" + to);
-        s.toast("Layout duplicated", "layouts\\" + to + ".json", "", g_pal->info);
-    } else if (name == "layout.reset") {
-        // herdr window.rs 3514-3533: only a layout herdr ships; a file of that name is set aside
-        // (<name>.json.old-<time>, never over an older one, window.rs 218-224) and its clicks go.
-        const std::string which = arg.empty() ? s.settings.layout : arg;
-        if (lay::builtin_text(which).empty())
-            return "\"" + which + "\" isn't a layout AgentDesk ships";
-        std::error_code ec;
-        int aside = 0;
-        std::vector<std::filesystem::path> files;
-        for (const auto& e : std::filesystem::directory_iterator(layouts_dir(), ec))
-            if (e.is_regular_file() && e.path().extension() == L".json")
-                files.push_back(e.path());
-        const long long stamp = static_cast<long long>(std::time(nullptr));
-        for (const auto& f : files) {
-            const auto j = Json::parse(read_text_file(f), nullptr, false);
-            const auto stem = f.stem().u8string();
-            const std::string file_name(stem.begin(), stem.end());
-            // An old AgentDesk file says its name inside.
-            const std::string n = lay::is_legacy(j) ? safe::string_or(j, "name", file_name) : file_name;
-            if (n != which)
-                continue;
-            std::filesystem::path to;
-            for (int i = 1;; ++i) {
-                to = f;
-                to += win::to_wide(".old-" + std::to_string(stamp) + (i == 1 ? "" : "-" + std::to_string(i)));
-                if (!std::filesystem::exists(to, ec))
-                    break;
-            }
-            std::filesystem::rename(f, to, ec);
-            if (ec)
-                return "cannot set layouts\\" + file_name + ".json aside: " + ec.message();
-            ++aside;
+        std::filesystem::rename(f, to, ec);
+        if (ec)
+            return "cannot set layouts\\" + file_name + ".json aside: " + ec.message();
+        ++aside;
+    }
+    std::filesystem::remove(layout_state_path(which), ec);
+    s.layouts = load_layouts(s.settings);
+    if (std::none_of(s.layouts.begin(), s.layouts.end(),
+                     [&](const LayoutSpec& l) { return l.name == s.settings.layout; }))
+        run_command(s, "layout:workspace");
+    s.toast("Layout reset: " + which, aside > 0 ? "Your file was kept aside as <name>.json.old-<time>." : "",
+            "", g_pal->info);
+    return {};
+}
+
+// mod.clone <mod>: copies the mod folder to <mod>-copy (then -copy-2, ...); without a name, asks.
+void clone_mod(App::State& s, const std::string& arg) {
+    if (arg.empty()) {
+        open_rename(s, "mod.clone", "", "");
+        return;
+    }
+    const auto dir = data_dir() / L"mods";
+    const auto src = dir / win::to_wide(arg);
+    std::error_code ec;
+    if (arg.find_first_of("/\\:") != std::string::npos || arg == "." || arg == ".." ||
+        !std::filesystem::is_directory(src, ec)) {
+        s.toast("No mod named " + arg, "Mods are folders in the mods folder.", "", g_pal->info);
+        return;
+    }
+    std::string to = arg + "-copy";
+    for (int n = 2; std::filesystem::exists(dir / win::to_wide(to), ec); ++n)
+        to = arg + "-copy-" + std::to_string(n);
+    std::filesystem::copy(src, dir / win::to_wide(to), std::filesystem::copy_options::recursive, ec);
+    if (ec)
+        s.toast("Could not duplicate " + arg, ec.message(), "", g_pal->needs_you);
+    else
+        s.toast("Mod duplicated", "mods\\" + to + " (off until you enable it)", "", g_pal->info);
+}
+
+// Switching, cloning and resetting layouts; mods.
+Outcome exec_layout_mod_command(App::State& s, const Command& c) {
+    if (c.name == "layout.switch" || c.name == "layout") {
+        // `arg` names the layout; without one, the next in the list.
+        std::string next = c.arg;
+        if (next.empty()) {
+            for (std::size_t i = 0; i < s.layouts.size(); ++i)
+                if (s.layouts[i].name == s.settings.layout)
+                    next = s.layouts[(i + 1) % s.layouts.size()].name;
         }
-        std::filesystem::remove(layout_state_path(which), ec);
-        s.layouts = load_layouts(s.settings);
-        if (std::none_of(s.layouts.begin(), s.layouts.end(),
-                         [&](const LayoutSpec& l) { return l.name == s.settings.layout; }))
-            run_command(s, "layout:workspace");
-        s.toast("Layout reset: " + which, aside > 0 ? "Your file was kept aside as <name>.json.old-<time>." : "", "",
-                g_pal->info);
-    } else if (name == "mod.clone") {
-        if (arg.empty()) {
-            open_rename(s, "mod.clone", "", "");
-        } else {
-            const auto dir = data_dir() / L"mods";
-            const auto src = dir / win::to_wide(arg);
-            std::error_code ec;
-            if (arg.find_first_of("/\\:") != std::string::npos || arg == "." || arg == ".." ||
-                !std::filesystem::is_directory(src, ec)) {
-                s.toast("No mod named " + arg, "Mods are folders in the mods folder.", "", g_pal->info);
-            } else {
-                std::string to = arg + "-copy";
-                for (int n = 2; std::filesystem::exists(dir / win::to_wide(to), ec); ++n)
-                    to = arg + "-copy-" + std::to_string(n);
-                std::filesystem::copy(src, dir / win::to_wide(to), std::filesystem::copy_options::recursive, ec);
-                if (ec)
-                    s.toast("Could not duplicate " + arg, ec.message(), "", g_pal->needs_you);
-                else
-                    s.toast("Mod duplicated", "mods\\" + to + " (off until you enable it)", "", g_pal->info);
-            }
-        }
-    } else if (name == "mods.reload") {
+        if (next.empty() && !s.layouts.empty())
+            next = s.layouts.front().name;
+        s.settings.layout = next;
+        save_settings(s.settings);
+        s.toast("Layout: " + next, "", "", g_pal->info, 2);
+        s.focus_view(s.ws.focused_session());
+    } else if (c.name == "layout.clone") {
+        return clone_layout(s, c.arg);
+    } else if (c.name == "layout.reset") {
+        return reset_layout(s, c.arg);
+    } else if (c.name == "mod.clone") {
+        clone_mod(s, c.arg);
+    } else if (c.name == "mods.reload") {
         s.layouts = load_layouts(s.settings);
         s.mods->load(s.settings.mods_enabled);
         s.toast("Mods reloaded", "", "", g_pal->info, 2);
-    } else if (name == "mods.folder") {
+    } else if (c.name == "mods.folder") {
         const auto dir = data_dir() / L"mods";
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
         ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-    } else if (name == "mod") {
-        const auto c2 = arg.find(':');
+    } else if (c.name == "mod") {
+        const auto c2 = c.arg.find(':');
         if (c2 == std::string::npos)
             return "mod needs <mod>:<command>";
-        s.mods->run_command(arg.substr(0, c2), arg.substr(c2 + 1));
-    } else if (name.rfind("win98.", 0) == 0) {
-        // Herdr 98's key commands (README.md 12-17), delivered to its taskbar (taskbar.js 126-176)
-        // while the layout shows.
-        if (s.layout().style == "win98")
-            w98::command(s, name.substr(6));
-    } else if (const auto dot = name.find('.');
-               dot != std::string::npos && [&] {
-                   std::error_code ec;  // "<mod>.<command>": keys.json accepts it when that mod folder exists
-                   return std::filesystem::is_directory(data_dir() / L"mods" / win::to_wide(name.substr(0, dot)), ec);
-               }()) {
-        s.mods->run_command(name.substr(0, dot), name.substr(dot + 1));
+        s.mods->run_command(c.arg.substr(0, c2), c.arg.substr(c2 + 1));
     } else {
-        // herdr window.rs 2975-2976.
-        return "unknown command \"" + name + "\"";
+        return std::nullopt;
     }
-    return {};
+    return kDone;
+}
+
+// Runs a command and says why it failed ("" when it ran): an unknown command, a missing target,
+// or a git step that failed.
+std::string exec_command(App::State& s, const std::string& cmd) {
+    const auto colon = cmd.find(':');
+    const Command c{cmd, cmd.substr(0, colon),
+                    colon == std::string::npos ? std::string() : cmd.substr(colon + 1),
+                    s.ws.focused_session()};
+    // Other spellings of commands AgentDesk has, so a keys.json written with them keeps working.
+    // "app.quit" closes the window; the agents keep running.
+    static const std::map<std::string, std::string> kCommandAliases = {{"terminal.park", "pane.park"},
+                                                                       {"terminal.peek", "agent.peek"},
+                                                                       {"terminal.open", "tab.new"},
+                                                                       {"app.quit", "window.close"}};
+    if (c.name == "layout.toggle" && c.arg.empty())  // the panel (AgentDesk's older spelling)
+        return exec_command(s, "panel");
+    if (auto r = layout_command(s, c.name, c.arg))
+        return *r;
+    if (const auto al = kCommandAliases.find(c.name); al != kCommandAliases.end())
+        return exec_command(s, c.arg.empty() ? al->second : al->second + ":" + c.arg);
+    if (c.name == "mod.open" && c.arg == "picker")
+        return exec_command(s, "app.picker");
+    for (const auto group :
+         {exec_launch_command, exec_pane_command, exec_tab_space_command, exec_agent_command,
+          exec_worktree_command, exec_app_command, exec_layout_mod_command})
+        if (auto r = group(s, c))
+            return *r;
+    if (c.name.rfind("win98.", 0) == 0) {
+        // AgentDesk 98's own commands go to its taskbar, while that layout shows.
+        if (s.layout().style == "win98")
+            w98::command(s, c.name.substr(6));
+        return {};
+    }
+    // "<mod>.<command>": keys.json accepts it when that mod folder exists.
+    if (const auto dot = c.name.find('.');
+        dot != std::string::npos && mod_folder_exists(c.name.substr(0, dot))) {
+        s.mods->run_command(c.name.substr(0, dot), c.name.substr(dot + 1));
+        return {};
+    }
+    return "unknown command \"" + c.name + "\"";
 }
 
 }  // namespace
 
-// herdr window.rs 2931-2943: a command run for the person (a click, a key, a menu, a mod) has
-// nobody to read the reply, so a failure shows as an error toast "<command> failed".
+// A command run for the person (a click, a key, a menu, a mod) has nobody to read its answer, so
+// a failure shows as an error toast "<command> failed".
 void run_command(App::State& s, const std::string& cmd, bool person) {
     if (s.defer_commands) {
         s.deferred_commands.push_back({cmd, person, s.ws.focused_session()});
         return;
     }
-    // herdr window.rs 2995-2997 / telemetry.rs 124: a command the person ran, by its name.
+    // Telemetry counts the commands the person ran, by name only.
     if (const std::string name = cmd.substr(0, cmd.find(':')); person && builtin_command(name))
         ui::telemetry::command(name);
     const std::string error = exec_command(s, cmd);
