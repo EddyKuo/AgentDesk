@@ -636,7 +636,21 @@ std::pair<std::string, std::string> layout_theme_pair(const Settings& st) {
     return {st.theme_dark, st.theme_light};
 }
 
+// ui.json parsed but a key has the wrong type: the defaults are used, and nothing is written over
+// the person's file until they fix it (as when it does not parse).
+bool g_settings_unreadable = false;
+
+Settings load_settings_unchecked();
 Settings load_settings() {
+    try {
+        return load_settings_unchecked();
+    } catch (const Json::exception&) {
+        g_settings_unreadable = true;
+        return Settings{};
+    }
+}
+
+Settings load_settings_unchecked() {
     Settings s;
     std::ifstream in(data_dir() / L"ui.json", std::ios::binary);
     if (!in) {
@@ -649,7 +663,7 @@ Settings load_settings() {
     // herdr settings.rs 718-726: even when the rest can't be used, the file's own "telemetry".
     if (j.is_object() && j.contains("telemetry") && j["telemetry"].is_boolean())
         s.telemetry = j["telemetry"].get<bool>();
-    if (j.is_discarded() || j.value("schema_version", 0) != 1)
+    if (!j.is_object() || j.value("schema_version", 0) != 1)
         return s;
     s.close_notice_shown = j.value("close_notice_shown", false);
     s.last_cwd = j.value("last_cwd", "");
@@ -805,6 +819,10 @@ void save_settings(const Settings& s) {
             g_settings_problem = "Cannot read ui.json";
             return;
         }
+        if (g_settings_unreadable) {  // a value of the wrong type: the person's file stays as is
+            g_settings_problem = "ui.json has errors: fix it first";
+            return;
+        }
         Json doc = Json::object();
         if (exists && !before.empty()) {
             doc = Json::parse(before, nullptr, false);
@@ -823,6 +841,13 @@ void save_settings(const Settings& s) {
         {
             std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
             out << doc.dump(2, ' ', false, Json::error_handler_t::replace) << "\n";
+            out.flush();
+            if (!out) {  // a full or failing disk: never put a cut-off file in its place
+                out.close();
+                std::filesystem::remove(tmp, ec);
+                g_settings_problem = "Not saved to ui.json";
+                return;
+            }
         }
         bool again_ok = true;
         const std::string now = exists ? read_text_file(path, &again_ok) : std::string();
@@ -830,7 +855,10 @@ void save_settings(const Settings& s) {
             std::filesystem::remove(tmp, ec);
             continue;
         }
-        ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+        if (!::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            std::filesystem::remove(tmp, ec);
+            g_settings_problem = "Not saved to ui.json";
+        }
         return;
     }
     g_settings_problem = "Not saved to ui.json";
