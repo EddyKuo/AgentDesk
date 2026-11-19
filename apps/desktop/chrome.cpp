@@ -1,13 +1,15 @@
-// Shared window-chrome drawing: mod panels, icons, icon buttons, menus, shell picker, status
-// marks, drag areas and the confirm prompt helpers.
+// Shared window-chrome drawing: mod panels, colour helpers, icons and icon buttons, context menus,
+// the shell picker, agent status marks, window dragging and the confirm prompt helpers.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
 
 namespace {
-// ------------------------------------------------------------------ drawing
+// ------------------------------------------------------------------ mod panels
 
+// A mod names its colours by role; map them onto the palette.
 ImU32 mod_color(const std::string& c) {
     if (c == "dim")
         return g_pal->dim;
@@ -22,9 +24,57 @@ ImU32 mod_color(const std::string& c) {
     return g_pal->text;
 }
 
+void text_colored(const std::string& text, ImU32 col) {
+    ImGui::PushStyleColor(ImGuiCol_Text, v4(col));
+    ImGui::TextUnformatted(text.c_str());
+    ImGui::PopStyleColor();
+}
+
+void draw_mod_widget(App::State& s, const ui::ModPanel& panel, const ui::ModWidget& w, float inset) {
+    switch (w.kind) {
+        case ui::ModWidget::Kind::kText:
+            ImGui::PushStyleColor(ImGuiCol_Text, v4(mod_color(w.color)));
+            ImGui::TextWrapped("%s", w.text.c_str());
+            ImGui::PopStyleColor();
+            break;
+        case ui::ModWidget::Kind::kButton:
+            if (ImGui::SmallButton(w.text.c_str()))
+                s.mods->click(panel.mod, panel.id, w.id);
+            break;
+        case ui::ModWidget::Kind::kSeparator:
+            ImGui::Separator();
+            break;
+        case ui::ModWidget::Kind::kProgress:
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, v4(g_pal->focus));
+            ImGui::ProgressBar(w.value, ImVec2(ImGui::GetContentRegionAvail().x - inset, px(6)), "");
+            ImGui::PopStyleColor();
+            if (!w.text.empty())
+                ImGui::TextDisabled("%s", w.text.c_str());
+            break;
+        case ui::ModWidget::Kind::kRow: {
+            // Label on the left, value right-aligned.
+            text_colored(w.text, g_pal->dim);
+            const float rw = ImGui::CalcTextSize(w.text2.c_str()).x;
+            ImGui::SameLine(ImGui::GetContentRegionMax().x - rw - inset);
+            text_colored(w.text2, mod_color(w.color));
+            break;
+        }
+        case ui::ModWidget::Kind::kBadge: {
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            const ImVec2 t = ImGui::CalcTextSize(w.text.c_str());
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->AddRectFilled(p, ImVec2(p.x + t.x + px(12), p.y + t.y + px(4)), alpha(mod_color(w.color), 60),
+                              px(8));
+            dl->AddText(ImVec2(p.x + px(6), p.y + px(2)), mod_color(w.color), w.text.c_str());
+            ImGui::Dummy(ImVec2(t.x + px(12), t.y + px(4)));
+            break;
+        }
+    }
+}
+
 }  // namespace
 
-// Mod panels, inset and titled like the sidebar's own sections (herdr spaces/agents headers).
+// Mod panels, inset and titled like the sidebar's own section headers.
 // only_mod: just that mod's panels (a layout block naming it).
 void draw_mod_panels(App::State& s, const std::string& where, const std::string& only_mod) {
     const float inset = px(18);
@@ -36,60 +86,15 @@ void draw_mod_panels(App::State& s, const std::string& where, const std::string&
         ImGui::Indent(inset);
         if (!panel.title.empty()) {
             ImGui::PushFont(s.fonts.ui_medium, 11.5f);
-            ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
-            ImGui::TextUnformatted(panel.title.c_str());
-            ImGui::PopStyleColor();
+            text_colored(panel.title, g_pal->dim);
             ImGui::PopFont();
             ImGui::Dummy(ImVec2(0, px(2)));
         }
         ImGui::PushFont(s.fonts.ui, 12.5f);
         ImGui::PushTextWrapPos(ImGui::GetContentRegionMax().x - inset);
         for (std::size_t i = 0; i < panel.widgets.size(); ++i) {
-            const auto& w = panel.widgets[i];
             ImGui::PushID(static_cast<int>(i));
-            switch (w.kind) {
-                case ui::ModWidget::Kind::kText:
-                    ImGui::PushStyleColor(ImGuiCol_Text, v4(mod_color(w.color)));
-                    ImGui::TextWrapped("%s", w.text.c_str());
-                    ImGui::PopStyleColor();
-                    break;
-                case ui::ModWidget::Kind::kButton:
-                    if (ImGui::SmallButton(w.text.c_str()))
-                        s.mods->click(panel.mod, panel.id, w.id);
-                    break;
-                case ui::ModWidget::Kind::kSeparator:
-                    ImGui::Separator();
-                    break;
-                case ui::ModWidget::Kind::kProgress:
-                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, v4(g_pal->focus));
-                    ImGui::ProgressBar(w.value, ImVec2(ImGui::GetContentRegionAvail().x - inset, px(6)), "");
-                    ImGui::PopStyleColor();
-                    if (!w.text.empty())
-                        ImGui::TextDisabled("%s", w.text.c_str());
-                    break;
-                case ui::ModWidget::Kind::kRow: {
-                    ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
-                    ImGui::TextUnformatted(w.text.c_str());
-                    ImGui::PopStyleColor();
-                    const float rw = ImGui::CalcTextSize(w.text2.c_str()).x;
-                    ImGui::SameLine(ImGui::GetContentRegionMax().x - rw - inset);
-                    ImGui::PushStyleColor(ImGuiCol_Text, v4(mod_color(w.color)));
-                    ImGui::TextUnformatted(w.text2.c_str());
-                    ImGui::PopStyleColor();
-                    break;
-                }
-                case ui::ModWidget::Kind::kBadge: {
-                    const ImVec2 p = ImGui::GetCursorScreenPos();
-                    const ImVec2 t = ImGui::CalcTextSize(w.text.c_str());
-                    ImGui::GetWindowDrawList()->AddRectFilled(p,
-                                                              ImVec2(p.x + t.x + px(12), p.y + t.y + px(4)),
-                                                              alpha(mod_color(w.color), 60), px(8));
-                    ImGui::GetWindowDrawList()->AddText(ImVec2(p.x + px(6), p.y + px(2)), mod_color(w.color),
-                                                        w.text.c_str());
-                    ImGui::Dummy(ImVec2(t.x + px(12), t.y + px(4)));
-                    break;
-                }
-            }
+            draw_mod_widget(s, panel, panel.widgets[i], inset);
             ImGui::PopID();
         }
         ImGui::PopTextWrapPos();
@@ -100,10 +105,9 @@ void draw_mod_panels(App::State& s, const std::string& where, const std::string&
     }
 }
 
-// ------------------------------------------------------------------ herdr window chrome
-// Layout, sizes and behaviour follow herdr-app's default layout and mods (layouts/main.json,
-// mods/workspace-chrome, spaces, agents, tabs, pane, workspace-status; Apache-2.0, see
-// docs/research/herdr-app/spec-sidebar-layout.md). Sizes are herdr design px through px().
+// ------------------------------------------------------------------ window chrome
+// Sizes in the chrome are design pixels at scale 1: px() scales positions and boxes, fpx() font
+// sizes.
 
 float fpx(float v) {
     return v * g_scale;
@@ -112,22 +116,23 @@ float fpx(float v) {
 ImU32 mix(ImU32 a, ImU32 b, float t) {
     const ImVec4 x = ImGui::ColorConvertU32ToFloat4(a);
     const ImVec4 y = ImGui::ColorConvertU32ToFloat4(b);
-    return ImGui::ColorConvertFloat4ToU32(ImVec4(x.x + (y.x - x.x) * t, x.y + (y.y - x.y) * t,
-                                                 x.z + (y.z - x.z) * t, x.w + (y.w - x.w) * t));
+    return ImGui::ColorConvertFloat4ToU32(
+        ImVec4(x.x + (y.x - x.x) * t, x.y + (y.y - x.y) * t, x.z + (y.z - x.z) * t, x.w + (y.w - x.w) * t));
 }
 
-// herdr tokens derived from our palettes: raised (active tab), popover (menus).
+// A surface slightly raised from the card (active tab, diff hunk rows): darker in light themes,
+// lighter in dark ones.
 ImU32 raised_color() {
     return g_pal->light ? mix(g_pal->card, IM_COL32(0, 0, 0, 255), 0.05f)
                         : mix(g_pal->card, IM_COL32(255, 255, 255, 255), 0.09f);
 }
 
-// herdr's accent_foreground: text on the accent fill.
+// Text drawn on an accent fill.
 ImU32 accent_foreground() {
     return IM_COL32(255, 255, 255, 255);
 }
 
-// Avatar colours: herdr's fixed table (spaces.js MARK), the same in every theme.
+// Space avatar colours by name: a fixed table, the same in every theme.
 ImU32 avatar_color(const std::string& name) {
     if (name == "ansi3")
         return IM_COL32(0xe3, 0x81, 0x4f, 255);
@@ -142,13 +147,15 @@ ImU32 avatar_color(const std::string& name) {
     return IM_COL32(0x22, 0xa9, 0x9a, 255);  // ansi6
 }
 
+// Centres the glyph on `center`, snapped to whole pixels so icons stay crisp.
 void draw_icon(App::State& s, ImDrawList* dl, const char* glyph, float size, ImVec2 center, ImU32 col) {
     const ImVec2 t = s.fonts.icons->CalcTextSizeA(size, FLT_MAX, 0, glyph);
-    dl->AddText(s.fonts.icons, size, ImVec2(std::round(center.x - t.x * 0.5f), std::round(center.y - t.y * 0.5f)),
-                col, glyph);
+    dl->AddText(s.fonts.icons, size,
+                ImVec2(std::round(center.x - t.x * 0.5f), std::round(center.y - t.y * 0.5f)), col, glyph);
 }
 
-// herdr icon button: square, radius 6, muted icon; hover background + foreground.
+// Square icon button with radius 6 and a muted icon; hover (or `on`) adds a background and brings
+// the icon to the foreground colour.
 bool icon_button(App::State& s, const char* id, const char* glyph, ImVec2 pos, float side, float icon,
                  const char* tip, ImU32 col, bool on) {
     ImGui::SetCursorScreenPos(pos);
@@ -156,16 +163,19 @@ bool icon_button(App::State& s, const char* id, const char* glyph, ImVec2 pos, f
     const bool hov = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     if (hov || on)
-        dl->AddRectFilled(pos, ImVec2(pos.x + side, pos.y + side), on ? g_pal->selected : g_pal->hover, px(6));
-    draw_icon(s, dl, glyph, icon, ImVec2(pos.x + side * 0.5f, pos.y + side * 0.5f), hov || on ? g_pal->text : col);
+        dl->AddRectFilled(pos, ImVec2(pos.x + side, pos.y + side), on ? g_pal->selected : g_pal->hover,
+                          px(6));
+    draw_icon(s, dl, glyph, icon, ImVec2(pos.x + side * 0.5f, pos.y + side * 0.5f),
+              hov || on ? g_pal->text : col);
     if (hov && tip != nullptr && *tip != 0)
         ImGui::SetTooltip("%s", tip);
     return clicked;
 }
 
-// herdr context menu (mods/menu): padding 5, rows 31 px with a 14 px muted icon, the label and
-// the bound key right-aligned in 11 px dim. Use between begin_menu / end_menu.
-// Keyboard in the open menu (herdr menu/main.js 131-137): one menu is open at a time.
+// ------------------------------------------------------------------ context menus
+// 5 px padding; 31 px rows with a 14 px muted icon, the label, and the bound key right-aligned in
+// 11 px faint text. Rows go between begin_menu and ImGui::EndPopup. Only one menu is open at a
+// time, so a single keyboard navigator serves all of them.
 ui::MenuNav g_menu_nav;
 
 // Call right after a menu popup begins: a fresh menu highlights its first row; Up/Down move,
@@ -173,8 +183,9 @@ ui::MenuNav g_menu_nav;
 void menu_keys() {
     if (ImGui::IsWindowAppearing())
         g_menu_nav.open();
-    g_menu_nav.frame(ImGui::IsKeyPressed(ImGuiKey_UpArrow), ImGui::IsKeyPressed(ImGuiKey_DownArrow),
-                     ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
+    g_menu_nav.frame(
+        ImGui::IsKeyPressed(ImGuiKey_UpArrow), ImGui::IsKeyPressed(ImGuiKey_DownArrow),
+        ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
         ImGui::CloseCurrentPopup();
 }
@@ -189,6 +200,7 @@ bool begin_menu(const char* id) {
         menu_keys();
     return open;
 }
+
 bool menu_row(App::State& s, const char* glyph, const char* label, const std::string& chord, bool enabled) {
     const ImVec2 a = ImGui::GetCursorScreenPos();
     const float w = std::max(ImGui::GetContentRegionAvail().x, px(190));
@@ -197,7 +209,7 @@ bool menu_row(App::State& s, const char* glyph, const char* label, const std::st
     ImGui::EndDisabled();
     const bool hov = enabled && ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    // herdr menu/main.js 152-153: the highlighted row is "selected", a hovered one "hover".
+    // The keyboard-highlighted row is drawn as selected, a hovered one as hover.
     bool run = false;
     const bool on = enabled && g_menu_nav.row(false, &run);
     clicked = clicked || run;
@@ -210,12 +222,14 @@ bool menu_row(App::State& s, const char* glyph, const char* label, const std::st
     dl->AddText(s.fonts.ui, fpx(12.8f), ImVec2(a.x + px(31), cy - fpx(12.8f) * 0.6f), col, label);
     if (!chord.empty()) {
         const float cw = s.fonts.ui->CalcTextSizeA(fpx(11), FLT_MAX, 0, chord.c_str()).x;
-        dl->AddText(s.fonts.ui, fpx(11), ImVec2(a.x + w - px(8) - cw, cy - fpx(11) * 0.6f), g_pal->faint, chord.c_str());
+        dl->AddText(s.fonts.ui, fpx(11), ImVec2(a.x + w - px(8) - cw, cy - fpx(11) * 0.6f), g_pal->faint,
+                    chord.c_str());
     }
     if (clicked)
         ImGui::CloseCurrentPopup();
     return clicked;
 }
+
 // The shells this machine has (host profiles that run a shell), the default one first.
 std::vector<std::pair<std::string, std::string>> shell_profiles(App::State& s, const std::string& machine) {
     ui::HostClient* h = s.host_for(machine);
@@ -257,12 +271,14 @@ void draw_shell_picker(App::State& s, const char* id, const char* target) {
 void menu_separator() {
     const ImVec2 a = ImGui::GetCursorScreenPos();
     ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, px(9)));
-    ImGui::GetWindowDrawList()->AddLine(ImVec2(a.x, a.y + px(4)), ImVec2(a.x + ImGui::GetContentRegionAvail().x, a.y + px(4)),
-                                        g_pal->border);
+    ImGui::GetWindowDrawList()->AddLine(
+        ImVec2(a.x, a.y + px(4)), ImVec2(a.x + ImGui::GetContentRegionAvail().x, a.y + px(4)), g_pal->border);
 }
 
-// Agent status marks (agents.js 208-217): spinner, "Needs you" pill or "!", done dot, idle ring.
-// Draws with its left edge at `x`, vertically centred on `cy`; returns the width used.
+// ------------------------------------------------------------------ status marks
+// Agent status marks: a spinner (working), a "Needs you" pill or a compact "!" (blocked), a done
+// dot, an idle ring. Draws with its left edge at `x`, vertically centred on `cy`, and returns the
+// width used; with `measure` it only returns the width.
 float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a, bool compact, bool measure) {
     switch (a) {
         case Attention::kWorking: {
@@ -281,8 +297,8 @@ float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a,
                     dl->AddRectFilled(ImVec2(x, cy - px(7)), ImVec2(x + px(14), cy + px(7)),
                                       alpha(g_pal->needs_you, 0x26), px(4));
                     const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fpx(10.5f), FLT_MAX, 0, "!");
-                    dl->AddText(s.fonts.ui_bold, fpx(10.5f), ImVec2(x + (px(14) - t.x) * 0.5f, cy - t.y * 0.5f),
-                                g_pal->needs_you, "!");
+                    dl->AddText(s.fonts.ui_bold, fpx(10.5f),
+                                ImVec2(x + (px(14) - t.x) * 0.5f, cy - t.y * 0.5f), g_pal->needs_you, "!");
                 }
                 return px(14);
             }
@@ -290,9 +306,10 @@ float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a,
             const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fpx(10.5f), FLT_MAX, 0, label);
             const float w = t.x + px(12);
             if (!measure) {
-                dl->AddRectFilled(ImVec2(x, cy - px(9)), ImVec2(x + w, cy + px(9)), alpha(g_pal->needs_you, 0x26),
-                                  px(5));
-                dl->AddText(s.fonts.ui_bold, fpx(10.5f), ImVec2(x + px(6), cy - t.y * 0.5f), g_pal->needs_you, label);
+                dl->AddRectFilled(ImVec2(x, cy - px(9)), ImVec2(x + w, cy + px(9)),
+                                  alpha(g_pal->needs_you, 0x26), px(5));
+                dl->AddText(s.fonts.ui_bold, fpx(10.5f), ImVec2(x + px(6), cy - t.y * 0.5f), g_pal->needs_you,
+                            label);
             }
             return w;
         }
@@ -310,10 +327,12 @@ float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a,
     return 0;
 }
 
-// Dragging an empty part of the brand row or the tab bar moves the window (herdr window_drag:
-// posts SC_MOVE so snapping works); double-click toggles maximize.
+// Dragging an empty part of the brand row or the tab bar moves the window; double-click toggles
+// maximize. The press is handed to Windows as a caption click (WM_NCLBUTTONDOWN + HTCAPTION), so
+// the system move loop runs and Aero Snap works.
 void window_drag_area(App::State& s, ImVec2 a, ImVec2 b) {
-    if (s.config.hwnd == nullptr || ImGui::IsAnyItemHovered() || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId))
+    if (s.config.hwnd == nullptr || ImGui::IsAnyItemHovered() ||
+        ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId))
         return;
     if (!ImGui::IsMouseHoveringRect(a, b, false) || !ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows))
         return;
@@ -330,19 +349,22 @@ GitTail git_tail(const GitInfo& g, const std::string& space_name, bool worktree_
     GitTail t;
     if (!g.repo)
         return t;
-    auto same = [](const std::string& a, const std::string& b) { return _stricmp(a.c_str(), b.c_str()) == 0; };
+    auto same = [](const std::string& a, const std::string& b) {
+        return _stricmp(a.c_str(), b.c_str()) == 0;
+    };
     const std::string repo = folder_name(g.common_top.empty() ? g.top : g.common_top);
     std::string branch = g.branch == "HEAD" ? std::string("(detached)") : g.branch;
     if (branch == "main" || branch == "master" || same(branch, space_name))
         branch.clear();
-    std::string r = worktree_row || same(repo, space_name) ? std::string() : repo;
-    t.text = r;
+    t.text = worktree_row || same(repo, space_name) ? std::string() : repo;
     if (!branch.empty())
         t.text += (t.text.empty() ? "" : " \xC2\xB7 ") + branch;
     t.ahead = g.ahead;
     t.behind = g.behind;
     return t;
 }
+
+// ------------------------------------------------------------------ confirm prompt
 
 void open_confirm(App::State& s, std::string title, std::string detail, std::string ok, std::string command) {
     s.confirm_title = std::move(title);
@@ -352,8 +374,7 @@ void open_confirm(App::State& s, std::string title, std::string detail, std::str
     s.show_confirm = true;
 }
 
-// "Close space?" (window.rs 3067-3080): "<name> — N tabs, M terminals", always plural as
-// window.rs 3075 writes it.
+// "Close space?" with "<name> — N tabs, M terminals"; the counts stay plural even for one.
 void confirm_close_space(App::State& s, int index) {
     if (index < 0 || index >= static_cast<int>(s.ws.spaces.size()))
         return;
