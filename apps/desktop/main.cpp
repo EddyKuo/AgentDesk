@@ -2,6 +2,7 @@
 // The UI holds no process or ConPTY: every session lives in the host. Closing the window only
 // detaches; "Exit and stop all sessions" is the explicit way to end the host (design doc 4.3).
 // This file is the platform shell; the window contents are in app.cpp.
+#include <functional>
 #include <d3d11.h>
 #include <dxgi.h>
 #include <windows.h>
@@ -55,6 +56,12 @@ struct Gfx {
 } g_gfx;
 
 HANDLE g_wake = nullptr;  // set by IPC threads; the UI loop wakes and redraws
+// Dragging a window edge runs Windows' own modal size loop, where the main loop does not turn:
+// without a frame at each new size, DWM stretches the last one (text and pictures warp until the
+// mouse is released). WM_SIZE draws one through g_draw_now while that loop runs.
+std::function<void()> g_draw_now;
+bool g_sizing = false;  // between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE
+bool g_drawing = false;  // a frame is being built (WM_SIZE can arrive from inside one)
 float g_pending_dpi = 0.0f;
 std::atomic<bool> g_close_requested{false};
 std::atomic<int> g_focus_change{-1};  // -1 none, 0 lost, 1 gained
@@ -198,7 +205,15 @@ LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
             if (wparam != SIZE_MINIMIZED) {
                 g_gfx.pending_w = LOWORD(lparam);
                 g_gfx.pending_h = HIWORD(lparam);
+                if (g_sizing && g_draw_now && !g_drawing)
+                    g_draw_now();  // a frame at the new size now, not a stretched old one
             }
+            return 0;
+        case WM_ENTERSIZEMOVE:
+            g_sizing = true;
+            return 0;
+        case WM_EXITSIZEMOVE:
+            g_sizing = false;
             return 0;
         case WM_DPICHANGED: {
             const auto* r = reinterpret_cast<RECT*>(lparam);  // Win32 contract for this message
@@ -434,6 +449,47 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     bool exit_now = false;
     int frames_to_draw = 3;
     auto last_tick = Clock::time_point{};
+    // One frame at the window's current size. A lost device whose re-creation fails ends the
+    // loop (running = false).
+    auto draw_frame = [&] {
+        g_drawing = true;
+        if (g_gfx.pending_w != 0 && g_gfx.pending_h != 0) {
+            release_rtv();
+            g_gfx.swap->ResizeBuffers(0, g_gfx.pending_w, g_gfx.pending_h, DXGI_FORMAT_UNKNOWN, 0);
+            g_gfx.pending_w = g_gfx.pending_h = 0;
+            create_rtv();
+        }
+        if (g_pending_dpi > 0.0f) {
+            app.apply_scale(g_pending_dpi);
+            g_pending_dpi = 0.0f;
+        }
+
+        ImGui_ImplDX11_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        app.before_new_frame();  // --input keeps its mouse position over the backend's
+        ImGui::NewFrame();
+        app.frame();
+        ImGui::Render();
+        const ImVec4 bg = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+        const float clear[4] = {bg.x, bg.y, bg.z, 1.0f};
+        g_gfx.context->OMSetRenderTargets(1, &g_gfx.rtv, nullptr);
+        g_gfx.context->ClearRenderTargetView(g_gfx.rtv, clear);
+        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        const HRESULT hr = g_gfx.swap->Present(1, 0);
+        g_gfx.occluded = hr == DXGI_STATUS_OCCLUDED;
+        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+            ImGui_ImplDX11_Shutdown();
+            dx11_backend = false;
+            destroy_device();
+            if (!create_device(hwnd) || !(dx11_backend = ImGui_ImplDX11_Init(g_gfx.device, g_gfx.context)))
+                running = false;
+        }
+        g_drawing = false;
+    };
+    g_draw_now = [&] {
+        if (running && dx11_backend)
+            draw_frame();
+    };
     while (running) {
         if (dev.exit_after_ms > 0 && Clock::now() - launched > std::chrono::milliseconds(dev.exit_after_ms))
             exit_now = true;
@@ -491,42 +547,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             continue;
         }
         g_gfx.occluded = false;
-        if (g_gfx.pending_w != 0 && g_gfx.pending_h != 0) {
-            release_rtv();
-            g_gfx.swap->ResizeBuffers(0, g_gfx.pending_w, g_gfx.pending_h, DXGI_FORMAT_UNKNOWN, 0);
-            g_gfx.pending_w = g_gfx.pending_h = 0;
-            create_rtv();
-        }
-        if (g_pending_dpi > 0.0f) {
-            app.apply_scale(g_pending_dpi);
-            g_pending_dpi = 0.0f;
-        }
-
-        ImGui_ImplDX11_NewFrame();
-        ImGui_ImplWin32_NewFrame();
-        app.before_new_frame();  // --input keeps its mouse position over the backend's
-        ImGui::NewFrame();
-        app.frame();
-        ImGui::Render();
-        const ImVec4 bg = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
-        const float clear[4] = {bg.x, bg.y, bg.z, 1.0f};
-        g_gfx.context->OMSetRenderTargets(1, &g_gfx.rtv, nullptr);
-        g_gfx.context->ClearRenderTargetView(g_gfx.rtv, clear);
-        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-        const HRESULT hr = g_gfx.swap->Present(1, 0);
-        g_gfx.occluded = hr == DXGI_STATUS_OCCLUDED;
-        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
-            ImGui_ImplDX11_Shutdown();
-            dx11_backend = false;
-            destroy_device();
-            if (!create_device(hwnd))
-                break;
-            dx11_backend = ImGui_ImplDX11_Init(g_gfx.device, g_gfx.context);
-            if (!dx11_backend)
-                break;
-        }
+        draw_frame();
+        if (!running)
+            break;
         --frames_to_draw;
     }
+    g_draw_now = nullptr;
 
     app.on_quit();
     if (!dev.report.empty())
