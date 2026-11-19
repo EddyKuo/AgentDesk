@@ -141,7 +141,7 @@ struct Component {
 };
 
 // Everything in the zip that is not AgentDesk's own, with the license file quoted for it. These
-// are legal attributions: every entry, the herdr-app one included, must stay.
+// are legal attributions: every entry must stay.
 std::vector<Component> shipped_components(const fs::path& root, const fs::path& share) {
     return {
         {"libvterm 0.3.3", "https://www.leonerd.org.uk/code/libvterm/",
