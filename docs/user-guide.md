@@ -32,6 +32,8 @@ Agent 需要你時一定會播放提示音；你沒在看的 Agent 完成時也�
 
 新 space、新分頁和分割都會先開一個 shell（預設依序找 PowerShell 7、Windows PowerShell、Command Prompt，可在「設定 > Look」更改），位置在目前面板 shell 所在的資料夾。用 `cd` 切到專案後再輸入 `claude` 或 `codex`；面板、space 名稱和分支都會跟著更新。
 
+按側欄 Spaces 旁的「+」會列出這台電腦有的 shell（PowerShell 7、Windows PowerShell、Command Prompt、WSL），選哪個就用哪個開新 space；分頁列「+」的選單也列出這些 shell，可以直接開成新分頁。快捷鍵 Ctrl+Shift+N（新 space）和 Ctrl+Shift+T（新分頁）一樣開預設的 shell。
+
 - 新分頁：Ctrl+Shift+T，或分頁列「+」選單的 Terminal
 - 新 space：Ctrl+Shift+N，或 Spaces 標題旁的「+」
 - 往右或往下分割：Ctrl+Shift+O、Ctrl+Shift+E，或面板標題列的按鈕

@@ -4707,6 +4707,44 @@ bool menu_row(App::State& s, const char* glyph, const char* label, const std::st
         ImGui::CloseCurrentPopup();
     return clicked;
 }
+// The shells this machine has (host profiles that run a shell), the default one first.
+std::vector<std::pair<std::string, std::string>> shell_profiles(App::State& s, const std::string& machine) {
+    ui::HostClient* h = s.host_for(machine);
+    const auto profiles = h->profiles();
+    const std::string def = pick_shell(s.settings.shell_profile, profiles);
+    std::vector<std::pair<std::string, std::string>> out;
+    for (const auto& [id, name] : profiles)
+        if (is_shell_profile(id) || program_of_profile(h->profile_executable(id), id).shell)
+            out.emplace_back(id, name);
+    std::stable_partition(out.begin(), out.end(), [&](const auto& p) { return p.first == def; });
+    return out;
+}
+
+// A menu of the shells: the chosen one starts a new space (or tab) in the focused folder.
+void draw_shell_picker(App::State& s, const char* id, const char* target) {
+    ImGui::SetNextWindowSizeConstraints(ImVec2(px(220), 0), ImVec2(FLT_MAX, FLT_MAX));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(5), px(5)));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    const bool open = ImGui::BeginPopup(id);
+    ImGui::PopStyleVar(2);
+    if (!open)
+        return;
+    menu_keys();
+    const std::string machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
+    const auto shells = shell_profiles(s, machine);
+    if (shells.empty()) {
+        ImGui::TextDisabled("No shell found");
+    }
+    for (std::size_t i = 0; i < shells.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        const std::string chord = i == 0 ? s.keymap.chord_for(std::string(target) + ".new") : std::string();
+        if (menu_row(s, ui::icon::kTerminal, shells[i].second.c_str(), chord))
+            run_command(s, std::string("launch:") + target + ":" + shells[i].first);
+        ImGui::PopID();
+    }
+    ImGui::EndPopup();
+}
+
 void menu_separator() {
     const ImVec2 a = ImGui::GetCursorScreenPos();
     ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, px(9)));
@@ -4971,8 +5009,11 @@ float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail) {
     {
         const float b = px(26);
         const ImVec2 bp = rail ? ImVec2(pos.x + (w - b) * 0.5f, pos.y + px(2)) : ImVec2(pos.x + w - px(10) - b, pos.y + px(2.5f));
+        // AgentDesk's own (herdr opens its one shell): pick the shell the new space starts in,
+        // from the shells found on this machine (PowerShell 7, Windows PowerShell, cmd, WSL).
         if (icon_button(s, "##space-new", ui::icon::kPlus, bp, b, fpx(14), nullptr, g_pal->dim))
-            run_command(s, "space.new");
+            ImGui::OpenPopup("##space-shells");
+        draw_shell_picker(s, "##space-shells", "space");
     }
     const float head = px(31);
     ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + head));
@@ -5997,9 +6038,10 @@ void draw_new_menu(App::State& s) {
     const std::string machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
     ui::HostClient* mh = s.host_for(machine);
     const auto profiles = mh->profiles();
-    // Other shells (WSL distributions): a tab in the focused folder, like Terminal.
-    for (const auto& [id, name] : profiles)
-        if (id.starts_with("wsl-") && id != pick_shell(s.settings.shell_profile, profiles))
+    // The other shells this machine has (PowerShell 7, Windows PowerShell, cmd, WSL): a tab in
+    // the focused folder, like Terminal (AgentDesk's own; herdr has the one shell).
+    for (const auto& [id, name] : shell_profiles(s, machine))
+        if (id != pick_shell(s.settings.shell_profile, profiles))
             row(ui::icon::kTerminal, name, "", "launch:tab:" + id);
     ImGui::Dummy(ImVec2(0, px(2)));
     ImGui::PushFont(s.fonts.ui_medium, 11);
