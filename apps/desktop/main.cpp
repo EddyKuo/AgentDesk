@@ -4,7 +4,7 @@
 // This file is the platform shell; the window contents are in app.cpp.
 #include <functional>
 #include <d3d11.h>
-#include <dxgi.h>
+#include <dxgi1_2.h>
 #include <windows.h>
 // dwmapi/shellapi need windows.h first.
 #include <algorithm>
@@ -48,11 +48,13 @@ using Clock = std::chrono::steady_clock;
 struct Gfx {
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* context = nullptr;
-    IDXGISwapChain* swap = nullptr;
+    IDXGISwapChain1* swap = nullptr;
     ID3D11RenderTargetView* rtv = nullptr;
     UINT pending_w = 0;
     UINT pending_h = 0;
     bool occluded = false;
+    DXGI_RGBA fill{};
+    bool fill_set = false;
 } g_gfx;
 
 HANDLE g_wake = nullptr;  // set by IPC threads; the UI loop wakes and redraws
@@ -115,27 +117,59 @@ void release_rtv() {
     }
 }
 
+void destroy_device();
+
+bool create_swap_chain(HWND hwnd) {
+    // DXGI_SCALING_NONE: while a window edge is dragged, DWM shows the last frame at its own size
+    // (top-left aligned) and fills the uncovered strip with the background colour, instead of
+    // stretching it to the new size until the next frame lands. Flip model only (DXGI_SCALING docs).
+    IDXGIDevice* dxgi_device = nullptr;
+    IDXGIAdapter* adapter = nullptr;
+    IDXGIFactory2* factory = nullptr;
+    HRESULT hr = g_gfx.device->QueryInterface(IID_PPV_ARGS(&dxgi_device));
+    if (SUCCEEDED(hr))
+        hr = dxgi_device->GetAdapter(&adapter);
+    if (SUCCEEDED(hr))
+        hr = adapter->GetParent(IID_PPV_ARGS(&factory));
+    if (SUCCEEDED(hr)) {
+        DXGI_SWAP_CHAIN_DESC1 sd{};
+        sd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        sd.SampleDesc.Count = 1;
+        sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        sd.BufferCount = 2;
+        sd.Scaling = DXGI_SCALING_NONE;
+        sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+        hr = factory->CreateSwapChainForHwnd(g_gfx.device, hwnd, &sd, nullptr, nullptr, &g_gfx.swap);
+        if (FAILED(hr)) {  // some drivers refuse NONE: fall back to the stretching default
+            sd.Scaling = DXGI_SCALING_STRETCH;
+            hr = factory->CreateSwapChainForHwnd(g_gfx.device, hwnd, &sd, nullptr, nullptr, &g_gfx.swap);
+        }
+        if (SUCCEEDED(hr))
+            factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
+    }
+    if (factory)
+        factory->Release();
+    if (adapter)
+        adapter->Release();
+    if (dxgi_device)
+        dxgi_device->Release();
+    return SUCCEEDED(hr);
+}
+
 bool create_device(HWND hwnd) {
-    DXGI_SWAP_CHAIN_DESC sd{};
-    sd.BufferCount = 2;
-    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    sd.OutputWindow = hwnd;
-    sd.SampleDesc.Count = 1;
-    sd.Windowed = TRUE;
-    sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0};
     D3D_FEATURE_LEVEL got{};
-    HRESULT hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2,
-                                               D3D11_SDK_VERSION, &sd, &g_gfx.swap, &g_gfx.device, &got,
-                                               &g_gfx.context);
+    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION,
+                                   &g_gfx.device, &got, &g_gfx.context);
     if (hr == DXGI_ERROR_UNSUPPORTED) {  // no hardware device: WARP software rasterizer
-        hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, levels, 2,
-                                           D3D11_SDK_VERSION, &sd, &g_gfx.swap, &g_gfx.device, &got,
-                                           &g_gfx.context);
+        hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, levels, 2, D3D11_SDK_VERSION,
+                               &g_gfx.device, &got, &g_gfx.context);
     }
-    if (FAILED(hr))
+    if (FAILED(hr) || !create_swap_chain(hwnd)) {
+        destroy_device();
         return false;
+    }
     create_rtv();
     return true;
 }
@@ -472,6 +506,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         ImGui::Render();
         const ImVec4 bg = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
         const float clear[4] = {bg.x, bg.y, bg.z, 1.0f};
+        // The colour DWM fills the uncovered strip with while the window grows (DXGI_SCALING_NONE).
+        if (const DXGI_RGBA fill{bg.x, bg.y, bg.z, 1.0f};
+            fill.r != g_gfx.fill.r || fill.g != g_gfx.fill.g || fill.b != g_gfx.fill.b || !g_gfx.fill_set) {
+            g_gfx.swap->SetBackgroundColor(&fill);
+            g_gfx.fill = fill;
+            g_gfx.fill_set = true;
+        }
         g_gfx.context->OMSetRenderTargets(1, &g_gfx.rtv, nullptr);
         g_gfx.context->ClearRenderTargetView(g_gfx.rtv, clear);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
