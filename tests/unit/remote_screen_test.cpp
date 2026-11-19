@@ -85,3 +85,45 @@ TEST(RemoteScreen, GenerationChangeRequiresSnapshot) {
     const auto s1 = e.snapshot();
     EXPECT_EQ(rs.apply_delta(delta(s0, s1)), DeltaResult::kNeedSnapshot);
 }
+
+// A snapshot that loses a chunk never completes: its assembly is dropped when the next snapshot
+// starts or completes, or when the client asks for a fresh one.
+TEST(RemoteScreen, AbandonedSnapshotAssembliesAreFreed) {
+    auto e = make_engine();
+    e.feed("hello");
+    const auto s = e.snapshot();
+    RemoteScreen rs;
+    EXPECT_FALSE(rs.apply_snapshot_chunk(snapshot_chunk(s, "a", 0, 2, 0, 3)));
+    EXPECT_EQ(rs.pending_count(), 1u);
+    rs.mark_needs_snapshot();
+    EXPECT_EQ(rs.pending_count(), 0u);
+    EXPECT_FALSE(rs.apply_snapshot_chunk(snapshot_chunk(s, "b", 0, 2, 0, 3)));
+    EXPECT_TRUE(rs.apply_snapshot_chunk(snapshot_chunk(s, "c", 0, 1, 0, 6)));
+    EXPECT_EQ(rs.pending_count(), 0u);
+    EXPECT_EQ(rs.current()->row_text(0), "hello");
+}
+
+// Malformed IPC data throws a json exception (the client catches it and asks for a snapshot);
+// it never leaves a half-built snapshot behind or changes the current screen.
+TEST(RemoteScreen, MalformedEventsThrowWithoutChangingTheScreen) {
+    auto e = make_engine();
+    e.feed("hello");
+    const auto s0 = e.snapshot();
+    RemoteScreen rs;
+    ASSERT_TRUE(rs.apply_snapshot_chunk(snapshot_chunk(s0, "a", 0, 1, 0, 6)));
+    auto bad = snapshot_chunk(s0, "b", 0, 1, 0, 6);
+    bad["meta"]["rows"] = -5;
+    EXPECT_THROW(rs.apply_snapshot_chunk(bad), nlohmann::json::exception);
+    bad = snapshot_chunk(s0, "b", 0, 1, 0, 6);
+    bad["rows"] = Json::array({Json{{"row", "zero"}}});
+    EXPECT_THROW(rs.apply_snapshot_chunk(bad), nlohmann::json::exception);
+    EXPECT_EQ(rs.pending_count(), 0u);
+    bad = snapshot_chunk(s0, "b", 0, 1, 0, 6);
+    bad.erase("meta");
+    EXPECT_THROW(rs.apply_snapshot_chunk(bad), nlohmann::json::exception);
+    e.feed(" world");
+    auto d = delta(s0, e.snapshot());
+    d["rows"] = "nope";
+    EXPECT_THROW(rs.apply_delta(d), nlohmann::json::exception);
+    EXPECT_EQ(rs.current()->row_text(0), "hello");
+}

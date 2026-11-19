@@ -63,6 +63,7 @@ public:
     [[nodiscard]] std::shared_ptr<const terminal::ScreenSnapshot> snapshot() const override;
     void send(host::InputEvent input) override;
     void resize(int rows, int cols) override;
+    [[nodiscard]] bool controls_size() const override;
     [[nodiscard]] bool can_input() const override;
     void request_history(std::size_t lines) override;
     [[nodiscard]] std::shared_ptr<const std::vector<HistoryLineText>> history() const override;
@@ -132,8 +133,14 @@ public:
 
 private:
     friend class RemoteSession;  // queues history/control requests on the worker
-    using Task = std::function<void(ipc::PipeClient&)>;
-    void enqueue(Task task);
+    struct Task {
+        std::function<void(ipc::PipeClient&)> run;
+        // Called instead of run when the connection is gone by the time the task is taken
+        // (requests with a result answer with an error rather than never).
+        std::function<void(const std::string& error)> fail;
+    };
+    void enqueue(std::function<void(ipc::PipeClient&)> run,
+                 std::function<void(const std::string& error)> fail = nullptr);
     void worker_loop();
     bool try_connect(bool allow_start);
     void refresh_sessions(ipc::PipeClient& client);

@@ -23,7 +23,9 @@ public:
     virtual ~TerminalSource() = default;
     [[nodiscard]] virtual std::shared_ptr<const terminal::ScreenSnapshot> snapshot() const = 0;
     virtual void send(host::InputEvent input) = 0;
-    virtual void resize(int rows, int cols) = 0;
+    virtual void resize(int rows, int cols) = 0;  // ignored unless controls_size()
+    // Only the input controller sets the ConPTY size (design doc 3.7).
+    [[nodiscard]] virtual bool controls_size() const { return true; }
     [[nodiscard]] virtual bool can_input() const = 0;  // false: read-only (not controller / exited)
 
     // Scrollback: ask for the newest `lines` history lines; they arrive asynchronously.

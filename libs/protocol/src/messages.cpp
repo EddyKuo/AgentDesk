@@ -31,7 +31,9 @@ std::optional<ErrorCode> parse_error_code(std::string_view s) {
     return std::nullopt;
 }
 
-ParseResult parse_message(std::string_view payload) {
+namespace {
+
+ParseResult parse_message_unchecked(std::string_view payload) {
     ParseResult out;
     Json j = Json::parse(payload, nullptr, false);
     if (j.is_discarded() || !j.is_object()) {
@@ -91,10 +93,18 @@ ParseResult parse_message(std::string_view payload) {
     if (const auto res = j.find("result"); res != j.end()) {
         r.result = *res;
     } else if (const auto err = j.find("error"); err != j.end() && err->is_object()) {
-        const auto code = parse_error_code(err->value("code", ""));
-        r.error = code.value_or(ErrorCode::kInternal);
-        r.error_message = err->value("message", "");
-        r.retryable = err->value("retryable", false);
+        const auto code = err->find("code");
+        const auto message = err->find("message");
+        const auto retryable = err->find("retryable");
+        if ((code != err->end() && !code->is_string()) || (message != err->end() && !message->is_string()) ||
+            (retryable != err->end() && !retryable->is_boolean())) {
+            out.error = "error code and message must be strings and retryable a boolean";
+            return out;
+        }
+        r.error = parse_error_code(code != err->end() ? code->get<std::string>() : std::string())
+                      .value_or(ErrorCode::kInternal);
+        r.error_message = message != err->end() ? message->get<std::string>() : std::string();
+        r.retryable = retryable != err->end() && retryable->get<bool>();
     } else {
         out.error = "response needs result or error";
         return out;
@@ -103,8 +113,23 @@ ParseResult parse_message(std::string_view payload) {
     return out;
 }
 
+}  // namespace
+
+ParseResult parse_message(std::string_view payload) {
+    // A wrongly typed field must come back as a parse error, never as an exception: callers parse
+    // on connection and reader threads, where an escaping exception ends the process.
+    try {
+        return parse_message_unchecked(payload);
+    } catch (const Json::exception&) {
+        ParseResult out;
+        out.error = "malformed message";
+        return out;
+    }
+}
+
 std::string serialize(const Request& r) {
-    return Json{{"v", kProtocolVersion}, {"id", r.id}, {"method", r.method}, {"params", r.params}}.dump();
+    return Json{{"v", kProtocolVersion}, {"id", r.id}, {"method", r.method}, {"params", r.params}}.dump(
+        -1, ' ', false, Json::error_handler_t::replace);
 }
 
 std::string serialize(const Response& r) {
@@ -115,14 +140,16 @@ std::string serialize(const Response& r) {
     } else {
         j["result"] = r.result.value_or(Json::object());
     }
-    return j.dump();
+    // Invalid UTF-8 in a string (text from a program or a Windows message) becomes U+FFFD
+    // instead of an exception: a reply must always be sendable.
+    return j.dump(-1, ' ', false, Json::error_handler_t::replace);
 }
 
 std::string serialize(const Event& e) {
     Json j = e.body;
     j["v"] = kProtocolVersion;
     j["event"] = e.event;
-    return j.dump();
+    return j.dump(-1, ' ', false, Json::error_handler_t::replace);
 }
 
 Response ok(std::string id, Json result) {

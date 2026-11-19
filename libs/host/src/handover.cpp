@@ -337,7 +337,7 @@ Response SessionManager::do_update(const Request& req) {
 void SessionManager::finish_handover() {
     if (!successor_)
         return;
-    std::vector<std::unique_ptr<Session>> released;
+    std::vector<std::shared_ptr<Session>> released;
     {
         std::lock_guard lock(mutex_);
         for (const auto& m : successor_->sessions) {

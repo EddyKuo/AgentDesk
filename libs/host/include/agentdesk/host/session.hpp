@@ -112,7 +112,9 @@ public:
     // byte, stops reacting to the program's exit and returns the state. nullopt with `why` when
     // that did not work within `timeout`; then call resume().
     std::optional<Frozen> freeze(std::chrono::milliseconds timeout, std::string* why);
-    // The handover failed: read, write and watch the program again.
+    // The handover failed: read, write and watch the program again. Waits until the actor has
+    // finished any freeze still in progress. Not on the actor thread, not under a lock its
+    // listeners take.
     void resume();
     // The new host holds duplicates of every handle: close ours without ending anything. Destroy
     // the session afterwards.
@@ -151,7 +153,9 @@ private:
         std::shared_ptr<std::promise<std::string>> result;  // state, or empty with error set
         std::shared_ptr<std::string> error;
     };
-    struct UnfreezeCmd {};
+    struct UnfreezeCmd {
+        std::shared_ptr<std::promise<void>> done;  // set once the actor handled it (resume())
+    };
     using Command = std::variant<OutputChunk, InputEvent, ResizeCmd, InterruptCmd, ReportCmd, HistoryCmd,
                                  FreezeCmd, UnfreezeCmd>;
 

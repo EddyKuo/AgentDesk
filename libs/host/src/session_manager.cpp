@@ -4,7 +4,9 @@
 #include <cwctype>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <set>
+#include <system_error>
 
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
@@ -27,6 +29,62 @@ constexpr std::size_t kMaxRecords = 200;
 // read; only the newest few do, otherwise create/stop churn grows threads and memory forever
 // (design doc 1.5 stability target). Older ones keep metadata only.
 constexpr std::size_t kMaxExitedLive = 8;
+
+// JSON strings must be UTF-8: invalid bytes become U+FFFD.
+std::string valid_utf8(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    std::size_t i = 0;
+    while (i < in.size()) {
+        const auto c = static_cast<unsigned char>(in[i]);
+        std::size_t n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
+        bool ok = n > 0 && i + n <= in.size();
+        for (std::size_t k = 1; ok && k < n; ++k)
+            ok = (static_cast<unsigned char>(in[i + k]) & 0xC0) == 0x80;
+        if (ok) {
+            out.append(in, i, n);
+            i += n;
+        } else {
+            out += "\xEF\xBF\xBD";
+            ++i;
+        }
+    }
+    return out;
+}
+
+// Text for an exception that goes into a reply. std::system_error's message is in the ANSI code
+// page (CP950 on a Traditional Chinese system), which is not UTF-8 and would make the reply
+// unserializable: describe Windows errors with FormatMessageW instead.
+std::string error_text(const std::exception& e) {
+    std::string what = e.what();
+    if (const auto* se = dynamic_cast<const std::system_error*>(&e);
+        se != nullptr && se->code().category() == std::system_category()) {
+        const std::string ansi = se->code().message();
+        std::string prefix = what;
+        if (what.size() >= ansi.size() + 2 && what.ends_with(ansi))
+            prefix = what.substr(0, what.size() - ansi.size() - 2);
+        wchar_t* text = nullptr;
+        const DWORD n = ::FormatMessageW(
+            FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+            nullptr, static_cast<DWORD>(se->code().value()), 0, reinterpret_cast<LPWSTR>(&text), 0, nullptr);
+        const std::unique_ptr<wchar_t, decltype(&::LocalFree)> owned(text, &::LocalFree);
+        std::string message;
+        if (n > 0 && text != nullptr) {
+            std::wstring_view w(text, n);
+            while (!w.empty() &&
+                   (w.back() == L'\r' || w.back() == L'\n' || w.back() == L' ' || w.back() == L'.'))
+                w.remove_suffix(1);
+            try {
+                message = win::to_utf8(w);
+            } catch (const std::exception&) {
+            }
+        }
+        if (message.empty())
+            message = "Windows error " + std::to_string(se->code().value());
+        what = prefix.empty() ? message : prefix + ": " + message;
+    }
+    return valid_utf8(what);
+}
 
 Response bad(const Request& r, std::string msg) {
     return protocol::fail(r.id, ErrorCode::kBadRequest, std::move(msg));
@@ -167,6 +225,20 @@ constexpr auto kWorktreeTimeout = std::chrono::seconds(600);
 // A reply must fit one IPC frame (kMaxFrameBytes, 4 MiB) after JSON escaping.
 constexpr std::size_t kMaxGitRunBytes = 3u * 1024u * 1024u;
 
+// A damaged entry in profiles.json or sessions.json is skipped, never fatal: the host must start
+// even when a settings file is broken (store.cpp, read_json_with_backup). Diagnostics only: the
+// file, the entry's position and the error kind, never the entry's text (design doc 3.9).
+void log_skipped_entry(const std::filesystem::path& data_dir, std::string_view file, std::size_t index,
+                       const std::exception& e) {
+    try {
+        std::ofstream(data_dir / L"host.log", std::ios::app)
+            << iso8601_now() << " pid=" << ::GetCurrentProcessId() << " skipped " << file << " entry "
+            << index << " ("
+            << (dynamic_cast<const Json::exception*>(&e) != nullptr ? "malformed" : "unreadable") << ")\n";
+    } catch (const std::exception&) {
+    }
+}
+
 std::string line_text(const terminal::HistoryLine& line) {
     std::string text;
     for (const auto& cell : line.cells) {
@@ -194,8 +266,15 @@ SessionManager::SessionManager(HostConfig config) : config_(std::move(config)) {
     // Previous host's sessions: history only, never adopted by PID (design doc 2.2 step 6).
     if (const auto doc = read_json_with_backup(config_.data_dir / L"sessions.json")) {
         std::vector<SessionRecord> records;
-        for (const auto& j : doc->value("sessions", Json::array()))
-            records.push_back(session_record_from_json(j));
+        std::size_t index = 0;
+        for (const auto& j : doc->value("sessions", Json::array())) {
+            try {
+                records.push_back(session_record_from_json(j));
+            } catch (const std::exception& e) {
+                log_skipped_entry(config_.data_dir, "sessions.json", index, e);
+            }
+            ++index;
+        }
         for (auto& r : mark_orphans_lost(std::move(records))) {
             auto m = std::make_shared<Managed>();
             m->last_process_state = r.process_state;
@@ -236,11 +315,19 @@ SessionManager::~SessionManager() {
 void SessionManager::load_profiles() {
     const auto file = config_.data_dir / L"profiles.json";
     if (const auto doc = read_json_with_backup(file)) {
-        for (const auto& j : doc->value("profiles", Json::array()))
-            profiles_.push_back(profile_from_json(j));
+        std::size_t index = 0;
+        for (const auto& j : doc->value("profiles", Json::array())) {
+            try {
+                profiles_.push_back(profile_from_json(j));
+            } catch (const std::exception& e) {
+                log_skipped_entry(config_.data_dir, "profiles.json", index, e);
+            }
+            ++index;
+        }
         // Files written before WSL profiles existed get them once; a profile the person removes
         // afterwards stays removed ("wsl_detected").
-        if (doc->value("wsl_detected", false))
+        if (const auto wd = doc->find("wsl_detected");
+            wd != doc->end() && wd->is_boolean() && wd->get<bool>())
             return;
         for (auto& p : detect_wsl_profiles())
             if (std::none_of(profiles_.begin(), profiles_.end(), [&](const Profile& q) { return q.id == p.id; }))
@@ -312,9 +399,23 @@ void SessionManager::on_message(const ipc::ConnectionPtr& conn, std::string payl
     try {
         resp = dispatch(conn, *req);
     } catch (const std::exception& e) {
-        resp = protocol::fail(req->id, ErrorCode::kInternal, e.what());
+        resp = protocol::fail(req->id, ErrorCode::kInternal, error_text(e));
     }
-    conn->send(protocol::serialize(resp));
+    // Nothing may escape this connection thread: an exception here would end the host and every
+    // terminal in it.
+    try {
+        if (!conn->send(protocol::serialize(resp)) && !conn->closed()) {
+            // Larger than one frame (4 MiB): say so instead of leaving the client to time out.
+            conn->send(protocol::serialize(
+                protocol::fail(req->id, ErrorCode::kInternal, "reply too large for one message")));
+        }
+    } catch (const std::exception& e) {
+        try {
+            conn->send(protocol::serialize(protocol::fail(req->id, ErrorCode::kInternal, error_text(e))));
+        } catch (const std::exception&) {
+            conn->close();  // cannot even say why: drop the client, keep the host
+        }
+    }
 }
 
 Response SessionManager::dispatch(const ipc::ConnectionPtr& conn, const Request& req) {
@@ -429,28 +530,6 @@ Response SessionManager::do_ui_state_set(const ipc::ConnectionPtr& conn, const R
 // pipe only admits this Windows user, so these read what that user can read; the UI on this
 // machine reads the same folders directly.
 namespace {
-
-// JSON strings must be UTF-8: invalid bytes become U+FFFD.
-std::string valid_utf8(const std::string& in) {
-    std::string out;
-    out.reserve(in.size());
-    std::size_t i = 0;
-    while (i < in.size()) {
-        const auto c = static_cast<unsigned char>(in[i]);
-        std::size_t n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 0;
-        bool ok = n > 0 && i + n <= in.size();
-        for (std::size_t k = 1; ok && k < n; ++k)
-            ok = (static_cast<unsigned char>(in[i + k]) & 0xC0) == 0x80;
-        if (ok) {
-            out.append(in, i, n);
-            i += n;
-        } else {
-            out += "\xEF\xBF\xBD";
-            ++i;
-        }
-    }
-    return out;
-}
 
 std::optional<std::filesystem::path> absolute_folder_param(const Request& req, const char* key) {
     const std::string p = req.params.value(key, "");
@@ -662,14 +741,19 @@ Response SessionManager::do_wait(const Request& req) {
         return bad(req, "until must be idle, blocked, exited or change");
     const auto timeout = std::chrono::milliseconds(
         std::clamp<long long>(req.params.value("timeout_ms", 600000LL), 0, 3600000LL));
-    if (!m->session)
+    std::shared_ptr<Session> session;  // kept alive for this request (prune_exited)
+    {
+        std::lock_guard lock(mutex_);
+        session = m->session;
+    }
+    if (!session)
         return protocol::ok(
             req.id, {{"reached", until == "exited"}, {"process_state", "Lost"}, {"agent_state", "Unknown"}});
-    const auto first = m->session->info();
+    const auto first = session->info();
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     bool seen_working = first.agent.state == AgentState::kWorking;
     for (;;) {
-        const auto info = m->session->info();
+        const auto info = session->info();
         seen_working = seen_working || info.agent.state == AgentState::kWorking;
         bool reached = false;
         if (info.process_state == ProcessState::kExited || info.process_state == ProcessState::kFailed)
@@ -742,7 +826,7 @@ Response SessionManager::do_report(const Request& req) {
 void SessionManager::prune_exited() {
     if (updating_ || handed_over_)
         return;  // frozen sessions are being handed over
-    std::vector<std::unique_ptr<Session>> doomed;
+    std::vector<std::shared_ptr<Session>> doomed;
     {
         std::lock_guard lock(mutex_);
         std::vector<ManagedPtr> exited;
@@ -774,7 +858,9 @@ void SessionManager::prune_exited() {
                 sessions_.erase(history_only[i]->record.id);
         }
     }
-    doomed.clear();  // joins actor/writer threads outside mutex_ (see header locking rule)
+    // Joins actor/writer threads outside mutex_ (see header locking rule), or leaves that to the
+    // request still using the session, which drops its copy outside mutex_ too.
+    doomed.clear();
 }
 
 Response SessionManager::do_hello(const Request& req) {
@@ -886,7 +972,7 @@ Response SessionManager::do_create(const Request& req) {
     try {
         session = Session::start(std::move(sc), std::move(listener));  // outside mutex_ (listeners lock it)
     } catch (const std::exception& e) {
-        auto r = protocol::fail(req.id, ErrorCode::kSpawnFailed, e.what());
+        auto r = protocol::fail(req.id, ErrorCode::kSpawnFailed, error_text(e));
         std::lock_guard lock(mutex_);
         dedupe_[req.id] = {now, r};
         return r;
@@ -1056,7 +1142,7 @@ Response SessionManager::do_input(const ipc::ConnectionPtr& conn, const Request&
     const auto m = resolve(req, err);
     if (!m)
         return *err;
-    Session* session = nullptr;
+    std::shared_ptr<Session> session;  // kept alive for this request (prune_exited)
     {
         std::lock_guard lock(mutex_);
         if (!m->session)
@@ -1065,7 +1151,7 @@ Response SessionManager::do_input(const ipc::ConnectionPtr& conn, const Request&
         if (m->controller && *m->controller != conn->id()) {
             return protocol::fail(req.id, ErrorCode::kNotController, "another client controls this session");
         }
-        session = m->session.get();
+        session = m->session;
     }
     const auto& p = req.params;
     const std::string kind = p.value("kind", "text");
@@ -1160,14 +1246,19 @@ Response SessionManager::do_history(const Request& req) {
     const auto m = resolve(req, err);
     if (!m)
         return *err;
-    if (!m->session)
+    std::shared_ptr<Session> session;  // kept alive for this request (prune_exited)
+    {
+        std::lock_guard lock(mutex_);
+        session = m->session;
+    }
+    if (!session)
         return protocol::fail(req.id, ErrorCode::kNotFound, "session is Lost");
     const auto from = req.params.value("from_line_id", static_cast<std::uint64_t>(0));
     const auto max = std::min<std::size_t>(req.params.value("max_lines", kMaxHistoryLines), kMaxHistoryLines);
     // Blocking call into the actor: must not hold mutex_ (see header).
     const bool tail = req.params.value("tail", false);
-    const auto lines = tail ? m->session->history_tail(max) : m->session->history(from, max);
-    const auto info = m->session->info();
+    const auto lines = tail ? session->history_tail(max) : session->history(from, max);
+    const auto info = session->info();
     Json out = Json::array();
     for (const auto& line : lines)
         out.push_back({{"line_id", line.line_id}, {"text", line_text(line)}, {"wrapped", line.wrapped}});

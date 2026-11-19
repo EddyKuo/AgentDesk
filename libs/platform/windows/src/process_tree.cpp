@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cwctype>
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -107,12 +108,13 @@ std::vector<std::string> split_command_line(const std::wstring& line) {
     if (line.empty())
         return out;
     int n = 0;
-    wchar_t** words = ::CommandLineToArgvW(line.c_str(), &n);
-    if (words == nullptr)
+    // Freed even when to_utf8 throws (a lone surrogate in another program's command line).
+    const std::unique_ptr<wchar_t*, decltype(&::LocalFree)> words(::CommandLineToArgvW(line.c_str(), &n),
+                                                                  &::LocalFree);
+    if (!words)
         return out;
     for (int i = 0; i < n; ++i)
-        out.push_back(to_utf8(words[i]));
-    ::LocalFree(words);
+        out.push_back(to_utf8(words.get()[i]));
     return out;
 }
 

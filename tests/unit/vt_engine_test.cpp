@@ -250,6 +250,23 @@ TEST(VtEngine, PasteIsBracketedOnlyWhenEnabledAndEndMarkerStripped) {
     EXPECT_THROW(e.paste(std::string("a\0b", 3)), std::invalid_argument);
 }
 
+// Removing one end marker must not leave a new one formed from the bytes around it.
+TEST(VtEngine, PasteStripsEndMarkerReformedByRemoval) {
+    VtEngine e(small_options());
+    e.feed("\x1b[?2004h");
+    e.paste("\x1b[20\x1b[201~1~rm -rf x\r");
+    std::string sent = e.take_pty_input();
+    ASSERT_TRUE(sent.starts_with("\x1b[200~"));
+    ASSERT_TRUE(sent.ends_with("\x1b[201~"));
+    EXPECT_EQ(sent.substr(6, sent.size() - 12).find("\x1b[201~"), std::string::npos)
+        << "pasted text escaped the bracket";
+    // Nested: every removal forms the next marker.
+    e.paste("\x1b[2\x1b[20\x1b[201~1~01~x");
+    sent = e.take_pty_input();
+    ASSERT_GE(sent.size(), 12u);
+    EXPECT_EQ(sent.substr(6, sent.size() - 12).find("\x1b[201~"), std::string::npos);
+}
+
 // herdr src/win32_keys.rs: once ConPTY asks for win32-input-mode (even split across writes),
 // modified Enter and Escape go as key-down + key-up win32 events; plain Enter stays CR.
 TEST(VtEngine, Win32InputModeEncodesModifiedEnterAndEscape) {

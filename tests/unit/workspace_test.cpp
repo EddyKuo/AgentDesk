@@ -127,6 +127,43 @@ TEST(Workspace, JsonRoundTrip) {
     EXPECT_TRUE(Workspace::from_json(nlohmann::json::object()).spaces.empty());
 }
 
+// The ui.state document comes from the host (other windows, other versions): wrongly typed
+// fields count as missing and never throw.
+TEST(Workspace, MalformedDocumentLoadsWhatIsValid) {
+    const auto doc = nlohmann::json::parse(R"({
+        "version": 1, "active_space": "x", "pinned": {"a": 1}, "right_click_program": [1, "codex"],
+        "spaces": [
+            7, "junk",
+            {"id": 5, "name": ["n"], "machine": null, "color": {}, "panel": 1, "folder": true,
+             "active_tab": "0", "tabs": {"not": "an array"}},
+            {"name": "ok", "active_tab": 9.5, "tabs": [
+                3,
+                {"id": [], "name": 1, "focused": 2, "zoomed": {}, "settled": "yes", "pane_names": {"a": 1, "b": "B"},
+                 "root": {"split": 5, "children": [{"session": 1}, {"session": "a"}, {"session": "b"}],
+                          "weights": ["x", 1, null]}},
+                {"root": {"split": "down", "a": {"session": "c"}, "b": {"session": "d"}, "ratio": "half"}}
+            ]}
+        ]})");
+    Workspace r;
+    ASSERT_NO_THROW(r = Workspace::from_json(doc));
+    ASSERT_EQ(r.spaces.size(), 1u);
+    EXPECT_EQ(r.spaces[0].name, "ok");
+    ASSERT_EQ(r.spaces[0].tabs.size(), 2u);
+    const auto& t = r.spaces[0].tabs[0];
+    EXPECT_EQ(t.name, "");
+    EXPECT_FALSE(t.root.vertical);
+    EXPECT_EQ(t.pane_names.size(), 1u);
+    EXPECT_EQ(t.pane_names.at("b"), "B");
+    EXPECT_EQ(r.spaces[0].active_tab, 1);
+    EXPECT_EQ(r.spaces[0].tabs[1].root.children.size(), 2u);
+    EXPECT_TRUE(r.pinned.empty());
+    EXPECT_EQ(r.right_click_program.size(), 1u);
+    EXPECT_EQ(r.active_space, 0);
+    EXPECT_TRUE(
+        Workspace::from_json(nlohmann::json::parse(R"({"version": "1", "spaces": []})")).spaces.empty());
+    EXPECT_TRUE(Workspace::from_json(nlohmann::json::array()).spaces.empty());
+}
+
 TEST(Workspace, SpaceTitleFollowsFirstTerminalFolderUntilNamed) {
     Workspace w;
     w.add_space("a");

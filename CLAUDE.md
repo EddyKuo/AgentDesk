@@ -44,8 +44,9 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 
 | 檔案 | 內容 |
 |---|---|
-| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.10）。改設計就改這份，並在檔頭版本紀錄加一列 |
-| `contracts/approved/PRD.md` | PRD 契約 v1.3.1（鎖定設計文件 v2.5）。需求變更要依憲法 6.3 升版 |
+| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.11）。改設計就改這份，並在檔頭版本紀錄加一列 |
+| `contracts/approved/PRD.md` | PRD 契約 v2.0.0（鎖定設計文件 v2.11）。需求變更要依憲法 6.3 升版 |
+| `docs/design/use-cases.md`、`docs/design/design-concept.md` | Use case（UC-01～UC-21）與設計概念（給新加入的開發者） |
 | `contracts/inbox/TestReport_sprint*.md` | 每個 Sprint 的測試報告（QA，依 ADR_001 判定） |
 | `docs/poc/M0-report.md`、`docs/poc/evidence/` | M0 結論與實測 JSON |
 | `sprint/current/`、`sprint/archive/` | Sprint 計畫與狀態 |
@@ -93,7 +94,7 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 
 **libvterm 0.3.3 的坑**：UTF-8 序列被切在兩次寫入之間時會產生 U+FFFD，`VtEngine::feed` 會暫存尾端不完整的序列（只延後、不丟），程序結束時 `flush()`。預設色的格子 RGB 一律為 0（標準形式），比較快照或走協定時才會相等。
 
-**終端機繪製**（`libs/ui/src/terminal_view.cpp`）：格寬取字型的真實 advance（mono 字型開 PixelSnapH），不可用 `CalcTextSize`，它會無條件進位，游標會越往右越偏。每格各自定位；寬字元放大填滿兩格並置中。字型是 Cascadia Mono／Segoe UI 合併正黑體，再合併 Segoe UI Symbol／Emoji；ImGui 用 vcpkg 的 `wchar32` feature。
+**終端機繪製**（`libs/ui/src/terminal_view.cpp`）：格寬取字型的真實 advance（mono 字型開 PixelSnapH），不可用 `CalcTextSize`，它會無條件進位，游標會越往右越偏。每格各自定位；寬字元放大填滿兩格並置中。字型（`libs/ui/src/fonts.cpp`）：介面用隨附的 Geist，終端機用隨附的 JetBrains Mono Medium，缺字由微軟正黑體、Symbols Nerd Font、Segoe UI Symbol／Emoji 補；ImGui 用 vcpkg 的 `wchar32` 與 `freetype` feature，由 FreeType 繪字。
 
 **Windows 細節**：子程序以 CREATE_SUSPENDED 建立、指派 KILL_ON_JOB_CLOSE Job 後才 Resume，Job 不設 BREAKAWAY_OK（設計文件優先於 skill 範例）。`PtyProcess::close()` 順序：ClosePseudoConsole → join reader → 釋放 handle（write mutex 保護）→ TerminateJobObject。中斷就是寫入 0x03（M0 實測對 PING、cmd 有效）。
 

@@ -41,6 +41,9 @@ public:
 
     void load_fonts();  // after the ImGui context exists, before the first frame
     void apply_scale(float dpi);
+    // Every wake of the loop, drawn or not (minimized, locked): sessions, attention (sounds,
+    // toasts), mods and persistence. Touches no ImGui frame.
+    void tick();
     void frame();               // between ImGui::NewFrame() and ImGui::Render()
     void before_new_frame();    // after the platform backend's NewFrame, before ImGui::NewFrame
     void on_close_requested();  // window X

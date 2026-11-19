@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -130,7 +131,47 @@ ModWidget::Kind widget_kind(const std::string& k) {
     return ModWidget::Kind::kText;
 }
 
+// Fields of mod-supplied JSON: a value of the wrong type counts as missing (json::value throws).
+std::string str_field(const Json& j, const char* key, const char* fallback = "") {
+    const auto it = j.find(key);
+    return it != j.end() && it->is_string() ? it->get<std::string>() : std::string(fallback);
+}
+float num_field(const Json& j, const char* key) {
+    const auto it = j.find(key);
+    return it != j.end() && it->is_number() ? it->get<float>() : 0.0f;
+}
+
 }  // namespace
+
+std::vector<ModPanel> parse_mod_panels(const std::string& mod, const std::string& where,
+                                       const std::string& text) {
+    std::vector<ModPanel> out;
+    const auto list = Json::parse(text, nullptr, false);
+    if (!list.is_array())
+        return out;
+    for (const auto& pj : list) {
+        if (!pj.is_object())
+            continue;
+        ModPanel panel{mod, str_field(pj, "id"), str_field(pj, "title"), where, {}};
+        if (const auto widgets = pj.find("widgets"); widgets != pj.end() && widgets->is_array()) {
+            for (const auto& w : *widgets) {
+                if (!w.is_object() || panel.widgets.size() >= 200)
+                    continue;
+                ModWidget mw;
+                mw.kind = widget_kind(str_field(w, "kind", "text"));
+                mw.text = str_field(w, "text");
+                mw.text2 = str_field(w, "text2");
+                mw.color = str_field(w, "color");
+                const float v = num_field(w, "value");
+                mw.value = std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : 0.0f;
+                mw.id = str_field(w, "id");
+                panel.widgets.push_back(std::move(mw));
+            }
+        }
+        out.push_back(std::move(panel));
+    }
+    return out;
+}
 
 // ------------------------------------------------------------------ one mod = one DLL
 struct ModHost::Mod {
@@ -262,7 +303,7 @@ void ModHost::load(const std::set<std::string>& enabled) {
         if (std::filesystem::is_regular_file(f / L"mod.json", ec)) {
             const auto j = Json::parse(read_file(f / L"mod.json"), nullptr, false);
             if (j.is_object())
-                m->info.description = j.value("description", "");
+                m->info.description = str_field(j, "description");
         }
         if (std::filesystem::is_regular_file(f / L"settings.json", ec)) {
             const auto j = Json::parse(read_file(f / L"settings.json"), nullptr, false);
@@ -342,27 +383,8 @@ std::vector<ModPanel> ModHost::panels(const std::string& where) {
         std::string text;
         if (!m->take(raw, text, 1024 * 1024))
             continue;
-        const auto list = Json::parse(text, nullptr, false);
-        if (!list.is_array())
-            continue;
-        for (const auto& pj : list) {
-            if (!pj.is_object())
-                continue;
-            ModPanel panel{m->info.name, pj.value("id", ""), pj.value("title", ""), where, {}};
-            for (const auto& w : pj.value("widgets", Json::array())) {
-                if (!w.is_object() || panel.widgets.size() >= 200)
-                    continue;
-                ModWidget mw;
-                mw.kind = widget_kind(w.value("kind", "text"));
-                mw.text = w.value("text", "");
-                mw.text2 = w.value("text2", "");
-                mw.color = w.value("color", "");
-                mw.value = std::clamp(w.value("value", 0.0f), 0.0f, 1.0f);
-                mw.id = w.value("id", "");
-                panel.widgets.push_back(std::move(mw));
-            }
+        for (auto& panel : parse_mod_panels(m->info.name, where, text))
             out.push_back(std::move(panel));
-        }
     }
     return out;
 }

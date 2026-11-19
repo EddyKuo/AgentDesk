@@ -131,6 +131,27 @@ void update_view_from_json(SessionView& v, const Json& j) {
         v.is_controller = false;  // nothing to control in a Lost session
 }
 
+// Fields of host replies, type-checked (json::value throws on a wrong type).
+std::string str_field(const Json& j, const char* key) {
+    if (!j.is_object())
+        return {};
+    const auto it = j.find(key);
+    return it != j.end() && it->is_string() ? it->get<std::string>() : std::string();
+}
+bool bool_field(const Json& j, const char* key) {
+    if (!j.is_object())
+        return false;
+    const auto it = j.find(key);
+    return it != j.end() && it->is_boolean() && it->get<bool>();
+}
+// Another client holds input control: "controller" is present and not null.
+bool controlled_by_other(const Json& j) {
+    if (!j.is_object())
+        return false;
+    const auto it = j.find("controller");
+    return it != j.end() && !it->is_null();
+}
+
 std::shared_ptr<const terminal::ScreenSnapshot> placeholder_screen() {
     static const auto blank = [] {
         auto s = std::make_shared<terminal::ScreenSnapshot>();
@@ -200,6 +221,11 @@ void RemoteSession::resize(int rows, int cols) {
             return;  // read-only views never change the ConPTY size (3.7)
     }
     owner_.post("session.resize", {{"session", id_}, {"rows", rows}, {"cols", cols}});
+}
+
+bool RemoteSession::controls_size() const {
+    std::lock_guard lock(mutex_);
+    return view_.is_controller;
 }
 
 bool RemoteSession::can_input() const {
@@ -283,9 +309,12 @@ void RemoteSession::take_control() {
         const auto r = c.call("session.attach", {{"session", self->id_}, {"take_control", true}});
         if (!r || !r->result)
             return;
-        std::lock_guard lock(self->mutex_);
-        self->view_.is_controller = r->result->value("is_controller", false);
-        self->view_.controlled_elsewhere = !self->view_.is_controller;
+        {
+            std::lock_guard lock(self->mutex_);
+            self->view_.is_controller = bool_field(*r->result, "is_controller");
+            self->view_.controlled_elsewhere = !self->view_.is_controller;
+        }
+        self->owner_.notify();  // redraw: the view now sends its size (TerminalView::handle_resize)
     });
 }
 
@@ -347,10 +376,11 @@ void HostClient::notify() const {
         options_.wake();
 }
 
-void HostClient::enqueue(Task task) {
+void HostClient::enqueue(std::function<void(ipc::PipeClient&)> run,
+                         std::function<void(const std::string& error)> fail) {
     {
         std::lock_guard lock(mutex_);
-        tasks_.push_back(std::move(task));
+        tasks_.push_back({std::move(run), std::move(fail)});
     }
     cv_.notify_all();
 }
@@ -363,19 +393,26 @@ void HostClient::post(std::string method, Json params) {
 
 void HostClient::call(std::string method, Json params, std::function<void(Json, std::string)> done,
                       std::chrono::milliseconds timeout) {
-    enqueue([this, method = std::move(method), params = std::move(params), done = std::move(done),
-             timeout](ipc::PipeClient& c) {
-        const auto r = c.call(method, params, timeout);
-        if (!done)
-            return;
-        if (!r)
-            done(Json(), "no response from agent-host");
-        else if (r->error)
-            done(Json(), std::string(protocol::to_string(*r->error)) + ": " + r->error_message);
-        else
-            done(r->result.value_or(Json::object()), "");
-        notify();
-    });
+    // Shared by the request and its not-connected answer (only one of them runs).
+    auto cb = std::make_shared<std::function<void(Json, std::string)>>(std::move(done));
+    enqueue(
+        [this, method = std::move(method), params = std::move(params), cb, timeout](ipc::PipeClient& c) {
+            const auto r = c.call(method, params, timeout);
+            if (!*cb)
+                return;
+            if (!r)
+                (*cb)(Json(), "no response from agent-host");
+            else if (r->error)
+                (*cb)(Json(), std::string(protocol::to_string(*r->error)) + ": " + r->error_message);
+            else
+                (*cb)(r->result.value_or(Json::object()), "");
+            notify();
+        },
+        [this, cb](const std::string& error) {
+            if (*cb)
+                (*cb)(Json(), error);
+            notify();
+        });
 }
 
 std::optional<Json> HostClient::take_ui_state() {
@@ -394,36 +431,49 @@ void HostClient::request_start_host() {
 
 void HostClient::create_session(std::string profile_id, std::string cwd, std::string name,
                                 std::function<void(std::string)> done) {
-    enqueue([this, profile_id = std::move(profile_id), cwd = std::move(cwd), name = std::move(name),
-             done = std::move(done)](ipc::PipeClient& c) {
-        Json params{{"profile_id", profile_id}, {"cwd", cwd}};
-        if (!name.empty())
-            params["name"] = name;
-        const auto r = c.call("session.create", params, 15s);
-        std::string error;
-        if (!r)
-            error = "no response from agent-host";
-        else if (r->error)
-            error = std::string(protocol::to_string(*r->error)) + ": " + r->error_message;
-        else
-            refresh_sessions(c);
-        if (done)
-            done(error);
-        notify();
-    });
+    auto cb = std::make_shared<std::function<void(std::string)>>(std::move(done));
+    enqueue(
+        [this, profile_id = std::move(profile_id), cwd = std::move(cwd), name = std::move(name),
+         cb](ipc::PipeClient& c) {
+            Json params{{"profile_id", profile_id}, {"cwd", cwd}};
+            if (!name.empty())
+                params["name"] = name;
+            const auto r = c.call("session.create", params, 15s);
+            std::string error;
+            if (!r)
+                error = "no response from agent-host";
+            else if (r->error)
+                error = std::string(protocol::to_string(*r->error)) + ": " + r->error_message;
+            else
+                refresh_sessions(c);
+            if (*cb)
+                (*cb)(error);
+            notify();
+        },
+        [this, cb](const std::string& error) {
+            if (*cb)
+                (*cb)(error);
+            notify();
+        });
 }
 
 void HostClient::shutdown_host(bool stop_sessions, std::function<void(std::string)> done) {
-    enqueue([stop_sessions, done = std::move(done)](ipc::PipeClient& c) {
-        const auto r = c.call("host.shutdown", {{"stop_sessions", stop_sessions}});
-        std::string error;
-        if (!r)
-            error = "no response from agent-host";
-        else if (r->error)
-            error = r->error_message;
-        if (done)
-            done(error);
-    });
+    auto cb = std::make_shared<std::function<void(std::string)>>(std::move(done));
+    enqueue(
+        [stop_sessions, cb](ipc::PipeClient& c) {
+            const auto r = c.call("host.shutdown", {{"stop_sessions", stop_sessions}});
+            std::string error;
+            if (!r)
+                error = "no response from agent-host";
+            else if (r->error)
+                error = r->error_message;
+            if (*cb)
+                (*cb)(error);
+        },
+        [cb](const std::string& error) {
+            if (*cb)
+                (*cb)(error);
+        });
 }
 
 bool HostClient::try_connect(bool allow_start) {
@@ -471,23 +521,34 @@ bool HostClient::try_connect(bool allow_start) {
     }
     client_ = std::move(hc.client);
     connected_ = true;
-    if (const auto r = client_->call("profile.list", Json::object()); r && r->result) {
+    // Host replies are checked field by field: a malformed one is skipped, not fatal.
+    if (const auto r = client_->call("profile.list", Json::object());
+        r && r->result && r->result->is_object()) {
         std::vector<std::pair<std::string, std::string>> list;
         std::map<std::string, std::string> exes;
-        for (const auto& p : r->result->value("profiles", Json::array())) {
-            list.emplace_back(p.value("id", ""), p.value("name", ""));
-            if (const auto e = p.find("executable"); e != p.end() && e->is_string())
-                exes[p.value("id", "")] = e->get<std::string>();
+        if (const auto ps = r->result->find("profiles"); ps != r->result->end() && ps->is_array()) {
+            for (const auto& p : *ps) {
+                const std::string id = str_field(p, "id");
+                list.emplace_back(id, str_field(p, "name"));
+                if (const std::string exe = str_field(p, "executable"); !exe.empty())
+                    exes[id] = exe;
+            }
         }
         std::lock_guard lock(mutex_);
         profiles_ = std::move(list);
         profile_exes_ = std::move(exes);
     }
-    if (const auto r = client_->call("ui.state.get", {{"watch", true}}); r && r->result) {
+    if (const auto r = client_->call("ui.state.get", {{"watch", true}});
+        r && r->result && r->result->is_object()) {
         std::lock_guard lock(mutex_);
-        pending_ui_state_ = r->result->value("doc", Json::object());
+        const auto doc = r->result->find("doc");
+        pending_ui_state_ = doc != r->result->end() ? *doc : Json::object();
     }
-    refresh_sessions(*client_);
+    try {
+        refresh_sessions(*client_);
+    } catch (const std::exception&) {
+        // the next periodic refresh tries again
+    }
     notify();
     return true;
 }
@@ -499,13 +560,22 @@ void HostClient::refresh_sessions(ipc::PipeClient& c) {
     std::vector<std::shared_ptr<RemoteSession>> to_attach;
     {
         std::lock_guard lock(mutex_);
-        for (const auto& j : r->result->value("sessions", Json::array())) {
-            const std::string id = j.value("id", "");
+        const auto list = r->result->is_object() ? r->result->find("sessions") : r->result->end();
+        if (list == r->result->end() || !list->is_array())
+            return;
+        for (const auto& j : *list) {
+            const std::string id = str_field(j, "id");
+            if (id.empty())
+                continue;
             auto& s = sessions_[id];
             if (!s)
                 s = std::make_shared<RemoteSession>(*this, id);
             std::lock_guard sl(s->mutex_);
-            update_view_from_json(s->view_, j);
+            try {
+                update_view_from_json(s->view_, j);
+            } catch (const nlohmann::json::exception&) {
+                continue;  // this session's malformed entry; the others still update
+            }
             if (!s->attached_ && !s->view_.lost)
                 to_attach.push_back(s);
         }
@@ -514,26 +584,31 @@ void HostClient::refresh_sessions(ipc::PipeClient& c) {
         // UI clients ask for control; a second UI becomes read-only (design doc 3.7).
         const auto a = c.call("session.attach", {{"session", s->id_}, {"want_control", true}});
         std::lock_guard sl(s->mutex_);
-        if (a && a->result) {
+        if (a && a->result && a->result->is_object()) {
             s->attached_ = true;
-            s->view_.is_controller = a->result->value("is_controller", false);
-            s->view_.controlled_elsewhere = !s->view_.is_controller && !a->result->at("controller").is_null();
-            update_view_from_json(s->view_, *a->result);
+            s->view_.is_controller = bool_field(*a->result, "is_controller");
+            s->view_.controlled_elsewhere = !s->view_.is_controller && controlled_by_other(*a->result);
+            try {
+                update_view_from_json(s->view_, *a->result);
+            } catch (const nlohmann::json::exception&) {
+                // a malformed field keeps its last value; the next list refresh updates it
+            }
         }
     }
     notify();
 }
 
 void HostClient::on_event(protocol::Event e) {
+    // Runs on the pipe reader thread: nothing may escape (std::terminate would end agent-ui.exe).
     if (e.event == "ui.state") {
-        {
+        if (const auto doc = e.body.is_object() ? e.body.find("doc") : e.body.end(); doc != e.body.end()) {
             std::lock_guard lock(mutex_);
-            pending_ui_state_ = e.body.value("doc", Json::object());
+            pending_ui_state_ = *doc;
         }
         notify();
         return;
     }
-    const std::string id = e.body.value("session_id", "");
+    const std::string id = str_field(e.body, "session_id");
     std::shared_ptr<RemoteSession> s;
     {
         std::lock_guard lock(mutex_);
@@ -546,16 +621,26 @@ void HostClient::on_event(protocol::Event e) {
     bool want_snapshot = false;
     {
         std::lock_guard lock(s->mutex_);
-        if (e.event == "screen.snapshot") {
-            if (s->screen_.apply_snapshot_chunk(e.body))
-                s->resync_requested_ = false;
-        } else if (e.event == "screen.delta") {
-            if (s->screen_.apply_delta(e.body) == DeltaResult::kNeedSnapshot && !s->resync_requested_) {
+        try {
+            if (e.event == "screen.snapshot") {
+                if (s->screen_.apply_snapshot_chunk(e.body))
+                    s->resync_requested_ = false;
+            } else if (e.event == "screen.delta") {
+                if (s->screen_.apply_delta(e.body) == DeltaResult::kNeedSnapshot && !s->resync_requested_) {
+                    s->resync_requested_ = true;
+                    want_snapshot = true;
+                }
+            } else if (e.event == "session.state") {
+                update_view_from_json(s->view_, e.body);
+            }
+        } catch (const std::exception&) {
+            // Malformed host data (json at/get/value, or a size that cannot be allocated): the
+            // screen keeps what it had and a fresh snapshot replaces it.
+            s->screen_.mark_needs_snapshot();
+            if (!s->resync_requested_) {
                 s->resync_requested_ = true;
                 want_snapshot = true;
             }
-        } else if (e.event == "session.state") {
-            update_view_from_json(s->view_, e.body);
         }
     }
     if (want_snapshot)
@@ -592,10 +677,26 @@ void HostClient::worker_loop() {
                 tasks_.pop_front();
             }
         }
-        if (task && client_ && connected_)
-            task(*client_);
+        // Replies are host data: a malformed one (json at/get/value throwing) costs that request,
+        // never the worker thread (an escaping exception would end agent-ui.exe).
+        if (task.run && client_ && connected_) {
+            try {
+                task.run(*client_);
+            } catch (const std::exception&) {
+                notify();
+            }
+        } else if (task.fail) {
+            try {
+                task.fail("not connected to agent-host");
+            } catch (const std::exception&) {
+            }
+        }
         if (std::chrono::steady_clock::now() >= next_refresh && client_ && connected_) {
-            refresh_sessions(*client_);
+            try {
+                refresh_sessions(*client_);
+            } catch (const std::exception&) {
+                notify();
+            }
             next_refresh = std::chrono::steady_clock::now() + kListRefresh;
         }
     }

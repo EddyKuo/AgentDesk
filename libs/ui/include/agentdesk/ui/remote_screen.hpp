@@ -27,7 +27,10 @@ public:
 
     [[nodiscard]] std::shared_ptr<const terminal::ScreenSnapshot> current() const { return current_; }
     [[nodiscard]] bool needs_snapshot() const noexcept { return needs_snapshot_; }
-    void mark_needs_snapshot() noexcept { needs_snapshot_ = true; }
+    // Also drops snapshot assemblies in flight (the next snapshot replaces them).
+    void mark_needs_snapshot() noexcept;
+    // Snapshots partly received (at most one: a session's snapshots arrive one after another).
+    [[nodiscard]] std::size_t pending_count() const noexcept { return pending_.size(); }
 
 private:
     struct Pending {

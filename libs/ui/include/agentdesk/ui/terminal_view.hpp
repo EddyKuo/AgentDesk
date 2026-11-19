@@ -119,6 +119,7 @@ private:
     std::optional<GridSize> pending_size_;
     std::chrono::steady_clock::time_point pending_since_{};
     std::optional<GridSize> requested_size_;
+    bool controlled_size_ = false;  // source.controls_size() at the last resize check
     std::string paste_pending_;
     bool open_paste_popup_ = false;
     bool open_context_menu_ = false;

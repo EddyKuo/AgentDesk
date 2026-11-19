@@ -54,6 +54,39 @@ TEST(Frame, RejectsZeroOversizedAndInvalidUtf8) {
     EXPECT_TRUE(out.empty());
 }
 
+// A wrongly typed field is a parse error, never an exception (callers run on connection threads).
+TEST(Messages, WronglyTypedErrorFieldsAreParseErrors) {
+    for (const char* payload : {R"({"v":1,"id":"a","error":{"code":5}})",
+                                R"({"v":1,"id":"a","error":{"code":"NOT_FOUND","message":[1]}})",
+                                R"({"v":1,"id":"a","error":{"code":"NOT_FOUND","retryable":"yes"}})"}) {
+        ParseResult r;
+        EXPECT_NO_THROW(r = parse_message(payload)) << payload;
+        EXPECT_FALSE(r.message) << payload;
+        EXPECT_FALSE(r.error.empty()) << payload;
+    }
+    const auto ok = parse_message(R"({"v":1,"id":"a","error":{"code":"NOT_FOUND"}})");
+    ASSERT_TRUE(ok.message);
+    EXPECT_EQ(std::get<Response>(*ok.message).error, ErrorCode::kNotFound);
+}
+
+// Text that is not UTF-8 (a Windows message in the ANSI code page) must not make a reply
+// unsendable: it is replaced, and the frame is valid.
+TEST(Messages, SerializeReplacesInvalidUtf8) {
+    const std::string cp950 = "\xA8\x74\xB2\xCE\xA7\xE4\xA4\xA3\xA8\xEC";  // "系統找不到" in CP950
+    std::string wire;
+    EXPECT_NO_THROW(wire = serialize(fail("r-1", ErrorCode::kInternal, "CreateProcessW: " + cp950)));
+    EXPECT_TRUE(is_valid_utf8(wire));
+    EXPECT_NO_THROW(encode_frame(wire));
+    const auto back = parse_message(wire);
+    ASSERT_TRUE(back.message);
+    EXPECT_TRUE(std::get<Response>(*back.message).error_message.starts_with("CreateProcessW: "));
+    Event e;
+    e.event = "session.state";
+    e.body = {{"agent_message", cp950}};
+    EXPECT_NO_THROW(wire = serialize(e));
+    EXPECT_TRUE(is_valid_utf8(wire));
+}
+
 TEST(Messages, ParsesRequestResponseEvent) {
     auto r = parse_message(R"({"v":1,"id":"r-001","method":"session.create","params":{"name":"review"}})");
     ASSERT_TRUE(r.message);

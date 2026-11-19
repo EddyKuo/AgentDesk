@@ -82,6 +82,11 @@ struct ModOutput {
     std::vector<std::vector<std::wstring>> execs;  // argv, started without a shell
 };
 
+// The panels in a mod's panels() JSON text. Fields of the wrong type count as missing, so no mod
+// output can throw here; at most 200 widgets per panel.
+[[nodiscard]] std::vector<ModPanel> parse_mod_panels(const std::string& mod, const std::string& where,
+                                                     const std::string& text);
+
 class ModHost {
 public:
     explicit ModHost(std::filesystem::path dir);

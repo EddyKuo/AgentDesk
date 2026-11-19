@@ -148,3 +148,33 @@ TEST_F(ModsTest, OldLuaModsAndBadDllsReportErrors) {
     EXPECT_FALSE(mods[1].loaded);
     EXPECT_NE(mods[1].error.find("Lua"), std::string::npos);  // old
 }
+
+// Mod output and mod.json come from the mod: a field of the wrong type is treated as missing and
+// never throws out of the window's draw loop.
+TEST_F(ModsTest, WronglyTypedModJsonIsIgnored) {
+    install("b", {}, R"({"description": 5})");
+    ModHost h(dir_);
+    ASSERT_NO_THROW(h.load({}));
+    ASSERT_EQ(h.mods().size(), 1u);
+    EXPECT_EQ(h.mods()[0].description, "");
+
+    std::vector<agentdesk::ui::ModPanel> panels;
+    ASSERT_NO_THROW(panels = agentdesk::ui::parse_mod_panels(
+                        "m", "sidebar",
+                        R"([{"id": 1, "title": ["x"], "widgets": [{"kind": 3, "text": {}, "text2": null,)"
+                        R"( "color": true, "value": "half", "id": 7}, 4, {"kind": "progress", "value": 9}]},)"
+                        R"( {"id": "p2", "widgets": "nope"}, "junk"])"));
+    ASSERT_EQ(panels.size(), 2u);
+    EXPECT_EQ(panels[0].id, "");
+    EXPECT_EQ(panels[0].title, "");
+    ASSERT_EQ(panels[0].widgets.size(), 2u);
+    EXPECT_EQ(panels[0].widgets[0].kind, ModWidget::Kind::kText);
+    EXPECT_EQ(panels[0].widgets[0].text, "");
+    EXPECT_FLOAT_EQ(panels[0].widgets[0].value, 0.0f);
+    EXPECT_EQ(panels[0].widgets[0].id, "");
+    EXPECT_EQ(panels[0].widgets[1].kind, ModWidget::Kind::kProgress);
+    EXPECT_FLOAT_EQ(panels[0].widgets[1].value, 1.0f);
+    EXPECT_EQ(panels[1].id, "p2");
+    EXPECT_TRUE(panels[1].widgets.empty());
+    EXPECT_TRUE(agentdesk::ui::parse_mod_panels("m", "sidebar", "{not json").empty());
+}
