@@ -348,6 +348,9 @@ struct Settings {
     std::string appearance = "system";  // "system", "light" or "dark" (herdr Appearance)
     std::string theme_dark = "midnight";
     std::string theme_light = "paper";
+    // herdr window.rs 3620-3635: a layout is a look; each keeps its own dark and light theme
+    // (layout -> {dark, light}). Without an entry the two above are used.
+    std::map<std::string, std::pair<std::string, std::string>> layout_themes;
     float line_height = 1.0f;    // terminal cell height multiplier
     float cell_width = 1.0f;     // terminal cell width multiplier
     std::string sound_done;      // MP3 replacing the bundled sounds
@@ -390,6 +393,13 @@ float first_run_zoom() {
     return std::clamp(std::round(z * 10.0f) / 10.0f, 0.5f, 3.0f);
 }
 
+// The shown layout's {dark, light} themes (herdr: on the layout's root), else the defaults.
+std::pair<std::string, std::string> layout_theme_pair(const Settings& st) {
+    if (const auto it = st.layout_themes.find(st.layout); it != st.layout_themes.end())
+        return it->second;
+    return {st.theme_dark, st.theme_light};
+}
+
 Settings load_settings() {
     Settings s;
     std::ifstream in(data_dir() / L"ui.json", std::ios::binary);
@@ -417,6 +427,10 @@ Settings load_settings() {
         s.theme_dark = j.value("theme_dark", light ? std::string("midnight") : s.theme);
         s.theme_light = j.value("theme_light", light ? s.theme : std::string("paper"));
     }
+    if (const auto lt = j.find("layout_themes"); lt != j.end() && lt->is_object())
+        for (const auto& [name, pair] : lt->items())
+            if (pair.is_object())
+                s.layout_themes[name] = {pair.value("dark", s.theme_dark), pair.value("light", s.theme_light)};
     s.zoom = std::clamp(j.value("zoom", 1.0f), 0.5f, 3.0f);
     s.font_size = std::clamp(j.value("font_size", 14.0f), 8.0f, 32.0f);  // the stepper's 8-32
     s.sounds = j.value("sounds", true);
@@ -503,6 +517,13 @@ void save_settings(const Settings& s) {
             {"appearance", s.appearance},
             {"theme_dark", s.theme_dark},
             {"theme_light", s.theme_light},
+            {"layout_themes",
+             [&] {
+                 Json m = Json::object();
+                 for (const auto& [name, pair] : s.layout_themes)
+                     m[name] = Json{{"dark", pair.first}, {"light", pair.second}};
+                 return m;
+             }()},
             {"zoom", s.zoom},
             {"font_size", s.font_size},
             {"sounds", s.sounds},
@@ -3755,10 +3776,12 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         s.show_exit = true;
         s.exit_error.clear();
     } else if (name == "theme") {
+        // herdr app.theme (window.rs 3620-3635): the theme goes on the shown layout, as its light
+        // or its dark half; the other half stays. Appearance is not changed.
         const Palette* p = palette_by_id(arg);
-        (p->light ? s.settings.theme_light : s.settings.theme_dark) = p->id;
-        if (s.settings.appearance != "system")
-            s.settings.appearance = p->light ? "light" : "dark";
+        auto pair = layout_theme_pair(s.settings);
+        (p->light ? pair.second : pair.first) = p->id;
+        s.settings.layout_themes[s.settings.layout] = pair;
         s.settings.theme = p->id;
         save_settings(s.settings);
     } else if (name == "layout.switch" || name == "layout") {
@@ -9651,7 +9674,7 @@ void draw_settings(App::State& s) {
         settings_row_done(s);
         ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->faint));
         ImGui::PushFont(s.fonts.ui, 11.5f);
-        ImGui::TextWrapped("A layout file with its own \"theme\" uses that one instead.");
+        ImGui::TextWrapped("For the layout you're in: each layout keeps its own light and dark theme.");  // settings/main.js 523
         ImGui::PopFont();
         ImGui::PopStyleColor();
         for (const bool light_cards : {false, true}) {
@@ -9662,7 +9685,8 @@ void draw_settings(App::State& s) {
         for (const auto& p : kPalettes) {
             if (p.light != light_cards || p.layout_only)
                 continue;
-            const bool on = (light_cards ? s.settings.theme_light : s.settings.theme_dark) == p.id;
+            const auto shown = layout_theme_pair(s.settings);
+            const bool on = (light_cards ? shown.second : shown.first) == p.id;
             const ImVec2 a = ImGui::GetCursorScreenPos();
             const float cw = px(120), ch = px(64);
             ImGui::PushID(p.id);
@@ -10982,7 +11006,8 @@ void App::frame() {
         g_settings_problem.clear();
     }
     s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
-    if (const Palette* want = effective_palette(s.settings.appearance, s.settings.theme_dark, s.settings.theme_light,
+    const auto theme_pair = layout_theme_pair(s.settings);
+    if (const Palette* want = effective_palette(s.settings.appearance, theme_pair.first, theme_pair.second,
                                                 s.layout().theme);
         want != g_pal) {
         g_pal = want;
