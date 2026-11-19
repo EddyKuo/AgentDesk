@@ -158,7 +158,7 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 
 Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy。每次修改都立即生效並儲存，沒有儲存鈕。
 
-- **Look**：版面與主題卡片；整體縮放、介面文字大小（預設 15 px，覺得太小可以調大）、終端機字型與大小、行高、字寬、捲動速度；新終端機用的 shell、放開滑鼠就複製、keys.json、worktree 資料夾。
+- **Look**：版面與主題卡片（我們的 Midnight、Ember、Moss、Paper，加上 herdr 的 graphite、ink、moss、paper、atom one dark；把 herdr 格式的主題檔放進 `%LOCALAPPDATA%\AgentDesk\themes\` 也會列出來，每個版面各自記住深色與淺色主題）；整體縮放、介面文字大小（預設 15 px，覺得太小可以調大）、終端機字型與大小、行高、字寬、捲動速度；新終端機用的 shell、放開滑鼠就複製、keys.json、worktree 資料夾。
 - **Machines**：遠端機器清單與「Add a machine…」。
 - **Alerts**：提示音開關與試聽、右下角通知開關。
 - **Mods**：啟用或停用 mod、看錯誤、重新載入。
