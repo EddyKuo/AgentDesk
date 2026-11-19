@@ -94,6 +94,7 @@ int wmain(int argc, wchar_t** argv) {
         dk::copy_tree(bin / L"win98", stage / L"win98");
         // herdr's program table and icons (defaults/programs.json, defaults/icons).
         dk::copy_tree(bin / L"programs", stage / L"programs");
+        dk::copy_tree(bin / L"themes", stage / L"themes");  // herdr defaults/themes (atom-one-dark)
         // Example mods (C++ DLLs) and the SDK to build your own: headers and the examples' sources.
         for (const auto& m : fs::directory_iterator(bin / L"mods")) {
             if (!m.is_directory())
