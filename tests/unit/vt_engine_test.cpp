@@ -393,3 +393,15 @@ TEST(VtEngine, CellsRememberWhichOfTheSixteenAnsiColoursTheyUse) {
     EXPECT_EQ(s.at(0, 4).fg_ansi, -1);  // RGB
     EXPECT_EQ(s.at(0, 5).fg_ansi, -1);  // default
 }
+
+// The person's rule (2026-11-19): an agent that exits back to the shell prompt leaves no status,
+// done and idle included.
+TEST(VtEngine, ShellPromptOsc133DropsEveryRecord) {
+    for (const char* state : {"idle", "done", "working", "blocked"}) {
+        VtEngine e(small_options());
+        e.feed(std::string("\x1b]7501;state=") + state + "\x07");
+        ASSERT_NE(e.status().root(), nullptr) << state;
+        e.feed("\x1b]133;A\x07");
+        EXPECT_EQ(e.status().root(), nullptr) << state;
+    }
+}

@@ -1094,30 +1094,11 @@ const ui::Programs& programs() {
 
 // What runs in a terminal (herdr programs::of): the agent's 7501 `app` first, else the
 // foreground program's argv (its name alone from an older host).
-// herdr defaults/AGENTS.md 153: agents are terminals whose program reports a status. The OSC
-// 7501 record outlives the program by spec (done/idle are kept, design doc 3.4), so once the
-// terminal runs a shell again (the agent exited back to its prompt) it is no agent any more.
-bool agent_left(const ui::SessionView& v);
-
 ui::Program program_of(const ui::SessionView& v) {
     std::vector<std::string> argv = v.program_argv;
     if (argv.empty() && !v.program.empty())
         argv.push_back(v.program);
-    // A report left over from an agent that already exited names that agent; the terminal runs
-    // its shell now, so it shows as the shell (herdr: the report's app goes with the program).
-    if (!argv.empty())
-        if (ui::Program now = programs().of({}, argv); now.shell)
-            return now;
     return programs().of(v.agent_app, argv);
-}
-
-bool agent_left(const ui::SessionView& v) {
-    std::vector<std::string> argv = v.program_argv;
-    if (argv.empty() && !v.program.empty())
-        argv.push_back(v.program);
-    if (argv.empty())
-        return false;  // nothing known about what runs now (an older or remote host)
-    return programs().of({}, argv).shell;
 }
 
 // The program a profile starts.
@@ -2681,7 +2662,7 @@ struct App::State {
     [[nodiscard]] Attention attention_of(const std::string& id) const {
         const auto it = views_by_id.find(id);
         if (it != views_by_id.end() &&
-            (it->second.lost || it->second.process_state != "Running" || agent_left(it->second)))
+            (it->second.lost || it->second.process_state != "Running"))
             return Attention::kNone;
         return attention.get(id);
     }
@@ -5439,7 +5420,7 @@ void refresh_git_facts(App::State& s) {
 // terminal in a pane of a space whose program reports a status now.
 bool live_agent(App::State& s, const std::string& id, const ui::SessionView& v) {
     return !v.lost && v.process_state == "Running" && v.agent_state != "Unknown" && !s.hidden.contains(id) &&
-           !agent_left(v) && s.ws.find(id).space >= 0;
+           s.ws.find(id).space >= 0;
 }
 
 void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail) {

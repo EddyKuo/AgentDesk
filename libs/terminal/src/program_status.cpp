@@ -347,7 +347,10 @@ void ProgramStatusStore::on_process_exit() {
 }
 
 void ProgramStatusStore::on_shell_prompt() {
-    drop_transient();
+    // The shell shows its prompt again: whatever reported before it has ended, so its status goes
+    // too (done and idle included). The person's rule (2026-11-19, design doc 3.4): an agent that
+    // exits leaves no status behind.
+    records_.clear();
 }
 
 void ProgramStatusStore::reset() {

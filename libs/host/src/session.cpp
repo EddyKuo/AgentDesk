@@ -44,6 +44,7 @@ std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener li
     std::unique_ptr<Session> self(new Session(std::move(config), std::move(listener)));
     terminal::EngineEvents events;
     events.on_status = [raw = self.get()](const terminal::StatusReport& r) { raw->on_engine_status(r); };
+    events.on_shell_prompt = [raw = self.get()] { raw->refresh_agent_from_engine(); };
     self->engine_ = std::make_unique<terminal::VtEngine>(self->config_.engine, std::move(events));
     self->snapshot_ = std::make_shared<const terminal::ScreenSnapshot>(self->engine_->snapshot());
 
@@ -695,6 +696,7 @@ std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener li
         throw bad();
     terminal::EngineEvents events;
     events.on_status = [raw = self.get()](const terminal::StatusReport& rep) { raw->on_engine_status(rep); };
+    events.on_shell_prompt = [raw = self.get()] { raw->refresh_agent_from_engine(); };
     self->engine_ = terminal::VtEngine::restore(self->config_.engine, std::move(events), engine_state);
     SessionInfo& i = self->info_;
     const auto ps = r.u8();
