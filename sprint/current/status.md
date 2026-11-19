@@ -129,3 +129,4 @@ plan: docs/design/AgentDesk_Design.md 5.6
 | 2026-11-19 | 重開時出現很多舊的 space | 修正：照 herdr，終端機已結束（exited、killed）或遺失（Lost，跑它的 agent-host 已不在）時移除它的面板，分頁空了關分頁、space 空了關 space；已結束的 session 也不再被開成 space。使用者實機回報 | src/window.rs 2262-2283、2695-2719；src/model.rs 403-422 | — |
 | 2026-11-19 | 使用者實機驗收 | 使用者確認：Agent 狀態顯示與清除正常、重開後 space 正常、FreeType 字型可接受 | 使用者 2026-11-19 | — |
 | 2026-11-19 | 使用者整體驗收 | 使用者確認 AgentDesk 已完整複刻 herdr，驗收完成。刻意保留的差異（不允許寫入剪貼簿、系統內建 ConPTY 不能交接、libvterm 修改、意見回饋只能複製或存檔）維持設計文件的紀錄 | 使用者 2026-11-19 | — |
+| 2026-11-19 | Release 執行檔縮小 | 使用者同意：Release preset 的連結參數改成 /debug /INCREMENTAL:NO /OPT:REF /OPT:ICF，保留 PDB。agent-ui.exe 9.01 MB → 4.22 MB、agent-host.exe 2.06 MB → 0.72 MB、agentctl.exe 1.85 MB → 0.37 MB；Release 273 個測試通過 | 使用者 2026-11-19 | — |
