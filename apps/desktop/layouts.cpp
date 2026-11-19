@@ -1,5 +1,6 @@
 // Window layouts: the layout files (layouts\*.json), their saved state, and the example mods
-// written on first run.
+// copied in on first run.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
@@ -29,7 +30,7 @@ void derive_layout(LayoutSpec& l) {
         const Json& th = t.look["theme"];
         if (th.is_string())
             theme = th.get<std::string>();
-        else if (th.is_object())  // layout.rs 197-210: the system's appearance picks
+        else if (th.is_object())  // {"dark": ..., "light": ...}: Windows' app mode picks
             theme = safe::string_or(th, system_light() ? "light" : "dark");
     }
     l.look_applies = theme.empty() || palette_exists(theme);
@@ -45,7 +46,8 @@ void derive_layout(LayoutSpec& l) {
             n->content.pane->header && n->content.pane->header->mod() == "terminals-pane" && l.style.empty())
             l.style = "terminals";
     }
-    // layout.rs 150-151: the nearest node setting it wins; the panes' block decides.
+    // Font size: on the path from the root to the first shown panes' block, the deepest node that
+    // sets one wins.
     l.font_size.reset();
     for (const lay::Node* n : t.visible_blocks()) {
         if (n->content.type != lay::Content::Type::kTab)
@@ -62,7 +64,7 @@ void derive_layout(LayoutSpec& l) {
 
 namespace {
 // Before this engine the workspace's sizes were in ui.json: the first time, they become its
-// clicks (what herdr keeps in layouts/.state).
+// clicks (layouts\.state\workspace.json).
 lay::State seed_from_settings(const Settings& st, const lay::Node& file) {
     lay::Node now = file;
     const Settings d;
@@ -83,8 +85,8 @@ lay::State seed_from_settings(const Settings& st, const lay::Node& file) {
     return lay::State::between(file, now);
 }
 
-// herdr window.rs 997-1043 load_layout: the file (or its shipped default when it is broken),
-// with the clicks; a click on a field the file changed since gives way.
+// The tree to draw: the file (or the built-in when the file is broken) with the person's clicks;
+// a click on a field the file changed since it was made gives way to the file.
 void apply_layout_state(LayoutSpec& l, const Settings& st) {
     l.tree = l.file;
     std::error_code ec;
@@ -103,8 +105,8 @@ void apply_layout_state(LayoutSpec& l, const Settings& st) {
 
 }  // namespace
 
-// herdr window.rs 1199-1220 write_state: the clicks, with the file they were made on; none, no
-// file. Not for a broken file (it is not what shows).
+// Writes the clicks, with the file they were made on; no clicks, no state file. Not for a broken
+// file (it is not what shows).
 void save_layout_state(const LayoutSpec& l) {
     if (!l.error.empty())
         return;
@@ -127,6 +129,54 @@ void save_layout_state(const LayoutSpec& l) {
     ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
 }
 
+namespace {
+// Gives every node without an id one ("node-<n>", not used by another node), in memory only, so
+// clicks on it can be kept.
+void fill_missing_ids(lay::Node& root) {
+    int k = 0;
+    std::set<std::string> taken;
+    for (const lay::Node* n : root.walk())
+        taken.insert(n->id);
+    root.fill_ids([&] {
+        std::string id;
+        do
+            id = "node-" + std::to_string(++k);
+        while (taken.count(id) != 0);
+        return id;
+    });
+}
+
+// A layout file: the current format, or an old AgentDesk one (read as the built-in of its style).
+// A broken file keeps its error and shows the built-in of its name (the workspace when it names
+// none).
+LayoutSpec read_layout_file(const std::filesystem::path& f) {
+    LayoutSpec l;
+    const auto stem = f.stem().u8string();
+    l.name.assign(stem.begin(), stem.end());
+    l.from_file = true;
+    std::error_code ec;
+    l.mtime = std::filesystem::last_write_time(f, ec);
+    const Json j = Json::parse(read_text_file(f), nullptr, false);
+    if (lay::is_legacy(j)) {
+        l.legacy = true;
+        l.name = safe::string_or(j, "name", l.name);
+        l.file = lay::from_legacy(j);
+        if (j.contains("details") && j["details"].is_boolean())
+            l.details = j["details"].get<bool>();
+    } else if (auto n = j.is_discarded() ? std::nullopt : lay::parse(j, &l.error)) {
+        l.file = std::move(*n);
+    } else {
+        if (j.is_discarded())
+            l.error = "not valid JSON";
+        l.file = lay::builtin(l.name);
+    }
+    fill_missing_ids(l.file);
+    return l;
+}
+
+}  // namespace
+
+// The built-ins, then <data>\layouts\*.json by file name; a file replaces the built-in it names.
 std::vector<LayoutSpec> load_layouts(const Settings& st) {
     std::vector<LayoutSpec> list;
     for (const auto& name : lay::builtin_names()) {
@@ -143,37 +193,7 @@ std::vector<LayoutSpec> load_layouts(const Settings& st) {
             files.push_back(e.path());
     std::sort(files.begin(), files.end());
     for (const auto& f : files) {
-        LayoutSpec l;
-        const auto stem = f.stem().u8string();
-        l.name.assign(stem.begin(), stem.end());
-        l.from_file = true;
-        l.mtime = std::filesystem::last_write_time(f, ec);
-        const Json j = Json::parse(read_text_file(f), nullptr, false);
-        if (lay::is_legacy(j)) {
-            l.legacy = true;
-            l.name = safe::string_or(j, "name", l.name);
-            l.file = lay::from_legacy(j);
-            if (j.contains("details") && j["details"].is_boolean())
-                l.details = j["details"].get<bool>();
-        } else if (auto n = j.is_discarded() ? std::nullopt : lay::parse(j, &l.error)) {
-            l.file = std::move(*n);
-        } else {
-            if (j.is_discarded())
-                l.error = "not valid JSON";
-            l.file = lay::builtin(l.name);  // window.rs 180-182: as shipped, main when not one
-        }
-        // window.rs 1222-1243 keep_ids: nodes without an id get one (here only in memory).
-        int k = 0;
-        std::set<std::string> taken;
-        for (const lay::Node* n : l.file.walk())
-            taken.insert(n->id);
-        l.file.fill_ids([&] {
-            std::string id;
-            do
-                id = "node-" + std::to_string(++k);
-            while (taken.count(id) != 0);
-            return id;
-        });
+        LayoutSpec l = read_layout_file(f);
         const auto it = std::find_if(list.begin(), list.end(), [&](const LayoutSpec& x) { return x.name == l.name; });
         if (it != list.end()) {
             l.builtin = it->builtin;
@@ -188,14 +208,12 @@ std::vector<LayoutSpec> load_layouts(const Settings& st) {
 }
 
 // ------------------------------------------------------------------ example mods (first run)
-// Written to <data>\mods when that folder does not exist yet; ours, small, and meant to be read.
 // The example mods (C++ DLLs built from mods\ in the source tree) ship next to agent-ui.exe in
-// mods\<name>\. Copied into <data>\mods on first run, and into folders that still hold the old
-// Lua example of the same name (its settings.json is kept). They stay off until enabled.
+// mods\<name>\. Each is copied into <data>\mods when it is not there yet, and into a folder that
+// still holds the old Lua example of the same name (its settings.json is kept). A folder of the
+// person's own is left alone. They stay off until enabled.
 void write_example_mods() {
-    wchar_t exe[MAX_PATH]{};
-    ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    const auto shipped = std::filesystem::path(exe).parent_path() / L"mods";
+    const auto shipped = exe_dir() / L"mods";
     const auto dir = data_dir() / L"mods";
     std::error_code ec;
     for (const auto& e : std::filesystem::directory_iterator(shipped, ec)) {

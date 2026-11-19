@@ -4,6 +4,7 @@
 // the fallback and text that is not valid UTF-16 is still shown, never an exception: nlohmann's
 // value() throws type_error when the stored type differs, and win::to_utf8 throws on an unpaired
 // surrogate (on a worker thread either ends the process).
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include <windows.h>
 
 #include <climits>
@@ -66,8 +67,9 @@ inline std::optional<float> number(const Json& v) {
     return std::isfinite(d) ? std::optional<float>(static_cast<float>(d)) : std::nullopt;
 }
 
-// layout.rs 107-112 (libs/ui/src/layout.cpp read_background): two colors at an angle, 180
-// unless said. Anything else (ui.state is read without that check) is no gradient.
+// A background's "gradient": two colours at an angle (degrees, 180 unless given), as
+// libs/ui/src/layout.cpp read_background accepts it. Anything else (ui.state is read without
+// that check) is no gradient.
 struct Gradient {
     std::string from;
     std::string to;

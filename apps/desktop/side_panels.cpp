@@ -1,9 +1,23 @@
 // SidePanels: the Files and Changes panels' data (listing, preview, git status and diffs),
 // loaded on one worker thread.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
+
+namespace {
+// Folders first, then by name (case-insensitive).
+void sort_entries(std::vector<SidePanels::FileEntry>& entries) {
+    std::sort(entries.begin(), entries.end(),
+              [](const SidePanels::FileEntry& a, const SidePanels::FileEntry& b) {
+                  if (a.dir != b.dir)
+                      return a.dir;
+                  return _stricmp(a.name.c_str(), b.name.c_str()) < 0;
+              });
+}
+
+}  // namespace
 
 SidePanels::~SidePanels() {
     worker_.request_stop();
@@ -126,11 +140,7 @@ void SidePanels::select_change(const std::string& path) {
 
 void SidePanels::commit() {
     std::lock_guard lock(mutex);
-    // herdr changes/main.js commit(): this.message.trim()
-    std::string msg = commit_msg;
-    const auto first = msg.find_first_not_of(" \t\r\n");
-    msg = first == std::string::npos ? std::string()
-                                     : msg.substr(first, msg.find_last_not_of(" \t\r\n") - first + 1);
+    const std::string msg = trimmed(commit_msg);
     if (msg.empty() || repo_top.empty() || committing || changes_loading)
         return;
     committing = true;
@@ -144,7 +154,7 @@ void SidePanels::commit() {
         if (r.started && r.exit_code == 0) {
             commit_msg[0] = 0;
         } else {
-            // (stderr || stdout).trim(), as herdr shows it
+            // git's own message: stderr, else stdout, trimmed
             commit_note = "Commit failed: " + (r.started ? r.message() : std::string("git not found"));
         }
         changes_at_ = {};
@@ -187,11 +197,7 @@ std::pair<std::vector<SidePanels::FileEntry>, bool> SidePanels::list_folder(cons
                 if (const std::string name = safe::string_or(e, "name"); !name.empty())
                     out.push_back({name, safe::bool_or(e, "dir", false)});
         more = safe::bool_or(*r, "more", false);
-        std::sort(out.begin(), out.end(), [](const FileEntry& a, const FileEntry& b) {
-            if (a.dir != b.dir)
-                return a.dir;
-            return _stricmp(a.name.c_str(), b.name.c_str()) < 0;
-        });
+        sort_entries(out);
         return {out, more};
     }
     std::error_code ec;
@@ -208,30 +214,14 @@ std::pair<std::vector<SidePanels::FileEntry>, bool> SidePanels::list_folder(cons
         std::error_code e2;
         out.push_back({name, it->is_directory(e2)});
     }
-    std::sort(out.begin(), out.end(), [](const FileEntry& a, const FileEntry& b) {
-        if (a.dir != b.dir)
-            return a.dir;
-        return _stricmp(a.name.c_str(), b.name.c_str()) < 0;
-    });
+    sort_entries(out);
     return {out, more};
 }
 
 host::ToolResult SidePanels::git_run(const std::string& mc, const std::string& cwd,
                                      std::vector<std::wstring> args) {
-    if (!mc.empty()) {
-        host::ToolResult r;
-        Json a = Json::array();
-        for (const auto& x : args)
-            a.push_back(win::to_utf8(x));
-        const auto res = remote ? remote(mc, "git.run", Json{{"cwd", cwd}, {"args", a}}) : std::nullopt;
-        if (res) {
-            r.started = true;
-            r.exit_code = static_cast<unsigned long>(safe::int_or(*res, "exit_code", 1));
-            r.output = safe::string_or(*res, "output");
-            r.error = safe::string_or(*res, "error");
-        }
-        return r;
-    }
+    if (!mc.empty())
+        return remote_git(remote, mc, cwd, args);
     const std::filesystem::path p(win::to_wide(cwd));
     args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-c", L"core.fsmonitor=false", L"-c",
                                L"diff.autoRefreshIndex=false", L"-C", p.native()});
@@ -315,7 +305,8 @@ void SidePanels::load_files(const std::string& mc, const std::string& root, std:
         total += entries.size();
         got[rel] = std::move(entries);
     }
-    // Git marks: keyed by path relative to `root` (normalised; herdr's string join misses on Windows).
+    // Git marks, keyed by the lower-case path relative to `root` with '/' separators: git reports
+    // paths relative to the repo top, which may be above `root`.
     std::map<std::string, char> m;
     const std::string top = top_of(mc, root);
     if (!top.empty()) {

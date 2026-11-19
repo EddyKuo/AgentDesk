@@ -1,5 +1,6 @@
 // ui.json: the Settings record, reading it (with old-key migration) and writing it back without
-// losing keys or overwriting a file that has errors.
+// losing keys or overwriting a file that has errors. Also the data and executable folders.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
@@ -21,9 +22,15 @@ std::filesystem::path data_dir() {
     return dir;
 }
 
+std::filesystem::path exe_dir() {
+    wchar_t exe[MAX_PATH]{};
+    ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    return std::filesystem::path(exe).parent_path();
+}
+
 namespace {
-// herdr first run (settings.rs 778-802): zoom from Windows' text size (Accessibility
-// TextScaleFactor, 100..225 %), x1.15 on a screen 2400 px or wider, rounded to tenths.
+// The first run's zoom: Windows' text size (Accessibility TextScaleFactor, 100..225 %), x1.15 on
+// a screen 2400 px or wider, rounded to tenths.
 float first_run_zoom() {
     DWORD factor = 100, size = sizeof(factor);
     ::RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Accessibility", L"TextScaleFactor", RRF_RT_REG_DWORD,
@@ -36,7 +43,7 @@ float first_run_zoom() {
 
 }  // namespace
 
-// The shown layout's {dark, light} themes (herdr: on the layout's root), else the defaults.
+// The shown layout's {dark, light} themes, else the defaults.
 std::pair<std::string, std::string> layout_theme_pair(const Settings& st) {
     if (const auto it = st.layout_themes.find(st.layout); it != st.layout_themes.end())
         return it->second;
@@ -48,20 +55,46 @@ namespace {
 // the person's file until they fix it (as when it does not parse).
 bool g_settings_unreadable = false;
 
-Settings load_settings_unchecked();
+// The theme keys. Files from before "appearance" existed keep their one theme as the fixed
+// choice; ids of the older preset spelling are read as today's (theme_id).
+void read_themes(const Json& j, Settings& s) {
+    s.theme = theme_id(j.value("theme", s.theme));
+    const bool light = std::string(palette_by_id(s.theme)->id) == s.theme && palette_by_id(s.theme)->light;
+    s.appearance = j.value("appearance", j.contains("theme") ? (light ? "light" : "dark") : "system");
+    s.theme_dark = theme_id(j.value("theme_dark", light ? std::string("midnight") : s.theme));
+    s.theme_light = theme_id(j.value("theme_light", light ? s.theme : std::string("paper")));
+    if (const auto lt = j.find("layout_themes"); lt != j.end() && lt->is_object())
+        for (const auto& [name, pair] : lt->items())
+            if (pair.is_object())
+                s.layout_themes[name] = {theme_id(pair.value("dark", s.theme_dark)),
+                                         theme_id(pair.value("light", s.theme_light))};
+}
 
-}  // namespace
+// The string elements of `list`, in order; anything else in it is skipped.
+template <class Out>
+void add_strings(const Json& list, Out& out) {
+    for (const auto& v : list)
+        if (v.is_string())
+            out.insert(out.end(), v.get<std::string>());
+}
 
-Settings load_settings() {
-    try {
-        return load_settings_unchecked();
-    } catch (const Json::exception&) {
-        g_settings_unreadable = true;
-        return Settings{};
+// The list keys. "panels" and "mods_enabled" replace the defaults only when present as a list.
+void read_lists(const Json& j, Settings& s) {
+    add_strings(j.value("folded_machines", Json::array()), s.folded_machines);
+    if (const auto it = j.find("panels"); it != j.end() && it->is_array()) {
+        s.panels.clear();
+        add_strings(*it, s.panels);
+    }
+    add_strings(j.value("palette_recent", Json::array()), s.palette_recent);
+    if (const auto it = j.find("agents_changed"); it != j.end() && it->is_object())
+        s.agents_changed = *it;
+    if (const auto it = j.find("mods_enabled"); it != j.end() && it->is_array()) {
+        s.mods_enabled.clear();
+        add_strings(*it, s.mods_enabled);
     }
 }
 
-namespace {
+// Throws Json::exception when a key has the wrong type (load_settings catches it).
 Settings load_settings_unchecked() {
     Settings s;
     std::ifstream in(data_dir() / L"ui.json", std::ios::binary);
@@ -72,28 +105,16 @@ Settings load_settings_unchecked() {
     std::stringstream ss;
     ss << in.rdbuf();
     const auto j = Json::parse(ss.str(), nullptr, false);
-    // herdr settings.rs 718-726: even when the rest can't be used, the file's own "telemetry".
+    // The telemetry choice is honoured even when the rest of the file can't be used.
     if (j.is_object() && j.contains("telemetry") && j["telemetry"].is_boolean())
         s.telemetry = j["telemetry"].get<bool>();
     if (!j.is_object() || j.value("schema_version", 0) != 1)
         return s;
     s.close_notice_shown = j.value("close_notice_shown", false);
     s.last_cwd = j.value("last_cwd", "");
-    s.theme = theme_id(j.value("theme", s.theme));
     s.terminal_weight = std::clamp(j.value("terminal_weight", s.terminal_weight), 100, 900);
     s.ui_font = j.value("ui_font", "");
-    // Appearance: files from before it existed keep their one theme as the fixed choice.
-    {
-        const bool light = std::string(palette_by_id(s.theme)->id) == s.theme && palette_by_id(s.theme)->light;
-        s.appearance = j.value("appearance", j.contains("theme") ? (light ? "light" : "dark") : "system");
-        s.theme_dark = theme_id(j.value("theme_dark", light ? std::string("midnight") : s.theme));
-        s.theme_light = theme_id(j.value("theme_light", light ? s.theme : std::string("paper")));
-    }
-    if (const auto lt = j.find("layout_themes"); lt != j.end() && lt->is_object())
-        for (const auto& [name, pair] : lt->items())
-            if (pair.is_object())
-                s.layout_themes[name] = {theme_id(pair.value("dark", s.theme_dark)),
-                                         theme_id(pair.value("light", s.theme_light))};
+    read_themes(j, s);
     s.zoom = std::clamp(j.value("zoom", 1.0f), 0.5f, 3.0f);
     s.font_size = std::clamp(j.value("font_size", 14.0f), 8.0f, 32.0f);  // the stepper's 8-32
     s.sounds = j.value("sounds", true);
@@ -117,26 +138,7 @@ Settings load_settings_unchecked() {
     s.sound_blocked = j.value("sound_blocked", "");
     s.welcomed = j.value("welcomed", "");
     s.seen_version = j.value("seen_version", "");
-    for (const auto& m : j.value("folded_machines", Json::array()))
-        if (m.is_string())
-            s.folded_machines.push_back(m.get<std::string>());
-    if (const auto it = j.find("panels"); it != j.end() && it->is_array()) {
-        s.panels.clear();
-        for (const auto& p : *it)
-            if (p.is_string())
-                s.panels.push_back(p.get<std::string>());
-    }
-    for (const auto& r : j.value("palette_recent", Json::array()))
-        if (r.is_string())
-            s.palette_recent.push_back(r.get<std::string>());
-    if (const auto it = j.find("agents_changed"); it != j.end() && it->is_object())
-        s.agents_changed = *it;
-    if (const auto it = j.find("mods_enabled"); it != j.end() && it->is_array()) {
-        s.mods_enabled.clear();
-        for (const auto& m : *it)
-            if (m.is_string())
-                s.mods_enabled.insert(m.get<std::string>());
-    }
+    read_lists(j, s);
     s.layout = j.value("layout", s.layout);
     for (const auto& m : j.value("machines", Json::array())) {
         if (m.is_object() && !m.value("name", "").empty() && !m.value("target", "").empty())
@@ -147,7 +149,17 @@ Settings load_settings_unchecked() {
 
 }  // namespace
 
-// Interface text size relative to herdr's 13 px; the whole chrome scales with it and the zoom.
+Settings load_settings() {
+    try {
+        return load_settings_unchecked();
+    } catch (const Json::exception&) {
+        g_settings_unreadable = true;
+        return Settings{};
+    }
+}
+
+// Interface text size relative to the 13 px the chrome is designed at; the whole chrome scales
+// with it and the zoom.
 float ui_text_factor(const Settings& s) {
     return s.ui_text / 13.0f;
 }
@@ -166,9 +178,8 @@ std::string read_text_file(const std::filesystem::path& p, bool* ok) {
     return ss.str();
 }
 
-// herdr settings.js 115-148: re-read the file, apply our keys onto it (keys we do not own stay),
-// write only if nobody changed it meanwhile (3 tries), and never overwrite a file that does not
-// parse.
+// Re-reads the file, applies our keys onto it (keys we do not own stay), writes only if nobody
+// changed it meanwhile (3 tries), and never overwrites a file that does not parse.
 void save_settings(const Settings& s) {
     const auto path = data_dir() / L"ui.json";
     const auto tmp = std::filesystem::path(path).concat(L".tmp");
@@ -247,7 +258,7 @@ void save_settings(const Settings& s) {
         }
         for (const auto& [k, v] : ours.items())
             doc[k] = v;
-        // herdr settings main.js 858-861: off writes false, on deletes the key.
+        // Telemetry off writes false; on deletes the key (on is the default).
         if (s.telemetry)
             doc.erase("telemetry");
         else
