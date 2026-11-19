@@ -165,16 +165,38 @@ std::optional<std::string> env(const char* name) {
     return out;
 }
 
+bool has_file_scheme(const std::string& link) {
+    constexpr std::string_view kFile = "file:";
+    return link.size() >= kFile.size() &&
+           std::equal(kFile.begin(), kFile.end(), link.begin(), [](char a, char b) {
+               return a == static_cast<char>(std::tolower(static_cast<unsigned char>(b)));
+           });
+}
+
 // The path a file: URL names on this computer, percent-decoded (herdr links::file_url_path).
+// Every spelling counts (FILE:///C:/x, file:/C:/x, file://server/share/x); a host other than
+// localhost names a UNC path (\\server\share\x).
 std::optional<std::string> file_url_path(const std::string& link) {
-    if (link.rfind("file://", 0) != 0)
+    if (!has_file_scheme(link))
         return std::nullopt;
-    std::string rest = link.substr(7);
-    if (rest.rfind("localhost", 0) == 0)
-        rest = rest.substr(9);
+    std::string rest = link.substr(5);
+    rest = rest.substr(0, rest.find_first_of("?#"));
+    std::string host;
+    if (rest.rfind("//", 0) == 0) {
+        const auto slash = rest.find('/', 2);
+        host = rest.substr(2, slash == std::string::npos ? std::string::npos : slash - 2);
+        rest = slash == std::string::npos ? std::string() : rest.substr(slash);
+        std::string lower = host;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](char ch) {
+            return static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        });
+        if (lower == "localhost")
+            host.clear();
+        else if (host.find_first_of("\\%") != std::string::npos)
+            return std::nullopt;
+    }
     if (rest.empty() || rest[0] != '/')
         return std::nullopt;
-    rest = rest.substr(0, rest.find_first_of("?#"));
     std::string bytes;
     for (std::size_t i = 0; i < rest.size(); ++i) {
         if (rest[i] == '%') {
@@ -187,13 +209,19 @@ std::optional<std::string> file_url_path(const std::string& link) {
             bytes.push_back(rest[i]);
         }
     }
-    // /C:/Users/... names C:\Users\...
-    if (bytes.size() > 2 && bytes[2] == ':' && std::isalpha(static_cast<unsigned char>(bytes[1])) != 0) {
-        std::string win = bytes.substr(1);
-        std::replace(win.begin(), win.end(), '/', '\\');
-        return win;
-    }
+    if (bytes.find('\0') != std::string::npos)
+        return std::nullopt;
+    std::replace(bytes.begin(), bytes.end(), '/', '\\');
+    // /C:/Users/... names C:\Users\... (also after this computer's name, as OSC 8 writes it)
+    if (bytes.size() > 2 && bytes[2] == ':' && std::isalpha(static_cast<unsigned char>(bytes[1])) != 0)
+        return bytes.substr(1);
+    if (!host.empty())
+        return "\\\\" + host + bytes;  // file://server/share/x names \\server\share\x
     return bytes;
+}
+
+bool is_unc(const std::string& path) {
+    return path.size() > 2 && path[0] == '\\' && path[1] == '\\';
 }
 
 }  // namespace
@@ -230,8 +258,18 @@ std::optional<LinkTarget> resolve_link(const std::string& link, const std::strin
                         });
     if (scheme) {
         // Windows can't open a file URL whose path is percent-encoded, the way programs write them.
-        if (const auto p = file_url_path(link); p && path_exists(to_path(*p)))
-            return LinkTarget{true, *p};
+        // A file: URL in any spelling opens only as the file it names, so open_link's refusal to
+        // run programs applies; one that names nothing here never reaches the shell.
+        if (has_file_scheme(link)) {
+            const auto p = file_url_path(link);
+            if (!p)
+                return std::nullopt;
+            // A share on another computer is not checked here: hovering terminal text must not
+            // connect anywhere. open_link still shows programs there in Explorer.
+            if (is_unc(*p) || path_exists(to_path(*p)))
+                return LinkTarget{true, *p};
+            return std::nullopt;
+        }
         const bool allowed = std::any_of(kSchemes.begin(), kSchemes.end(), [&](std::string_view s) {
             const std::string_view name = s.substr(0, s.find(':') + 1);
             return link.size() >= name.size() &&
@@ -311,7 +349,14 @@ void open_link(const LinkTarget& target) {
     std::wstring file = wide;
     if (target.file) {
         // A program or script is shown in Explorer, never run from a click on terminal text.
-        std::wstring ext = fs::path(wide).extension().wstring();
+        // Windows drops trailing periods and spaces (evil.exe. runs evil.exe), and a colon past
+        // the drive names a stream: neither may hide the real extension.
+        std::wstring name = wide;
+        while (!name.empty() && (name.back() == L'.' || name.back() == L' '))
+            name.pop_back();
+        if (name.find(L':', 2) != std::wstring::npos)
+            return;
+        std::wstring ext = fs::path(name).extension().wstring();
         for (auto& ch : ext)
             ch = static_cast<wchar_t>(std::towlower(ch));
         static constexpr std::wstring_view kRun[] = {L".exe", L".com", L".bat", L".cmd", L".ps1", L".psm1", L".vbs",

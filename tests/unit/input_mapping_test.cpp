@@ -141,3 +141,31 @@ TEST(Links, ResolvesUrlsAndExistingFilesOnly) {
     EXPECT_FALSE(resolve_link("src/main.cpp", "").has_value());  // relative needs the folder
     std::filesystem::remove_all(dir);
 }
+
+// Every spelling of a file: URL resolves to the file it names (so open_link shows programs in
+// Explorer), and one that names nothing here is refused rather than handed to the shell.
+TEST(Links, FileUrlsInEverySpellingResolveToFiles) {
+    const auto dir = std::filesystem::temp_directory_path() / "agentdesk_links_file_url";
+    std::filesystem::create_directories(dir);
+    const auto exe = dir / "evil.exe";
+    {
+        std::ofstream(exe) << "x";
+    }
+    std::string url_path = exe.generic_string();  // C:/Users/.../evil.exe
+    for (const std::string& url : {"FILE:///" + url_path, "file:/" + url_path, "File://localhost/" + url_path,
+                                   "file:///" + url_path}) {
+        const auto t = resolve_link(url, "");
+        ASSERT_TRUE(t.has_value()) << url;
+        EXPECT_TRUE(t->file) << url;
+        EXPECT_EQ(std::filesystem::path(t->target), exe) << url;
+    }
+    EXPECT_EQ(resolve_link("file://server/share/evil.exe", ""),
+              (LinkTarget{true, R"(\\server\share\evil.exe)"}));
+    EXPECT_EQ(resolve_link("FILE://server/share/a%20b.exe", ""),
+              (LinkTarget{true, R"(\\server\share\a b.exe)"}));
+    EXPECT_FALSE(resolve_link("FILE:///C:/no/such/evil.exe", "").has_value());
+    EXPECT_FALSE(resolve_link("file:C:/x/evil.exe", "").has_value());    // no path at all
+    EXPECT_FALSE(resolve_link("file:///C:/x/%zz.exe", "").has_value());  // bad escape
+    EXPECT_FALSE(resolve_link("file:///C:/x/a%00.exe", "").has_value());
+    std::filesystem::remove_all(dir);
+}
