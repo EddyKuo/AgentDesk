@@ -83,16 +83,16 @@ int wmain(int argc, wchar_t** argv) {
         result["checked_at"] = dk::utc_now_iso();
         result["ui_exit_code"] = ui_exit;
         result["child_killed_with_host"] = !child_alive;
-        result["ui_reconnected"] = after.contains("connected") ? after["connected"] : Json();
+        result["ui_reconnected"] = dk::field(after, "connected");
         result["new_host_instance"] = after.value("host_instance_id", Json()) != old_instance;
         result["session_marked_lost"] = s.value("lost", false);
-        result["session_state"] = s.contains("process_state") ? s["process_state"] : Json();
+        result["session_state"] = dk::field(s, "process_state");
         result["session_not_controller"] = !s.value("is_controller", false);
         result["pass"] = ui_exit == 0 && !child_alive && result["ui_reconnected"] == true &&
                          result["new_host_instance"] == true && result["session_marked_lost"] == true;
         const auto text = dk::ps_json(result);
         // Same bytes as the PowerShell version's Set-Content -Encoding UTF8: BOM, trailing newline.
-        dk::write_file(root / L"docs" / L"poc" / L"evidence" / L"qa10-ui-host-crash.json", text + "\n", true);
+        dk::write_file(dk::evidence_path(L"qa10-ui-host-crash.json"), text + "\n", true);
         std::printf("%s\n", text.c_str());
         dk::remove_tree(data);
         return result["pass"] == true ? 0 : 1;

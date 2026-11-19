@@ -17,7 +17,7 @@ namespace {
 Json state_of(const Json& list, const std::string& name, const char* key) {
     for (const auto& s : list.value("sessions", Json::array())) {
         if (s.value("name", "") == name)
-            return s.contains(key) ? s[key] : Json();
+            return dk::field(s, key);
     }
     return Json();
 }
@@ -60,7 +60,7 @@ int wmain(int argc, wchar_t** argv) {
         r["trusted_source"] = state_of(list, "working", "agent_source");
         r["pass"] = r["no_source_state"] == "Unknown" && r["trusted_state"] == "Working";
         const auto text = dk::ps_json(r);
-        dk::write_file(root / L"docs" / L"poc" / L"evidence" / L"qa07-silence-60s.json", text);
+        dk::write_file(dk::evidence_path(L"qa07-silence-60s.json"), text);
         std::printf("%s\n", text.c_str());
         return r["pass"] == true ? 0 : 1;
     } catch (const std::exception& e) {

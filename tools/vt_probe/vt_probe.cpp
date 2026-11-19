@@ -3,7 +3,12 @@
 //                       stdin for up to 3 s and prints "PROBE-REPLY:<hex>" on one line.
 //   vt_probe report  -> prints an OSC 7501 working report, then "PROBE-DONE".
 //   vt_probe echo    -> echoes stdin lines as "PROBE-ECHO:<hex>" until "quit".
-// Used by S1-5 (inbox vs bundled ConPTY) and the end-to-end tests.
+//   vt_probe mouse   -> turns on SGR click reporting, then behaves like echo.
+//   vt_probe size    -> keeps printing "SIZE <cols> <rows>" of the console it sees.
+//   vt_probe crash   -> exits with 0xC0000005 (access violation) after 300 ms.
+//   vt_probe counter -> prints "COUNT n" every 200 ms until killed.
+//   vt_probe flood [seconds=5] [bytes_per_sec=1048576] -> numbered lines, then "FLOOD-DONE <n>".
+// Used by S1-5 (inbox vs bundled ConPTY), the integration tests and the QA tools.
 #include <windows.h>
 
 #include <algorithm>

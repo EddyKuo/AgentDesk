@@ -88,6 +88,10 @@ std::string utc_now_iso();  // round-trip format with 7 fractional digits, like 
 std::string ps_json(const Json& object);
 // profiles.json for an isolated host.
 std::string profiles_json(const Json& profiles);
+// object[key], or null when the key is missing (a missing value shows as null in evidence files).
+Json field(const Json& object, const char* key);
+// docs\poc\evidence\<name> in the source checkout, where the QA tools write their results.
+fs::path evidence_path(std::wstring_view name);
 
 std::string u8(const fs::path& path);
 std::wstring wide(std::string_view text);

@@ -25,10 +25,6 @@ Json find_session(const Json& list, const std::string& name) {
     return Json::object();
 }
 
-Json field(const Json& obj, const char* key) {
-    return obj.contains(key) ? obj[key] : Json();
-}
-
 bool starts_with_icase(const std::wstring& text, const std::wstring& prefix) {
     return text.size() >= prefix.size() && _wcsnicmp(text.c_str(), prefix.c_str(), prefix.size()) == 0;
 }
@@ -72,10 +68,10 @@ int wmain(int argc, wchar_t** argv) {
                       work.native()});
         dk::sleep_ms(3000);
         const Json agent = find_session(list(), "agent");
-        r["osc7501_state"] = field(agent, "agent_state");
+        r["osc7501_state"] = dk::field(agent, "agent_state");
         // probe exits after reporting: state is Unknown, last kept
-        r["osc7501_last_state"] = field(agent, "last_agent_state");
-        r["osc7501_source"] = field(agent, "agent_source");
+        r["osc7501_last_state"] = dk::field(agent, "last_agent_state");
+        r["osc7501_source"] = dk::field(agent, "agent_source");
         r["bundled_conpty"] = dk::read_file(data / L"host.log").find("conpty=bundled") != std::string::npos;
         const DWORD host = dk::host_pid(pipe);
         r["host_from_zip"] = host != 0 && starts_with_icase(dk::process_image_path(host), app.native());
@@ -86,11 +82,11 @@ int wmain(int argc, wchar_t** argv) {
         dk::wait_exit(ui, std::chrono::milliseconds(30000));
         const Json ui_report = dk::read_json(report);
         r["ui_exit_code"] = dk::exit_code(ui);
-        r["ui_connected"] = field(ui_report, "connected");
+        r["ui_connected"] = dk::field(ui_report, "connected");
         r["ui_sessions"] = ui_report.contains("sessions") && ui_report["sessions"].is_array()
                                ? ui_report["sessions"].size()
                                : std::size_t{0};
-        r["ui_tabs"] = field(ui_report, "tabs");
+        r["ui_tabs"] = dk::field(ui_report, "tabs");
         int running = 0;
         for (const auto& s : list().value("sessions", Json::array())) {
             if (s.value("process_state", "") == "Running")
@@ -106,7 +102,7 @@ int wmain(int argc, wchar_t** argv) {
                     r["osc7501_source"] == "osc7501" && r["ui_exit_code"] == 0 && r["ui_connected"] == true &&
                     r["ui_sessions"] == 2 && running >= 1 && r["notices_present"] == true;
         const auto text = dk::ps_json(r);
-        dk::write_file(root / L"docs" / L"poc" / L"evidence" / L"m4-smoke-zip.json", text);
+        dk::write_file(dk::evidence_path(L"m4-smoke-zip.json"), text);
         std::printf("%s\n", text.c_str());
         dk::remove_tree(work);
         return r["pass"] == true ? 0 : 1;

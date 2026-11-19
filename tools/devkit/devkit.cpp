@@ -1,3 +1,4 @@
+// Implementation of the developer and QA tools' shared helpers (devkit.hpp).
 #include "devkit.hpp"
 
 #include <algorithm>
@@ -322,6 +323,14 @@ std::string ps_json(const Json& object) {
 
 std::string profiles_json(const Json& profiles) {
     return Json{{"schema_version", 1}, {"profiles", profiles}}.dump(2);
+}
+
+Json field(const Json& object, const char* key) {
+    return object.contains(key) ? object[key] : Json();
+}
+
+fs::path evidence_path(std::wstring_view name) {
+    return source_root() / L"docs" / L"poc" / L"evidence" / name;
 }
 
 std::string u8(const fs::path& path) {

@@ -23,8 +23,27 @@ Json first_session(const Json& report) {
     return Json::object();
 }
 
-Json field(const Json& obj, const char* key) {
-    return obj.contains(key) ? obj[key] : Json();
+// The COUNT numbers in agentctl's `read --json` output, in order.
+std::vector<long long> counter_numbers(const Json& history) {
+    // Case-insensitive, as the earlier PowerShell script's -match was.
+    const std::regex count_line("^COUNT (\\d+)$", std::regex::icase);
+    std::vector<long long> numbers;
+    for (const auto& line : history.value("lines", Json::array())) {
+        std::smatch m;
+        const std::string text = line.is_string() ? line.get<std::string>() : std::string();
+        if (std::regex_match(text, m, count_line))
+            numbers.push_back(std::stoll(m[1].str()));
+    }
+    return numbers;
+}
+
+// Runs agent-ui until it exits on its own (--exit-after-ms); kills it after 30 s.
+void run_ui(const fs::path& ui, const std::vector<std::wstring>& args, const char* what) {
+    const auto p = dk::start(ui, args);
+    if (!dk::wait_exit(p, std::chrono::milliseconds(30000))) {
+        dk::kill(p);
+        throw std::runtime_error(std::string(what) + " did not exit");
+    }
 }
 
 }  // namespace
@@ -50,33 +69,18 @@ int wmain(int argc, wchar_t** argv) {
         const fs::path r2 = data / L"run2.json";
 
         // Run 1: the UI starts the host, creates the session, then closes after 4 s (detach).
-        auto p = dk::start(ui, {L"--pipe", pipe, L"--start", L"counter", L"--exit-after-ms", L"4000",
-                                L"--report", r1.native()});
-        if (!dk::wait_exit(p, std::chrono::milliseconds(30000))) {
-            dk::kill(p);
-            throw std::runtime_error("UI run 1 did not exit");
-        }
+        run_ui(
+            ui,
+            {L"--pipe", pipe, L"--start", L"counter", L"--exit-after-ms", L"4000", L"--report", r1.native()},
+            "UI run 1");
         dk::sleep_ms(gap_seconds * 1000);
         // Run 2: reopen the UI without creating anything.
-        p = dk::start(ui, {L"--pipe", pipe, L"--exit-after-ms", L"3000", L"--report", r2.native()});
-        if (!dk::wait_exit(p, std::chrono::milliseconds(30000))) {
-            dk::kill(p);
-            throw std::runtime_error("UI run 2 did not exit");
-        }
+        run_ui(ui, {L"--pipe", pipe, L"--exit-after-ms", L"3000", L"--report", r2.native()}, "UI run 2");
 
         const Json a = dk::read_json(r1);
         const Json b = dk::read_json(r2);
-        const Json history = Json::parse(
-            dk::run(ctl, {L"--pipe", pipe, L"read", L"counter", L"--lines", L"200", L"--json"}).out);
-        // PowerShell's -match is case-insensitive.
-        const std::regex count_line("^COUNT (\\d+)$", std::regex::icase);
-        std::vector<long long> numbers;
-        for (const auto& line : history.value("lines", Json::array())) {
-            std::smatch m;
-            const std::string text = line.is_string() ? line.get<std::string>() : std::string();
-            if (std::regex_match(text, m, count_line))
-                numbers.push_back(std::stoll(m[1].str()));
-        }
+        const std::vector<long long> numbers = counter_numbers(Json::parse(
+            dk::run(ctl, {L"--pipe", pipe, L"read", L"counter", L"--lines", L"200", L"--json"}).out));
         int gaps = 0;
         for (std::size_t i = 1; i < numbers.size(); ++i) {
             if (numbers[i] != numbers[i - 1] + 1)
@@ -88,12 +92,12 @@ int wmain(int argc, wchar_t** argv) {
         const Json s2 = first_session(b);
         Json result;
         result["checked_at"] = dk::utc_now_iso();
-        result["same_session_id"] = field(s1, "id") == field(s2, "id");
-        result["same_pid"] = field(s1, "pid") == field(s2, "pid");
-        result["pid"] = field(s2, "pid");
-        result["state_after_reopen"] = field(s2, "process_state");
-        result["same_host_instance"] = field(a, "host_instance_id") == field(b, "host_instance_id");
-        result["reconnected_ui_controls_input"] = field(s2, "is_controller");
+        result["same_session_id"] = dk::field(s1, "id") == dk::field(s2, "id");
+        result["same_pid"] = dk::field(s1, "pid") == dk::field(s2, "pid");
+        result["pid"] = dk::field(s2, "pid");
+        result["state_after_reopen"] = dk::field(s2, "process_state");
+        result["same_host_instance"] = dk::field(a, "host_instance_id") == dk::field(b, "host_instance_id");
+        result["reconnected_ui_controls_input"] = dk::field(s2, "is_controller");
         result["counter_lines_checked"] = numbers.size();
         result["counter_first"] = numbers.empty() ? Json() : Json(numbers.front());
         result["counter_last"] = numbers.empty() ? Json() : Json(numbers.back());
@@ -102,7 +106,7 @@ int wmain(int argc, wchar_t** argv) {
                          result["state_after_reopen"] == "Running" && gaps == 0 && numbers.size() > 20;
         const auto text = dk::ps_json(result);
         // Same bytes as the PowerShell version's Set-Content -Encoding UTF8: BOM, trailing newline.
-        dk::write_file(root / L"docs" / L"poc" / L"evidence" / L"qa05-ui-detach.json", text + "\n", true);
+        dk::write_file(dk::evidence_path(L"qa05-ui-detach.json"), text + "\n", true);
         std::printf("%s\n", text.c_str());
         dk::remove_tree(data);
         return result["pass"] == true ? 0 : 1;
