@@ -1,3 +1,4 @@
+// Maps an OSC 7 file:// URI to a Windows path (drives, MSYS, WSL mounts and distributions).
 #include "agentdesk/terminal/cwd_uri.hpp"
 
 #include <cctype>

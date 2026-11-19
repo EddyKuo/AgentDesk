@@ -1,5 +1,7 @@
 #pragma once
 
+// PtyProcess: one child program in a pseudoconsole, its job and the thread that reads its output.
+
 #include <windows.h>
 
 #include <atomic>

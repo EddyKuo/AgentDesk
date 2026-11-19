@@ -1,3 +1,5 @@
+// SessionManager: request handling for IPC protocol v1, snapshot and delta fan-out, session
+// metadata, and the host-side helpers for agents, worktrees and remote Files/Changes.
 #include "agentdesk/host/session_manager.hpp"
 
 #include <algorithm>
@@ -117,8 +119,8 @@ void add_wsl_folder_hook(platform::win::PtySpawnSpec& spec) {
 }
 
 // PowerShell's cd (Set-Location) does not change the process's Windows current folder, which is
-// what the host reads to follow the shell. Like herdr, wrap the prompt: after the person's own
-// prompt runs, copy the location into [Environment]::CurrentDirectory. Only for an interactive
+// what the host reads to follow the shell. So the prompt is wrapped: after the person's own
+// prompt runs, the location is copied into [Environment]::CurrentDirectory. Only for an interactive
 // PowerShell the profile starts without its own -Command/-File; cmd needs nothing.
 void add_folder_hook(platform::win::PtySpawnSpec& spec) {
     std::wstring exe = spec.executable.filename().native();
@@ -220,7 +222,7 @@ bool has_control_chars(const std::string& s) {
     });
 }
 
-// herdr defaults/mods/worktree/main.js:205-207, 243: worktree add/remove may take minutes.
+// git worktree add/remove may take minutes on a large repository (checkout, submodules).
 constexpr auto kWorktreeTimeout = std::chrono::seconds(600);
 // A reply must fit one IPC frame (kMaxFrameBytes, 4 MiB) after JSON escaping.
 constexpr std::size_t kMaxGitRunBytes = 3u * 1024u * 1024u;
@@ -526,7 +528,7 @@ Response SessionManager::do_ui_state_set(const ipc::ConnectionPtr& conn, const R
     return protocol::ok(req.id, {{"rev", ui_state_rev_}});
 }
 
-// ---- Files / Changes for a client on another machine (herdr mods/files, mods/changes). The
+// ---- Files / Changes panels for a client on another machine. The
 // pipe only admits this Windows user, so these read what that user can read; the UI on this
 // machine reads the same folders directly.
 namespace {
@@ -621,7 +623,7 @@ Response SessionManager::do_git_run(const Request& req) {
     std::error_code ec;
     if (!std::filesystem::is_directory(*cwd, ec))
         return protocol::fail(req.id, ErrorCode::kNotFound, "not a folder");
-    // worktree remove may take minutes (herdr worktree/main.js:243).
+    // worktree remove may take minutes.
     const bool long_running = args.size() > 8 && args[8] == L"worktree";
     const auto r = run_tool(args, *cwd, long_running ? kWorktreeTimeout : std::chrono::seconds(60));
     if (!r.started)
@@ -657,8 +659,7 @@ Response SessionManager::do_worktree_add(const Request& req) {
     }
     const std::wstring wbranch = win::to_wide(branch);
     const std::wstring wpath = win::to_wide(path);
-    // herdr defaults/mods/worktree/main.js create(): a branch that exists is checked out, a new
-    // one starts from HEAD. Existence is asked of git, never read from its (translated) messages.
+    // A branch that exists is checked out; a new one starts from HEAD. Existence is asked of git, never read from its (translated) messages.
     const auto known = run_tool({L"git", L"-C", repo_path.native(), L"show-ref", L"--verify", L"--quiet",
                                  L"refs/heads/" + wbranch},
                                 repo_path, std::chrono::seconds(60));
@@ -919,8 +920,8 @@ Response SessionManager::do_create(const Request& req) {
 
     SessionRecord rec;
     rec.id = new_uuid();
-    // herdr: a terminal has a name only when someone gives it one (hc run --name, pane.rename);
-    // without one it shows by its program (programs.rs). Not the profile's name.
+    // A terminal has a name only when someone gives it one (agentctl run --name, a rename in the
+    // UI); without one the UI shows it by its program. Never the profile's name.
     rec.name = p.value("name", std::string());
     rec.cwd = cwd;
     rec.profile_id = profile_id;

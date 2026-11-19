@@ -1,3 +1,4 @@
+// Connects to agent-host (starting it when allowed) or to a remote host over ssh-like stdio.
 #include "agentdesk/ipc/host_launcher.hpp"
 
 #include <atomic>

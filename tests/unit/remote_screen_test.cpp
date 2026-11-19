@@ -1,3 +1,4 @@
+// RemoteScreen: rebuilding a terminal screen from snapshot and delta events.
 #include "agentdesk/ui/remote_screen.hpp"
 
 #include <gtest/gtest.h>

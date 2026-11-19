@@ -1,5 +1,7 @@
 #pragma once
 
+// RAII owners for Win32 handles and process/thread attribute lists.
+
 #include <windows.h>
 
 #include <memory>

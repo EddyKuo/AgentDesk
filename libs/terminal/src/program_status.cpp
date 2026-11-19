@@ -1,3 +1,4 @@
+// OSC 7501 parsing and the per-terminal store of status records (lifetime rules of the spec).
 #include "agentdesk/terminal/program_status.hpp"
 
 #include <algorithm>

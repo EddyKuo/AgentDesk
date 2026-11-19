@@ -1,3 +1,5 @@
+// UI input helpers: key mapping, clipboard chords, paste policy, selection text, dropped paths
+// and link detection.
 #include "agentdesk/ui/input_mapping.hpp"
 
 #include <filesystem>
@@ -72,7 +74,7 @@ TEST(InputMapping, SelectionTextHandlesWideAndCombining) {
     EXPECT_EQ(selection_text(snap, {0, 5}, {1, 2}), "x\r\nred");
 }
 
-// herdr src/vt.rs:1158-1163 (unwrap, trim): soft-wrapped rows join, trailing blank lines go.
+// Copying a selection: soft-wrapped rows join, trailing blank lines go.
 TEST(InputMapping, SelectionTextJoinsSoftWrapsAndTrims) {
     VtEngineOptions o;
     o.rows = 5;
@@ -96,7 +98,7 @@ TEST(InputMapping, SelectionDragScrollsOneToFiveLines) {
     EXPECT_EQ(selection_scroll_lines(260.0f, 20.0f, 10), 4);
 }
 
-// herdr src/terminal/drag_paths.rs quote_paths (Windows): plain paths as they are, the rest in
+// Dropped files are pasted as paths: plain paths as they are, the rest in
 // single quotes with ' doubled, a trailing space, never Enter.
 TEST(InputMapping, QuotePathsForPaste) {
     EXPECT_EQ(*quote_paths({"C:/work/a.txt"}), "C:/work/a.txt ");
@@ -107,7 +109,7 @@ TEST(InputMapping, QuotePathsForPaste) {
     EXPECT_FALSE(quote_paths({"a\nb"}).has_value());
 }
 
-// herdr src/links.rs (Ghostty's pattern): URLs without trailing punctuation, rooted and bare
+// Link detection: URLs without trailing punctuation, rooted and bare
 // paths without a trailing colon.
 TEST(Links, FindsUrlsAndPaths) {
     auto link = [](const std::string& text, std::size_t at) -> std::string {

@@ -1,3 +1,5 @@
+// The process in front of a terminal, its folder and its command line (read from its PEB).
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/platform/win/process_tree.hpp"
 
 // tlhelp32.h and winternl.h need windows.h first.

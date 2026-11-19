@@ -1,3 +1,6 @@
+// VtEngine on top of libvterm: callbacks, input encoding, history, OSC handling, snapshots and
+// the handover state format.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/terminal/vt_engine.hpp"
 
 #include <algorithm>
@@ -350,8 +353,9 @@ void VtEngine::resize(int rows, int cols) {
     bump();
 }
 
-// Port of herdr src/win32_keys.rs (Win32Input::watch, latest): libvterm ignores DEC mode 9001,
-// so the request is read from the output as it streams by, including one split across writes.
+// win32-input-mode (DEC mode 9001, which ConPTY requests): libvterm ignores the mode, so the
+// request is read from the output as it streams by, including one split across writes. The last
+// set or reset in the stream wins.
 void VtEngine::watch_win32_mode(std::string_view bytes) {
     static constexpr std::string_view kOn = "\x1b[?9001h";
     static constexpr std::string_view kOff = "\x1b[?9001l";
@@ -377,7 +381,7 @@ void VtEngine::watch_win32_mode(std::string_view bytes) {
 
 namespace {
 
-// herdr src/win32_keys.rs:44-55: a key pressed and released as win32-input-mode events,
+// A key pressed and released as win32-input-mode events,
 // `CSI Vk;Sc;Uc;Kd;Cs;Rc _` (Shift 0x10, left Ctrl 0x08, left Alt 0x02 held, repeat 1).
 std::string win32_key(unsigned vk, unsigned scan, unsigned typed, std::uint8_t mods) {
     const unsigned held = ((mods & kModShift) ? 0x10u : 0u) | ((mods & kModCtrl) ? 0x08u : 0u) |
@@ -393,7 +397,7 @@ std::string win32_key(unsigned vk, unsigned scan, unsigned typed, std::uint8_t m
 }  // namespace
 
 void VtEngine::key(Key key, std::uint8_t mods) {
-    // herdr src/terminal.rs:1645-1652: with win32-input-mode on, modified Enter and Escape go as
+    // With win32-input-mode on, modified Enter and Escape go as
     // win32 key events (Shift+Enter reaches the program; ConPTY would otherwise merge a bare
     // Escape with the next key into an Alt chord).
     if (win32_on_) {
@@ -447,7 +451,7 @@ void VtEngine::paste(std::string_view utf8) {
             pos = body.find(kEnd, pos >= kEnd.size() - 1 ? pos - (kEnd.size() - 1) : 0);
         }
     } else {
-        // herdr src/vt.rs:1631 (paste_bytes): without bracketed paste, line breaks are Enter (CR).
+        // Without bracketed paste, every line break (LF or CRLF) is sent as Enter (CR).
         std::string cr;
         cr.reserve(body.size());
         for (std::size_t i = 0; i < body.size(); ++i) {

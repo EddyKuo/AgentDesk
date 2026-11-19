@@ -81,7 +81,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         }
         ::LocalFree(argv);
     }
-    // Like agent-ui --version (herdr update.rs 392-400): on the stdout it was given.
+    // Like agent-ui --version: written to the stdout handle it was given (no console of its own).
     if (version) {
         const std::string line = std::string("agent-host ") + AGENTDESK_VERSION_STRING + "\n";
         DWORD written = 0;

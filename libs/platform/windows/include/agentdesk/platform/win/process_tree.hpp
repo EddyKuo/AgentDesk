@@ -1,5 +1,7 @@
 #pragma once
 
+// What runs in front in a terminal: walks the session's job and reads process parameters.
+
 #include <windows.h>
 
 #include <string>
@@ -8,14 +10,14 @@
 namespace agentdesk::platform::win {
 
 // What a terminal is running now. A pseudo console has no foreground process group, so this
-// follows herdr's rule: when the root is a shell, the front is the shell's newest direct child
+// follows one rule: when the root is a shell, the front is the shell's newest direct child
 // (console hosts excluded), else the shell itself; a root that is not a shell is the front.
 // Grandchildren never take the front, so an agent's helper processes do not replace it.
 struct Foreground {
     std::string program;  // lower-case image name without ".exe"; empty if the job is empty
     std::string cwd;      // UTF-8 current folder of that process (empty if unreadable)
-    // That process's command line as words (CommandLineToArgvW); empty if unreadable. herdr
-    // resolves a terminal's program from its argv (programs.rs 270-327).
+    // That process's command line as words (CommandLineToArgvW); empty if unreadable. The UI
+    // tells which program a terminal runs from these words.
     std::vector<std::string> argv;
 };
 Foreground foreground(HANDLE job, DWORD root_pid);

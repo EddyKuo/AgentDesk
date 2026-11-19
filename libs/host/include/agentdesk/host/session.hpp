@@ -1,5 +1,8 @@
 #pragma once
 
+// One terminal session inside agent-host: the ConPTY child, its VtEngine, the threads around
+// them (reader, actor, writer) and the freeze/adopt steps of a host handover.
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -41,7 +44,7 @@ struct AgentStatus {
     terminal::StatusKind kind = terminal::StatusKind::kNone;
     std::string message;
     AgentState last_state = AgentState::kUnknown;  // value before the record was dropped
-    std::string app;  // the 7501 report's `app` (herdr shows a terminal by it first), or empty
+    std::string app;  // the 7501 report's `app` (the UI names a terminal by it first), or empty
 };
 
 struct SessionInfo {
@@ -98,9 +101,9 @@ public:
     // Blocks until the root process exited (or timeout). Returns the exit code.
     std::optional<std::uint32_t> wait_exit(std::chrono::milliseconds timeout) const;
 
-    // ---- agent-host's self-update (design doc 7.4 OQ-09; herdr src/update.rs 236, docs/
-    // commands.md 547: "terminals keep running"). The old host freezes each session and hands
-    // its state and handles to the new host, which adopts them.
+    // ---- agent-host's self-update (design doc 7.4 OQ-09): terminals keep running across it.
+    // The old host freezes each session and hands its state and handles to the new host, which
+    // adopts them.
     struct Frozen {
         std::string state;  // engine + session state (save format of this build)
         // The live terminal's handles, owned by *this; nullopt when the program already exited.

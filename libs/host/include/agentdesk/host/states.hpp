@@ -1,5 +1,7 @@
 #pragma once
 
+// The two independent session states: the process lifecycle and the agent status.
+
 #include <optional>
 #include <string_view>
 

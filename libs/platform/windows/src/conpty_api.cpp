@@ -1,3 +1,4 @@
+// Loads the ConPTY functions: the bundled conpty.dll by absolute path, else kernel32's.
 #include "agentdesk/platform/win/conpty_api.hpp"
 
 #include <system_error>

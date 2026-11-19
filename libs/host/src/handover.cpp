@@ -1,9 +1,7 @@
 // agent-host's self-update: the running host hands every session, live, to a new agent-host.
 //
-// herdr: "hc update" replaces herdr-core and "terminals keep running; the app reconnects when the
-// core restarts" (herdr-app src/update.rs 235, docs/commands.md 547, src/hc.rs 26-28: "cores
-// restart and their programs survive"). herdr-core's own mechanism is not in herdr-app's
-// source; this is the smallest Windows one (design doc 7.4 OQ-09):
+// The terminals keep running and the clients reconnect to the new host. This is the smallest
+// mechanism Windows allows (design doc 7.4 OQ-09):
 //
 //   old host (host.update {exe})                     new host (agent-host --takeover)
 //   1. starts the new exe with two private pipes ->  waits for the state
@@ -330,7 +328,7 @@ Response SessionManager::do_update(const Request& req) {
     successor_ = Successor{std::move(successor), std::move(to_new), std::move(frozen)};
     if (config_.on_handed_over)
         config_.on_handed_over();
-    // herdr core_bin.rs 256: `hc update --json` says {"now": ...}.
+    // `agentctl update --json` prints this "now" text as is.
     return protocol::ok(req.id, {{"now", "agent-host " + version}, {"host_instance_id", instance}});
 }
 

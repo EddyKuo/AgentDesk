@@ -1,3 +1,4 @@
+// The Named Pipe server (one thread per client, overlapped I/O) and client of protocol v1.
 #include "agentdesk/ipc/pipe.hpp"
 
 // sddl.h needs windows.h first (included through pipe.hpp).

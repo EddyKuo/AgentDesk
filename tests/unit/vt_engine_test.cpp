@@ -1,3 +1,4 @@
+// VtEngine: parsing, query replies (OSC 7501 before DA1), input encoding, history and links.
 #include "agentdesk/terminal/vt_engine.hpp"
 
 #include <filesystem>
@@ -243,7 +244,7 @@ TEST(VtEngine, CtrlCAndTextEncodeAsExpected) {
 TEST(VtEngine, PasteIsBracketedOnlyWhenEnabledAndEndMarkerStripped) {
     VtEngine e(small_options());
     e.paste("a\nb\r\nc");
-    EXPECT_EQ(e.take_pty_input(), "a\rb\rc");  // herdr src/vt.rs:1631: line breaks are Enter
+    EXPECT_EQ(e.take_pty_input(), "a\rb\rc");  // without bracketed paste, line breaks are Enter
     e.feed("\x1b[?2004h");
     e.paste("x\x1b[201~y");
     EXPECT_EQ(e.take_pty_input(), "\x1b[200~xy\x1b[201~");
@@ -267,7 +268,7 @@ TEST(VtEngine, PasteStripsEndMarkerReformedByRemoval) {
     EXPECT_EQ(sent.substr(6, sent.size() - 12).find("\x1b[201~"), std::string::npos);
 }
 
-// herdr src/win32_keys.rs: once ConPTY asks for win32-input-mode (even split across writes),
+// Once ConPTY asks for win32-input-mode (even split across writes),
 // modified Enter and Escape go as key-down + key-up win32 events; plain Enter stays CR.
 TEST(VtEngine, Win32InputModeEncodesModifiedEnterAndEscape) {
     VtEngine e(small_options());
@@ -397,7 +398,7 @@ TEST(VtEngine, MouseIsReportedOnlyInTheModeTheProgramAsked) {
     EXPECT_EQ(e.take_pty_input(), "");
 }
 
-// A theme's own 16 ANSI colours (herdr themes "ansi", Herdr 98) need the index, not just the RGB.
+// A theme with its own 16 ANSI colours (the Win98 theme, for one) needs the index, not just the RGB.
 TEST(VtEngine, CellsRememberWhichOfTheSixteenAnsiColoursTheyUse) {
     VtEngine e(small_options());
     e.feed("\x1b[31mR\x1b[0m\x1b[44mB\x1b[0m\x1b[91mr\x1b[0m\x1b[38;5;200mx\x1b[0m\x1b[38;2;1;2;3my\x1b[0mz");

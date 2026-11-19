@@ -1,5 +1,8 @@
 #pragma once
 
+// VtEngine: the libvterm wrapper that parses a program's output, answers its queries, encodes
+// input, keeps scrollback history and produces immutable screen snapshots.
+
 #include <array>
 #include <cstdint>
 #include <deque>
@@ -42,8 +45,8 @@ struct Cell {
     bool default_bg = true;
     Rgb fg;
     Rgb bg;
-    // One of the 16 ANSI colours (0-15), else -1: a theme's own table may draw it (herdr themes
-    // "ansi"); fg/bg still hold the standard RGB.
+    // One of the 16 ANSI colours (0-15), else -1: a theme with its own ANSI table may draw it
+    // differently; fg/bg still hold the standard RGB.
     std::int8_t fg_ansi = -1;
     std::int8_t bg_ansi = -1;
     friend bool operator==(const Cell&, const Cell&) = default;
@@ -83,7 +86,7 @@ struct ScreenSnapshot {
     std::uint64_t generation = 0;
     std::uint64_t seq = 0;
     // Per row: 1 when the row was soft-wrapped (its text continues on the next row). Copying
-    // joins such rows without a line break (herdr vt.rs selection_text, unwrap). May be empty
+    // joins such rows without a line break. May be empty
     // (treated as all 0).
     std::vector<std::uint8_t> wrapped;
     std::vector<Hyperlink> links;  // OSC 8 links on the screen, by row
@@ -187,7 +190,7 @@ public:
     void mouse(int row, int col, int button, MouseAction action, std::uint8_t mods = kModNone);
     [[nodiscard]] MouseMode mouse_mode() const noexcept { return mouse_mode_; }
     // The program asked for win32-input-mode (CSI ?9001h, ConPTY does): modified Enter and
-    // Escape are then sent as win32 key events (herdr src/win32_keys.rs).
+    // Escape are then sent as win32 key events.
     [[nodiscard]] bool win32_input() const noexcept { return win32_on_; }
 
     // Bytes to write to the PTY input, in order: query replies (DA/DSR/CPR/OSC 7501) and
@@ -209,8 +212,8 @@ public:
     // The root program exited: apply OSC 7501 lifetime rules.
     void on_process_exit();
 
-    // agent-host's self-update (design doc 7.4 OQ-09; herdr update.rs 236: "terminals keep
-    // running"): the old host saves the engine, the new host restores it and feeds the next byte.
+    // agent-host's self-update (design doc 7.4 OQ-09; terminals keep running): the old host
+    // saves the engine, the new host restores it and feeds the next byte.
     // Only between two bytes where no escape sequence is half read: the parser is in its ground
     // state (the UTF-8 carry and pending replies travel along).
     [[nodiscard]] bool at_handover_point() const;

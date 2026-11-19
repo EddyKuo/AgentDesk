@@ -1,5 +1,7 @@
 #pragma once
 
+// Starting agent-host detached from the launcher (and, when allowed, out of its job).
+
 #include <windows.h>
 
 #include <filesystem>

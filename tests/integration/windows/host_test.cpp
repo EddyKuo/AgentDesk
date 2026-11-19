@@ -807,7 +807,7 @@ TEST_F(HostFixture, ForegroundProgramFollowsChild) {
     EXPECT_TRUE(wait_until([&] { return program() == "vt_probe"; }, 10s)) << program();
 }
 
-// live_cwd follows cd in cmd (real current folder) and PowerShell (prompt hook, herdr-style).
+// live_cwd follows cd in cmd (real current folder) and PowerShell (the prompt hook).
 TEST_F(HostFixture, LiveCwdFollowsCd) {
     const auto target = data_dir_ / L"sub dir";
     fs::create_directories(target);
@@ -854,7 +854,7 @@ TEST_F(HostFixture, WorktreeAddCreatesCheckout) {
     EXPECT_TRUE(std::filesystem::exists(target / L".git"));
     EXPECT_TRUE(c->call("worktree.add", {{"repo", win::to_utf8(repo.native())}, {"branch", "-x"}})
                     ->error.has_value());
-    // A branch that exists is checked out (show-ref, not git's wording; herdr worktree/main.js).
+    // A branch that exists is checked out (asked with show-ref, never read from git's wording).
     git({L"branch", L"existing"});
     const auto again = data_dir_ / L"wt" / L"existing";
     const auto r2 = c->call("worktree.add",
@@ -893,7 +893,7 @@ TEST(GitTools, RunToolSeparatesStreamsAndKeepsLargeOutput) {
     EXPECT_EQ(big.output.size(), 4000u * 48u);
 }
 
-TEST(GitTools, WorktreeSlugMatchesHerdr) {
+TEST(GitTools, WorktreeSlugKeepsLettersDigitsAndDots) {
     using agentdesk::host::worktree_slug;
     EXPECT_EQ(worktree_slug("feature/x"), "feature-x");
     EXPECT_EQ(worktree_slug("--fix: a b--"), "fix-a-b");
@@ -904,7 +904,7 @@ TEST(GitTools, WorktreeSlugMatchesHerdr) {
     EXPECT_NE(worktree_slug("///"), worktree_slug("??"));
 }
 
-// Agent collaboration (herdr-style helpers): a sub-agent records its parent, gets its first task
+// Agent collaboration (helper agents): a sub-agent records its parent, gets its first task
 // once it is ready, reports back into the parent's input, and the parent can wait for it.
 TEST_F(HostFixture, SubAgentTaskReportAndWait) {
     const auto parent = create("cmd", "lead");
@@ -963,31 +963,31 @@ TEST_F(HostFixture, SubAgentTaskReportAndWait) {
 // command is agentctl bridge itself, so the whole path is exercised without an ssh server.
 TEST_F(HostFixture, ProtocolOverBridgeCommand) {
     const auto id = create("cmd", "remote-shell");
-    auto hc = agentdesk::ipc::connect_over_command({AGENTDESK_CTL_EXE, L"--pipe", pipe_, L"bridge"}, 10s);
-    ASSERT_TRUE(hc.client) << hc.error;
-    EXPECT_FALSE(hc.host_instance_id.empty());
-    const auto list = hc.client->call("session.list", Json::object());
+    auto conn = agentdesk::ipc::connect_over_command({AGENTDESK_CTL_EXE, L"--pipe", pipe_, L"bridge"}, 10s);
+    ASSERT_TRUE(conn.client) << conn.error;
+    EXPECT_FALSE(conn.host_instance_id.empty());
+    const auto list = conn.client->call("session.list", Json::object());
     ASSERT_TRUE(list && list->result);
     ASSERT_EQ(list->result->at("sessions").size(), 1u);
     // Events flow too: attach gets a snapshot.
     std::atomic<int> snapshots{0};
-    hc.client->set_event_handler([&](agentdesk::protocol::Event e) {
+    conn.client->set_event_handler([&](agentdesk::protocol::Event e) {
         if (e.event == "screen.snapshot")
             ++snapshots;
     });
-    ASSERT_TRUE(hc.client->call("session.attach", {{"session", id}}));
+    ASSERT_TRUE(conn.client->call("session.attach", {{"session", id}}));
     EXPECT_TRUE(wait_until([&] { return snapshots.load() > 0; }, 5s));
-    hc.client->close();
+    conn.client->close();
 }
 
 TEST(RemoteTransport, FailingCommandExplainsWhy) {
     wchar_t sys[MAX_PATH]{};
     ::GetSystemDirectoryW(sys, MAX_PATH);
     const auto cmd = (fs::path(sys) / L"cmd.exe").native();
-    auto hc =
+    auto conn =
         agentdesk::ipc::connect_over_command({cmd, L"/c", L"echo Permission denied (publickey) 1>&2"}, 3s);
-    EXPECT_FALSE(hc.client);
-    EXPECT_NE(hc.error.find("Permission denied"), std::string::npos) << hc.error;
+    EXPECT_FALSE(conn.client);
+    EXPECT_NE(conn.error.find("Permission denied"), std::string::npos) << conn.error;
     const auto argv = agentdesk::ipc::ssh_bridge_argv("dev@build-box", "");
     EXPECT_EQ(argv.front(), L"ssh");
     EXPECT_EQ(argv[argv.size() - 3], L"dev@build-box");

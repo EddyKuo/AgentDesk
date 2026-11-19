@@ -1,5 +1,7 @@
 #pragma once
 
+// Input events a client sends to a session (keys, text, paste, raw bytes, mouse).
+
 #include <cstdint>
 #include <string>
 #include <variant>

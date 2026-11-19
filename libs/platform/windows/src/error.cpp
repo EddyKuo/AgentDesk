@@ -1,3 +1,4 @@
+// Strict UTF-8 / UTF-16 conversion (invalid input throws instead of being replaced).
 #include "agentdesk/platform/win/error.hpp"
 
 #include <limits>

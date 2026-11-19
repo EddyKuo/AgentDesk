@@ -1,5 +1,7 @@
 #pragma once
 
+// Win32 error helpers and UTF-8 / UTF-16 conversion.
+
 #include <windows.h>
 
 #include <string>

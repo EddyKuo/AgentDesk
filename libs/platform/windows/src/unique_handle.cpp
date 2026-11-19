@@ -1,3 +1,4 @@
+// AttributeList: the buffer behind STARTUPINFOEX attributes (pseudoconsole, handle list).
 #include "agentdesk/platform/win/unique_handle.hpp"
 
 #include "agentdesk/platform/win/error.hpp"

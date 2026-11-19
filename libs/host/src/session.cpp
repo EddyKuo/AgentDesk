@@ -1,3 +1,5 @@
+// Session: the actor that owns one terminal (VtEngine + PtyProcess), its writer thread,
+// backpressure, snapshot publishing and the handover state format.
 #include "agentdesk/host/session.hpp"
 
 #include <windows.h>

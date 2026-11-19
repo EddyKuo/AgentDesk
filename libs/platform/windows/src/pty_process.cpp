@@ -1,3 +1,5 @@
+// PtyProcess: spawning under ConPTY in a kill-on-close job, the reader thread, shutdown order,
+// and handing a live pseudoconsole to another agent-host.
 #include "agentdesk/platform/win/pty_process.hpp"
 
 #include <algorithm>

@@ -1,6 +1,7 @@
 // agentctl.exe: command-line client of agent-host.exe (design doc 3.8).
 // Exit codes: 0 ok, 2 bad arguments, 3 host unreachable, 4 session not found or ambiguous,
 // 5 operation refused, 6 start failed, 7 timeout. With --json, stdout carries only the result.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include <windows.h>
 
 #include <algorithm>
@@ -558,9 +559,9 @@ int run_bridge(const std::wstring& pipe, bool may_start) {
     ::ExitProcess(kOk);
 }
 
-// herdr `hc update` (herdr-app src/core_bin.rs 242-265, docs/commands.md 547): agent-host to its
-// latest release; terminals keep running (agent-host hands them to the new one, design doc 7.4
-// OQ-09). --json: {"now": "agent-host X"} on stdout, or {"error": {"message", "hint"}} on stderr.
+// agentctl update: agent-host to its latest release; terminals keep running (agent-host hands
+// them to the new one, design doc 7.4 OQ-09). --json: {"now": "agent-host X"} on stdout, or
+// {"error": {"message", "hint"}} on stderr.
 int update_failed(const Ctx& ctx, const std::string& message, const std::string& hint = {}) {
     if (ctx.json) {
         Json e = {{"message", message}};
@@ -616,8 +617,8 @@ int cmd_update(Ctx& ctx, const std::wstring& pipe) {
     }
     const std::string now = r->result->value("now", "agent-host " + staged.version);
     const std::string instance = r->result->value("host_instance_id", "");
-    // The new agent-host serves the pipe once the old one let go (herdr: the app reconnects
-    // when the core restarts).
+    // The new agent-host serves the pipe once the old one let go; wait until it answers as the
+    // instance the old host named.
     const auto deadline = std::chrono::steady_clock::now() + 15s;
     while (std::chrono::steady_clock::now() < deadline) {
         if (auto c = ipc::PipeClient::connect(pipe, std::chrono::milliseconds(500))) {

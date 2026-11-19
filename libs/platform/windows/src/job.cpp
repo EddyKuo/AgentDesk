@@ -1,3 +1,4 @@
+// KillOnCloseJob: creating, checking (after a handover) and using the session's job.
 #include "agentdesk/platform/win/job.hpp"
 
 #include <stdexcept>

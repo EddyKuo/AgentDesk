@@ -1,3 +1,5 @@
+// Runs git and other helpers without a console, and turns branch names into folder names.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/host/git_tools.hpp"
 
 #include <windows.h>
@@ -106,7 +108,7 @@ std::string ToolResult::message() const {
 }
 
 std::string worktree_slug(const std::string& branch) {
-    // Port of herdr defaults/mods/worktree/main.js slug(): /[^\p{L}\p{M}\p{N}._-]+/ -> "-".
+    // The rule is /[^\p{L}\p{M}\p{N}._-]+/ -> "-", then trim dashes.
     // Non-ASCII code points count as letters (no Unicode tables here); NFC is not applied.
     std::string out;
     bool dash = false;

@@ -1,3 +1,4 @@
+// Names of the process and agent states, as used in the protocol and in sessions.json.
 #include "agentdesk/host/states.hpp"
 
 #include <algorithm>
