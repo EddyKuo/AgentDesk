@@ -63,7 +63,7 @@ struct Args {
 const std::vector<std::string> kValueOptions = {
     "--profile", "--name",   "--cwd",     "--lines", "--file", "--text",       "--source",
     "--state",   "--kind",   "--message", "--seq",   "--pipe", "--timeout-ms", "--key",
-    "--task",    "--parent", "--until",   "--to",    "--from",         "--version", "--exe"};
+    "--task",    "--parent", "--until",   "--to",    "--from", "--version",    "--exe"};
 
 Args parse_args(int argc, wchar_t** argv) {
     Args a;
@@ -174,6 +174,21 @@ std::string session_arg(const Ctx& ctx) {
     return ctx.args.positional[0];
 }
 
+// A whole file's bytes; nullopt when it cannot be opened.
+std::optional<std::string> read_file(const std::string& path) {
+    std::ifstream in(std::filesystem::path(win::to_wide(path)), std::ios::binary);
+    if (!in)
+        return std::nullopt;
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+// With --json the host's result, else `text`.
+void print_result(const Ctx& ctx, const Json& result, const std::string& text) {
+    out(ctx.json ? result.dump() + "\n" : text);
+}
+
 int cmd_run(Ctx& ctx) {
     const auto profile = ctx.args.opt("--profile");
     if (!profile)
@@ -196,7 +211,7 @@ int cmd_run(Ctx& ctx) {
     Json r;
     if (const auto e = call(ctx, "session.create", params, r))
         return *e;
-    out(ctx.json ? r.dump() + "\n" : r.value("session_id", "") + "\n");
+    print_result(ctx, r, r.value("session_id", "") + "\n");
     return kOk;
 }
 
@@ -295,31 +310,30 @@ int cmd_read(Ctx& ctx) {
 
 int cmd_send(Ctx& ctx) {
     const std::string session = session_arg(ctx);
-    Json r;
+    // One session.input; `input` holds the kind and its fields.
+    const auto send = [&](Json input) {
+        input["session"] = session;
+        Json r;
+        return call(ctx, "session.input", std::move(input), r);
+    };
     if (const auto file = ctx.args.opt("--file")) {
-        std::ifstream in(std::filesystem::path(win::to_wide(*file)), std::ios::binary);
-        if (!in)
+        const auto text = read_file(*file);
+        if (!text)
             throw std::invalid_argument("cannot read " + *file);
-        std::stringstream ss;
-        ss << in.rdbuf();
-        if (const auto e =
-                call(ctx, "session.input", {{"session", session}, {"kind", "paste"}, {"text", ss.str()}}, r))
+        if (const auto e = send({{"kind", "paste"}, {"text", *text}}))
             return *e;
     } else if (const auto text = ctx.args.opt("--text")) {
-        if (const auto e =
-                call(ctx, "session.input", {{"session", session}, {"kind", "text"}, {"text", *text}}, r))
+        if (const auto e = send({{"kind", "text"}, {"text", *text}}))
             return *e;
     } else if (const auto key = ctx.args.opt("--key")) {
-        if (const auto e =
-                call(ctx, "session.input", {{"session", session}, {"kind", "key"}, {"key", *key}}, r))
+        if (const auto e = send({{"kind", "key"}, {"key", *key}}))
             return *e;
     } else if (!ctx.args.has("--enter")) {
         throw std::invalid_argument("send needs --text, --file, --key or --enter");
     }
     // Enter only when asked (design doc 3.8): the agent may be waiting for a confirmation.
     if (ctx.args.has("--enter")) {
-        if (const auto e =
-                call(ctx, "session.input", {{"session", session}, {"kind", "key"}, {"key", "enter"}}, r))
+        if (const auto e = send({{"kind", "key"}, {"key", "enter"}}))
             return *e;
     }
     if (ctx.json)
@@ -336,7 +350,7 @@ int cmd_stop(Ctx& ctx) {
     if (const auto e =
             call(ctx, "session.stop", {{"session", session}, {"mode", force ? "force" : "interrupt"}}, r))
         return *e;
-    out(ctx.json ? r.dump() + "\n" : std::string(force ? "force stop sent\n" : "interrupt sent\n"));
+    print_result(ctx, r, force ? "force stop sent\n" : "interrupt sent\n");
     return kOk;
 }
 
@@ -386,10 +400,7 @@ int cmd_report(Ctx& ctx) {
         throw std::invalid_argument("report runs inside an AgentDesk session (or pass --from)");
     std::string text;
     if (const auto f = ctx.args.opt("--file")) {
-        std::ifstream in(std::filesystem::path(win::to_wide(*f)), std::ios::binary);
-        std::stringstream ss;
-        ss << in.rdbuf();
-        text = ss.str();
+        text = read_file(*f).value_or(std::string());  // unreadable: "report needs text" below
     } else if (const auto t = ctx.args.opt("--text")) {
         text = *t;
     } else {
@@ -404,7 +415,7 @@ int cmd_report(Ctx& ctx) {
     Json r;
     if (const auto e = call(ctx, "session.report", params, r))
         return *e;
-    out(ctx.json ? r.dump() + "\n" : "report queued for " + r.value("to", "") + "\n");
+    print_result(ctx, r, "report queued for " + r.value("to", "") + "\n");
     return kOk;
 }
 
@@ -451,13 +462,10 @@ int cmd_shutdown(Ctx& ctx) {
     Json r;
     if (const auto e = call(ctx, "host.shutdown", {{"stop_sessions", ctx.args.has("--stop-sessions")}}, r))
         return *e;
-    out(ctx.json ? r.dump() + "\n" : "host shutting down\n");
+    print_result(ctx, r, "host shutting down\n");
     return kOk;
 }
 
-// stdin/stdout <-> the local host pipe, byte for byte. Runs on a remote machine under ssh:
-// "ssh <machine> agentctl bridge" lets another PC's AgentDesk use this machine's agent-host.
-// stdout carries only protocol bytes; diagnostics go to stderr.
 // "agentctl hook": the status hook for agent CLIs (Codex CLI, Claude Code), in place of a script.
 // Reads the hook event JSON from stdin and reports it like `report-state` (design doc 3.6).
 // Contract with the CLI: print NOTHING and always exit 0. Printing would be parsed by the CLI
@@ -498,7 +506,8 @@ int run_hook() {
     const auto seq = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                                                     std::chrono::system_clock::now().time_since_epoch())
                                                     .count());
-    Json params{{"session", win::to_utf8(session)}, {"source", "agentdesk-hook"}, {"state", state}, {"seq", seq}};
+    Json params{
+        {"session", win::to_utf8(session)}, {"source", "agentdesk-hook"}, {"state", state}, {"seq", seq}};
     if (!kind.empty())
         params["kind"] = kind;
     try {
@@ -511,6 +520,9 @@ int run_hook() {
     return kOk;
 }
 
+// stdin/stdout <-> the local host pipe, byte for byte. Runs on a remote machine under ssh:
+// "ssh <machine> agentctl bridge" lets another PC's AgentDesk use this machine's agent-host.
+// stdout carries only protocol bytes; diagnostics go to stderr.
 int run_bridge(const std::wstring& pipe, bool may_start) {
     auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);
     if (!host.client) {
@@ -579,6 +591,25 @@ int update_done(const Ctx& ctx, const std::string& now) {
     return kOk;
 }
 
+protocol::Json ctl_hello() {
+    return {{"version", protocol::kProtocolVersion}, {"client", "agentctl"}};
+}
+
+// After host.update: the new agent-host serves the pipe once the old one let go. True once it
+// answers as the instance the old host named.
+bool successor_serves(const std::wstring& pipe, const std::string& instance) {
+    const auto deadline = std::chrono::steady_clock::now() + 15s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (auto c = ipc::PipeClient::connect(pipe, std::chrono::milliseconds(500))) {
+            const auto again = c->call("hello", ctl_hello());
+            if (again && again->result && again->result->value("host_instance_id", "") == instance)
+                return true;
+        }
+        std::this_thread::sleep_for(100ms);
+    }
+    return false;
+}
+
 int cmd_update(Ctx& ctx, const std::wstring& pipe) {
     namespace updates = agentdesk::ui::updates;
     updates::CoreStageRequest req;
@@ -589,7 +620,7 @@ int cmd_update(Ctx& ctx, const std::wstring& pipe) {
     auto client = ipc::PipeClient::connect(pipe, std::chrono::milliseconds(300));
     std::optional<protocol::Response> hello;
     if (client)
-        hello = client->call("hello", {{"version", protocol::kProtocolVersion}, {"client", "agentctl"}}, ctx.timeout);
+        hello = client->call("hello", ctl_hello(), ctx.timeout);
     if (!hello || hello->error || !hello->result) {
         // Nothing runs: the update is in place for agent-host's next start.
         req.host_exe = ipc::sibling_executable(L"agent-host.exe");
@@ -613,21 +644,13 @@ int cmd_update(Ctx& ctx, const std::wstring& pipe) {
     if (!r || r->error || !r->result) {
         if (staged.swapped)
             updates::unstage_core(req.host_exe);
-        return update_failed(ctx, r && r->error ? r->error_message : std::string("agent-host did not answer"));
+        return update_failed(ctx,
+                             r && r->error ? r->error_message : std::string("agent-host did not answer"));
     }
     const std::string now = r->result->value("now", "agent-host " + staged.version);
     const std::string instance = r->result->value("host_instance_id", "");
-    // The new agent-host serves the pipe once the old one let go; wait until it answers as the
-    // instance the old host named.
-    const auto deadline = std::chrono::steady_clock::now() + 15s;
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (auto c = ipc::PipeClient::connect(pipe, std::chrono::milliseconds(500))) {
-            const auto again = c->call("hello", {{"version", protocol::kProtocolVersion}, {"client", "agentctl"}});
-            if (again && again->result && again->result->value("host_instance_id", "") == instance)
-                return update_done(ctx, now);
-        }
-        std::this_thread::sleep_for(100ms);
-    }
+    if (successor_serves(pipe, instance))
+        return update_done(ctx, now);
     return update_failed(ctx, "the new agent-host did not start serving");
 }
 
@@ -651,6 +674,31 @@ const char* kUsage =
     "            update agent-host to its latest release (AGENTDESK_RELEASES_URL), or to the\n"
     "            agent-host.exe at PATH; terminals keep running\n"
     "global: --json  --pipe NAME  --no-start  --timeout-ms N\n";
+
+// report-state runs inside agent hooks: never start a host from there, and inherit the pipe
+// advertised to the session (design doc 3.6).
+std::wstring session_pipe(const Ctx& ctx) {
+    if (const auto p = ctx.args.opt("--pipe"))
+        return win::to_wide(*p);
+    if (wchar_t buf[512]{}; ::GetEnvironmentVariableW(L"AGENTDESK_PIPE", buf, 512) > 0)
+        return buf;
+    return ipc::default_pipe_name();
+}
+
+int run_command(Ctx& ctx) {
+    using Command = int (*)(Ctx&);
+    static const std::map<std::string, Command> kCommands = {
+        {"run", cmd_run},           {"list", cmd_list}, {"read", cmd_read},
+        {"send", cmd_send},         {"stop", cmd_stop}, {"report-state", cmd_report_state},
+        {"shutdown", cmd_shutdown}, {"wait", cmd_wait}, {"report", cmd_report},
+        {"label", cmd_label}};
+    const auto& c = ctx.args.command;
+    if (const auto it = kCommands.find(c); it != kCommands.end())
+        return it->second(ctx);
+    diag("unknown command: " + c);
+    std::cerr << kUsage;
+    return kBadArgs;
+}
 
 }  // namespace
 
@@ -684,14 +732,7 @@ int wmain(int argc, wchar_t** argv) {
         return run_bridge(pipe, !ctx.args.has("--no-start"));
     }
 
-    // report-state runs inside agent hooks: never start a host from there, and inherit the
-    // pipe advertised to the session (design doc 3.6).
-    std::wstring pipe = ipc::default_pipe_name();
-    if (const auto p = ctx.args.opt("--pipe")) {
-        pipe = win::to_wide(*p);
-    } else if (wchar_t buf[512]{}; ::GetEnvironmentVariableW(L"AGENTDESK_PIPE", buf, 512) > 0) {
-        pipe = buf;
-    }
+    const std::wstring pipe = session_pipe(ctx);
     if (ctx.args.command == "update")
         return cmd_update(ctx, pipe);
     const bool may_start = !ctx.args.has("--no-start") && ctx.args.command != "report-state" &&
@@ -707,30 +748,7 @@ int wmain(int argc, wchar_t** argv) {
     ctx.client = std::move(host.client);
 
     try {
-        const auto& c = ctx.args.command;
-        if (c == "run")
-            return cmd_run(ctx);
-        if (c == "list")
-            return cmd_list(ctx);
-        if (c == "read")
-            return cmd_read(ctx);
-        if (c == "send")
-            return cmd_send(ctx);
-        if (c == "stop")
-            return cmd_stop(ctx);
-        if (c == "report-state")
-            return cmd_report_state(ctx);
-        if (c == "shutdown")
-            return cmd_shutdown(ctx);
-        if (c == "wait")
-            return cmd_wait(ctx);
-        if (c == "report")
-            return cmd_report(ctx);
-        if (c == "label")
-            return cmd_label(ctx);
-        diag("unknown command: " + c);
-        std::cerr << kUsage;
-        return kBadArgs;
+        return run_command(ctx);
     } catch (const std::invalid_argument& e) {
         diag(e.what());
         return kBadArgs;

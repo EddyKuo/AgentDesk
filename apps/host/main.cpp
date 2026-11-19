@@ -58,48 +58,106 @@ std::unique_ptr<ipc::PipeServer> serve(const std::wstring& name, const ipc::Serv
     }
 }
 
+struct HostArgs {
+    std::wstring pipe_name;
+    std::filesystem::path data_dir;
+    std::wstring takeover;  // "IN,OUT,OLD" handle values from the old host, or empty
+    bool version = false;
+};
+
+HostArgs parse_command_line() {
+    HostArgs a;
+    int argc = 0;
+    LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
+    for (int i = 1; argv != nullptr && i < argc; ++i) {
+        const std::wstring arg = argv[i];
+        if (arg == L"--pipe" && i + 1 < argc)
+            a.pipe_name = argv[++i];
+        else if (arg == L"--data-dir" && i + 1 < argc)
+            a.data_dir = argv[++i];
+        else if (arg == L"--takeover" && i + 1 < argc)
+            a.takeover = argv[++i];
+        else if (arg == L"--version")
+            a.version = true;
+    }
+    ::LocalFree(argv);
+    return a;
+}
+
+// Like agent-ui --version: written to the stdout handle it was given (no console of its own).
+int print_version() {
+    const std::string line = std::string("agent-host ") + AGENTDESK_VERSION_STRING + "\n";
+    DWORD written = 0;
+    ::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE), line.data(), static_cast<DWORD>(line.size()), &written,
+                nullptr);
+    return 0;
+}
+
+// --data-dir, else AGENTDESK_DATA_DIR (tests, portable use), else %LOCALAPPDATA%\AgentDesk.
+std::filesystem::path resolve_data_dir(std::filesystem::path given) {
+    if (!given.empty())
+        return given;
+    wchar_t buf[MAX_PATH]{};
+    const DWORD n = ::GetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", buf, MAX_PATH);
+    return n > 0 && n < MAX_PATH ? std::filesystem::path(std::wstring(buf, n)) : host::default_data_dir();
+}
+
+// The new host's side of host.update: adopts the old host's sessions and waits for its "go".
+// nullptr when the takeover did not go through (logged); the old host then keeps everything.
+std::shared_ptr<host::SessionManager> take_over(const host::HostConfig& cfg, const std::wstring& takeover,
+                                                const std::filesystem::path& data_dir,
+                                                win::UniqueHandle& old_host) {
+    std::size_t at = 0;
+    win::UniqueHandle from_old(handle_arg(takeover, at));
+    win::UniqueHandle to_old(handle_arg(takeover, at));
+    old_host.reset(handle_arg(takeover, at));
+    std::shared_ptr<host::SessionManager> manager;
+    try {
+        manager = host::receive_handover(cfg, from_old.get(), to_old.get());
+    } catch (const std::exception& e) {
+        log_line(data_dir, std::string("takeover refused: ") + e.what());
+        return nullptr;
+    }
+    if (!host::await_handover_go(from_old.get(), old_host.get())) {
+        manager->abandon_adopted();
+        log_line(data_dir, "takeover abandoned: the old host kept its sessions");
+        return nullptr;
+    }
+    manager->start_adopted();
+    return manager;
+}
+
+ipc::ServerHandlers handlers_for(const std::shared_ptr<host::SessionManager>& manager) {
+    ipc::ServerHandlers handlers;
+    handlers.on_open = [manager](const ipc::ConnectionPtr& c) { manager->on_open(c); };
+    handlers.on_message = [manager](const ipc::ConnectionPtr& c, std::string p) {
+        manager->on_message(c, std::move(p));
+    };
+    handlers.on_close = [manager](const ipc::ConnectionPtr& c) { manager->on_close(c); };
+    return handlers;
+}
+
+// The program file the old host ran from may have been moved aside as agent-host.exe.old
+// (agentctl update); it can go once that host has exited.
+void remove_old_exe_after(win::UniqueHandle old_host) {
+    std::thread([old = std::move(old_host)] {
+        ::WaitForSingleObject(old.get(), 60000);
+        std::error_code ec;
+        std::filesystem::remove(ipc::sibling_executable(L"agent-host.exe.old"), ec);
+    }).detach();
+}
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
-    std::wstring pipe_name;
-    std::filesystem::path data_dir;
-    std::wstring takeover;
-    bool version = false;
-    {
-        int argc = 0;
-        LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
-        for (int i = 1; argv != nullptr && i < argc; ++i) {
-            const std::wstring a = argv[i];
-            if (a == L"--pipe" && i + 1 < argc)
-                pipe_name = argv[++i];
-            else if (a == L"--data-dir" && i + 1 < argc)
-                data_dir = argv[++i];
-            else if (a == L"--takeover" && i + 1 < argc)
-                takeover = argv[++i];
-            else if (a == L"--version")
-                version = true;
-        }
-        ::LocalFree(argv);
-    }
-    // Like agent-ui --version: written to the stdout handle it was given (no console of its own).
-    if (version) {
-        const std::string line = std::string("agent-host ") + AGENTDESK_VERSION_STRING + "\n";
-        DWORD written = 0;
-        ::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE), line.data(), static_cast<DWORD>(line.size()), &written,
-                    nullptr);
-        return 0;
-    }
-    const bool custom_pipe = !pipe_name.empty();
-    if (!custom_pipe)
-        pipe_name = ipc::default_pipe_name();
-    if (data_dir.empty()) {
-        wchar_t buf[MAX_PATH]{};
-        const DWORD n =
-            ::GetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", buf, MAX_PATH);  // tests, portable use
-        data_dir =
-            n > 0 && n < MAX_PATH ? std::filesystem::path(std::wstring(buf, n)) : host::default_data_dir();
-    }
+    const HostArgs args = parse_command_line();
+    if (args.version)
+        return print_version();
+    const bool custom_pipe = !args.pipe_name.empty();
+    const std::wstring pipe_name = custom_pipe ? args.pipe_name : ipc::default_pipe_name();
+    const std::filesystem::path data_dir = resolve_data_dir(args.data_dir);
     std::filesystem::create_directories(data_dir);
+    const bool taking_over = !args.takeover.empty();
 
     // One host per user and logon session (design doc 2.2 step 2). A second one just exits;
     // its launcher then connects to the existing host. A host taking over from the running one
@@ -108,7 +166,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         custom_pipe ? L"Local\\AgentDesk-host-test-" + std::to_wstring(std::hash<std::wstring>{}(pipe_name))
                     : ipc::default_mutex_name();
     win::UniqueHandle instance(::CreateMutexW(nullptr, FALSE, mutex_name.c_str()));
-    if (!instance || (::GetLastError() == ERROR_ALREADY_EXISTS && takeover.empty()))
+    if (!instance || (::GetLastError() == ERROR_ALREADY_EXISTS && !taking_over))
         return 0;
 
     win::UniqueHandle shutdown(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
@@ -125,45 +183,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     try {
         std::shared_ptr<host::SessionManager> manager;
         win::UniqueHandle old_host;
-        if (!takeover.empty()) {
-            std::size_t at = 0;
-            win::UniqueHandle from_old(handle_arg(takeover, at));
-            win::UniqueHandle to_old(handle_arg(takeover, at));
-            old_host.reset(handle_arg(takeover, at));
-            try {
-                manager = host::receive_handover(cfg, from_old.get(), to_old.get());
-            } catch (const std::exception& e) {
-                log_line(data_dir, std::string("takeover refused: ") + e.what());
+        if (taking_over) {
+            manager = take_over(cfg, args.takeover, data_dir, old_host);
+            if (!manager)
                 return 1;
-            }
-            if (!host::await_handover_go(from_old.get(), old_host.get())) {
-                manager->abandon_adopted();
-                log_line(data_dir, "takeover abandoned: the old host kept its sessions");
-                return 1;
-            }
-            manager->start_adopted();
         } else {
             manager = std::make_shared<host::SessionManager>(cfg);
         }
-        ipc::ServerHandlers handlers;
-        handlers.on_open = [manager](const ipc::ConnectionPtr& c) { manager->on_open(c); };
-        handlers.on_message = [manager](const ipc::ConnectionPtr& c, std::string p) {
-            manager->on_message(c, std::move(p));
-        };
-        handlers.on_close = [manager](const ipc::ConnectionPtr& c) { manager->on_close(c); };
-        auto server = serve(pipe_name, handlers, !takeover.empty());
-        log_line(data_dir, std::string(takeover.empty() ? "started" : "took over") +
+        auto server = serve(pipe_name, handlers_for(manager), taking_over);
+        log_line(data_dir, std::string(taking_over ? "took over" : "started") +
                                " instance=" + cfg.host_instance_id +
                                " conpty=" + (cfg.conpty.bundled ? "bundled" : "inbox"));
-        if (old_host) {
-            // The program file the old host ran from may have been moved aside as
-            // agent-host.exe.old (agentctl update); it can go once that host has exited.
-            std::thread([old = std::move(old_host)] {
-                ::WaitForSingleObject(old.get(), 60000);
-                std::error_code ec;
-                std::filesystem::remove(ipc::sibling_executable(L"agent-host.exe.old"), ec);
-            }).detach();
-        }
+        if (old_host)
+            remove_old_exe_after(std::move(old_host));
         ::WaitForSingleObject(shutdown.get(), INFINITE);
         // Let the shutdown (or host.update) response reach the client before tearing down the pipe.
         ::Sleep(200);
