@@ -1,20 +1,19 @@
 #pragma once
 // Internal to agent-ui: the AgentDesk 98 layout's shared types and helpers (namespace
 // detail::w98), used by the win98_*.cpp files and the commands and panes that call into them.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail::w98 {
 
 // ------------------------------------------------------------ win98_kit.cpp
-// ------------------------------------------------------------------ Herdr 98 (herdr-app win98)
-// Herdr 98, part 1: the drawing kit, the shared values, the popup menus and the overlay windows.
-// Ported from herdr-app defaults/mods/win98 (commit 321c9a8, Apache-2.0): kit.js, menu.js; herdr's
-// overlays (herdr.d.ts 395-425). Uses the app's helpers from app_internal.hpp (run_command,
-// create_session, program_info, ...).
+// The drawing kit, the shared values, the popup menus and the overlay windows. Uses the app's
+// helpers from app_internal.hpp (run_command, create_session, program_info, ...).
 //
-// Pixels: kit.js 4-6 draws in whole Win98 pixels, u(n) = n * scale (Small Fonts 1, Large 2) at
-// the display's scale; herdr's zoom does not change them. Layout px (padding, gaps) are px().
+// Pixels: everything is drawn in whole Win98 pixels, U(n) = n * scale (Small Fonts 1, Large
+// Fonts 2) times the display's DPI scale; the app zoom does not change them. Layout px (padding,
+// gaps) are px().
 
 using namespace ::agentdesk::desktop::w98state;
 namespace k98 = agentdesk::ui::win98;
@@ -55,7 +54,7 @@ std::vector<std::string> wrap(App::State& s, const std::string& text, float widt
 float lines(App::State& s, ImDrawList* dl, float x, float top, const std::vector<std::string>& ls, ImU32 col,
             bool bold = false);
 
-// ---------------------------------------------------------------- bevels (kit.js 82-137)
+// ---------------------------------------------------------------- boxes and bevels
 
 struct Box {
     float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
@@ -84,7 +83,7 @@ void brand_splash(App::State& s, ImDrawList* dl, Box b);
 void glyph(App::State& s, ImDrawList* dl, const std::string& name, float w, float h, ImVec2 at, ImU32 col);
 void program_icon(App::State& s, ImDrawList* dl, const ui::Program& p, float size, ImVec2 at);
 
-// ---------------------------------------------------------------- buttons (kit.js 139-174)
+// ---------------------------------------------------------------- buttons
 
 struct ButtonOpts {
     bool def = false;      // the thick outline
@@ -110,7 +109,7 @@ Pressed button(App::State& s, ImDrawList* dl, const char* id, Box b, const Butto
 Pressed text_button(App::State& s, ImDrawList* dl, const char* id, Box b, const std::string& text,
                     ButtonOpts o = {}, bool bold = false);
 
-// ---------------------------------------------------------------- title bars (kit.js 241-289)
+// ---------------------------------------------------------------- title bars, fields, menus, windows
 
 struct Control {
     std::string kind;
@@ -148,8 +147,8 @@ struct Task {
     std::string status;
 };
 
-// dialog.js 263-273: 75 x 23 buttons in a row, gap 6, at the end or in the middle. Returns the
-// index pressed, or -1.
+// A row of push buttons (75 x 23 unless given, gap 6), right-aligned (`end`) or centered.
+// Returns the index pressed, or -1.
 struct Btn {
     std::string label;
     bool def = false;
@@ -193,7 +192,7 @@ void desktop(App::State& s, ImDrawList* dl, Box b);
 k98::Mines::Options mines_options(App::State& s);
 ImVec2 render_mines(App::State& s, Window& win, ImDrawList* dl, ImVec2 at);
 
-// ---------------------------------------------------------------- Solitaire (sol.js)
+// ---------------------------------------------------------------- Solitaire
 
 using Sol = k98::Solitaire;
 ImVec2 render_sol(App::State& s, Window& /*win*/, ImDrawList* dl, ImVec2 at);

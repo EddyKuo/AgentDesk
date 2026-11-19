@@ -1,10 +1,11 @@
 // AgentDesk 98 games: Mines and Solitaire.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail::w98 {
 
-// ---------------------------------------------------------------- Mines (mines.js)
+// ---------------------------------------------------------------- Mines
 
 k98::Mines::Options mines_options(App::State& s) {
     k98::Mines::Options o;
@@ -17,7 +18,7 @@ k98::Mines::Options mines_options(App::State& s) {
         o.sound = safe::bool_or(j, "sound", o.sound);
         if (const auto b = j.find("best"); b != j.end() && b->is_object())
             for (const auto& [k, v] : b->items())
-                if (const auto secs = safe::int_in(v, 0, 999))  // mines.js: the clock stops at 999
+                if (const auto secs = safe::int_in(v, 0, 999))  // the clock stops at 999
                     o.best[k] = *secs;
     }
     return o;
@@ -52,7 +53,7 @@ void mines_request(App::State& s, const std::string& cmd) {
         save_mines(s);
 }
 
-// mines.js 125-136.
+// The Game menu, or the Help menu.
 MenuItems mines_menu(App::State& s, bool help) {
     if (help)
         return {{"&Contents", "", "", "", [&s] { run_command(s, "app.help"); }},
@@ -95,12 +96,12 @@ MenuItems mines_menu(App::State& s, bool help) {
     return m;
 }
 
-// kit.js 295-308 win(): the frame, the title bar, the menu bar, the body. Returns the inside box.
+// A game window's raised frame. Returns the box inside it.
 Box win_frame(App::State& s, ImDrawList* dl, ImVec2 at, float width, float height) {
     return bevel(s, dl, box(at, ImVec2(width, height)), Bevel::kWindow, rgb(C::kFace)).inset(one(s));
 }
 
-// mines.js 15-22.
+// A three-digit, seven-segment counter.
 void counter(App::State& s, ImDrawList* dl, ImVec2 at, int value) {
     const std::string chars = k98::counter_chars(value);
     const float w = U(s, 11) * 3 + U(s, 2) * 2 + U(s, 1) * 2 + 2 * one(s);
@@ -279,7 +280,7 @@ ImVec2 render_mines(App::State& s, Window& win, ImDrawList* dl, ImVec2 at) {
                   false, w.arial);
         }
     }
-    area("##mines-own", Box{in.x0, my, in.x1, in.y1});  // own(): the menu bar and body are not for dragging
+    area("##mines-own", Box{in.x0, my, in.x1, in.y1});  // a press on the menu bar or body does not drag the window
     if (!sound.empty())
         sfx(s, sound);
     if (std::exchange(m.saved, false))
@@ -345,7 +346,7 @@ void sol_command(App::State& s, const std::string& cmd) {
 ImVec2 render_sol(App::State& s, Window& /*win*/, ImDrawList* dl, ImVec2 at) {
     W98& w = st(s);
     Sol& g = *w.sol;
-    // sol.js 371-375: the options from shared; the clock runs while the window is open.
+    // The options from the shared values; the clock runs while the window is open.
     const Json& jd = shared(s, "win98.sol.draw");
     const Json& js = shared(s, "win98.sol.scoring");
     if (const auto draw = safe::int_in(jd, 1, 3); draw == 1 || draw == 3)  // Draw One / Draw Three only
@@ -504,7 +505,7 @@ ImVec2 render_sol(App::State& s, Window& /*win*/, ImDrawList* dl, ImVec2 at) {
     for (const auto& f : g.trails)
         sol_card(s, dl, f.c, true, false, P(f.x, f.y), deck);
     dl->PopClipRect();
-    // The pointer on the table (sol.js 384-399, 401-407).
+    // The pointer on the table: press, drag, release.
     const Pressed tp = area("##sol-table", table);
     const ImVec2 mp = ImGui::GetIO().MousePos;
     const ImVec2 pt((mp.x - table.x0) / K(s), (mp.y - table.y0) / K(s));
@@ -523,7 +524,7 @@ ImVec2 render_sol(App::State& s, Window& /*win*/, ImDrawList* dl, ImVec2 at) {
                 w.sol_press =
                     W98::SolPress{hit->loc, mp, ImVec2((mp.x - hit->b.x0) / K(s), (mp.y - hit->b.y0) / K(s))};
             if (hit->what == 1 && hit->up && ImGui::GetIO().MouseClickedCount[0] >= 2) {
-                // on_click with click_count 2: send it home.
+                // A double-click sends the card home.
                 w.sol_press.reset();
                 g.pick.reset();
                 g.foundation(hit->loc);
@@ -532,7 +533,7 @@ ImVec2 render_sol(App::State& s, Window& /*win*/, ImDrawList* dl, ImVec2 at) {
     }
     if (w.sol_press && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         if (!tp.hovered && !w.sol_drag) {
-            w.sol_press.reset();  // on_hover(false)
+            w.sol_press.reset();  // the pointer left the table
         } else if (w.sol_drag ||
                    std::abs(mp.x - w.sol_press->at.x) + std::abs(mp.y - w.sol_press->at.y) > 4 * s.dpi) {
             w.sol_drag = ImVec2(pt.x - w.sol_press->grab.x, pt.y - w.sol_press->grab.y);
@@ -552,7 +553,7 @@ ImVec2 render_sol(App::State& s, Window& /*win*/, ImDrawList* dl, ImVec2 at) {
         w.sol_drag.reset();
     }
     area("##sol-own",
-         Box{in.x0, my, in.x1, in.y1});  // own(): the menu and the status bar are not for dragging
+         Box{in.x0, my, in.x1, in.y1});  // a press on the menu or status bar does not drag the window
     // The status bar: the message, the score, the time.
     const float sy = table.y1 + U(s, 1);
     const float sh = U(s, 19);
@@ -571,7 +572,7 @@ ImVec2 render_sol(App::State& s, Window& /*win*/, ImDrawList* dl, ImVec2 at) {
     return ImVec2(width, snap(height));
 }
 
-// sol.js 345-365: Options and Select Card Back (a dialog over the window).
+// Options and Select Card Back (a dialog over the window).
 ImVec2 render_sol_dialog(App::State& s, Window& win, ImDrawList* dl, ImVec2 at) {
     const float o = one(s);
     const float width = U(s, 336);

@@ -1,12 +1,13 @@
 // AgentDesk 98 desktop: its icons, the Office Assistant, the overlay windows and the window as
 // a whole.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail::w98 {
 
 namespace {
-// ---------------------------------------------------------------- the desktop (desktop.js)
+// ---------------------------------------------------------------- the desktop
 
 struct DesktopItem {
     std::string key;
@@ -229,7 +230,7 @@ void desktop(App::State& s, ImDrawList* dl, Box b) {
 }
 
 namespace {
-// ---------------------------------------------------------------- the Office Assistant (clippy.js)
+// ---------------------------------------------------------------- the Office Assistant
 
 const char* const kTips[] = {
     "It looks like you're herding agents.\n\nDid you know? Ctrl+Esc opens the Start menu.",
@@ -251,7 +252,7 @@ struct News {
     std::string where;
 };
 
-// clippy.js 457-463: the agent that needs you (blocked), else the latest that finished, while you
+// What the assistant reports: the agent that needs you (blocked), else the latest that finished, while you
 // look elsewhere and did not dismiss it.
 std::optional<News> clippy_news(App::State& s) {
     W98& w = st(s);
@@ -300,7 +301,7 @@ std::optional<News> clippy_news(App::State& s) {
     return list.back().second;
 }
 
-// owner: the node the layout floats it over; f: its floating block there (layout.rs 61-77).
+// owner: the node the layout floats it over; f: its floating block there.
 void clippy(App::State& s, Box owner, ui::layout::Float& f) {
     if (shared_str(s, "win98.clippy") == "off")
         return;
@@ -338,9 +339,9 @@ void clippy(App::State& s, Box owner, ui::layout::Float& f) {
     }
     const float cw = std::max(U(s, 64), text.empty() ? 0.0f : bw) + U(s, 8);
     const float ch = U(s, 8) + (text.empty() ? 0.0f : bh + U(s, 2)) + U(s, 80);
-    // win98.json 70-80: where the layout's floating block says (the left edge of the screen row, at
-    // its end, unless dragged: a click kept in layouts/.state); dragged elsewhere it snaps to the
-    // nearest edge and third (layout.rs 732-751), 12 px in (floats.rs 14, 78-96).
+    // Where the layout's floating block says (by default the left edge of the screen row, at its
+    // end; a drag is kept in the layout state). Dropped elsewhere, it snaps to the nearest edge
+    // and third, kFloatMargin px in.
     const float m = px(ui::layout::kFloatMargin);
     if (const Json& pj = shared(s, "win98.float.clippy"); pj.is_object()) {
         // Where it was dropped before the layout kept it: now the float's click.
@@ -351,14 +352,14 @@ void clippy(App::State& s, Box owner, ui::layout::Float& f) {
         set_shared(s, "win98.float.clippy", nullptr);
     }
     const k98::FloatPlace place{static_cast<k98::Edge>(f.edge), static_cast<k98::Align>(f.align)};
-    const bool right = place.edge != k98::Edge::kLeft;  // clippy.js 469
+    const bool right = place.edge != k98::Edge::kLeft;  // away from the left edge: right-aligned
     const auto home = k98::float_home(owner.x0, owner.y0, owner.w(), owner.h(), cw, ch, place, m);
     ImVec2 at(snap(home[0]), snap(home[1]));
     const ImVec2 mouse = ImGui::GetIO().MousePos;
     if (w.clippy.moving) {
         at = ImVec2(snap(mouse.x - cw * w.clippy.grab.x), snap(mouse.y - ch * w.clippy.grab.y));
     } else if (w.clippy.spring_from) {
-        // floats.rs 212-215: left = 1 - spring(elapsed / 360 ms), the body offset by from * left.
+        // Easing home: the offset scales by 1 - spring(elapsed / kSnapMs).
         const float ms = std::chrono::duration<float, std::milli>(Clock::now() - w.clippy.spring_start).count();
         const float left = 1.0f - k98::spring(ms / k98::kSnapMs);
         if (ms >= k98::kSnapMs) {
@@ -366,7 +367,7 @@ void clippy(App::State& s, Box owner, ui::layout::Float& f) {
         } else {
             at = ImVec2(snap(at.x + w.clippy.spring_from->x * left), snap(at.y + w.clippy.spring_from->y * left));
             if (s.config.wake)
-                s.config.wake();  // floats.rs 326: frames while anything moves
+                s.config.wake();  // keep drawing frames while it moves
         }
     }
     ImGui::SetNextWindowPos(at);
@@ -410,7 +411,7 @@ void clippy(App::State& s, Box owner, ui::layout::Float& f) {
         }
         y = b.y1 + U(s, 2);
     }
-    // loop("top", {from: 0, to: -5, period: 800}) while there is news.
+    // While there is news, Clippy bobs up to 5 px over 800 ms.
     float bounce = 0;
     if (news) {
         const double t = std::fmod(ImGui::GetTime() * 1000.0, 800.0) / 800.0;
@@ -429,8 +430,8 @@ void clippy(App::State& s, Box owner, ui::layout::Float& f) {
                 std::floor(static_cast<double>(std::rand()) / (RAND_MAX + 1.0) * std::size(kTips)));
         sfx(s, "clippy");
     }
-    // floats.rs 253-300: a press on it that no control takes drags it (from 4 px); dropped, it
-    // takes the place its center is nearest to.
+    // A press on it that no control takes drags it (after kDragStart px); dropped, it takes the
+    // place its center is nearest to.
     if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !g_area_hovered) {
         w.clippy.pressing = true;
         w.clippy.down = mouse;
@@ -439,7 +440,7 @@ void clippy(App::State& s, Box owner, ui::layout::Float& f) {
     ImGui::End();
     if (w.clippy.pressing) {
         if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-            // floats.rs 261-262: the larger of the two distances, from 4 px.
+            // The drag starts once either axis has moved kDragStart px.
             if (!w.clippy.moving && std::max(std::abs(mouse.x - w.clippy.down.x),
                                              std::abs(mouse.y - w.clippy.down.y)) >= k98::kDragStart * s.dpi)
                 w.clippy.moving = true;
@@ -450,8 +451,8 @@ void clippy(App::State& s, Box owner, ui::layout::Float& f) {
                 const auto to = k98::snap_float(cx, cy, owner.w(), owner.h());
                 f.edge = static_cast<ui::layout::Edge>(to.edge);
                 f.align = static_cast<ui::layout::Align>(to.align);
-                save_layout_state(s.layout());  // floats.rs 288-297 + layout_sync.rs FloatState
-                // floats.rs 288-297: spring from where it was let go to its new home.
+                save_layout_state(s.layout());  // the new place is kept with the layout
+                // Spring from where it was let go to its new home.
                 const auto next = k98::float_home(owner.x0, owner.y0, owner.w(), owner.h(), cw, ch, to, m);
                 w.clippy.spring_from = ImVec2(mouse.x - cw * w.clippy.grab.x - next[0],
                                               mouse.y - ch * w.clippy.grab.y - next[1]);
@@ -466,7 +467,7 @@ void clippy(App::State& s, Box owner, ui::layout::Float& f) {
 
 // ---------------------------------------------------------------- the overlay windows
 
-// taskbar.js 181-193: one window per open (or minimized) game.
+// One window per open (or minimized) game.
 void sync_games(App::State& s) {
     W98& w = st(s);
     for (const char* k : {"mines", "sol"}) {
@@ -518,7 +519,7 @@ void draw_windows(App::State& s) {
             continue;
         if ((win->role == "mines" || win->role == "sol") && app_state(s, win->role) != "open") {
             if (win->role == "sol" && w.sol) {
-                w.sol->animating = false;  // sol.js 374: stop()
+                w.sol->animating = false;  // a hidden game stops animating
                 w.sol_press.reset();
                 w.sol_drag.reset();
             }
@@ -531,7 +532,7 @@ void draw_windows(App::State& s) {
         }
         const std::string name = "##w98win" + std::to_string(id);
         if (win->modal) {
-            // herdr dialog overlays dim the window and keep clicks beside them.
+            // A modal dialog dims the window and swallows clicks beside it.
             const std::string dim = name + "dim";
             ImGui::SetNextWindowPos(vp->WorkPos);
             ImGui::SetNextWindowSize(vp->WorkSize);
@@ -635,9 +636,8 @@ void draw_windows(App::State& s) {
 
 }  // namespace
 
-// settings/main.js 302-309: the layout's preview picture (win98.json "preview":
-// layouts/win98.svg), the width of the card and 62 tall, kept whole (an image fits inside its
-// box), rounded 6 with a 1 px border.
+// The layout's preview picture in Settings (win98.svg), fit whole inside the card's box, with
+// rounded corners and a 1 px border.
 void preview(App::State& s, ImDrawList* dl, ImVec2 a, ImVec2 size, float rounding, ImU32 border) {
     constexpr float kW = 320, kH = 200;  // its viewBox
     const float k = std::min(size.x / kW, size.y / kH);
@@ -651,10 +651,10 @@ void preview(App::State& s, ImDrawList* dl, ImVec2 a, ImVec2 size, float roundin
     dl->AddRect(a, ImVec2(a.x + size.x, a.y + size.y), border, rounding);
 }
 
-// ---------------------------------------------------------------- the window (win98.json)
+// ---------------------------------------------------------------- the layout
 
 // The layout's background: its color (Display Properties > Wallpaper), or the clouds picture
-// covering it (dialog.js 919-925).
+// covering it.
 void background(App::State& s, ImDrawList* dl, Box b) {
     const std::string c = shared_str(s, "win98.desktop");
     if (c == "clouds") {
@@ -672,15 +672,14 @@ void background(App::State& s, ImDrawList* dl, Box b) {
     fill(dl, b, c.empty() ? rgb(C::kDesktop) : hex(c));
 }
 
-// win98.json: a column of the screen (the desktop, 84 px, and the panes with 10 px padding;
-// Clippy floats over it) and the taskbar (28 px). The layout engine places them (draw_layout);
-// this is what the taskbar does each time it shows, before its blocks draw.
+// The layout is a row of the desktop (84 px) and the panes (10 px padding; Clippy floats over
+// it) above the taskbar (28 px). The layout engine places them (draw_layout); this runs each frame
+// the layout shows, before its blocks draw.
 void begin(App::State& s) {
     W98& w = st(s);
     ensure_fonts(s);
     if (!w.was_shown) {
-        // taskbar.js 68-107: a new taskbar: the Start menu closed, the boot (always when the app
-        // just started).
+        // Newly shown: the Start menu closed, then the boot (forced when the app just started).
         w.was_shown = true;
         if (!shared(s, "win98.start").is_null())
             set_shared(s, "win98.start", nullptr);
@@ -691,8 +690,8 @@ void begin(App::State& s) {
     w.wakeup_ms = 250;
 }
 
-// kit.js 441-479 fitLayout: the bars in Win98 pixels (n * scale / zoom layout px, which the zoom
-// makes n * scale screen px), whole on screen as before. Clicks, not edits (layout_sync.rs 324).
+// Sizes the desktop and taskbar bars in whole Win98 pixels: n * scale / zoom layout px, which the
+// zoom turns back into n * scale screen px. These are runtime sizes, not edits to the saved layout.
 void fit(App::State& s, ui::layout::Node& root) {
     const float zoom = g_scale;
     auto want = [&](float n) { return snap(U(s, n)) / zoom; };
@@ -732,7 +731,7 @@ void overlays(App::State& s) {
     w.wakeup_ms = ms;
 }
 
-// A layout switch closes windows and menus (herdr.d.ts 405).
+// A layout switch closes windows and menus.
 void hidden(App::State& s) {
     W98& w = st(s);
     if (!w.was_shown)

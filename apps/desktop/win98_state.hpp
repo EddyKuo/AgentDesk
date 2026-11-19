@@ -1,7 +1,7 @@
 #pragma once
-// Herdr 98's state in agent-ui (herdr-app defaults/mods/win98, commit 321c9a8): the open menus,
-// dialogs and game windows that herdr opens as overlays, the shared values the mod keeps
-// (herdr's shared(), persisted: <data>\win98.json), and the games. Drawn by win98_*.cpp.
+// State of the AgentDesk 98 layout in agent-ui: the open menus, dialogs and game windows drawn as
+// overlays, the shared values persisted in <data>\win98.json, and the games. Drawn by win98_*.cpp.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include <chrono>
 #include <functional>
 #include <map>
@@ -20,10 +20,10 @@ namespace agentdesk::desktop::w98state {
 
 using Clock = std::chrono::steady_clock;
 
-// kit.js 350-355: a menu item. `act` is what perform() does (kit.js 388-400).
+// A menu item. `act` runs when it is chosen; `sub` makes it open a submenu instead.
 struct MenuItem {
     std::string label;
-    std::string icon;  // an icon of the mod (icons/<name>.svg)
+    std::string icon;  // an icon under win98/icons (<name>.svg)
     std::string img;   // a picture file under win98\ (programs/claude.svg)
     std::string shortcut;
     std::function<void()> act;
@@ -35,7 +35,7 @@ struct MenuItem {
     bool sep = false;
 };
 
-// menu.js: one popup menu. Its parents are the menus it hangs off.
+// One popup menu. Its parents are the menus it hangs off.
 struct Menu {
     int id = 0;
     std::vector<MenuItem> items;
@@ -50,7 +50,7 @@ struct Menu {
     int opened_frame = -1;  // the press that opened it is not one beside it
 };
 
-// dialog.js: one dialog window, by kind, with its props and state.
+// One dialog window, by kind, with its props and state.
 struct Button {
     std::string label;
     bool def = false;
@@ -69,7 +69,7 @@ struct Dialog {
     std::vector<Button> buttons;
     std::string mode;   // screen: boot, shutdown, restart
     float width = 340;  // Win98 px
-    // state (dialog.js 47-75)
+    // state
     std::string input;
     bool fresh = true;
     int choice = 0;
@@ -81,8 +81,8 @@ struct Dialog {
     Clock::time_point stage_at{};
 };
 
-// An overlay window: a dialog, a game or the Solitaire options (herdr openOverlay kind "window",
-// "dialog"). Game windows have a key and come back where they were dropped.
+// An overlay window: a dialog, a game or the Solitaire options. Game windows have a key and come
+// back where they were dropped.
 struct Window {
     int id = 0;
     std::string role;  // dialog, mines, sol, sol-dialog
@@ -103,12 +103,12 @@ struct Window {
 struct Clippy {
     std::vector<std::string> dismissed;  // "<session>:<status>"
     std::optional<int> tip;
-    // A drag of the float (herdr floats.rs 253-300): where it was pressed, where in it, moving.
+    // A drag of the float: where it was pressed, where in it, and whether it is moving yet.
     bool pressing = false;
     bool moving = false;
     ImVec2 down{};
     ImVec2 grab{};  // the share of its size from its top left
-    // floats.rs 64-69 FloatAnim: its offset from home when dropped, easing to zero.
+    // After a drop: its offset from its new home, easing to zero.
     std::optional<ImVec2> spring_from;
     Clock::time_point spring_start{};
 };
@@ -125,15 +125,15 @@ struct W98 {
     ImVec2 drag_grab{};
     bool was_shown = false;  // the layout showed last frame
     int menu_focus = 0;      // the menu given the keyboard
-    std::string sol_menu;    // sol.js 380: the Solitaire menu opened last
+    std::string sol_menu;    // the Solitaire menu opened last
     long long wakeup_ms = 1000;
-    // taskbar.js
+    // the taskbar
     bool booted = false;                 // the taskbar started for this showing of the layout
     std::vector<std::string> installed;  // agent profiles the Start menu offers
     ImVec4 start_bounds{};               // the Start button (x, y, w, h)
     std::string desktop_sel;
     float desktop_scroll = 0;
-    // Games (mines.js, sol.js); made when first opened.
+    // Games; made when first opened.
     std::unique_ptr<ui::win98::Mines> mines;
     Clock::time_point mines_tick{};
     std::unique_ptr<ui::win98::Solitaire> sol;
@@ -151,7 +151,7 @@ struct W98 {
     ImFont* font = nullptr;  // Pixelated MS Sans Serif
     ImFont* bold = nullptr;
     ImFont* dos = nullptr;    // PxPlus IBM VGA 8x16
-    ImFont* arial = nullptr;  // Mines numbers (mines.js 157: Arial bold)
+    ImFont* arial = nullptr;  // the Mines numbers (Arial bold)
     bool fonts_tried = false;
     std::string applied_layout;  // the layout whose fonts are in use
 };

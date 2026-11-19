@@ -1,14 +1,14 @@
 // AgentDesk 98 dialogs (Run, Shut Down, Display, Find, ...).
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail::w98 {
 
-// Herdr 98, part 2: the dialogs (herdr-app defaults/mods/win98/dialog.js, commit 321c9a8).
-// Each kind is drawn top-down in Win98 px from dialog.js; the window's height is what it took.
+// Each kind is drawn top-down in Win98 px; the window's height is whatever its body took.
 
 namespace {
-// dialog.js 26-38.
+// The title of a dialog that does not set its own.
 std::string kind_title(const std::string& kind) {
     static const std::map<std::string, std::string> kT = {{"run", "Run"},
                                                           {"shutdown", "Shut Down AgentDesk"},
@@ -51,7 +51,7 @@ int buttons(App::State& s, ImDrawList* dl, float x0, float x1, float y, const st
 }
 
 namespace {
-// dialog.js 275-285: the text box: the text (selected while fresh) and a blinking caret.
+// The text box: the text (selected while fresh) and a blinking caret.
 void input(App::State& s, ImDrawList* dl, Box b, const Dialog& d) {
     const Box in = field(s, dl, b);
     dl->PushClipRect(in.a(), in.b(), true);
@@ -64,14 +64,14 @@ void input(App::State& s, ImDrawList* dl, Box b, const Dialog& d) {
     } else {
         x += label(s, dl, x, top, d.input, rgb(C::kText), false, 11, 13, false);
     }
-    // loop("opacity", {from: 0, to: 1, period: 1060})
+    // The caret fades in and out over 1060 ms.
     const double t = std::fmod(ImGui::GetTime() * 1000.0, 1060.0) / 1060.0;
     const int a = static_cast<int>(255.0 * (t < 0.5 ? t * 2 : 2 - t * 2));
     fill(dl, Box{snap(x), snap(top), snap(x) + one(s), snap(top + U(s, 13))}, rgb(C::kText, a));
     dl->PopClipRect();
 }
 
-// dialog.js 287-299: a radio button and its label.
+// A radio button and its label.
 bool radio(App::State& s, ImDrawList* dl, const char* id, float x, float y, const std::string& text,
            bool on) {
     const float w = U(s, 12) + U(s, 6) + text_w(s, k98::plain(text));
@@ -82,7 +82,7 @@ bool radio(App::State& s, ImDrawList* dl, const char* id, float x, float y, cons
     return p.clicked;
 }
 
-// dialog.js 301-316: a check box (a 13 px field) and its label.
+// A check box (a 13 px field) and its label.
 bool check(App::State& s, ImDrawList* dl, const char* id, float x, float y, const std::string& text,
            bool on) {
     const float w = U(s, 13) + U(s, 6) + text_w(s, k98::plain(text));
@@ -100,7 +100,7 @@ void close_dialog(App::State& /*s*/, Window& w) {
     w.closing = true;
 }
 
-// dialog.js 185-188.
+// Steps the prompt's computer (this one, then each remote machine) by `dir`, wrapping.
 void pick_machine(App::State& s, Dialog& d, int dir) {
     std::vector<std::string> all = {""};
     for (const auto& m : s.settings.machines)
@@ -111,8 +111,8 @@ void pick_machine(App::State& s, Dialog& d, int dir) {
     d.machine = all[static_cast<std::size_t>((i + dir + n) % n)];
 }
 
-// dialog.js 221-229: a command line in a new tab, then the shell stays (herdr: sh -c "<cmd>;
-// exec $SHELL"). On Windows the shell runs it and stays: PowerShell -NoExit -Command, cmd /K.
+// Runs a command line in a new tab, and the shell stays afterwards: PowerShell -NoExit -Command,
+// cmd /K, or a POSIX shell's -c "<cmd>; exec $SHELL".
 void run_it(App::State& s, Window& w, Dialog& d) {
     std::string cmd = d.input;
     while (!cmd.empty() && std::isspace(static_cast<unsigned char>(cmd.back())))
@@ -138,7 +138,7 @@ void run_it(App::State& s, Window& w, Dialog& d) {
     new_tab(s, k98::run_name(cmd), -1, shell, args);
 }
 
-// dialog.js 231-245.
+// Shut Down's choice: stand by, shut down, restart, or "Restart in DOS mode" (the Terminals layout).
 void shutdown_choice(App::State& s, Window& w, Dialog& d) {
     const int c = d.choice;
     close_dialog(s, w);
@@ -160,7 +160,7 @@ void shutdown_choice(App::State& s, Window& w, Dialog& d) {
     }
 }
 
-// dialog.js 253-259.
+// Close Program's End Task: kills the selected terminal.
 void end_task(App::State& s, Dialog& d) {
     const auto list = tasks(s);
     if (d.sel < 0 || d.sel >= static_cast<int>(list.size()))
@@ -170,7 +170,7 @@ void end_task(App::State& s, Dialog& d) {
     d.sel = std::max(0, d.sel - 1);
 }
 
-// dialog.js 190-219.
+// OK (or Enter), per kind.
 void ok(App::State& s, Window& w, Dialog& d) {
     if (d.kind == "prompt") {
         std::string name = d.input;
@@ -209,7 +209,7 @@ void ok(App::State& s, Window& w, Dialog& d) {
 
 }  // namespace
 
-// dialog.js 154-183: the keys of the dialog that has the keyboard.
+// The keys of the dialog that has the keyboard.
 void dialog_keys(App::State& s, Window& w, Dialog& d) {
     auto pressed = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, true); };
     const ImGuiIO& io = ImGui::GetIO();
@@ -238,7 +238,7 @@ void dialog_keys(App::State& s, Window& w, Dialog& d) {
         } else if (io.KeyCtrl && pressed(ImGuiKey_U)) {
             d.input.clear();
         } else if (io.KeyCtrl && pressed(ImGuiKey_W)) {
-            // replace(/\S+\s*$/, "")
+            // Deletes the last word and the spaces after it.
             std::size_t e = d.input.size();
             while (e > 0 && std::isspace(static_cast<unsigned char>(d.input[e - 1])))
                 --e;
@@ -311,7 +311,7 @@ void dialog_keys(App::State& s, Window& w, Dialog& d) {
 namespace {
 // ---------------------------------------------------------------- the kinds
 
-// dialog.js 333-360.
+// A prompt: an icon, the text, a text box and, when asked, a choice of computer.
 float render_prompt(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     const float x0 = b.x0 + U(s, 10), x1 = b.x1 - U(s, 10);
     float y = b.y0 + U(s, 10);
@@ -353,7 +353,7 @@ float render_prompt(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) 
     return y + U(s, 23) + U(s, 10) - b.y0;
 }
 
-// dialog.js 362-386 (confirm and message).
+// A confirmation or a message: an optional icon, the text and a centered row of buttons.
 float render_confirm(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     const float x0 = b.x0 + U(s, 12), x1 = b.x1 - U(s, 12);
     float y = b.y0 + U(s, 12);
@@ -379,7 +379,7 @@ float render_confirm(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
     return y + U(s, 23) + U(s, 12) - b.y0;
 }
 
-// dialog.js 388-423.
+// Run: the text box with its history button.
 float render_run(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     const float x0 = b.x0 + U(s, 10), x1 = b.x1 - U(s, 10);
     float y = b.y0 + U(s, 10);
@@ -426,7 +426,7 @@ float render_run(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     return y + U(s, 23) + U(s, 10) - b.y0;
 }
 
-// dialog.js 425-449.
+// Shut Down: four choices.
 float render_shutdown(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     const float x0 = b.x0 + U(s, 10), x1 = b.x1 - U(s, 10);
     float y = b.y0 + U(s, 10);
@@ -455,7 +455,7 @@ float render_shutdown(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b
     return y + U(s, 23) + U(s, 10) - b.y0;
 }
 
-// dialog.js 451-457.
+// Log Off.
 float render_logoff(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     const float x0 = b.x0 + U(s, 12), x1 = b.x1 - U(s, 12);
     float y = b.y0 + U(s, 12);
@@ -471,7 +471,7 @@ float render_logoff(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) 
     return y + U(s, 23) + U(s, 12) - b.y0;
 }
 
-// dialog.js 459-493.
+// About: the brand picture and a few lines of (mostly playful) system information.
 float render_about(App::State& s, Window& w, Dialog& /*d*/, ImDrawList* dl, Box b) {
     const float x0 = b.x0 + U(s, 10), x1 = b.x1 - U(s, 10);
     float y = b.y0 + U(s, 10);
@@ -511,7 +511,7 @@ float render_about(App::State& s, Window& w, Dialog& /*d*/, ImDrawList* dl, Box 
     return y + U(s, 23) + U(s, 10) - b.y0;
 }
 
-// dialog.js 495-542.
+// Close Program: every running terminal, End Task and Shut Down.
 float render_taskman(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     const auto list = tasks(s);
     if (d.sel >= static_cast<int>(list.size()))
@@ -572,7 +572,7 @@ float render_taskman(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
     return y + U(s, 23) + U(s, 10) - b.y0;
 }
 
-// dialog.js 544-653.
+// Display Properties: Background, Effects and Settings pages.
 float render_display(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     const float x0 = b.x0 + U(s, 8), x1 = b.x1 - U(s, 8);
     float y = b.y0 + U(s, 8);
@@ -596,8 +596,8 @@ float render_display(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
     }
     // The page frame first; the chosen tab is drawn over its top edge.
     const float fy = y + row_h;
-    // div().p(10).min_h(300): the Background page is taller (monitor 170, gap 8, label 13, gap 8,
-    // the list of six 16 px rows in a field).
+    // Padding 10, at least 300 tall; the Background page is taller (monitor 170, gap 8, label 13,
+    // gap 8, the list of six 16 px rows in a field).
     const float page_h =
         d.page == 0 ? std::max(U(s, 300), U(s, 20 + 170 + 8 + 13 + 8 + 16 * 6 + 6)) : U(s, 300);
     const Box pb{x0, fy, x1, snap(fy + 2 * one(s) + page_h + 2 * one(s))};
@@ -705,7 +705,7 @@ float render_display(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
     return y + U(s, 23) + U(s, 8) - b.y0;
 }
 
-// dialog.js 655-709 and 927-958.
+// Date/Time Properties: the month, the year, the calendar, the clock face and the time zone.
 float render_datetime(App::State& s, Window& w, Dialog& /*d*/, ImDrawList* dl, Box b) {
     const k98::DateTime d = local_now();
     const float x0 = b.x0 + U(s, 10), x1 = b.x1 - U(s, 10);
@@ -776,7 +776,7 @@ float render_datetime(App::State& s, Window& w, Dialog& /*d*/, ImDrawList* dl, B
     return y + U(s, 23) + U(s, 10) - b.y0;
 }
 
-// dialog.js 711-755: an Explorer-ish window: icons in a 200 px field, a status bar.
+// An Explorer-like window body: icons in a 200 px field, a status bar.
 struct ExItem {
     std::string label;
     std::string icon;
@@ -844,7 +844,7 @@ float explorer(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b, const
     return sy + sh - b.y0;
 }
 
-// dialog.js 757-767.
+// My Computer: a drive per space, Control Panel and Printers.
 float render_mycomputer(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     static const char* const kLetters = "CDEFGHIJKLMNOPQRSTUVWXYZ";
     std::vector<ExItem> items;
@@ -868,7 +868,7 @@ float render_mycomputer(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box
     return explorer(s, w, d, dl, b, items, std::to_string(items.size()) + " object(s)");
 }
 
-// dialog.js 769-780.
+// Network Neighborhood: this computer and each remote machine; opening one makes a space there.
 float render_network(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     std::vector<ExItem> items;
     items.push_back({"Entire Network", "network", nullptr});
@@ -891,7 +891,7 @@ float render_network(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
     return explorer(s, w, d, dl, b, items, std::to_string(items.size()) + " object(s)");
 }
 
-// dialog.js 871-876.
+// Recycle Bin: always empty.
 float render_bin(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     float h = explorer(s, w, d, dl, b, {}, "0 object(s)");
     h += U(s, 8);
@@ -900,7 +900,7 @@ float render_bin(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     return h + U(s, 23);
 }
 
-// dialog.js 782-869.
+// Welcome: a contents list on the left, the chosen page on the right.
 float render_welcome(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {
     struct Item {
         const char* icon;
@@ -1023,7 +1023,7 @@ float render_welcome(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b)
     return fy + U(s, 8) + row_h + U(s, 8) - b.y0;
 }
 
-// dialog.js 81-150: the full-window boot, shut down and restart screens.
+// The timers of the full-window boot, shut down and restart screens.
 void screen_timers(App::State& s, Window& w, Dialog& d) {
     const auto since = Clock::now() - d.opened;
     using std::chrono::milliseconds;
@@ -1080,8 +1080,8 @@ void render_screen(App::State& s, Dialog& d, ImDrawList* dl, Box b) {
 
 }  // namespace
 
-// dialog.js 878-916: a dialog's frame (kit.js win: title bar, help unless Explorer-ish, close) and
-// its body. Returns the window's size.
+// A dialog's frame (the title bar with Help, unless Explorer-like, and Close) and its body.
+// Returns the window's size.
 ImVec2 render_dialog(App::State& s, Window& w, ImDrawList* dl, ImVec2 at) {
     Dialog& d = *w.dialog;
     if (d.kind == "screen") {
@@ -1102,7 +1102,7 @@ ImVec2 render_dialog(App::State& s, Window& w, ImDrawList* dl, ImVec2 at) {
     split.SetCurrentChannel(dl, 1);
     const float o = one(s);
     const Box frame_in{at.x + 3 * o, at.y + 3 * o, at.x + width - 3 * o, at.y + 100000};
-    // kit.js win(): title (18), gap 1, the body.
+    // The title bar (18), a 1 px gap, the body.
     std::vector<Control> controls;
     if (!explorerish)
         controls.push_back({"help", [] {}, "Help"});

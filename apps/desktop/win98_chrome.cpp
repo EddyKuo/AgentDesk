@@ -1,16 +1,12 @@
 // AgentDesk 98 chrome: command helpers, the panes' title bars, the Start menu, its commands and
 // the taskbar.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail::w98 {
 
-// Herdr 98, part 3: the window itself (herdr-app defaults/layouts/win98.json): the desktop, the
-// panes' title bars, the taskbar and its Start menu, the games, the Office Assistant, and the
-// layout's commands (keys.json section "layout:win98"). From defaults/mods/win98 taskbar.js,
-// desktop.js, window.js, mines.js, sol.js, clippy.js (commit 321c9a8).
-
-// ---------------------------------------------------------------- helpers (herdr commands by id)
+// ---------------------------------------------------------------- helpers: workspace commands by id
 
 std::string status_word(Attention a) {
     switch (a) {
@@ -67,7 +63,7 @@ void select_space_id(App::State& s, const std::string& id) {
 }
 
 namespace {
-// herdr tab.select {id}: selects the tab and its space; a settled tab is shown again.
+// Selects the tab and its space; a settled tab is shown again.
 void select_tab_id(App::State& s, const std::string& id) {
     const auto loc = ui::find_tab(s.ws, id);
     if (loc.space < 0)
@@ -78,8 +74,8 @@ void select_tab_id(App::State& s, const std::string& id) {
     dirty(s);
 }
 
-// herdr tab.settle {id} (model.rs 470-484): the shown one hands over to the next unsettled tab;
-// the last one stays shown, settled.
+// Settles (minimizes) a tab: the shown one hands over to the next unsettled tab; the last one
+// stays shown, settled.
 void settle_tab_id(App::State& s, const std::string& id) {
     const auto loc = ui::find_tab(s.ws, id);
     if (loc.space < 0)
@@ -106,7 +102,7 @@ void rename_space_id(App::State& s, const std::string& id, const std::string& na
     dirty(s);
 }
 
-// herdr tab.new {name, argv, space}: a terminal in a new tab (a shell, or the program asked for).
+// A terminal in a new tab (a shell, or the program asked for).
 void new_tab(App::State& s, const std::string& name, int space, const std::string& profile,
              const std::vector<std::string>& args) {
     Placement p;
@@ -128,7 +124,7 @@ void new_tab(App::State& s, const std::string& name, int space, const std::strin
     create_session(s, prof, cwd, name, p, args);
 }
 
-// herdr space.new {name, machine}.
+// A new space with a shell, on this computer (machine "") or a remote one.
 void new_space(App::State& s, const std::string& name, const std::string& machine) {
     Placement p;
     p.target = LaunchTarget::kSpace;
@@ -174,7 +170,7 @@ Dialog kind_dialog(const std::string& kind) {
 }
 
 namespace {
-// taskbar.js 519-541.
+// Asks before closing a tab.
 Dialog close_tab_ask(App::State& s, const ui::Tab& tab, int index) {
     Dialog d;
     d.kind = "confirm";
@@ -203,7 +199,7 @@ Dialog close_space_ask(App::State& s, int index) {
     return d;
 }
 
-// dialog.js 247-251: every terminal that has not finished.
+// Every terminal that has not finished (Close Program's list).
 std::vector<Task> tasks(App::State& s) {
     std::vector<Task> out;
     for (const auto& sess : s.sessions) {
@@ -224,19 +220,19 @@ std::vector<Task> tasks(App::State& s) {
     return out;
 }
 
-// dialog.js 919-925: the desktop's color or the clouds picture.
+// The desktop's color ("#rrggbb"), or "clouds" for the picture.
 void set_desktop(App::State& s, const std::string& c) {
     set_shared(s, "win98.desktop", c);
 }
 
 namespace {
-// window.js 9-17: a pane's title.
+// A pane's title: "<program> - <terminal title>", or the DOS path when there is no title.
 std::string pane_title_98(App::State& s, const std::string& id) {
     const auto it = s.views_by_id.find(id);
     if (it == s.views_by_id.end())
         return {};
     const auto& v = it->second;
-    // window.js 12-13: no program, or a shell -> "DOS Prompt - <dos path>".
+    // No program, or a shell: "DOS Prompt - <dos path>".
     const ui::Program prog = program_of(v);
     const std::string where = k98::dos_path(v.cwd, home_dir());
     if (prog.shell)
@@ -252,7 +248,7 @@ std::string pane_title_98(App::State& s, const std::string& id) {
     return !t.empty() && t != pname ? pname + " - " + t : pname + " - " + where;
 }
 
-// ---------------------------------------------------------------- pane title bars (window.js)
+// ---------------------------------------------------------------- pane title bars
 
 void pane_header(App::State& s, const std::string& id, Box b, bool focused) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -263,7 +259,7 @@ void pane_header(App::State& s, const std::string& id, Box b, bool focused) {
             : nullptr;
     const bool zoomed = tab != nullptr && tab->zoomed == id;
     const std::string tab_id = tab != nullptr ? tab->id : std::string();
-    // div().bg(face).pb(1) around the bar.
+    // The face color around the bar, 1 px below it.
     fill(dl, b, rgb(C::kFace));
     const Box bar{b.x0, b.y0, b.x1, b.y1 - one(s)};
     std::string act;
@@ -325,7 +321,7 @@ void pane_header(App::State& s, const std::string& id, Box b, bool focused) {
 
 }  // namespace
 
-// kit.js 464-473 (fitLayout): the pane header 18 and the border 3, in Win98 px.
+// The pane header (18) and border (3), in Win98 px.
 float pane_border(App::State& s) {
     return snap(U(s, k98::kBorderPx));
 }
@@ -337,9 +333,9 @@ void pane_header_at(App::State& s, const std::string& id, ImVec2 a, ImVec2 b, bo
 }
 
 namespace {
-// ---------------------------------------------------------------- the Start menu (taskbar.js 197-264)
+// ---------------------------------------------------------------- the Start menu
 
-// taskbar.js 15-27: the agents the Start menu offers when installed (here: a host profile).
+// The agents the Start menu offers when installed (a host profile with that id).
 struct Agent98 {
     const char* cmd;
     const char* name;
@@ -446,7 +442,7 @@ MenuItems start_items(App::State& s) {
     };
 }
 
-// taskbar.js 266-274.
+// Opens the Start menu (above its button when known), or closes it.
 void toggle_start(App::State& s, std::optional<Box> bounds) {
     if (!shared(s, "win98.start").is_null()) {
         close_all_menus(s);
@@ -458,7 +454,7 @@ void toggle_start(App::State& s, std::optional<Box> bounds) {
     set_shared(s, "win98.start", id);
 }
 
-// ---------------------------------------------------------------- commands (taskbar.js 126-176)
+// ---------------------------------------------------------------- the layout's commands (win98.<name>)
 
 void open_run(App::State& s) {
     open_dialog(s, kind_dialog("run"));
@@ -525,8 +521,8 @@ void command(App::State& s, const std::string& c) {
     }
 }
 
-// taskbar.js 109-120: coming into Herdr 98: the boot screen and the welcome (at most every half
-// hour unless forced), else just the chime (not on every reload).
+// Coming into AgentDesk 98: the boot screen and the welcome (at most every half hour unless
+// forced), else just the chime (not more than every 20 seconds).
 void boot(App::State& s, bool force) {
     const long long now = now_ms();
     const Json& lb = shared(s, "win98.boot");
@@ -545,7 +541,7 @@ void boot(App::State& s, bool force) {
     }
 }
 
-// Seconds since agent-ui started (taskbar.js 48-59 asks ps for the app's age).
+// Seconds since agent-ui started, or -1.
 long long app_age_seconds() {
     FILETIME created{}, exited{}, kernel{}, user{};
     if (!::GetProcessTimes(::GetCurrentProcess(), &created, &exited, &kernel, &user))
@@ -559,7 +555,7 @@ long long app_age_seconds() {
 }
 
 namespace {
-// ---------------------------------------------------------------- the taskbar (taskbar.js 276-516)
+// ---------------------------------------------------------------- the taskbar
 
 void tab_button(App::State& s, ImDrawList* dl, int i, const ui::Tab& t, Box b) {
     auto* sp = s.ws.active();
@@ -609,7 +605,7 @@ void tab_button(App::State& s, ImDrawList* dl, int i, const ui::Tab& t, Box b) {
     program_icon(s, dl, program, 16, ImVec2(face.x0, iy));
     if (!badge.empty()) {
         int alpha = 255;
-        if (badge == "hourglass") {  // loop("opacity", {from: 0.35, to: 1, period: 1400})
+        if (badge == "hourglass") {  // pulses between 35% and 100% over 1400 ms
             const double t2 = std::fmod(ImGui::GetTime() * 1000.0, 1400.0) / 1400.0;
             alpha = static_cast<int>(255.0 * (0.35 + 0.65 * (t2 < 0.5 ? t2 * 2 : 2 - t2 * 2)));
         }
@@ -686,7 +682,7 @@ void game_button(App::State& s, ImDrawList* dl, const std::string& key, const st
     }
 }
 
-// taskbar.js 370-398: Quick Launch: flat until hovered, then a 1 px raised bump.
+// A Quick Launch button: flat until hovered, then a 1 px raised bump.
 void quick(App::State& s, ImDrawList* dl, const char* id, Box b,
            const std::function<void(ImVec2)>& draw_icon_at, const std::string& tip,
            const std::function<void()>& act) {
@@ -767,7 +763,7 @@ void tray(App::State& s, ImDrawList* dl, Box b, const std::vector<TrayAgent>& ag
                                                           : std::string();
         if (!badge.empty()) {
             int alpha = 255;
-            if (a.status == "blocked") {  // loop("opacity", {from: 0, to: 1, period: 900})
+            if (a.status == "blocked") {  // blinks over 900 ms
                 const double t = std::fmod(ImGui::GetTime() * 1000.0, 900.0) / 900.0;
                 alpha = static_cast<int>(255.0 * (t < 0.5 ? t * 2 : 2 - t * 2));
             }
@@ -833,7 +829,7 @@ void taskbar(App::State& s, ImDrawList* dl, Box b) {
     auto separator = [&] {
         etch(s, dl, snap(x), snap(cy - U(s, 10)), U(s, 20), true);
         x += 2 * o + U(s, 2);
-        // kit.js 184-186: the grip, a 1 px bump, 20 tall.
+        // The grip: a 1 px bump, 20 tall.
         bevel(s, dl, box(ImVec2(x, cy - U(s, 10)), ImVec2(3 * o, U(s, 20))), Bevel::kBump);
         x += 3 * o + U(s, 2);
     };
