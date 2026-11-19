@@ -1,3 +1,4 @@
+// Rebuilds a session's screen from the host's snapshot chunks and deltas.
 #include "agentdesk/ui/remote_screen.hpp"
 
 #include <algorithm>

@@ -1,3 +1,6 @@
+// HostClient: the UI's connection to agent-host (connect or start, reconnect, session list,
+// per-session screen state) on a worker thread.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/host_client.hpp"
 
 #include <algorithm>
@@ -477,19 +480,19 @@ void HostClient::shutdown_host(bool stop_sessions, std::function<void(std::strin
 }
 
 bool HostClient::try_connect(bool allow_start) {
-    auto hc = options_.connector
-                  ? options_.connector()
-                  : ipc::connect_or_start_host(options_.host_exe, options_.pipe_name, 10s, allow_start);
-    if (!hc.client) {
+    auto conn = options_.connector
+                    ? options_.connector()
+                    : ipc::connect_or_start_host(options_.host_exe, options_.pipe_name, 10s, allow_start);
+    if (!conn.client) {
         std::lock_guard lock(mutex_);
-        last_error_ = hc.error.empty() ? std::string("agent-host is not reachable") : hc.error;
+        last_error_ = conn.error.empty() ? std::string("agent-host is not reachable") : conn.error;
         return false;
     }
-    transport_ = hc.transport;
-    if (hc.host_dies_with_launcher)
+    transport_ = conn.transport;
+    if (conn.host_dies_with_launcher)
         host_dies_with_launcher_ = true;
-    hc.client->set_event_handler([this](protocol::Event e) { on_event(std::move(e)); });
-    hc.client->set_disconnect_handler([this] {
+    conn.client->set_event_handler([this](protocol::Event e) { on_event(std::move(e)); });
+    conn.client->set_disconnect_handler([this] {
         connected_ = false;
         notify();
     });
@@ -497,11 +500,11 @@ bool HostClient::try_connect(bool allow_start) {
         std::lock_guard lock(mutex_);
         // New host instance: sessions we knew were owned by the old one and are Lost now.
         // Never re-run anything automatically (design doc 4.3). Unless the new host took them
-        // over in a self-update (design doc 7.4 OQ-09; herdr hc.rs 26-28: "cores restart and
-        // their programs survive, so reattach later"): then they are the same, still running.
-        const bool took_over = std::find(hc.host_succeeds.begin(), hc.host_succeeds.end(), instance_id_) !=
-                               hc.host_succeeds.end();
-        if (!instance_id_.empty() && instance_id_ != hc.host_instance_id && !took_over) {
+        // over in a self-update (design doc 7.4 OQ-09): the host restarts but its programs keep
+        // running, so the sessions are the same ones and are reattached.
+        const bool took_over = std::find(conn.host_succeeds.begin(), conn.host_succeeds.end(),
+                                         instance_id_) != conn.host_succeeds.end();
+        if (!instance_id_.empty() && instance_id_ != conn.host_instance_id && !took_over) {
             for (auto& [id, s] : sessions_) {
                 std::lock_guard sl(s->mutex_);
                 s->view_.lost = true;
@@ -515,11 +518,11 @@ bool HostClient::try_connect(bool allow_start) {
             s->attached_ = false;  // subscriptions die with the old connection
             s->screen_.mark_needs_snapshot();
         }
-        instance_id_ = hc.host_instance_id;
-        host_version_ = hc.host_version;
+        instance_id_ = conn.host_instance_id;
+        host_version_ = conn.host_version;
         last_error_.clear();
     }
-    client_ = std::move(hc.client);
+    client_ = std::move(conn.client);
     connected_ = true;
     // Host replies are checked field by field: a malformed one is skipped, not fatal.
     if (const auto r = client_->call("profile.list", Json::object());

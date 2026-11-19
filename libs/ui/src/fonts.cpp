@@ -1,3 +1,6 @@
+// Loads the bundled fonts into ImGui with CJK and symbol fallbacks, and lists installed font
+// families from the registry.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/fonts.hpp"
 
 #include <windows.h>

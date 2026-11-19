@@ -1,6 +1,7 @@
 #pragma once
 
-// What the Windows clipboard holds, for the terminal's paste (herdr src/terminal.rs:788-815).
+// What the Windows clipboard holds, for the terminal's paste: copied files, text, or an image.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 
 #include <optional>
 #include <string>

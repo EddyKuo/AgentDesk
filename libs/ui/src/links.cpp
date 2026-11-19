@@ -1,3 +1,6 @@
+// Links in terminal text: finding URLs and paths (Ghostty's pattern), resolving them, and
+// opening them with the system's handler.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/links.hpp"
 
 #include <windows.h>
@@ -23,7 +26,7 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// Ghostty's schemes (herdr src/links.rs:11), the only ones a link may open.
+// Ghostty's schemes, the only ones a link may open.
 constexpr std::array<std::string_view, 15> kSchemes = {
     "https://", "http://", "mailto:",  "ftp://",    "file:",     "ssh://",   "ssh:",   "git://",
     "tel:",     "magnet:", "ipfs://", "ipns://", "gemini://", "gopher://", "news:",
@@ -76,7 +79,7 @@ std::size_t url_at(const std::string& t, std::size_t i) {
     return 0;
 }
 
-// rooted_path and bare_path (herdr src/links.rs:22-27), ending without a colon.
+// Ghostty's rooted_path and bare_path, ending without a colon.
 std::size_t path_at(const std::string& t, std::size_t i) {
     std::size_t p = 0;  // end of the rooted prefix
     const unsigned char c = at_or_0(t, i);
@@ -173,7 +176,7 @@ bool has_file_scheme(const std::string& link) {
            });
 }
 
-// The path a file: URL names on this computer, percent-decoded (herdr links::file_url_path).
+// The path a file: URL names on this computer, percent-decoded.
 // Every spelling counts (FILE:///C:/x, file:/C:/x, file://server/share/x); a host other than
 // localhost names a UNC path (\\server\share\x).
 std::optional<std::string> file_url_path(const std::string& link) {

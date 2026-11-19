@@ -1,3 +1,5 @@
+// Keymap: parsing and formatting key chords, the default bindings, and applying keys.json.
+// Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/keymap.hpp"
 
 #include <cctype>
@@ -118,7 +120,8 @@ std::string Keymap::format(ImGuiKeyChord chord) {
 
 namespace {
 
-// herdr's defaults/keys.json for Windows (spec-settings-fonts.md 3.2), plus ctrl-1..9 / alt-1..9.
+// The default "global" section on Windows (spec-settings-fonts.md 3.2); ctrl-1..9 and alt-1..9
+// are added by for_each_default.
 constexpr std::pair<const char*, const char*> kGlobal[] = {
     {"ctrl-shift-t", "tab.new"},
     {"ctrl-shift-n", "space.new"},
@@ -168,7 +171,7 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
     {"ctrl-shift-v", "terminal.paste"},
     {"shift-insert", "terminal.paste"},
     {"ctrl-shift-f", "terminal.search"},
-    // herdr terminal.paste_image: on Windows the clipboard text, else Ctrl+V for the program.
+    // terminal.paste_image: the clipboard text, else Ctrl+V so the program reads the clipboard.
     {"ctrl-v", "terminal.paste_image"},
     {"ctrl-backspace", "send:\x17"},
     {"ctrl-left",
@@ -179,12 +182,26 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
      "f"},
 };
 
-// herdr-app defaults/mods/win98/README.md 12-13: keys.json section "layout:win98",
-// win98.start (Ctrl+Esc) and win98.taskman (Ctrl+Shift+Esc).
+// Section "layout:win98": the Start menu (Ctrl+Esc) and Task Manager (Ctrl+Shift+Esc).
 constexpr std::pair<const char*, const char*> kWin98[] = {
     {"ctrl-escape", "win98.start"},
     {"ctrl-shift-escape", "win98.taskman"},
 };
+
+// Calls f(section, chord text, command) for every default binding, in install order.
+template <class F>
+void for_each_default(F&& f) {
+    for (const auto& [chord, cmd] : kGlobal)
+        f("global", std::string(chord), std::string(cmd));
+    for (int i = 1; i <= 9; ++i) {
+        f("global", "ctrl-" + std::to_string(i), "tab.select:" + std::to_string(i));
+        f("global", "alt-" + std::to_string(i), "space.select:" + std::to_string(i));
+    }
+    for (const auto& [chord, cmd] : kTerminal)
+        f("terminal", std::string(chord), std::string(cmd));
+    for (const auto& [chord, cmd] : kWin98)
+        f("layout:win98", std::string(chord), std::string(cmd));
+}
 
 }  // namespace
 
@@ -196,39 +213,26 @@ const std::map<ImGuiKeyChord, std::string>& Keymap::layout_map() const {
 
 Keymap Keymap::defaults() {
     Keymap k;
-    for (const auto& [chord, cmd] : kGlobal)
-        k.global_[*parse(chord)] = cmd;
-    for (const auto& [chord, cmd] : kWin98)
-        k.sections_["layout:win98"][*parse(chord)] = cmd;
-    for (int i = 1; i <= 9; ++i) {
-        k.global_[*parse("ctrl-" + std::to_string(i))] = "tab.select:" + std::to_string(i);
-        k.global_[*parse("alt-" + std::to_string(i))] = "space.select:" + std::to_string(i);
-    }
-    for (const auto& [chord, cmd] : kTerminal)
-        k.terminal_[*parse(chord)] = cmd;
+    for_each_default([&](const std::string& section, const std::string& chord, std::string cmd) {
+        auto& map = section == "global"     ? k.global_
+                    : section == "terminal" ? k.terminal_
+                                            : k.sections_[section];
+        map[*parse(chord)] = std::move(cmd);
+    });
     return k;
 }
 
 nlohmann::json Keymap::default_file() {
-    nlohmann::json g = nlohmann::json::object();
-    for (const auto& [chord, cmd] : kGlobal)
-        g[chord] = cmd;
-    for (int i = 1; i <= 9; ++i) {
-        g["ctrl-" + std::to_string(i)] = "tab.select:" + std::to_string(i);
-        g["alt-" + std::to_string(i)] = "space.select:" + std::to_string(i);
-    }
-    nlohmann::json t = nlohmann::json::object();
-    for (const auto& [chord, cmd] : kTerminal)
-        t[chord] = cmd;
-    nlohmann::json w = nlohmann::json::object();
-    for (const auto& [chord, cmd] : kWin98)
-        w[chord] = cmd;
-    return {{"global", g}, {"terminal", t}, {"layout:win98", w}};
+    nlohmann::json doc = nlohmann::json::object();
+    for_each_default([&](const std::string& section, const std::string& chord, std::string cmd) {
+        doc[section][chord] = std::move(cmd);
+    });
+    return doc;
 }
 
 namespace {
 
-// herdr keys.rs 132-149: names from older releases.
+// Command names from older keys.json files, renamed to the current ones.
 std::string migrate(std::string a) {
     if (a.rfind("project.", 0) == 0)
         a = "space." + a.substr(8);
@@ -237,6 +241,30 @@ std::string migrate(std::string a) {
     if (a == "mod.open:start")
         a = "tab.new";
     return a;
+}
+
+// One keys.json value: unbind ("" or null), an action, or a problem (the text after
+// "<section>: <key>: ").
+struct EntryValue {
+    enum class Kind { kUnbind, kAction, kBad } kind;
+    std::string text;
+};
+
+EntryValue read_entry(const nlohmann::json& value) {
+    if (value.is_null() || (value.is_string() && value.get<std::string>().empty()))
+        return {EntryValue::Kind::kUnbind, {}};
+    if (value.is_string())
+        return {EntryValue::Kind::kAction, value.get<std::string>()};
+    if (value.is_object() && value.contains("command") && value["command"].is_string()) {
+        std::string action = value["command"].get<std::string>();
+        const auto args = value.value("args", nlohmann::json::object());
+        if (!args.is_object() || args.size() > 1)
+            return {EntryValue::Kind::kBad, "only one argument is supported"};
+        for (const auto& [k, v] : args.items())
+            action += ":" + (v.is_string() ? v.get<std::string>() : v.dump());
+        return {EntryValue::Kind::kAction, std::move(action)};
+    }
+    return {EntryValue::Kind::kBad, "the action must be text or {\"command\", \"args\"}"};
 }
 
 }  // namespace
@@ -267,31 +295,19 @@ std::vector<std::string> Keymap::apply(const nlohmann::json& overrides,
                 bad.push_back(section + ": cannot read the key \"" + chord_text + "\"");
                 continue;
             }
-            std::string action;
-            if (value.is_null() || (value.is_string() && value.get<std::string>().empty())) {
+            EntryValue entry = read_entry(value);
+            if (entry.kind == EntryValue::Kind::kUnbind) {
                 target->erase(*chord);
                 continue;
             }
-            if (value.is_string()) {
-                action = value.get<std::string>();
-            } else if (value.is_object() && value.contains("command") && value["command"].is_string()) {
-                action = value["command"].get<std::string>();
-                const auto args = value.value("args", nlohmann::json::object());
-                if (!args.is_object() || args.size() > 1) {
-                    bad.push_back(section + ": " + chord_text + ": only one argument is supported");
-                    continue;
-                }
-                for (const auto& [k, v] : args.items())
-                    action += ":" + (v.is_string() ? v.get<std::string>() : v.dump());
-            } else {
-                bad.push_back(section + ": " + chord_text +
-                              ": the action must be text or {\"command\", \"args\"}");
+            if (entry.kind == EntryValue::Kind::kBad) {
+                bad.push_back(section + ": " + chord_text + ": " + entry.text);
                 continue;
             }
-            action = migrate(action);
+            const std::string action = migrate(std::move(entry.text));
             if (action == "terminal") {
                 if (section == "global")
-                    continue;  // herdr: skipped in global
+                    continue;  // "terminal" only means something where a terminal has focus
             } else if (action.rfind("send:", 0) != 0 && known) {
                 const std::string name = action.substr(0, action.find(':'));
                 if (!known(name)) {
@@ -307,8 +323,6 @@ std::vector<std::string> Keymap::apply(const nlohmann::json& overrides,
     return bad;
 }
 
-// herdr-app src/keys.rs 89-109 (listing): the file's sections as written (sorted maps), the
-// defaults when it does not read, then the escape hatch.
 std::vector<Keymap::Binding> Keymap::listing(const nlohmann::json& file) {
     auto readable = [](const nlohmann::json& j) {
         if (!j.is_object())
@@ -338,11 +352,10 @@ std::vector<Keymap::Binding> Keymap::listing(const nlohmann::json& file) {
     return out;
 }
 
-// herdr-app defaults/mods/help/main.js 17-22.
 std::string Keymap::help_label(std::string_view action) {
     if (action.rfind("send:", 0) == 0)
         return "type " + nlohmann::json(std::string(action.substr(5))).dump();
-    // const [name, arg] = action.split(":"): the first two parts.
+    // Only the first two ':'-separated parts: the name and its argument.
     const auto c = action.find(':');
     std::string name(action.substr(0, c));
     std::string arg;
@@ -356,7 +369,6 @@ std::string Keymap::help_label(std::string_view action) {
     return arg.empty() ? name : name + " " + arg;
 }
 
-// herdr-app defaults/mods/help/main.js 8-15.
 const char* Keymap::help_group(std::string_view action) {
     auto starts = [&](std::string_view p) { return action.rfind(p, 0) == 0; };
     if (starts("space."))

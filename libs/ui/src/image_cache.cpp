@@ -1,3 +1,4 @@
+// SVG (lunasvg) and PNG (WIC) files decoded into ImGui textures, cached by file and size.
 #include "agentdesk/ui/image_cache.hpp"
 
 #include <windows.h>

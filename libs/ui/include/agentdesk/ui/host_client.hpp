@@ -34,7 +34,7 @@ struct SessionView {
     std::string start_cwd;  // folder the session was started in
     std::string created_at;  // ISO 8601 UTC, from the host
     std::string program;     // what runs in the terminal now ("claude", "pwsh"), from the host
-    std::vector<std::string> program_argv;  // its command line as words (herdr resolves by it)
+    std::vector<std::string> program_argv;  // its command line as words (programs are matched by it)
     std::string agent_app;                  // the 7501 report's `app`, if any
     std::string parent;      // session that started this one (sub-agent), or empty
     std::map<std::string, std::string> labels;

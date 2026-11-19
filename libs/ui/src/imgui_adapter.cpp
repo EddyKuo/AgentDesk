@@ -1,3 +1,4 @@
+// The only file that uses imgui_internal.h; see imgui_adapter.hpp.
 #include "agentdesk/ui/imgui_adapter.hpp"
 
 #include <imgui_internal.h>
@@ -60,10 +61,6 @@ void disable_nav_windowing() {
     g.ConfigNavWindowingKeyNext = 0;
     g.ConfigNavWindowingKeyPrev = 0;
 }
-
-}  // namespace agentdesk::ui::adapter
-
-namespace agentdesk::ui::adapter {
 
 void register_texture(ImTextureData* tex) {
     ImGui::RegisterUserTexture(tex);

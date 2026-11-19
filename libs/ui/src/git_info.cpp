@@ -1,3 +1,4 @@
+// Reads a folder's git branch and repository top from .git files, cached per folder.
 #include "agentdesk/ui/git_info.hpp"
 
 #include <chrono>
