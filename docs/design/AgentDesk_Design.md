@@ -1,6 +1,6 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.16  
+產品需求與系統設計文件 v2.17  
 日期：2026-11-20｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；還沒做的人工驗收見 5.4、5.7  
 技術基線：C++20、Windows 11 x64、Dear ImGui（FreeType 繪字）、Win32、DirectX 11、隨附 ConPTY
 
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.17 | 2026-11-20 | ADR-27：terminals 版面上方列最左邊加「顯示側欄」按鈕；`sidebar.toggle` 在沒有側欄的版面改為切到有側欄的版面；4.1 更新 |
 | 2.16 | 2026-11-20 | ADR-26：側欄整個隱藏時，分頁列最左邊顯示「顯示側欄」按鈕；4.1 更新 |
 | 2.15 | 2026-11-20 | ADR-25：terminals 版面的上方列加設定按鈕，三個按鈕都有名稱與快捷鍵的提示；4.1 更新 |
 | 2.14 | 2026-11-20 | ADR-24：AgentDesk 98 暫時隱藏（程式保留、照常編譯與測試）；2.4、2.8 加註 |
@@ -564,7 +565,7 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 | Details | AgentDesk 自己的面板（herdr 沒有），開啟時貼在窗格右邊：Agent 狀態與來源、訊息、程序與退出碼、控制權、停止按鈕 |
 | 狀態列 | 機器、目前分支、Agent 數量與需要你的數量；點右側的快捷鍵提示開命令面板 |
 
-terminals 版面沒有側欄與狀態列，分頁列左邊是目前的 space（點一下開 picker），右邊是設定、命令面板與新分頁三個按鈕（滑鼠停在上面會顯示名稱與快捷鍵；設定按鈕是 AgentDesk 加的，ADR-25），面板標題列的按鈕一直顯示。AgentDesk 98 見 2.8。
+terminals 版面沒有側欄與狀態列，分頁列最左邊是「顯示側欄」按鈕（切回 AgentDesk 版面，ADR-27），接著是目前的 space（點一下開 picker），右邊是設定、命令面板與新分頁三個按鈕（滑鼠停在上面會顯示名稱與快捷鍵；設定按鈕是 AgentDesk 加的，ADR-25），面板標題列的按鈕一直顯示。AgentDesk 98 見 2.8。
 
 狀態用文字與圖示搭配顏色，不能只靠顏色。Unknown 使用中性標示，Blocked（畫面上是 Needs you）才提示需要處理。根程序已退出但子程序仍存在時，明確顯示「正在清理子程序」。
 
@@ -791,6 +792,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-24 | AgentDesk 98 暫時隱藏（2026-11-20） | 使用者要求：先讓 AgentDesk 98 不要出現，但程式碼保留（使用者偏好 Mac 風格，是否移除 98 風格還沒決定）。做法：只在 agent-ui 列出版面的地方（`load_layouts`）略過 win98，內建的和 `layouts\win98.json` 都不列；`ui.json` 存的版面是 win98 時顯示第一個版面，存檔的值不改，重新開放時會回到 98。歡迎頁「More examples」不再提 AgentDesk 98。程式、素材、keys.json 的 `layout:win98` 區段與 `win98.*` 命令名稱都保留，`libs/ui` 的版面與 win98 單元測試照跑；`AGENTDESK_WIN98=1` 重新列出，截圖工具在 `--run` 含 win98 時自動設定，所以 98 的截圖比對仍可做。執行檔大小不變（程式照樣連結進去）；真正移除時再處理 |
 | ADR-25 | terminals 版面加設定按鈕（2026-11-20） | 使用者回報：切到 terminals 版面後左側欄不見，畫面上沒有按鈕能回到設定或換版面，第一次使用的人不會知道快捷鍵。herdr-app 的 terminals-bar 只有命令面板與新分頁兩個按鈕，設定與換版面只能靠快捷鍵或命令面板。做法：上方列在命令面板按鈕左邊加一個齒輪按鈕，開啟設定的 Look 頁（最上面就是版面選擇）；三個按鈕滑鼠停留時顯示名稱與目前綁定的快捷鍵（New tab、Commands、Settings and layouts）。和 herdr 不同的地方只有這兩點，尺寸與樣式沿用原本的按鈕 |
 | ADR-26 | 側欄隱藏後的「顯示側欄」按鈕（2026-11-20） | 使用者回報：按 Ctrl+Shift+B 後側欄整個不見，不用快捷鍵就叫不回來。herdr-app 也一樣：側欄自己的按鈕只把它縮成 44 px 的窄欄，整個隱藏後畫面上沒有按鈕，只能用快捷鍵或命令面板。做法：側欄節點隱藏時，分頁列最左邊（分頁前面）畫一個側欄圖示按鈕，樣式同分頁列其他 26 px 圖示按鈕，滑鼠停留顯示「Show sidebar」與目前綁定的快捷鍵，點一下執行 `sidebar.toggle`。側欄顯示時不畫，畫面與原本相同 |
+| ADR-27 | 在 terminals 版面叫出側欄（2026-11-20） | 使用者回報：按 Ctrl+Shift+L 切到 terminals 後，看不到能叫出左側欄的按鈕。terminals 版面本身沒有側欄，ADR-26 的按鈕只在有側欄的版面出現，ADR-25 的齒輪要進設定才能換版面，不夠直接。做法：(1) terminals 上方列最左邊（space 前面）加一個側欄圖示按鈕，樣式同該列其他 31 px 圖示按鈕，提示「Show sidebar」與快捷鍵；(2) `sidebar.toggle`（Ctrl+Shift+B）在沒有側欄節點的版面，改為切到第一個有側欄的版面（內建是 workspace）並確保側欄顯示。所以「顯示側欄」在每個版面都是同一個圖示、同一個快捷鍵；切換時照常顯示「Layout: workspace」提示 |
 | ADR-21 | 程式裡不出現 herdr 的名稱 | 使用者要求（2026-11-19）：執行檔、畫面與跟著發布的檔案只寫 AgentDesk。win98 版面改名 AgentDesk 98；開機、關於與開始選單側邊的「Herdr 98」圖片改由程式用像素字型畫出；Start 與 Update 圖示的 herdr 標誌換成 AgentDesk 的標誌（依 herdr art/generate.ts 的畫法重新產生）；預設主題 id 改為 `preset-<名稱>`，舊設定照樣讀得到。保留的部分：THIRD_PARTY_NOTICES 裡 herdr-app 的授權聲明（Apache-2.0 第 4 條要求）、原始碼註解裡的出處、版本庫的 `third_party/herdr/` |
 
 ### 7.2 主要風險
