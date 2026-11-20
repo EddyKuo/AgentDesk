@@ -382,11 +382,14 @@ long long App::next_wakeup_ms() const {
                                   .count();
         ms = std::min<long long>(ms, ui::mac::ms_to_next_minute(now % 60000) + 5);
     }
+    if (ambient_moving())
+        ms = std::min<long long>(ms, 33);  // the tint by agent state fades at about 30 frames a second
     return ms;
 }
 
 Json App::report() const {
     Json out = {{"connected", s_->host->connected()}, {"host_instance_id", s_->host->host_instance_id()}};
+    out["ambient_k"] = ambient_strength();
     Json list = Json::array();
     for (const auto& s : s_->host->sessions()) {
         const auto v = s->view();

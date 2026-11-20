@@ -348,6 +348,8 @@ inline constexpr CommandInfo kCommands[] = {
     {"appearance:schedule", "Appearance: Schedule"},
     {"appearance.toggle", "Toggle light / dark"},
     {"theme.suggested", "Use the layout's suggested themes"},
+    {"theme.ambient:off", "Tint by agent state: Off"},
+    {"theme.ambient:subtle", "Tint by agent state: Subtle"},
 };
 bool known_command(std::string_view name);
 
@@ -1222,9 +1224,24 @@ void draw_suggested_mark(ImDrawList* dl, ImVec2 c, float r, ImU32 col);
 const Palette* layout_palette(App::State& s, const LayoutSpec& l);
 bool look_theme_suggestion(App::State& s);
 std::optional<std::string> exec_suggest_command(App::State& s, const std::string& name);
+// ambient.cpp: tint by agent state. ambient_palette() returns `base` or a tinted copy of it;
+// recolor says the copy's colours changed this frame (apply_style_colors). `paused` (the theme
+// editor is open) drops the tint at once. ambient_moving() asks for ~30 frames a second.
+struct AmbientResult {
+    const Palette* palette = nullptr;
+    bool recolor = false;
+};
+AmbientResult ambient_palette(App::State& s, const Palette* base, bool paused);
+bool ambient_moving();
+double ambient_strength();  // 0..1, for --report
+bool look_ambient(App::State& s);  // its Settings rows
+// Windows' "Animation effects" is off (checked at most every 2 s).
+bool motion_reduced();
 // theme_commands.cpp: appearance:*, appearance.toggle and theme.* (nullopt: not one of them,
 // else "" when it ran or why it failed).
 std::optional<std::string> exec_theme_command(App::State& s, const std::string& name, const std::string& arg);
+// Sets g_pal for this frame (and the ImGui style when it changed).
+void update_palette(App::State& s);
 }  // namespace detail
 
 }  // namespace agentdesk::desktop

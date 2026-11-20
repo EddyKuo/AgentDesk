@@ -536,13 +536,7 @@ void App::frame() {
         g_settings_problem.clear();
     }
     s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
-    const auto theme_pair = layout_theme_pair(s.settings);
-    if (const Palette* want =
-            effective_palette(resolved_appearance(s), theme_pair.first, theme_pair.second, s.layout().theme);
-        want != g_pal) {
-        g_pal = want;
-        apply_style(s.dpi, ui_scale(s.settings));
-    }
+    update_palette(s);  // theme, appearance schedule, editor preview, tint (theme_commands.cpp)
     const bool connected = s.host->connected();
     for (const auto& c : std::exchange(s.pending_mod_commands, {}))
         run_command(s, c, false);
