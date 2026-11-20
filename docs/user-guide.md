@@ -207,7 +207,7 @@ AGENTDESK_MOD(Hello, "Says when an agent needs you")
 
 `host()` 提供 `run(命令)`、`send(session, 文字, 是否按 Enter)`、`notify(標題, 內文)`、`exec({程式, 參數...})`、`add_command(id, 名稱)`、`sessions()`、`setting(鍵, 預設值)`。可以覆寫的有 `on_event`（agent_state、session_added、session_exited、tick）、`panels(位置)`（用 `Panel` 的 `text`、`row`、`badge`、`progress`、`button`、`separator` 組出面板）、`click`、`decorate("tab"|"agent", ...)`、`command`。不用 C++ 的話，也可以直接實作 `mod_api.h` 的 C 介面。
 
-Mod 在 AgentDesk 裡以你的權限執行，跟你安裝的其他程式一樣，所以只啟用你信任的 mod。`exec` 直接啟動程式，不經過 shell。mod 當掉（例如記憶體存取錯誤）時會被停用，錯誤顯示在設定頁，AgentDesk 照常執行；但 mod 卡在無窮迴圈時，整個介面會停住。舊版的 Lua mod（`main.lua`）已不支援，設定頁會顯示錯誤；三個範例會自動換成 C++ 版本，原本的 `settings.json` 保留。
+Mod 在 AgentDesk 裡以你的權限執行，跟你安裝的其他程式一樣，所以只啟用你信任的 mod。在設定頁打開 mod 的開關時，AgentDesk 會先說明這一點，按「Turn on」才會啟用。`exec` 直接啟動程式，不經過 shell。mod 當掉（例如記憶體存取錯誤）時會被停用，錯誤顯示在設定頁，AgentDesk 照常執行；但 mod 卡在無窮迴圈時，整個介面會停住：終端機仍在 agent-host 裡繼續跑，用工作管理員結束 `agent-ui.exe`，在 `ui.json` 的 `mods_enabled` 拿掉那個 mod，再重新開啟 AgentDesk。寫 mod 的完整說明（介面、相容性規則、注意事項）在 [mods.md](mods.md)（英文）。舊版的 Lua mod（`main.lua`）已不支援，設定頁會顯示錯誤；三個範例會自動換成 C++ 版本，原本的 `settings.json` 保留。
 
 ## agentctl（命令列）
 

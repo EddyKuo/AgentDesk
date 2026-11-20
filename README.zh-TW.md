@@ -79,7 +79,7 @@ build\msvc-x64-debug\tests\unit_tests.exe --gtest_filter=VtEngine.Utf8SplitBefor
 build\msvc-x64-debug\tests\win_integration_tests.exe --gtest_filter=Session.*
 ```
 
-發布用的 zip 由 `agentdesk_package.exe` 產生，要先建置 Release（`scripts\build.cmd msvc-x64-release all`），輸出在 `dist\`。編譯一律 `/W4 /permissive- /WX`；格式與靜態分析用 VS 內附的 clang-format、clang-tidy，規則在根目錄的 `.clang-format`、`.clang-tidy`。
+發布用的 zip 由 `agentdesk_package.exe` 產生，要先建置 Release（`scripts\build.cmd msvc-x64-release all`），輸出在 `dist\`，完整步驟見 [docs/release.md](docs/release.md)。每次推送到 main 或送出 pull request，GitHub Actions（`.github/workflows/ci.yml`）會在 Windows 上建置 Debug 與 Release 並跑所有測試。編譯一律 `/W4 /permissive- /WX`；格式與靜態分析用 VS 內附的 clang-format、clang-tidy，規則在根目錄的 `.clang-format`、`.clang-tidy`。
 
 ## 專案結構
 
@@ -105,6 +105,8 @@ build\msvc-x64-debug\tests\win_integration_tests.exe --gtest_filter=Session.*
 | 文件 | 內容 |
 |---|---|
 | [docs/user-guide.md](docs/user-guide.md) | 使用說明：畫面、快捷鍵、子 Agent、遠端機器、WSL、版面、設定、mod、agentctl、限制 |
+| [docs/mods.md](docs/mods.md) | 寫 mod：介面、相容性、安全（英文） |
+| [docs/release.md](docs/release.md) | 發布流程：打包、GitHub Release、簽章與更新伺服器（英文） |
 | [docs/design/AgentDesk_Design.md](docs/design/AgentDesk_Design.md) | 唯一權威的產品需求與系統設計，產品與技術決策在 7.1 |
 | [docs/design/use-cases.md](docs/design/use-cases.md) | 使用情境 |
 | [docs/design/design-concept.md](docs/design/design-concept.md) | 設計理念 |

@@ -603,14 +603,38 @@ bool settings_mods(App::State& s) {
         const bool on = s.settings.mods_enabled.contains(m.name);
         settings_row(s, m.name.c_str(), m.description.c_str(), px(36), px(20));
         if (settings_toggle("##on", on)) {
-            if (!on)
-                s.settings.mods_enabled.insert(m.name);
-            else
+            if (!on) {
+                s.mod_confirm = m.name;  // turning on asks first, below the row
+            } else {
                 s.settings.mods_enabled.erase(m.name);
-            changed = true;
-            s.mods->load(s.settings.mods_enabled);
+                changed = true;
+                s.mods->load(s.settings.mods_enabled);
+            }
         }
         settings_row_done(s);
+        if (!on && s.mod_confirm == m.name) {
+            // A mod is code from someone else running as the person: say what that means before it
+            // starts, every time one is turned on.
+            settings_gap(px(6));
+            settings_wrapped(s,
+                             ("Turn on " + m.name +
+                              "? It will run inside AgentDesk with your Windows account's rights: it can read and "
+                              "change your files, start programs and type into your terminals. Turn it on only "
+                              "if you trust where it came from. A mod that hangs freezes this window until you end "
+                              "agent-ui; your terminals keep running.")
+                                 .c_str(),
+                             g_pal->needs_you);
+            settings_gap(px(8));
+            if (settings_button(s, "##mod-turn-on", "Turn on")) {
+                s.settings.mods_enabled.insert(m.name);
+                s.mod_confirm.clear();
+                changed = true;
+                s.mods->load(s.settings.mods_enabled);
+            }
+            ImGui::SameLine(0, px(8));
+            if (settings_button(s, "##mod-cancel", "Cancel"))
+                s.mod_confirm.clear();
+        }
         if (!m.error.empty()) {
             settings_gap(px(6));
             settings_wrapped(s, m.error.c_str(), g_pal->needs_you);

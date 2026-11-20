@@ -119,7 +119,9 @@ void guarded(Mod* m, F&& f) {
 
 template <typename T>
 int init(const agentdesk_host* host, agentdesk_mod* out, const char* description) {
-    if (host == nullptr || host->api_version != AGENTDESK_MOD_API_VERSION)
+    // An older AgentDesk may lack calls this header offers; a newer one only adds to the end of
+    // its structs, so it still serves a mod built against this header.
+    if (host == nullptr || host->api_version < AGENTDESK_MOD_API_VERSION)
         return 1;
     Mod::current_host() = Host(host);
     Mod* m = nullptr;
