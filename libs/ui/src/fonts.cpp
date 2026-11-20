@@ -6,9 +6,14 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <map>
 #include <string>
+#include <vector>
 
 #include <imgui.h>
 
@@ -50,6 +55,30 @@ std::string find_font(std::initializer_list<const wchar_t*> bundled, std::initia
     return {};
 }
 
+// AddFontFromFileTTF reads the whole file into a new buffer on every call, and every face merges
+// the same fallbacks (about 40 MB: JhengHei, Nerd Font, Segoe UI Symbol and Emoji), so loading
+// them that way kept five copies alive. Each file is read once and shared; ImGui gets a pointer it
+// does not own. The buffers live for the whole process, which also covers atlas rebuilds.
+ImFont* add_font_file(const std::string& path, float size, ImFontConfig c) {
+    static std::map<std::string, std::vector<char>> files;
+    auto it = files.find(path);
+    if (it == files.end()) {
+        std::ifstream in(std::filesystem::path(std::u8string(path.begin(), path.end())), std::ios::binary);
+        std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (bytes.empty())
+            return nullptr;
+        it = files.emplace(path, std::move(bytes)).first;
+    }
+    c.FontDataOwnedByAtlas = false;
+    if (c.Name[0] == '\0') {  // AddFontFromFileTTF names the source after the file; keep doing so
+        const std::string name =
+            std::filesystem::path(std::u8string(path.begin(), path.end())).filename().string();
+        std::snprintf(c.Name, sizeof(c.Name), "%s", name.c_str());
+    }
+    return ImGui::GetIO().Fonts->AddFontFromMemoryTTF(it->second.data(), static_cast<int>(it->second.size()),
+                                                      size, &c);
+}
+
 void merge(const std::string& path, float extra_scale = 1.0f, float y_offset = 0.0f) {
     if (path.empty())
         return;
@@ -57,7 +86,7 @@ void merge(const std::string& path, float extra_scale = 1.0f, float y_offset = 0
     c.MergeMode = true;
     c.ExtraSizeScale = extra_scale;
     c.GlyphOffset.y = y_offset;
-    ImGui::GetIO().Fonts->AddFontFromFileTTF(path.c_str(), 0.0f, &c);
+    add_font_file(path, 0.0f, c);
 }
 
 // Fills gaps after the main face: CJK (JhengHei, scaled so ideographs fill their slot), Nerd
@@ -74,7 +103,7 @@ ImFont* add(const std::string& path, float size, bool pixel_snap, const std::str
         return nullptr;
     ImFontConfig c;
     c.PixelSnapH = pixel_snap;  // terminal: integer advance, every cell on a pixel boundary
-    ImFont* f = ImGui::GetIO().Fonts->AddFontFromFileTTF(path.c_str(), size, &c);
+    ImFont* f = add_font_file(path, size, c);
     if (f != nullptr)
         merge_fallbacks(cjk, nerd);
     return f;
@@ -224,7 +253,7 @@ FontSet load_fonts(float mono_size_px, float ui_size_px) {
     set.mono = add(set.mono_source, mono_size_px, true, set.cjk_source, nerd);
     set.mono_bold = add(mono_bold, mono_size_px, true, set.cjk_source, nerd);
     if (!nerd.empty())
-        set.icons = io.Fonts->AddFontFromFileTTF(nerd.c_str(), ui_size_px);
+        set.icons = add_font_file(nerd, ui_size_px, ImFontConfig());
 
     if (set.ui == nullptr)
         set.ui = io.Fonts->AddFontDefault();
