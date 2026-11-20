@@ -1,63 +1,69 @@
 # AgentDesk
 
-AgentDesk 是 Windows 11 x64 的原生 AI coding agent 工作台。你可以在可分割的終端機面板裡同時跑多個 Agent CLI（首發支援 Claude Code 與 Codex CLI，其他命令列程式也能跑），關掉視窗後工作照常執行，重開時接回原本的畫面與版面。哪個 Agent 在等你、哪個已經做完，側欄都看得到。介面與行為依 [herdr-app](https://github.com/herdrdev/herdr-app) 的原始碼複刻，用 C++ 重寫，不追求協定相容。
+English | [繁體中文](README.zh-TW.md)
 
-目前版本 0.2.0。MVP（M0～M4）與 herdr-app 的移植都已完成，2026-11-19 完成整體驗收；還要人工驗收的項目列在設計文件 5.4、5.5。
+AgentDesk is a native Windows 11 x64 workbench for AI coding agents. Run several agent CLIs side by side in split terminal panes (Claude Code and Codex CLI first; any command-line program works). Close the window and the work keeps running; open it again and you are back where you were, with the same layout. The sidebar shows which agent is waiting for you and which one is done.
 
-## 功能
+The interface and behaviour are ported from the source of [herdr-app](https://github.com/herdrdev/herdr-app) and rewritten in C++. AgentDesk does not aim for protocol compatibility with herdr.
 
-- 背景執行：終端機、子程序與畫面狀態都在背景程序 `agent-host.exe` 裡。關掉視窗只會中斷連線，重開時以快照加增量接回。
-- space、分頁、分割：一個 space 是一個工作地點（通常是一個 repo），底下有多個分頁，每個分頁可以往右或往下分割、放大、拖曳交換位置。版面由 host 保存，重開視窗後還原。
-- Agent 狀態：程序狀態與 Agent 狀態分開顯示。Agent 狀態只來自結構化回報：Claude Code 2.1.295 以上用 OSC 7501（不必設定），Codex CLI 用 hook 呼叫 `agentctl report-state`。沒有可信來源就顯示 Unknown，不從畫面文字猜。Agent 結束、shell 回到提示時，狀態會清掉。
-- 注意力與通知：Agent 需要你時一定播放提示音；你沒在看的 Agent 完成時標為 Done，右下角跳出通知，點一下就跳過去。
-- 選擇 shell：側欄的「+」列出這台電腦偵測到的 PowerShell 7、Windows PowerShell、Command Prompt 與各個 WSL 發行版，選哪個就用哪個開新 space；分頁列的「+」也能直接開成新分頁。
-- WSL：已安裝的發行版自動列為 shell；在 bash 裡 `cd` 之後，space 名稱、分支與 Files／Changes 會跟著變。
-- Files／Changes：右側面板顯示目前資料夾的檔案樹與 git 變更，可以看差異、直接 commit。
-- 命令面板與快捷鍵：Ctrl+Shift+P 開命令面板，Ctrl+Shift+/ 列出所有快捷鍵，`keys.json` 可以改鍵。
-- git worktree：輸入分支名稱就建立 checkout，開成新的 space。
-- 子 Agent：在 AgentDesk 的終端機裡執行 `agentctl run --task ...` 會開出子 Agent；`agentctl wait` 等它，`agentctl report` 把結果送回父 Agent。
-- 遠端機器：透過 `ssh <目標> agentctl bridge`，另一台 Windows 電腦的 space 與 Agent 顯示在同一個側欄。
-- 版面、主題與 mod：內建 workspace、terminals 兩種版面，也能用 JSON 自訂。主題有 AgentDesk 自己的四套，加上 herdr 的主題。mod 是 C++ DLL，可以加命令、面板與通知。
-- 更新：AgentDesk 與 agent-host 都能更新；agent-host 單獨更新時由新版接手，終端機裡的程式不會中斷。AgentDesk 沒有內建伺服器，要設定 `AGENTDESK_RELEASES_URL` 才會檢查。
-- 命令列 `agentctl`：`run`、`list`、`read`、`send`、`stop`、`wait` 等指令，`--json` 輸出穩定，退出碼固定。
+Current version: 0.2.0.
 
-完整操作說明見 [docs/user-guide.md](docs/user-guide.md)。
+## Features
 
-## 系統需求
+- **Keeps running in the background.** Terminals, child processes and screen state live in a background process, `agent-host.exe`. Closing the window only disconnects; reopening reattaches with a snapshot followed by live updates.
+- **Spaces, tabs and splits.** A space is a place you work in (usually a repo). It holds tabs, and each tab splits right or down, zooms, and swaps panes by drag. The host keeps the layout, so it comes back when you reopen.
+- **Trustworthy agent status.** Process state and agent state are shown separately. Agent state comes only from structured reports: OSC 7501 from Claude Code 2.1.295 and later (no setup needed), and a hook that calls `agentctl report-state` for Codex CLI. Without a trusted source the state is Unknown; AgentDesk never guesses from screen text.
+- **Attention and notifications.** An agent that needs you always plays a sound. An agent you are not watching that finishes is marked Done and shows a toast; click it to jump there.
+- **Shell picker.** The sidebar "+" lists the shells found on the machine (PowerShell 7, Windows PowerShell, Command Prompt and each WSL distribution).
+- **WSL.** Installed distributions appear as shells; `cd` in bash updates the space name, branch and Files/Changes.
+- **Files and Changes panels.** A file tree and the git changes of the current folder, with diffs and commit.
+- **Command palette and keys.** Ctrl+Shift+P opens the palette, Ctrl+Shift+/ lists every shortcut, and `keys.json` rebinds them.
+- **git worktrees.** Type a branch name to create a checkout and open it as a new space.
+- **Sub-agents.** `agentctl run --task ...` inside an AgentDesk terminal starts a sub-agent; `agentctl wait` waits for it and `agentctl report` sends its result back to the parent.
+- **Remote machines.** Through `ssh <target> agentctl bridge`, another Windows machine's spaces and agents appear in the same sidebar.
+- **Layouts, themes and mods.** Two built-in layouts (workspace and terminals) plus custom JSON layouts, AgentDesk's own themes plus herdr's, and mods written as C++ DLLs that add commands, panels and notifications.
+- **Updates.** AgentDesk and agent-host can update; when agent-host updates on its own, the new host takes over and the programs in your terminals keep running. There is no built-in update server: set `AGENTDESK_RELEASES_URL` to enable checks.
+- **`agentctl` CLI.** `run`, `list`, `read`, `send`, `stop`, `wait` and more, with stable `--json` output and fixed exit codes.
 
-- Windows 11 x64，一般使用者權限即可（Windows 10 未驗證）。
-- 要用的 Agent CLI 自行安裝並登入，AgentDesk 不處理登入，也不複製任何 token。Claude Code 要 2.1.295 以上才會回報狀態。
-- 從原始碼建置另外需要 Visual Studio 2022 Build Tools，見「從原始碼建置」。
+The full manual (in Traditional Chinese) is [docs/user-guide.md](docs/user-guide.md).
 
-## 安裝與執行
+## Requirements
 
-1. 把 `AgentDesk-<版本>-win-x64.zip` 解壓到任意資料夾，例如 `%LOCALAPPDATA%\Programs\AgentDesk`。不需要系統管理員權限，也不寫登錄檔。
-2. 確認 `conpty\conpty.dll` 與 `conpty\x64\OpenConsole.exe` 跟執行檔放在一起。這是隨附的 ConPTY：Windows 內建的 ConPTY 會丟掉狀態查詢的回覆，少了它，Claude Code 不會回報狀態，agent-host 也無法單獨更新。
-3. 執行 `agent-ui.exe`。它會在背景啟動 `agent-host.exe`，第一次啟動會開歡迎頁，可以選大小與主題。
+- Windows 11 x64; a normal user account is enough. Windows 10 is untested.
+- Install and sign in to the agent CLIs you want to use. AgentDesk does not handle sign-in and never copies tokens. Claude Code reports status from version 2.1.295.
+- Building from source also needs Visual Studio 2022 Build Tools (see below).
 
-zip 裡還有 `agentctl.exe`、`LICENSE`、`THIRD_PARTY_NOTICES.md`、`docs\`（使用說明、Agent hook 設定、相容性矩陣）、範例 mod，以及寫 mod 用的 `sdk\`。資料與設定放在 `%LOCALAPPDATA%\AgentDesk`。
+## Install and run
 
-## 快速上手
+1. Unzip `AgentDesk-<version>-win-x64.zip` anywhere, for example `%LOCALAPPDATA%\Programs\AgentDesk`. No administrator rights and no registry writes.
+2. Keep `conpty\conpty.dll` and `conpty\x64\OpenConsole.exe` next to the executables. This is the bundled ConPTY: the one built into Windows drops the reply to the status query, so without it Claude Code reports no status and agent-host cannot update on its own.
+3. Run `agent-ui.exe`. It starts `agent-host.exe` in the background; the first start opens a welcome page where you pick a size and theme.
 
-1. 啟動後會先開一個 shell。用 `cd` 切到專案資料夾，space 名稱與分支會跟著變。
-2. 輸入 `claude` 或 `codex` 啟動 Agent。它需要你時，側欄 Agents 區塊會標出來，並播放提示音。
-3. Ctrl+Shift+O、Ctrl+Shift+E 往右、往下分割，在另一個面板再開一個 Agent；Ctrl+Shift+T 開新分頁，Ctrl+Shift+N 開新 space。
-4. 關掉視窗後工作繼續跑，再執行一次 `agent-ui.exe` 就接回來。
-5. Codex CLI 的狀態回報要手動安裝 hook，步驟在 [docs/integrations/agent-hooks.md](docs/integrations/agent-hooks.md)。
+**SmartScreen:** the first run may show "Windows protected your PC". AgentDesk's executables are not code-signed yet, and Windows shows this for any new download without reputation. Make sure the zip came from this project's GitHub Releases, then choose "More info" → "Run anyway". You can also build it yourself from source.
 
-## 從原始碼建置
+The zip also contains `agentctl.exe`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `docs\`, the example mods, and the mod `sdk\`. Data and settings live in `%LOCALAPPDATA%\AgentDesk`.
 
-只用以下工具，不需要另外安裝（ADR-11）：Visual Studio 2022 Build Tools 17.14（MSVC 14.44、Windows SDK 10.0.26100.0）、CMake、Ninja、vcpkg（manifest 模式，預設在 `C:\vcpkg`，triplet `x64-windows-static-md`）、Git for Windows。技術基線是 C++20、Dear ImGui（docking）＋Win32＋DirectX 11、ConPTY、libvterm 0.3.3。
+## Quick start
 
-`scripts\build.cmd` 會自己進入 VS 2022 x64 vcvars 環境、設定 `VCPKG_ROOT` 與英文編譯訊息（`VSLANG=1033`），再執行 CMake preset：
+1. A shell opens first. `cd` into a project; the space name and branch follow.
+2. Type `claude` or `codex` to start an agent. When it needs you, the sidebar's Agents section marks it and a sound plays.
+3. Ctrl+Shift+O and Ctrl+Shift+E split right and down; Ctrl+Shift+T opens a tab and Ctrl+Shift+N a space.
+4. Close the window: the work keeps running. Run `agent-ui.exe` again to reattach.
+5. Codex CLI needs a hook for status reports: see [docs/integrations/agent-hooks.md](docs/integrations/agent-hooks.md).
+
+## Building from source
+
+Tools: Visual Studio 2022 Build Tools 17.14 (MSVC 14.44, Windows SDK 10.0.26100.0), CMake 3.25 or later, Ninja, vcpkg in manifest mode (default location `C:\vcpkg`, triplet `x64-windows-static-md`) and Git for Windows. The code is C++20 with Dear ImGui, Win32, DirectX 11, ConPTY and libvterm 0.3.3.
+
+`scripts\build.cmd` enters the VS 2022 x64 environment, sets `VCPKG_ROOT` and English compiler messages, then runs the CMake presets:
 
 ```bat
 scripts\build.cmd msvc-x64-debug all          :: configure + build + ctest
-scripts\build.cmd msvc-x64-debug build        :: 只建置（preset 已 configure 過）
-scripts\build.cmd msvc-x64-release configure  :: 新 preset 第一次要先 configure
+scripts\build.cmd msvc-x64-debug build        :: build only (preset already configured)
+scripts\build.cmd msvc-x64-release configure  :: configure a new preset first
 ```
 
-新 clone 要先取得隨附 ConPTY：建置一次產生工具，執行它，再重新 configure。
+A fresh clone needs the bundled ConPTY: build once to get the tool, run it, then configure again.
 
 ```bat
 scripts\build.cmd msvc-x64-debug all
@@ -65,57 +71,55 @@ build\msvc-x64-debug\tools\fetch_conpty.exe
 scripts\build.cmd msvc-x64-debug configure
 ```
 
-`build.cmd` 在建置前會結束從這個建置資料夾（`build\<preset>\`）啟動的 `agent-ui` 與 `agent-host`，因為它們鎖住了執行檔與 `conpty.dll`；其他位置安裝的 AgentDesk 不受影響。結束 agent-host 也會結束它跑的終端機，不想這樣時先設定 `AGENTDESK_KEEP_HOST=1`。
+`fetch_conpty.exe` downloads a pinned version of Microsoft's ConPTY package and checks three SHA-256 hashes.
 
-測試用 GoogleTest，經由 ctest 執行（先建置過一次）：
+Before building, `build.cmd` ends any `agent-ui` and `agent-host` started from that build folder (`build\<preset>\`), because they lock the executables and `conpty.dll`. Ending agent-host also ends its terminals; set `AGENTDESK_KEEP_HOST=1` to skip this.
+
+Tests use GoogleTest through ctest:
 
 ```bat
-ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、windows_integration
-build\msvc-x64-debug\tests\unit_tests.exe --gtest_filter=VtEngine.Utf8SplitBeforeControlCharsIsReassembled
-build\msvc-x64-debug\tests\win_integration_tests.exe --gtest_filter=Session.*
+ctest --test-dir build\msvc-x64-debug -L unit          :: labels: unit, windows_integration
+build\msvc-x64-debug\tests\unit_tests.exe --gtest_filter=VtEngine.*
 ```
 
-發布用的 zip 由 `agentdesk_package.exe` 產生，要先建置 Release（`scripts\build.cmd msvc-x64-release all`），輸出在 `dist\`。編譯一律 `/W4 /permissive- /WX`；格式與靜態分析用 VS 內附的 clang-format、clang-tidy，規則在根目錄的 `.clang-format`、`.clang-tidy`。
+The release zip is made by `agentdesk_package.exe` after a Release build; see [docs/release.md](docs/release.md). Everything compiles with `/W4 /permissive- /WX`; formatting and static analysis use the clang-format and clang-tidy that ship with Visual Studio (`.clang-format`, `.clang-tidy`).
 
-## 專案結構
+## Repository layout
 
-| 路徑 | 內容 |
+| Path | Contents |
 |---|---|
-| `apps/desktop` | `agent-ui.exe`：Win32／DX11 外殼與整個介面 |
-| `apps/host` | `agent-host.exe`：擁有 ConPTY、子程序、終端機引擎與歷史的背景程序 |
-| `apps/cli` | `agentctl.exe`：命令列 client |
-| `libs/platform/windows` | `PtyProcess`（ConPTY＋Job＋reader 執行緒）、argv quoting、ConPTY 載入 |
-| `libs/terminal` | `VtEngine`（libvterm 封裝、快照、歷史、按鍵編碼）、OSC 7501 解析 |
-| `libs/protocol`、`libs/ipc` | IPC 分幀、訊息封包、錯誤碼、畫面編碼；Named Pipe |
-| `libs/host` | `Session` actor（程序＋引擎＋狀態） |
-| `libs/ui` | `TerminalView`、`Workspace`（space／分頁／分割樹、注意力）、`Keymap`、`ModHost`、版面引擎 |
-| `libs/modapi`、`mods/` | mod 介面（純 C 的 `mod_api.h` 與 header-only 的 `mod_sdk.hpp`）與三個範例 mod |
-| `tools/` | 開發、量測與打包工具（不出貨） |
-| `tests/` | GoogleTest 單元與 Windows 整合測試、fixture |
-| `third_party/` | libvterm 0.3.3、隨附 ConPTY 的授權與 NOTICE、字型、lunasvg 說明、herdr 的授權與資源（版面、主題、程式表、提示音） |
-| `scripts/build.cmd` | 建置腳本 |
-| `docs/`、`contracts/`、`sprint/`、`.decisions/` | 文件、契約、Sprint 紀錄、治理 ADR |
+| `apps/desktop` | `agent-ui.exe`: the Win32/DX11 shell and the whole interface |
+| `apps/host` | `agent-host.exe`: the background process that owns ConPTY, child processes, the terminal engine and history |
+| `apps/cli` | `agentctl.exe`: command-line client |
+| `libs/platform/windows` | `PtyProcess` (ConPTY + Job + reader thread), argv quoting, ConPTY loading |
+| `libs/terminal` | `VtEngine` (libvterm wrapper, snapshots, history, key encoding), OSC 7501 parsing |
+| `libs/protocol`, `libs/ipc` | IPC framing, messages, error codes, screen encoding; named pipes |
+| `libs/host` | `Session` actor (process + engine + state) |
+| `libs/ui` | `TerminalView`, `Workspace`, `Keymap`, `ModHost`, the layout engine |
+| `libs/modapi`, `mods/` | The mod interface (plain C `mod_api.h`, header-only `mod_sdk.hpp`) and three example mods |
+| `tools/` | Development, measurement and packaging tools (not shipped) |
+| `tests/` | GoogleTest unit and Windows integration tests, fixtures |
+| `third_party/` | libvterm, the bundled ConPTY's license and notice, fonts, lunasvg notes, herdr-app's license and resources |
+| `docs/`, `contracts/`, `sprint/`, `.decisions/` | Documentation, contracts, sprint records and process decisions (mostly in Traditional Chinese) |
 
-## 文件
+## Documentation
 
-| 文件 | 內容 |
+| Document | Contents |
 |---|---|
-| [docs/user-guide.md](docs/user-guide.md) | 使用說明：畫面、快捷鍵、子 Agent、遠端機器、WSL、版面、設定、mod、agentctl、限制 |
-| [docs/design/AgentDesk_Design.md](docs/design/AgentDesk_Design.md) | 唯一權威的產品需求與系統設計，產品與技術決策在 7.1 |
-| [docs/design/use-cases.md](docs/design/use-cases.md) | 使用情境 |
-| [docs/design/design-concept.md](docs/design/design-concept.md) | 設計理念 |
-| [contracts/approved/PRD.md](contracts/approved/PRD.md) | PRD 契約 |
-| [docs/integrations/agent-hooks.md](docs/integrations/agent-hooks.md) | Agent 狀態 hook 的手動安裝 |
-| [docs/compatibility.md](docs/compatibility.md) | 相容性矩陣 |
-| [docs/research/](docs/research/) | herdr 與 herdr-app 的研究筆記、移植規格 |
-| [CLAUDE.md](CLAUDE.md) | 給 Claude Code 的專案指引：指令、架構重點、不可違反的規則 |
+| [docs/user-guide.md](docs/user-guide.md) | User guide |
+| [docs/mods.md](docs/mods.md) | Writing mods: the API, compatibility, safety |
+| [docs/release.md](docs/release.md) | Making a release |
+| [docs/design/AgentDesk_Design.md](docs/design/AgentDesk_Design.md) | Product requirements and system design; decisions in section 7.1 |
+| [docs/integrations/agent-hooks.md](docs/integrations/agent-hooks.md) | Installing the agent status hooks |
+| [docs/compatibility.md](docs/compatibility.md) | Compatibility matrix |
+| [CLAUDE.md](CLAUDE.md) | Project guide for Claude Code: commands, architecture, invariants |
 
-## 授權
+## License
 
-AgentDesk 以 MIT License 釋出，見 [LICENSE](LICENSE)。
+AgentDesk is released under the MIT License; see [LICENSE](LICENSE).
 
-收錄或隨附的第三方元件（libvterm、ConPTY、字型、lunasvg），來源、版本、雜湊與授權寫在各自的 `third_party/*/README.agentdesk.md`；發布包的 `THIRD_PARTY_NOTICES.md` 列出所有隨附元件的授權聲明。
+Third-party components (libvterm, ConPTY, fonts, lunasvg) list their source, version, hashes and license in `third_party/*/README.agentdesk.md`. The release's `THIRD_PARTY_NOTICES.md` carries every bundled component's notices.
 
-## 致謝
+## Acknowledgements
 
-AgentDesk 的介面與行為依 [herdr-app](https://github.com/herdrdev/herdr-app)（Apache-2.0）的原始碼移植成 C++。herdr-app 的授權在 [third_party/herdr/LICENSE](third_party/herdr/LICENSE)，發布包的 THIRD_PARTY_NOTICES 也列出了它。
+AgentDesk's interface and behaviour are ported to C++ from the source of [herdr-app](https://github.com/herdrdev/herdr-app) (Apache-2.0). Its license is in [third_party/herdr/LICENSE](third_party/herdr/LICENSE) and in the release's THIRD_PARTY_NOTICES. AgentDesk is an independent project and is not affiliated with herdr.

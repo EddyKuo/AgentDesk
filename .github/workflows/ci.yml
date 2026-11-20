@@ -1,0 +1,72 @@
+# Builds AgentDesk and runs every test on Windows, for pushes to main and for pull requests.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: ${{ matrix.preset }}
+    runs-on: windows-2022
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [msvc-x64-debug, msvc-x64-release]
+    env:
+      VCPKG_ROOT: C:\vcpkg-ci
+      VCPKG_DEFAULT_BINARY_CACHE: C:\vcpkg-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      # vcpkg in manifest mode needs a clone whose history contains vcpkg.json's builtin-baseline.
+      - name: Set up vcpkg
+        shell: cmd
+        run: |
+          git clone --quiet https://github.com/microsoft/vcpkg.git %VCPKG_ROOT% || exit /b 1
+          call %VCPKG_ROOT%\bootstrap-vcpkg.bat -disableMetrics || exit /b 1
+          if not exist %VCPKG_DEFAULT_BINARY_CACHE% mkdir %VCPKG_DEFAULT_BINARY_CACHE%
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg-cache
+          key: vcpkg-${{ matrix.preset }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-${{ matrix.preset }}-
+
+      - name: Configure and build
+        shell: cmd
+        run: |
+          call scripts\build.cmd ${{ matrix.preset }} configure || exit /b 1
+          call scripts\build.cmd ${{ matrix.preset }} build
+
+      # The bundled ConPTY is not in git: fetch the pinned, hash-checked package, then configure
+      # again so the build copies it next to the executables and tests.
+      - name: Fetch the bundled ConPTY
+        shell: cmd
+        run: |
+          build\${{ matrix.preset }}\tools\fetch_conpty.exe || exit /b 1
+          call scripts\build.cmd ${{ matrix.preset }} configure || exit /b 1
+          call scripts\build.cmd ${{ matrix.preset }} build
+
+      # A few integration tests measure timing; a busy shared runner gets one retry.
+      - name: Test
+        shell: cmd
+        run: ctest --preset ${{ matrix.preset }} --repeat until-pass:2
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-${{ matrix.preset }}
+          path: build/${{ matrix.preset }}/ctest-junit.xml
+          if-no-files-found: ignore
