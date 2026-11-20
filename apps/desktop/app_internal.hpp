@@ -49,6 +49,7 @@
 #include "agentdesk/ui/programs.hpp"
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/layout.hpp"
+#include "agentdesk/ui/mac_layout.hpp"
 #include "agentdesk/ui/mods.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
@@ -187,8 +188,8 @@ void save_settings(const Settings& s);
 // ------------------------------------------------------------ layouts.cpp
 // ------------------------------------------------------------------ layouts
 // A layout is a tree of blocks (rows, columns, stacks; the sidebar, tab bar, panes, panel and
-// status bar are blocks), parsed by libs/ui layout.hpp. Built-ins are workspace and
-// terminals; <data>\layouts\<name>.json adds one or replaces a built-in of that name. The person's
+// status bar are blocks), parsed by libs/ui layout.hpp. Built-ins are workspace, terminals and
+// mac; <data>\layouts\<name>.json adds one or replaces a built-in of that name. The person's
 // clicks on a layout (sizes, shown/hidden, a stack's child, where a float sits) live apart from
 // the file, in <data>\layouts\.state\<name>.json, so editing the file never loses them.
 // AgentDesk's older files ({"sidebar", "tab_bar", "status_bar", "theme", "style", "font_size",
@@ -209,7 +210,7 @@ struct LayoutSpec {
     // From the tree.
     std::string theme;         // a palette AgentDesk has, else "" (the person's theme)
     bool look_applies = true;  // false when the layout names a theme AgentDesk lacks
-    std::string style;         // "" or "terminals": which renderers its blocks name
+    std::string style;         // "", "terminals" or "mac": which renderers its blocks name
     std::optional<float> font_size;
 };
 std::filesystem::path layouts_dir();
@@ -789,6 +790,15 @@ struct App::State {
     bool defer_commands = false;
     std::vector<DeferredCommand> deferred_commands;
     ui::ImageCache program_images;  // the program icons (programs\icons), as textures
+    // The AgentDesk Mac layout (mac_layout.cpp): the open menu and where each menu opens, whether
+    // the window fills the desktop, and each Dock tile's current magnification (by DockItem::key).
+    struct MacState {
+        int menu = -1;                // ui::mac::Menu, -1: none open
+        std::vector<ImVec2> menu_at;  // where each menu's dropdown opens, this frame
+        bool keyed = false;           // the open menu was moved through with the keyboard
+        bool fill = false;
+        std::map<std::string, float> scale;
+    } mac;
 
     // ---------------------------------------------------------------- helpers
     // The UI document (spaces, tabs, panes) changed: persist() sends it to the host soon.
@@ -992,6 +1002,9 @@ void traffic_lights_paint(App::State& s);
 // The first x a bar spanning [top, bottom] may use without covering the round buttons, `margin`
 // after them; `x` itself when they are not shown there.
 float clear_of_traffic_lights(const App::State& s, float x, float top, float bottom, float margin);
+// One round button (kind 0 red cross, 1 amber bar, 2 green plus) of radius `r` centred on `c`; the
+// window buttons and the Mac layout's inner window draw theirs with it.
+void paint_round_button(ImDrawList* dl, ImVec2 c, float r, int kind, bool lit, bool glyph, bool held);
 
 // The space's git tail: "repo · branch" without the parts the name already says, main/master
 // dropped, then ahead/behind.
@@ -1006,6 +1019,11 @@ void confirm_close_space(App::State& s, int index);
 
 // ------------------------------------------------------------ sidebar.cpp
 void draw_brand(App::State& s, ImVec2 pos, float w, bool rail);
+void draw_brand_mark(ImDrawList* dl, ImVec2 min, float side);
+// The avatar letter: the title's first character, upper-cased when ASCII.
+std::string avatar_letter(const std::string& title);
+void draw_space_avatar(App::State& s, ImDrawList* dl, ImVec2 min, float side, ImU32 fill, ImU32 ink,
+                       const std::string& letter, float font, float radius);
 float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail);
 bool is_agent(const ui::SessionView& v);
 // A tab is shown by its lead pane: the first agent, else the first pane.
@@ -1019,6 +1037,16 @@ void draw_sidebar_footer(App::State& s, ImVec2 pos, float w, bool rail);
 
 // ------------------------------------------------------------ tab_bar.cpp
 void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height);
+// The "+" menu (popup "##newmenu", opened by the caller in the same ID scope).
+void draw_new_menu(App::State& s);
+// Windows' minimize, maximize and close, ending at `right`, centred in [top, top + h].
+void draw_window_buttons(App::State& s, float right, float top, float h);
+// The most urgent state of a tab's terminals, and the tab's label.
+Attention tab_attention(App::State& s, const std::vector<std::string>& ids);
+std::string tab_label(App::State& s, const ui::Tab& tab, int i, const std::vector<std::string>& ids);
+// The tab's context menu (popup "##tabctx" on the last item): Rename, New tab, Close. A Close sets
+// `close_tab` to the tab's id for the caller to close after drawing.
+void tab_menu(App::State& s, const ui::Tab& tab, std::string& close_tab);
 
 // ------------------------------------------------------------ terminals_layout.cpp
 // ---------------------------------------------------------------- Terminals layout
@@ -1031,6 +1059,18 @@ struct TerminalsLook {
 };
 TerminalsLook terminals_look();
 void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height);
+
+// ------------------------------------------------------------ mac_layout.cpp
+// The AgentDesk Mac layout: a menu bar, a wallpaper desktop with the active tab in a floating
+// window, and a Dock of spaces and tabs.
+// The tree to place this frame when it differs from the layout's: the window filling the desktop,
+// or no tab to show (the window card is not drawn then).
+std::optional<lay::Node> mac_layout_tree(const App::State& s, const lay::Node& tree);
+// The wallpaper, the window's shadow and the empty-desktop hint, under the layout's backgrounds.
+void draw_mac_backdrop(App::State& s, const lay::Node& tree);
+void draw_mac_menubar(App::State& s, ImVec2 pos, float w, float h);
+void draw_mac_window_title(App::State& s, ImVec2 pos, float w, float h);
+void draw_mac_dock(App::State& s, ImVec2 pos, float w, float h);
 void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::SessionView& v, ImVec2 pos,
                                 float w, float h, bool focused);
 

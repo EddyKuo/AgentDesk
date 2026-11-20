@@ -60,6 +60,8 @@ inline std::string layout_display_name(const std::string& name) {
         return "AgentDesk";
     if (name == "terminals")
         return "Terminals";
+    if (name == "mac")
+        return "AgentDesk Mac";
     return name;
 }
 

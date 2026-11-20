@@ -1,6 +1,6 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.20  
+產品需求與系統設計文件 v2.21  
 日期：2026-11-20｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；還沒做的人工驗收見 5.4、5.7  
 技術基線：C++20、Windows 11 x64、Dear ImGui（FreeType 繪字）、Win32、DirectX 11、隨附 ConPTY
 
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.21 | 2026-11-20 | ADR-31：新增內建版面 AgentDesk Mac（mac）：選單列、桌布、浮動視窗與 Dock，AgentDesk 自己的設計；2.4、2.8、3.10、4.1 更新 |
 | 2.20 | 2026-11-20 | ADR-30：Mac 風格的視窗按鈕（左上三顆圓鈕，預設），設定 › Look 可切回 Windows 式；4.1 標題列一列更新 |
 | 2.19 | 2026-11-20 | ADR-29：開放 mod 前的四項準備（啟用前的安全說明、相容性規則、卡住時的處理說明、`docs/mods.md` 開發指南） |
 | 2.18 | 2026-11-20 | ADR-28：移除 AgentDesk 98（程式、素材、測試與建置步驟），取代 ADR-24 的隱藏做法；2.4、2.8、3.1、3.9、3.10、4.1、5.6 更新 |
@@ -188,7 +189,7 @@ VT Engine 需要回覆的終端機查詢由 host 處理，UI 不連線時仍可�
 
 ### 2.4 版面與版面引擎（ADR-15、ADR-18）
 
-內建兩個版面：workspace（herdr 的 main，預設；設定與命令面板顯示為 AgentDesk）與 terminals。herdr-app 的 `main.json`、`terminals.json` 原檔放在 `third_party/herdr/layouts`，建置時編進程式。原本的第三個版面 AgentDesk 98 已移除（ADR-28，見 2.8）；`ui.json` 存的版面名稱找不到時，顯示第一個版面。
+內建三個版面：workspace（herdr 的 main，預設；設定與命令面板顯示為 AgentDesk）、terminals，以及 AgentDesk 自己設計的 mac（顯示為 AgentDesk Mac，見 2.8）。herdr-app 的 `main.json`、`terminals.json` 原檔放在 `third_party/herdr/layouts`，`mac.json` 是我們的檔案，放在 `libs/ui/layouts`，三個都在建置時編進程式。原本的 AgentDesk 98 已移除（ADR-28）；`ui.json` 存的版面名稱找不到時，顯示第一個版面。
 
 - 版面模型在 `libs/ui`（`layout.hpp`）：節點樹由 block、row、column、stack、floating 組成，JSON 的鍵與預設值都照 herdr。大小計算、分隔線拖曳、浮動區塊的吸附與位置也照 herdr，herdr 的 layout.rs、layout_sync.rs 與拖曳測試已移植成單元測試。
 - 側欄、分頁列、窗格、右側面板、狀態列的位置都由目前版面的樹決定。每個區塊依它寫的 mod 名稱交給對應的 C++ 繪製函式；寫的是 C++ DLL mod 的名稱時，畫那個 mod 的面板。
@@ -247,13 +248,16 @@ sequenceDiagram
 
 **使用統計**（設定 › Privacy）：每個 UTC 日一份報告，跨日後放進待送佇列，7 天後丟棄；報告用隨機 id，送出失敗時以指數退避重試；使用者關閉統計時清空報告並換 id。`DO_NOT_TRACK`、`AGENTDESK_TELEMETRY=0`、CI 環境只關閉這一次執行。「What we send」逐字顯示待送報告、今天的草稿與上次送出的內容。
 
-### 2.8 AgentDesk 98（已移除，ADR-28）
+### 2.8 AgentDesk Mac（mac 版面，ADR-31）
 
-AgentDesk 98 是從 herdr 的 Herdr 98 移植來的 Windows 98 風格版面（ADR-18、ADR-21），v2.14 起先隱藏（ADR-24）。2026-11-20 使用者要在公開到 GitHub 前把它整個拿掉，所以程式、素材（模仿 Windows 98 的圖片、音效與字型）、單元測試、建置與打包步驟都已刪除（ADR-28）。
+使用者要把原本 AgentDesk 98 的想法（整個畫面換成另一種作業系統的樣子）改成 Mac 風格。herdr-app 沒有這種版面，所以這是 AgentDesk 自己的設計：感覺像 macOS，但不用 Apple 的標誌、字型、圖示、桌布或色碼。字用隨附的 Geist，圖示用 Nerd Font 的字形與 `programs\icons` 的程式圖示，桌布由程式畫，顏色全部從目前主題推算。AgentDesk 98 已依 ADR-28 移除，這個版面沒有沿用它的程式或素材。
 
-- `ui.json` 存的版面是 `win98` 時，顯示第一個版面（workspace）；舊格式版面檔的 `"style": "win98"` 讀成 workspace。
-- 資料目錄裡留下的 `win98.json` 不再讀取。使用者自己的 `layouts\win98.json` 會當成一般的自訂版面載入，裡面寫的 `win98` 區塊找不到對應的繪製函式，就什麼都不畫。
-- keys.json 不再有預設的 `layout:win98` 區段，`win98.*` 不再是已知命令。
+- 版面檔 `libs/ui/layouts/mac.json`：最上面 28 px 的 `mac-menubar` 區塊；下面是 desktop 欄（上下 16、左右 28 px 邊距，不能拖曳調整），裡面是 window 欄（圓角 12、1 px 框線，34 px 的 `mac-window-title` 加上顯示目前分頁的 tab 區塊）與 62 px 的 `mac-dock` 區塊。版面裡出現這三個 mod 名稱之一，`derive_layout` 就把 style 設成 `mac`，由 `apps/desktop/mac_layout.cpp` 畫。`traffic_lights` 是 [10, 8]，圓形視窗按鈕放在選單列裡。
+- 選單列：主題的 chrome 色往底色混一點，底部 1 px 線。左起是圓形視窗按鈕（設定為 Round 時）、AgentDesk 標誌與粗體名稱（AgentDesk 選單），再來是 File、Edit、View、Window、Help。點標題開選單，選單開著時滑鼠移到另一個標題就換過去，左右鍵也可以換；再點一次同一個標題關閉。下拉選單圓角 8、1 px 框線、內距 5 px，每列 24 px，滑鼠所在列用強調色填滿、字變白，快捷鍵靠右（取自 keys.json），停用的列變淡，目前的版面與分頁打勾。每一列都對應現有的命令（`MacLayout.EveryMenuRowNamesAKnownCommand` 檢查）。右邊依序是 Windows 式按鈕（設定為 Windows 時）、時鐘（本機時間、24 小時制，例如「Thu 16:25」，每分鐘換）、Agent 狀態（需要你的數量與紅點、執行中的數量與轉圈，都沒有時是機器人圖示；點一下用 `agent.focus` 跳到第一個需要你的 Agent，沒有就開 Go to）。其餘部分可拖曳移動視窗，雙擊最大化。
+- 桌面：從強調色到 info 色、都混進底色的斜向漸層，加上兩團用多層半透明圓疊出來的柔光；深色與淺色主題都用同樣的算法。
+- 視窗：目前分頁的面板放在浮動視窗裡，視窗有柔和陰影。標題列左邊三顆 11 px 圓鈕：紅色與黃色把分頁收進 Dock（`tab.settle`，程式繼續跑），綠色切換「填滿桌面」（新命令 `window.fill`，視窗去掉邊距與圓角，Dock 留在下方 10 px 的帶狀區）；標題列置中寫「space 名稱 — 分頁名稱」，雙擊標題列也是填滿桌面。沒有任何分頁時不畫視窗，桌面中央顯示標誌與「No tabs — press + in the Dock」。
+- Dock：底部置中、圓角 18 的半透明膠囊，44 px 圖塊、間距 10 px。每個 space 一個彩色字母頭像（目前的 space 下面有點，有需要你或完成的分頁時右上角有標記），分隔線，目前 space 的分頁（焦點面板的程式圖示，用程式表的底色與前景色；有程式在跑下面有點；右上角標記需要你、完成或執行中；收起的分頁變淡），分隔線，最後是「+」（開新增選單）與齒輪（設定）。滑鼠指到的圖塊放大到 1.25 倍、左右鄰居 1.1 倍，逐幀平滑過渡，上方顯示名稱泡泡；點 space 切換、點分頁顯示它（收起的會回來），右鍵分頁圖塊是分頁列同樣的選單。圖塊太多放不下時整個 Dock 等比縮小。
+- 通知在這個版面改到右上角、選單列下方；Ctrl+Shift+B 照 ADR-27 切到有側欄的版面。主題跟其他版面一樣各自記住深淺兩套（預設沿用 Midnight 與 Paper）。設定 › Look 的版面卡片畫出選單列、桌布、視窗與 Dock 的縮圖。
 
 ## 3. 技術詳細設計（SD）
 
@@ -529,7 +533,7 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 
 | 路徑 | 內容 |
 |---|---|
-| apps/desktop | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列、崩潰記錄），`app.cpp` 是 `App` 的建構與對外介面。介面依功能分檔：`themes`、`settings_store`（ui.json）、`layouts`、`programs`、`commands`（命令表與執行）、`sessions`、`git_cache`、`side_panels`、`chrome`、`sidebar`、`tab_bar`、`terminals_layout`、`panes`、`code_preview`、`files_changes`、`overlays`（命令面板、picker、說明）、`notices`、`notes`、`worktrees`、`settings_dialog`、`settings_pages`、`welcome`、`machine_add`、`frame`（版面繪製與每幀流程）。共用宣告在 `app_internal.hpp`（`detail` 命名空間）、`overlay_kit.hpp` |
+| apps/desktop | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列、崩潰記錄），`app.cpp` 是 `App` 的建構與對外介面。介面依功能分檔：`themes`、`settings_store`（ui.json）、`layouts`、`programs`、`commands`（命令表與執行）、`sessions`、`git_cache`、`side_panels`、`chrome`、`sidebar`、`tab_bar`、`terminals_layout`、`mac_layout`（AgentDesk Mac 版面）、`panes`、`code_preview`、`files_changes`、`overlays`（命令面板、picker、說明）、`notices`、`notes`、`worktrees`、`settings_dialog`、`settings_pages`、`welcome`、`machine_add`、`frame`（版面繪製與每幀流程）。共用宣告在 `app_internal.hpp`（`detail` 命名空間）、`overlay_kit.hpp` |
 | apps/host | `agent-host.exe`：背景程序入口、單例 mutex、`--takeover` 交接入口 |
 | apps/cli | `agentctl.exe`：指令解析、JSON 輸出、`hook`、`bridge`、`update` |
 | libs/platform/windows | `PtyProcess`（ConPTY＋Job＋reader 執行緒）、ConPTY 載入、argv quoting、脫離 Job 的背景啟動、程序樹、RAII handle |
@@ -537,7 +541,7 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 | libs/protocol | IPC 分幀（4-byte LE＋UTF-8 JSON）、訊息封包、錯誤碼、畫面編碼 |
 | libs/ipc | Named Pipe 伺服器與客戶端、啟動或連上 host |
 | libs/host | `Session` actor、`SessionManager`（協定方法）、狀態、持久化、git 工具、換版交接（`handover.cpp`） |
-| libs/ui | `TerminalView`、`Workspace`（space／分頁／分割樹、注意力）、版面引擎（`layout`）、`Keymap`、ModHost（`mods`）、程式表（`programs`）、sprites、字型、連結、剪貼簿、`git_info`、`HostClient`、遠端畫面、更新（`updates`）、使用統計（`telemetry`）；只有 `imgui_adapter.cpp` 碰 `imgui_internal.h` |
+| libs/ui | `TerminalView`、`Workspace`（space／分頁／分割樹、注意力）、版面引擎（`layout`，AgentDesk 自己的版面檔在 `layouts/`）、AgentDesk Mac 的規則（`mac_layout`）、命令名稱表（`command_names`）、`Keymap`、ModHost（`mods`）、程式表（`programs`）、sprites、字型、連結、剪貼簿、`git_info`、`HostClient`、遠端畫面、更新（`updates`）、使用統計（`telemetry`）；只有 `imgui_adapter.cpp` 碰 `imgui_internal.h` |
 | libs/modapi | mod 介面：純 C 的 `mod_api.h`、header-only 的 `mod_sdk.hpp`，以及隨 zip 附上的 SDK 建置檔 |
 | mods | 三個範例 mod（tab-timer、ntfy-notify、agent-summary），各自編成 `mods\<名稱>\mod.dll` |
 | tools | 開發與量測工具，不出貨：`pty_run`、`session_bench`、`vt_probe`、`soak`、`qa`（QA-05、QA-07、QA-10、`screenshot_ui`、`smoke_zip`）、`fetch_conpty`、`make_fixtures`、`package`（發布用 `agentdesk_package.exe`）、`devkit` |
@@ -564,11 +568,13 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 | Details | AgentDesk 自己的面板（herdr 沒有），開啟時貼在窗格右邊：Agent 狀態與來源、訊息、程序與退出碼、控制權、停止按鈕 |
 | 狀態列 | 機器、目前分支、Agent 數量與需要你的數量；點右側的快捷鍵提示開命令面板 |
 
+AgentDesk Mac 版面（2.8）用選單列、浮動視窗與 Dock 取代側欄、分頁列與狀態列。
+
 terminals 版面沒有側欄與狀態列，分頁列最左邊是「顯示側欄」按鈕（切回 AgentDesk 版面，ADR-27），接著是目前的 space（點一下開 picker），右邊是設定、命令面板與新分頁三個按鈕（滑鼠停在上面會顯示名稱與快捷鍵；設定按鈕是 AgentDesk 加的，ADR-25），面板標題列的按鈕一直顯示。
 
 狀態用文字與圖示搭配顏色，不能只靠顏色。Unknown 使用中性標示，Blocked（畫面上是 Needs you）才提示需要處理。根程序已退出但子程序仍存在時，明確顯示「正在清理子程序」。
 
-**注意力與通知**：Done 的意思是「沒在看的時候完成」，看過之後顯示 Idle（屬於 UI，不回寫 host）；分頁與 space 顯示其中最緊急的狀態。需要你時一定播放提示音，沒在看的 Agent 完成時也會；error 視同需要你。沒在看那個 Agent 時，右下角跳出通知（5 秒，錯誤 8 秒），點一下跳到該面板。提示音可在設定 › Alerts 關閉或換成自己的 MP3（`ui.json` 的 `sound_done`、`sound_blocked`）。
+**注意力與通知**：Done 的意思是「沒在看的時候完成」，看過之後顯示 Idle（屬於 UI，不回寫 host）；分頁與 space 顯示其中最緊急的狀態。需要你時一定播放提示音，沒在看的 Agent 完成時也會；error 視同需要你。沒在看那個 Agent 時，右下角跳出通知（AgentDesk Mac 版面在右上角、選單列下方；5 秒，錯誤 8 秒），點一下跳到該面板。提示音可在設定 › Alerts 關閉或換成自己的 MP3（`ui.json` 的 `sound_done`、`sound_blocked`）。
 
 ### 4.2 新增工作
 
@@ -795,6 +801,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-28 | AgentDesk 98 移除（2026-11-20） | 使用者要求：準備公開到 GitHub，不要在版本庫裡留下模仿 Windows 98 的素材與程式。做法：刪除 `apps/desktop/win98_*.cpp`、`libs/ui` 的 win98 邏輯、`third_party/herdr/win98`（像素字型、圖示、圖片、音效）、`third_party/herdr/layouts/win98.json`、win98 單元測試，以及建置時複製 `win98\`、打包與 THIRD_PARTY_NOTICES 裡的對應項目；內建版面剩 workspace 與 terminals，keys.json 的 `layout:win98` 預設區段與 `win98.*` 命令一併拿掉。`ui.json` 存的版面是 win98 時顯示 workspace，舊格式版面檔的 style win98 讀成 workspace。取代 ADR-24 的隱藏做法 |
 | ADR-29 | 開放 mod 給其他人寫（2026-11-20） | 準備公開到 GitHub，讓別人也能寫 mod。四項準備：(1) 設定 › Mods 打開開關時不直接啟用，先在該列下方說明 mod 以使用者的 Windows 權限執行（能讀寫檔案、啟動程式、在終端機輸入）以及卡住時視窗會停住，按「Turn on」才啟用，每次啟用都會說明；關閉不需確認。(2) 相容性：介面新版本只在結構尾端加成員、不改不刪，AgentDesk 載入 api_version 介於 1 與自己版本之間的 mod（載入前結構清為零，舊 mod 不認得的成員是 NULL），比自己新的 mod 拒絕並在設定頁說明；`mod_sdk.hpp` 也改為只拒絕比標頭舊的 AgentDesk。目前只有版本 1，行為不變。(3) 卡住無法從程式中斷，`mod_api.h`、使用說明與開發指南寫明處理方式：終端機在 agent-host 繼續跑，結束 agent-ui、從 `mods_enabled` 拿掉 mod 再開。(4) 開發指南 `docs/mods.md`（英文）：檔案配置、建置、範例、host 與 mod 的每個呼叫、UI 執行緒規則、相容性、純 C 寫法、發布建議 |
 | ADR-30 | Mac 風格的視窗按鈕（2026-11-20） | 使用者要求換成 Mac 風格，並要求查過 UI 設計、風格可以一樣但不能抄。調查：macOS 的設計原則是標題列與工具列合一、側欄從頂端延伸到底且選取用圓角、視窗按鈕是左上三顆圓鈕並有一般、懸停、非作用中三種狀態（Apple HIG 側欄頁、WWDC25「Designing for macOS」）。AgentDesk 依 herdr 複刻，herdr 本身就照 macOS 設計，側欄、圓角與膠囊分頁已具備；差的是視窗按鈕，所以照 herdr-app 在 macOS 上的版面規則做：按鈕位置取版面的 `traffic_lights`（workspace [12, 16]、terminals [16, 18]），品牌列左側讓出 76 px，窄欄寬 76 px 且只放按鈕（展開用窄欄底部的 »），分頁列與 terminals 上方列從按鈕之後開始（分別留 12、10 px），右上角不畫 Windows 式按鈕。按鈕由 AgentDesk 自己畫，不用 Apple 的素材、字型或色碼：直徑 12、間距 8，自訂的紅、琥珀、綠，滑鼠在這組按鈕上時才顯示 ×、−、＋，視窗非作用中時改用框線色，按下時變暗；點擊區延伸到間距的一半。新設定 `window_buttons`（`mac` 預設、`windows`），設定 › Look 的「Window buttons」切換；舊的 `ui.json` 沒有這個鍵，所以一律改為 Mac 式 |
+| ADR-31 | AgentDesk Mac 版面（2026-11-20） | 使用者要把原本 AgentDesk 98 的想法改成 Mac 風格的版面。herdr-app 沒有對應的版面，所以是 AgentDesk 自己的設計，不抄 Apple：不用 Apple 的標誌、字型、SF Symbols、桌布、圖示，也不照抄 Apple 規格裡的色碼；用隨附的 Geist、Nerd Font 字形、程式表圖示、程式畫的圖形與從主題推算的顏色。組成：選單列（AgentDesk 選單與 File、Edit、View、Window、Help，每列都是現有命令；右側時鐘與 Agent 狀態）、桌布、放目前分頁的浮動視窗、spaces 與分頁的 Dock（滑鼠指到時放大）。版面檔是我們的 `libs/ui/layouts/mac.json`，由版面引擎排位置，建置時和 herdr 的兩個檔案一起編進程式。視窗標題列的紅、黃、綠圓鈕不關閉程式：紅、黃把分頁收進 Dock（`tab.settle`），綠色填滿桌面（新命令 `window.fill`）。原因：Agent 關掉就停了，一不小心按到紅鈕不該結束正在跑的工作，收起來的分頁在 Dock 上一點就回來；真的要關閉用 File › Close tab 或 Dock 右鍵選單。通知改到右上角，避免蓋住 Dock。`tab.goto` 列入已知命令（Window 選單與 Dock 用它選分頁）。2.8 |
 | ADR-21 | 程式裡不出現 herdr 的名稱 | 使用者要求（2026-11-19）：執行檔、畫面與跟著發布的檔案只寫 AgentDesk。win98 版面改名 AgentDesk 98；開機、關於與開始選單側邊的「Herdr 98」圖片改由程式用像素字型畫出；Start 與 Update 圖示的 herdr 標誌換成 AgentDesk 的標誌（依 herdr art/generate.ts 的畫法重新產生）；預設主題 id 改為 `preset-<名稱>`，舊設定照樣讀得到。保留的部分：THIRD_PARTY_NOTICES 裡 herdr-app 的授權聲明（Apache-2.0 第 4 條要求）、原始碼註解裡的出處、版本庫的 `third_party/herdr/` |
 
 ### 7.2 主要風險

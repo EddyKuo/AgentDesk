@@ -38,7 +38,9 @@ void derive_layout(LayoutSpec& l) {
     l.style.clear();
     for (const lay::Node* n : t.walk()) {
         const std::string m = n->mod();
-        if (m == "terminals-bar" && l.style.empty())
+        if (m == "mac-menubar" || m == "mac-dock" || m == "mac-window-title")  // wins over the rest
+            l.style = "mac";
+        else if (m == "terminals-bar" && l.style.empty())
             l.style = "terminals";
         if (n->is_block() && n->content.type == lay::Content::Type::kTab && n->content.pane &&
             n->content.pane->header && n->content.pane->header->mod() == "terminals-pane" && l.style.empty())

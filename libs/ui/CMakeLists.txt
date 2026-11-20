@@ -24,6 +24,8 @@ agentdesk_library(agentdesk_ui
     src/programs.cpp
     src/layout.cpp
     src/window_place.cpp
+    src/command_names.cpp
+    src/mac_layout.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/layout_defaults.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -31,17 +33,21 @@ target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inclu
 target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt shcore lunasvg::lunasvg)
 target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agentdesk::host agentdesk::ipc agentdesk::protocol)
 
-# The shipped layout files (kept verbatim), compiled in as text for
-# layout::builtin_text as kPresetMain and kPresetTerminals.
-set(_preset_layouts "${PROJECT_SOURCE_DIR}/third_party/herdr/layouts")
+# The shipped layout files (kept verbatim), compiled in as text for layout::builtin_text as
+# kPresetMain, kPresetTerminals (herdr-app's, third_party/herdr/layouts) and kPresetMac
+# (AgentDesk's own, layouts/ here).
 set(_layout_defaults "")
-foreach(_name main terminals)
-    file(READ "${_preset_layouts}/${_name}.json" _text)
+foreach(_file
+        "${PROJECT_SOURCE_DIR}/third_party/herdr/layouts/main.json"
+        "${PROJECT_SOURCE_DIR}/third_party/herdr/layouts/terminals.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/mac.json")
+    get_filename_component(_name "${_file}" NAME_WE)
+    file(READ "${_file}" _text)
     string(SUBSTRING "${_name}" 0 1 _first)
     string(TOUPPER "${_first}" _first)
     string(SUBSTRING "${_name}" 1 -1 _rest)
     string(APPEND _layout_defaults "extern const char* const kPreset${_first}${_rest};\nconst char* const kPreset${_first}${_rest} = R\"layoutjson(${_text})layoutjson\";\n")
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_preset_layouts}/${_name}.json")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_file}")
 endforeach()
 file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/layout_defaults.cpp" CONTENT
 "// Generated from the shipped layout files by libs/ui/CMakeLists.txt. Do not edit.

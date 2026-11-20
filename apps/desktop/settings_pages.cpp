@@ -245,8 +245,9 @@ bool segmented(App::State& s, const char* id, std::string& value,
 
 // A small drawing of a layout in the current theme's colors for its Settings card.
 // workspace: a 42 px sidebar of lines, a tab strip (one accent tab, two raised), two terminals
-// side by side. terminals: its own fixed dark look, a bar with one tab over two cards. Anything
-// else: a plain frame with one terminal.
+// side by side. terminals: its own fixed dark look, a bar with one tab over two cards. mac: a
+// wallpaper with a menu bar, a window card and the Dock. Anything else: a plain frame with one
+// terminal.
 void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 size) {
     const ImVec2 b(a.x + size.x, a.y + size.y);
     auto line = [&](float x, float y, float w, ImU32 c) {
@@ -281,6 +282,46 @@ void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 siz
             d->AddLine(ImVec2(p.x, p.y + px(7)), ImVec2(q.x, p.y + px(7)), IM_COL32(0x25, 0x28, 0x2c, 255));
             line(p.x + px(3), p.y + px(2), 14, IM_COL32(0x5d, 0x61, 0x68, 255));
         }
+        return;
+    }
+    if (name == "mac") {
+        // The wallpaper, a menu bar strip, a window card with two panes and the Dock pill.
+        const ImU32 c0 = mix(g_pal->bg, g_pal->focus, g_pal->light ? 0.22f : 0.30f);
+        const ImU32 c1 = mix(g_pal->bg, g_pal->info, g_pal->light ? 0.12f : 0.16f);
+        const ImU32 mid = mix(c0, c1, 0.5f);
+        d->AddRectFilled(a, b, c0, px(6));
+        d->AddRectFilledMultiColor(ImVec2(a.x, a.y + px(7)), ImVec2(b.x, b.y - px(6)), c0, mid, c1, mid);
+        d->AddRectFilled(ImVec2(a.x, b.y - px(6)), b, c1, px(6), ImDrawFlags_RoundCornersBottom);
+        d->AddRectFilled(a, ImVec2(b.x, a.y + px(7)), mix(g_pal->sidebar, g_pal->bg, 0.3f), px(6),
+                         ImDrawFlags_RoundCornersTop);
+        d->AddLine(ImVec2(a.x, a.y + px(7)), ImVec2(b.x, a.y + px(7)), g_pal->border);
+        draw_brand_mark(d, ImVec2(a.x + px(4), a.y + px(1.5f)), px(4));
+        for (int i = 0; i < 4; ++i)
+            line(a.x + px(10) + static_cast<float>(i) * px(10), a.y + px(2), 7, g_pal->dim);
+        const ImVec2 wa(a.x + px(10), a.y + px(11));
+        const ImVec2 wb(b.x - px(10), b.y - px(15));
+        d->AddRectFilled(ImVec2(wa.x + px(1), wa.y + px(2)), ImVec2(wb.x + px(1), wb.y + px(2)),
+                         IM_COL32(0, 0, 0, 40), px(4));
+        d->AddRectFilled(wa, wb, g_pal->card, px(4));
+        d->AddRect(wa, wb, g_pal->border, px(4));
+        for (int i = 0; i < 3; ++i)
+            d->AddCircleFilled(ImVec2(wa.x + px(4) + static_cast<float>(i) * px(4), wa.y + px(3.5f)), px(1.3f),
+                               i == 0 ? IM_COL32(232, 98, 88, 255)
+                                      : i == 1 ? IM_COL32(230, 176, 62, 255) : IM_COL32(86, 182, 86, 255));
+        const float pw = (wb.x - wa.x - px(9)) * 0.5f;
+        term(ImVec2(wa.x + px(3), wa.y + px(7)), ImVec2(wa.x + px(3) + pw, wb.y - px(3)));
+        term(ImVec2(wb.x - px(3) - pw, wa.y + px(7)), ImVec2(wb.x - px(3), wb.y - px(3)));
+        const float dw = size.x * 0.46f;
+        const ImVec2 da(a.x + (size.x - dw) * 0.5f, b.y - px(12));
+        d->AddRectFilled(da, ImVec2(da.x + dw, b.y - px(3)), alpha(g_pal->sidebar, 230), px(3));
+        d->AddRect(da, ImVec2(da.x + dw, b.y - px(3)), g_pal->border, px(3));
+        static constexpr const char* kTiles[] = {"ansi4", "ansi3", "", "", ""};
+        for (int i = 0; i < 5; ++i) {
+            const ImVec2 t(da.x + px(2.5f) + static_cast<float>(i) * (dw - px(5)) / 5.0f, da.y + px(2));
+            const ImU32 fill = *kTiles[i] != 0 ? avatar_color(kTiles[i]) : raised_color();
+            d->AddRectFilled(t, ImVec2(t.x + px(5), t.y + px(5)), fill, px(1.5f));
+        }
+        d->AddRect(a, b, g_pal->border, px(6));
         return;
     }
     d->AddRectFilled(a, b, g_pal->sidebar, px(6));
