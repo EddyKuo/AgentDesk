@@ -12,7 +12,13 @@
  * A mod runs inside agent-ui.exe with the person's rights, like any program they install.
  * AgentDesk guards each call: a mod that crashes (an access violation, an escaping exception)
  * is turned off with an error in Settings > Mods, and its DLL stays loaded until AgentDesk
- * restarts.
+ * restarts. A mod that never returns (an endless loop, a blocking wait) freezes the window: the
+ * terminals keep running in agent-host, but agent-ui has to be ended and started again.
+ *
+ * Compatibility: a new interface version only appends members at the end of these structs and
+ * never changes or removes existing ones. AgentDesk loads a mod whose api_version is between 1
+ * and its own AGENTDESK_MOD_API_VERSION; members the mod does not know stay zero/NULL. A mod
+ * built against a newer header than the running AgentDesk is refused with an error.
  */
 #ifndef AGENTDESK_MOD_API_H
 #define AGENTDESK_MOD_API_H

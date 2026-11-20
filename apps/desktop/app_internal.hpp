@@ -759,6 +759,7 @@ struct App::State {
     std::string machine_add_copied;
     char machine_buf[256] = {};
     std::string confirm_title, confirm_detail, confirm_ok, confirm_command;
+    std::string mod_confirm;  // Settings > Mods: the mod whose "turn on?" warning is showing
     std::string settings_tab;  // tab to select when the settings window opens
     bool show_worktree_open = false;
     std::vector<WorktreeEntry> worktree_list;

@@ -313,9 +313,12 @@ void start_mod(ModHost::Mod& m) {
         m.info.error = crash_text(c);
     } else if (rc != 0) {
         m.info.error = "the mod refused to start (code " + std::to_string(rc) + ")";
-    } else if (m.mod.api_version != AGENTDESK_MOD_API_VERSION) {
+    } else if (m.mod.api_version == 0 || m.mod.api_version > AGENTDESK_MOD_API_VERSION) {
+        // Versions only ever add fields at the end of the structs, and m.mod starts zeroed, so a
+        // mod built for an older version still works: what it does not know stays NULL. A mod
+        // built for a newer AgentDesk may rely on calls this one lacks.
         m.info.error = "built for mod interface version " + std::to_string(m.mod.api_version) +
-                       ", this AgentDesk has " + std::to_string(AGENTDESK_MOD_API_VERSION);
+                       ", this AgentDesk supports 1 to " + std::to_string(AGENTDESK_MOD_API_VERSION);
     } else {
         m.ready = true;
         m.info.loaded = true;
