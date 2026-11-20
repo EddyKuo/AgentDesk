@@ -1,6 +1,6 @@
 ---
 contract_type: PRD
-version: 3.4.0
+version: 3.5.0
 status: approved
 author_agent: PM
 sprint: 11
@@ -10,12 +10,13 @@ skills_used:
   - shared/domain-coding-agents@1.0.0
 upstream_deps:
   - raw_requirement@2026-11-16
-  - docs/design/AgentDesk_Design.md@2.24
+  - docs/design/AgentDesk_Design.md@2.25
   - sprint/current/status.md@2026-11-20
 downstream_consumers:
   - RD
   - QA
 change_summary: |
+  3.5.0（Minor）：FR-39 補上按鈕顏色跟著主題；新增 FR-51 第一次使用提示（ADR-36，設計文件 v2.25，使用者 2026-11-20 回報）。既有需求不變。
   3.4.0（Minor）：新增第 10 節 FR-40～FR-50，對應使用者選定並已實作的版面與主題構想（設計文件 v2.24、ADR-32～ADR-35）：Mission Control、Focus 模式、Review、Timeline（host 狀態歷史、`session.timeline`、`agentctl timeline`）、AgentDesk Classic、AgentDesk Tiling、AgentDesk Cockpit、依時間切換外觀、跟著 Agent 狀態變色、版面的建議主題（只建議，不自動套用）、主題編輯器。FR-21 的「看過」改以畫面上實際畫出的終端機判斷（FR-40），既有版面行為不變。T1（高對比與色盲友善）使用者決定延後，不列入。既有需求不變。
   3.3.0（Minor）：FR-27 的內建版面加上 AgentDesk Mac（mac，ADR-31，設計文件 v2.21，使用者 2026-11-20 要求把原本 98 的想法改成 Mac 風格），加一條 Given／When／Then；既有需求不變。
   3.2.0（Minor）：新增 FR-39 Mac 風格的視窗按鈕（ADR-30，設計文件 v2.20，使用者 2026-11-20 要求），既有需求不變。
@@ -396,3 +397,14 @@ v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外�
 - Given 終端機文字對背景低於 3:1，When 按 Save，Then 多問一次才存。
 - Given 一個使用者自己的主題正被某個版面使用，When 使用者選 Delete…並確認，Then 檔案改名為 `<名稱>.json.old-<時間>`，那個版面改回預設主題。
 **驗證**: `ThemeFile.*`（含 `ThemeFile.NameRules`、`ThemeFile.WriteKeepsUnknownKeysAndOnlyOverrides`）、`ColorMath.*`、`PaletteCheck.*`、`ThemeCommands.NamesAreBuiltIn`。
+
+### FR-51 第一次使用提示（ADR-36）
+**優先級**: P2
+**描述**: 每個內建版面與專注模式第一次出現時，顯示一張提示卡：用途與 3～5 個常用操作，快捷鍵依使用者目前的按鍵設定。之後可以隨時重看，也可以全部關閉。同一批修正：視窗按鈕顏色跟著主題（補充 FR-39）。設計文件 2.4、ADR-36。
+**驗收標準**:
+- Given 使用者第一次切到某個版面，When 畫面穩定後，Then 中央出現那個版面的提示卡；按「Got it」後，這個版面不會再自動出現提示。
+- Given 提示卡開著，When 使用者打字或按 Enter，Then 按鍵不會送進終端機；關閉後打字照常送進終端機。
+- Given 使用者在 keys.json 改了某個操作的鍵，When 提示卡顯示，Then 顯示的是改過的鍵。
+- Given 使用者按「Don't show tips」，When 之後切到沒看過的版面，Then 不再自動出現提示；執行 `layout.tips` 仍可打開。
+- Given 使用者換主題，When 畫面更新，Then 左上角的視窗按鈕改用該主題推算的顏色，三顆仍分得出來，且在所在的列上對比至少 3:1。
+**驗證**: `LayoutTips.*`、`WindowButtons.*`；截圖（status.md 2026-11-20「視窗按鈕跟著主題、第一次使用提示」）。

@@ -10,7 +10,7 @@ AgentDesk 是 Windows 11 x64 的 AI coding agent 工作台：在可分割的終�
 
 ## 畫面
 
-執行 `agent-ui.exe`。它會在背景啟動 `agent-host.exe`，所有工作都跑在 host 裡。視窗沒有系統標題列。左上角三顆圓鈕依序是關閉、最小化、縮放（最大化），滑鼠移上去會顯示符號；想用 Windows 式的按鈕，到「設定 > Look > Window buttons」選 Windows，按鈕就會回到分頁列右端。拖曳分頁列或左上的品牌列可以移動視窗，雙擊切換最大化，也能用 Windows 的貼齊功能。
+執行 `agent-ui.exe`。它會在背景啟動 `agent-host.exe`，所有工作都跑在 host 裡。視窗沒有系統標題列。左上角三顆鈕依序是關閉、最小化、縮放（最大化），顏色跟著主題：關閉偏紅、最小化偏黃、縮放偏綠，色調取自主題的「需要你」「工作中」「完成」顏色，並保證在底色上看得清楚。滑鼠移上去會顯示符號，視窗不在前景時三顆都變灰；Cockpit 版面畫成外框圓環，Tiling 版面畫成小方塊，Classic 版面是文字按鈕。想用 Windows 式的按鈕，到「設定 > Look > Window buttons」選 Windows，按鈕就會回到分頁列右端。拖曳分頁列或左上的品牌列可以移動視窗，雙擊切換最大化，也能用 Windows 的貼齊功能。
 
 視窗會記住上次的位置、大小，以及是否最大化，下次開啟時回到原處；那台螢幕不在了，就以同樣大小開在滑鼠所在的螢幕中間。第一次開啟時，大小依螢幕決定：約為 1280×820 乘上 Windows 的縮放比例與 AgentDesk 的縮放（設定裡的 zoom），並保持在螢幕可用範圍的一半到九成之間。所以 Full HD 100% 和 4K 150% 開出來的視窗，看起來的比例差不多。想重新套用預設大小，關掉 AgentDesk 後刪除 `window.json`。
 
@@ -172,6 +172,8 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 - **tiling**（AgentDesk Tiling）、**cockpit**（AgentDesk Cockpit）、**classic**（AgentDesk Classic）：只換外觀與操作方式的風格版面，見下方「風格版面」。
 
 另外有一個任何版面都能用的專注模式（Ctrl+Shift+.），和隨時能打開的時間軸（Ctrl+Shift+H）。
+
+**第一次使用提示**：每個版面（和專注模式）第一次出現時，畫面中央會跳出一張提示卡，說明這個版面適合做什麼，並列出幾個常用操作與快捷鍵（依你的 keys.json 顯示）。按「Got it」、Esc 或點卡片外面就關閉，之後不會再自己出現；按「Don't show tips」則所有版面都不再跳卡。想再看一次，從命令面板執行「Tips for this layout」，或用 Mac、Classic 版面的 Help 選單，或設定 › Look 的「Layout tips」列；那一列的開關也能重新打開提示。
 
 ### 監看牆（Mission Control）
 
