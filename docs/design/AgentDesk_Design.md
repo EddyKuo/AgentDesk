@@ -1,6 +1,6 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.25  
+產品需求與系統設計文件 v2.26  
 日期：2026-11-20｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；版面與主題構想 A1～A4、B1～B3、T2～T5 已實作（2.9～2.12、ADR-32～ADR-35），T1 尚未；還沒做的人工驗收見 5.4、5.7  
 技術基線：C++20、Windows 11 x64、Dear ImGui（FreeType 繪字）、Win32、DirectX 11、隨附 ConPTY
 
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.26 | 2026-11-21 | 7.5 加上第二輪構想的位置（ideas.md 文末：現有版面評估、收斂提議、C1 Inbox／C2 Stage／C3 Pair／C4 Garden、美化規則），尚未排入 |
 | 2.25 | 2026-11-20 | ADR-36：視窗按鈕顏色跟著主題、各版面依風格畫法不同；每個版面與專注模式第一次出現時的提示卡（`layout.tips`、`tips`、`tips_seen`） |
 | 2.24 | 2026-11-20 | 依使用者選定的構想實作：ADR-32 Mission Control（`mission`）與 Focus 模式、ADR-33 Review（`review`）與 Timeline（host 狀態歷史、`session.timeline`、`session.state` 的 `at`、`agentctl timeline`）、ADR-34 風格版面 AgentDesk Tiling／Cockpit／Classic（`tiling`、`cockpit`、`classic`）與 mod → style 對照表、ADR-35 依時間切換外觀、跟著 Agent 狀態變色、版面的建議主題（只建議，不自動套用）、主題編輯器，以及共用的色彩計算；主題檔集中到 `libs/ui/themes`。內建版面共 8 個。「看過」改為以畫面上實際畫出的終端機判斷。新增 2.9～2.12；2.4、2.8、3.7.3、3.8、3.9、3.10、4.1、4.4、7.1、7.5 更新。T1（高對比與色盲友善）使用者決定延後 |
 | 2.23 | 2026-11-20 | 7.5 補上構想的設計規格位置（`docs/design/ideas/`）與開工前待決定事項 |
@@ -1046,6 +1047,8 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | T1 高對比與色盲友善 | 尚未實作，使用者決定延後 |
 
 ideas.md 列的五個開工前決定：(1) A1 不用 Esc，Ctrl+Shift+M 回牆面（ADR-32）；(2) Focus 的 `focus_alerts` 預設 `edge_sound`，仍播放提示音（ADR-32）；(3) T1 高對比主題與版面指定主題的優先順序，隨 T1 延後，仍待決定；(4) 建議主題只在設定頁提示，不自動套用（ADR-35）；(5) Timeline 的歷史放在 host，換版交接不搬（ADR-33）。另外 B1 的選單鍵是 F10（ADR-34）。
+
+第二輪構想（2026-11-21）：使用者認為後來實作的版面還要美化、而且不少不實用，要以實用、好看又有趣為目標重新評估。評估與提案寫在 `docs/design/ideas.md` 文末：保留 AgentDesk、Terminals、Review、Focus、AgentDesk Mac；Tiling 併進 Terminals、拿掉 Cockpit、Classic 改為彩蛋（都待使用者同意）；新構想 C1 Inbox（收件匣，建議最先做）、C2 Stage（主舞台，取代 Mission Control）、C3 Pair（並排比較）、C4 Garden（小花園）；以及統一的美化規則。尚未排入。
 
 ## 8. 官方參考資料
 

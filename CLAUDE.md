@@ -44,7 +44,7 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 
 | 檔案 | 內容 |
 |---|---|
-| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.25）。改設計就改這份，並在檔頭版本紀錄加一列 |
+| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.26）。改設計就改這份，並在檔頭版本紀錄加一列 |
 | `contracts/approved/PRD.md` | PRD 契約 v3.5.0（鎖定設計文件 v2.25）。需求變更要依憲法 6.3 升版 |
 | `docs/design/ideas.md`、`docs/design/ideas/` | 版面與主題的構想清單、各項設計規格與實作紀錄（`IMPL-*.md`）。A1～A4、B1～B3、T2～T5 已實作（設計文件 2.9～2.12、ADR-32～ADR-35），T1 尚未 |
 | `docs/design/use-cases.md`、`docs/design/design-concept.md` | Use case（UC-01～UC-21）與設計概念（給新加入的開發者） |
