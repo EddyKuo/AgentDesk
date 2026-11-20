@@ -17,7 +17,7 @@ AgentDesk 是 Windows 11 x64 的原生 AI coding agent 工作台。你可以在�
 - git worktree：輸入分支名稱就建立 checkout，開成新的 space。
 - 子 Agent：在 AgentDesk 的終端機裡執行 `agentctl run --task ...` 會開出子 Agent；`agentctl wait` 等它，`agentctl report` 把結果送回父 Agent。
 - 遠端機器：透過 `ssh <目標> agentctl bridge`，另一台 Windows 電腦的 space 與 Agent 顯示在同一個側欄。
-- 版面、主題與 mod：內建 workspace、terminals、AgentDesk 98 三種版面，也能用 JSON 自訂。主題有 AgentDesk 自己的四套，加上 herdr 的主題。mod 是 C++ DLL，可以加命令、面板與通知。
+- 版面、主題與 mod：內建 workspace、terminals 兩種版面，也能用 JSON 自訂。主題有 AgentDesk 自己的四套，加上 herdr 的主題。mod 是 C++ DLL，可以加命令、面板與通知。
 - 更新：AgentDesk 與 agent-host 都能更新；agent-host 單獨更新時由新版接手，終端機裡的程式不會中斷。AgentDesk 沒有內建伺服器，要設定 `AGENTDESK_RELEASES_URL` 才會檢查。
 - 命令列 `agentctl`：`run`、`list`、`read`、`send`、`stop`、`wait` 等指令，`--json` 輸出穩定，退出碼固定。
 

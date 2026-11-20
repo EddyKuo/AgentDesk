@@ -189,7 +189,7 @@ AgentDesk 的介面與行為依 herdr 桌面版（herdr-app）的原始碼複刻
 
 我們用 C++／ImGui 重寫，不搬 herdr 的 JS 執行環境，也不追求協定相容。herdr 的模型（版面節點樹、分割樹、注意力規則）轉寫成 C++，放在 `libs/ui`。遇到不清楚的行為時，答案是去查 herdr 的原始碼，不是自己發明。
 
-程式裡不出現 herdr 的名稱（ADR-21）：執行檔、畫面與跟著發布的檔案只寫 AgentDesk，win98 版面叫 AgentDesk 98，圖示換成 AgentDesk 的標誌。出處仍然要留下，這是 Apache-2.0 第 4 條的要求：
+程式裡不出現 herdr 的名稱（ADR-21）：執行檔、畫面與跟著發布的檔案只寫 AgentDesk，圖示換成 AgentDesk 的標誌。出處仍然要留下，這是 Apache-2.0 第 4 條的要求：
 
 - 發布包的 THIRD_PARTY_NOTICES 列出 herdr-app 並附授權（`third_party/herdr/LICENSE`）。
 - 轉寫的程式碼在原始碼註解裡註明出處（例如 `// herdr window.rs 2262-2283`）。
@@ -201,7 +201,7 @@ AgentDesk 的介面與行為依 herdr 桌面版（herdr-app）的原始碼複刻
 
 ### 版面引擎
 
-herdr 的版面模型已經搬進 `libs/ui`（`layout.hpp`）：節點樹（block、row、column、stack、floating）照 herdr 的 JSON 鍵與預設值讀寫，大小計算、分隔線拖曳都照 herdr，使用者的調整另存到 `layouts\.state\<名稱>.json`（設計文件 2.4）。內建三個版面：workspace、terminals、win98（ADR-18；win98 見 2.8）。使用者可以在 `%LOCALAPPDATA%\AgentDesk\layouts\` 放自己的版面檔，舊格式的檔案在讀取時轉換。
+herdr 的版面模型已經搬進 `libs/ui`（`layout.hpp`）：節點樹（block、row、column、stack、floating）照 herdr 的 JSON 鍵與預設值讀寫，大小計算、分隔線拖曳都照 herdr，使用者的調整另存到 `layouts\.state\<名稱>.json`（設計文件 2.4）。內建兩個版面：workspace、terminals（ADR-18）。原本的第三個 AgentDesk 98 已在公開前移除（ADR-28，設計文件 2.8）。使用者可以在 `%LOCALAPPDATA%\AgentDesk\layouts\` 放自己的版面檔，舊格式的檔案在讀取時轉換。
 
 ### 主題
 

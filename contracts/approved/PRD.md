@@ -1,6 +1,6 @@
 ---
 contract_type: PRD
-version: 2.2.0
+version: 3.0.0
 status: approved
 author_agent: PM
 sprint: 11
@@ -10,12 +10,13 @@ skills_used:
   - shared/domain-coding-agents@1.0.0
 upstream_deps:
   - raw_requirement@2026-11-16
-  - docs/design/AgentDesk_Design.md@2.14
+  - docs/design/AgentDesk_Design.md@2.18
   - sprint/current/status.md@2026-11-20
 downstream_consumers:
   - RD
   - QA
 change_summary: |
+  3.0.0（Major）：移除 AgentDesk 98（ADR-28，設計文件 v2.18，使用者 2026-11-20 要求，準備公開到 GitHub）。FR-27 的內建版面只剩 workspace、terminals 與自訂 JSON，FR-33 拿掉 AgentDesk 98 的圖片與圖示描述；刪除需求內容，依憲法 6.3 升主版號（下游 RD、QA 需重新確認 FR-27、FR-33）。程式、素材與 win98 測試已刪除；`ui.json` 存的 win98 改顯示 workspace。上一版保存在 `contracts/deprecated/PRD_v2.2.0.md`。
   2.2.0（Minor）：FR-27 的 AgentDesk 98 暫時隱藏（ADR-24，設計文件 v2.14，使用者 2026-11-20 要求）。需求內容保留、程式保留，重新開放不需改版；目前可切換的內建版面是 workspace 與 terminals。
   2.1.0（Minor）：新增 FR-38 視窗開啟的位置與大小（ADR-23，設計文件 v2.13，使用者 2026-11-20 要求），既有需求不變。
   2.0.1（Patch）：FR-21 引用的測試改名為 `Attention.AlertRules`（2026-11-20 重構時拿掉測試名稱裡的 herdr），需求不變。
@@ -35,7 +36,7 @@ change_summary: |
 
 # Product Requirements Document：AgentDesk
 
-> 本契約鎖定設計文件 **v2.11**，對應出貨的產品版本 0.2.0（1.3.1 鎖定 v2.5，1.1.0 鎖定 v1.7）。設計文件之後的變更若影響第 2、3、4、8、9 節，必須依 CLAUDE.md Section 6.3 將本契約升版，下游才能採用。上一版保存在 `contracts/deprecated/PRD_v1.3.1.md`。
+> 本契約鎖定設計文件 **v2.18**，對應產品版本 0.2.0（2.2.0 鎖定 v2.14，2.0.0 鎖定 v2.11，1.3.1 鎖定 v2.5，1.1.0 鎖定 v1.7）。設計文件之後的變更若影響第 2、3、4、8、9 節，必須依 CLAUDE.md Section 6.3 將本契約升版，下游才能採用。上一版保存在 `contracts/deprecated/PRD_v2.2.0.md`。
 
 ## 1. 產品概述
 
@@ -145,7 +146,7 @@ AgentDesk 的介面與行為依 herdr-app 的原始碼複刻（ADR-15），用 C
 | space | 一個工作地點，通常是一個 repo 或資料夾，可以在遠端機器上；底下有多個分頁 |
 | 分頁 | space 裡的一棵分割面板樹 |
 | 面板 | 分頁裡的一個終端機 |
-| 版面 | 決定顯示哪些區塊的設定（workspace、terminals、AgentDesk 98 與自訂 JSON） |
+| 版面 | 決定顯示哪些區塊的設定（workspace、terminals 與自訂 JSON） |
 | mod | 放在 `mods\<名稱>\mod.dll` 的 C++ DLL 擴充（ADR-17） |
 | 機器 | 透過 ssh＋`agentctl bridge` 連上的另一台電腦 |
 
@@ -154,7 +155,7 @@ AgentDesk 的介面與行為依 herdr-app 的原始碼複刻（ADR-15），用 C
 
 ## 8. 功能對齊 herdr（v1.2.0 新增，設計文件 5.5）
 
-v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外，維持原文。v2.11 的設計文件把遠端機器、版面、mod、AgentDesk 98 分別寫在 2.6、2.4、2.5、2.8。
+v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外，維持原文。設計文件把遠端機器、版面、mod 分別寫在 2.6、2.4、2.5；2.8 記錄 AgentDesk 98 的移除（ADR-28）。
 
 | ID | 需求 | 驗收 | 驗證 |
 |---|---|---|---|
@@ -165,7 +166,7 @@ v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外�
 | FR-24 | 可為 repo 建立 git worktree 並開成新 space | Given 一個 git repo 的 space，When 使用者執行 New worktree 並輸入分支名稱，Then 在 `%USERPROFILE%\.agentdesk\worktrees\<repo>\<branch>` 建立 checkout，並開成新 space | `HostFixture.WorktreeAddCreatesCheckout` |
 | FR-25 | Agent 可開子 Agent、給第一則任務、等待它、接收它的回報 | Given 一個在 AgentDesk 終端機裡執行的 Agent，When 它執行 `agentctl run --task "<任務>"`，Then 新 session 的 parent 是它，任務在子 Agent 就緒（回報 Idle，或沒有狀態來源時等 8 秒）後送出；子 Agent 執行 `agentctl report` 時，文字加上 `[from <名稱> <id>]` 送進父 Agent 的輸入，父 Agent 正在工作或等待使用者時先排隊 | `HostFixture.SubAgentTaskReportAndWait` |
 | FR-26 | 可加入 ssh 可連線的機器，遠端的 space 與 Agent 顯示在同一個側欄 | Given 遠端是 Windows、已安裝 AgentDesk、`agentctl` 在 PATH 上且設好金鑰登入，When 使用者在 Add machine 選這台主機，Then AgentDesk 執行 `ssh <目標> agentctl bridge`，遠端的 space 與 Agent 列在同一個側欄 | `HostFixture.ProtocolOverBridgeCommand`；實際 ssh 待人工（設計文件 5.5） |
-| FR-27 | 可切換版面（workspace、terminals、AgentDesk 98 與自訂 JSON；v2.0.0 依 ADR-18 更正，原文的看板與格狀已移除；v2.2.0 起 AgentDesk 98 暫時隱藏，ADR-24），可用 mod（C++ DLL，ADR-17）加命令、面板與通知 | Given 目前是 workspace 版面，When 使用者按 Ctrl+Shift+L 切到 terminals，Then 側欄與狀態列消失，space 改在分頁列左邊選。Given 已啟用一個 mod，When 它的 DLL 當掉，Then 該 mod 被停用、錯誤顯示在設定頁，AgentDesk 照常執行 | `Layout.*`、`ModsTest.*` |
+| FR-27 | 可切換版面（workspace、terminals 與自訂 JSON；v2.0.0 依 ADR-18 更正，原文的看板與格狀已移除；v3.0.0 依 ADR-28 移除 AgentDesk 98），可用 mod（C++ DLL，ADR-17）加命令、面板與通知 | Given 目前是 workspace 版面，When 使用者按 Ctrl+Shift+L 切到 terminals，Then 側欄與狀態列消失，space 改在分頁列左邊選。Given 已啟用一個 mod，When 它的 DLL 當掉，Then 該 mod 被停用、錯誤顯示在設定頁，AgentDesk 照常執行 | `Layout.*`、`ModsTest.*` |
 | FR-28 | 已安裝的 WSL 發行版自動列為 shell，在目前資料夾開啟；在 Linux 裡 cd 後，space 名稱、分支與 Files／Changes 跟著變（v1.3.0，ADR-16） | Given 已安裝 Ubuntu（WSL），When 使用者從新增選單開「Ubuntu (WSL)」並在 bash 裡 `cd /mnt/d/src`，Then space 名稱、分支與 Files／Changes 跟著換到 `D:\src` | `CwdUri.*`；實機 Ubuntu 驗證見 TestReport |
 
 ## 9. v2.0.0 新增需求（Sprint 10，設計文件 2.4～2.8、5.6、ADR-15～ADR-21）
@@ -209,7 +210,7 @@ v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外�
 
 ### FR-33 程式裡只出現 AgentDesk（ADR-21）
 **優先級**: P2
-**描述**: 執行檔、畫面與跟著發布的檔案只寫 AgentDesk。win98 版面改名 AgentDesk 98，開機、關於與開始選單側邊的圖片改由程式用像素字型畫出；Start 與 Update 圖示換成 AgentDesk 的標誌；預設主題 id 改為 `preset-<名稱>`。保留：THIRD_PARTY_NOTICES 裡 herdr-app 的授權聲明（Apache-2.0 第 4 條要求）、原始碼註解裡的出處、版本庫的 `third_party/herdr/`。
+**描述**: 執行檔、畫面與跟著發布的檔案只寫 AgentDesk；預設主題 id 改為 `preset-<名稱>`。保留：THIRD_PARTY_NOTICES 裡 herdr-app 的授權聲明（Apache-2.0 第 4 條要求）、原始碼註解裡的出處、版本庫的 `third_party/herdr/`。
 **驗收標準**:
 - Given Release 建置輸出，When 在三個執行檔與建置輸出裡搜尋 herdr，Then 找不到（發布包的 THIRD_PARTY_NOTICES 授權聲明依授權規定保留）。
 - Given 一份用舊主題 id 的設定檔，When AgentDesk 啟動，Then 照樣讀得到該主題。

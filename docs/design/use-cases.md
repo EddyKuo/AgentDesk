@@ -365,16 +365,16 @@ flowchart LR
 - **前置條件**：無。
 - **主要流程**：
   1. 使用者按 Ctrl+Shift+L、用命令面板，或開「設定 > Look」。
-  2. 使用者選版面：workspace（設定裡顯示為 AgentDesk）、terminals，或 AgentDesk 98（`win98`）。
+  2. 使用者選版面：workspace（設定裡顯示為 AgentDesk）或 terminals。
   3. 版面引擎依版面樹排出側欄、分頁列、面板、右側面板與狀態列。
   4. 使用者選主題卡片；每個版面各自記住一組深色與淺色主題。
 - **替代與例外流程**：
-  - 2a. AgentDesk 98：Windows 98 的外觀，有工作列、開始選單、桌面圖示、踩地雷、接龍與小幫手；按鍵在 keys.json 的 `layout:win98` 區段。AgentDesk 在最前面時，Ctrl+Esc、Ctrl+Shift+Esc 由它接手開開始選單與工作管理員，其他時候仍交給 Windows。
+  - 2a. `ui.json` 裡存的版面名稱已經不存在（例如已移除的 AgentDesk 98 留下的 `win98`）時，顯示第一個版面（workspace）。
   - 2b. 自訂版面放在 `%LOCALAPPDATA%\AgentDesk\layouts\<名稱>.json`；命令面板的「Duplicate layout」複製目前版面，「Reset layout」還原隨附的版面，改過的檔案改名保留。舊格式的版面檔在讀取時轉換，檔案本身不改寫。
   - 4a. 主題有我們的 Midnight、Ember、Moss、Paper，加上 herdr 的 graphite、ink、moss、paper、atom one dark；放進 `%LOCALAPPDATA%\AgentDesk\themes\` 的主題檔也會列出。
   - 介面縮放、介面文字大小（預設 15 px）、終端機字型、行高與字寬也在「設定 > Look」。
 - **後置條件**：設定立即生效並存進 `ui.json`，沒有儲存鈕。
-- **追溯**：設計文件 2.4、2.8、5.6（Terminals 版面、AgentDesk 98、Look 的版面卡片）；ADR-15、ADR-18、ADR-21。
+- **追溯**：設計文件 2.4、2.8、5.6（Terminals 版面、AgentDesk 98 移除、Look 的版面卡片）；ADR-15、ADR-18、ADR-21、ADR-28。
 
 ### UC-19 使用與撰寫 mod
 

@@ -44,8 +44,8 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 
 | 檔案 | 內容 |
 |---|---|
-| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.17）。改設計就改這份，並在檔頭版本紀錄加一列 |
-| `contracts/approved/PRD.md` | PRD 契約 v2.2.0（鎖定設計文件 v2.14）。需求變更要依憲法 6.3 升版 |
+| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.18）。改設計就改這份，並在檔頭版本紀錄加一列 |
+| `contracts/approved/PRD.md` | PRD 契約 v3.0.0（鎖定設計文件 v2.18）。需求變更要依憲法 6.3 升版 |
 | `docs/design/use-cases.md`、`docs/design/design-concept.md` | Use case（UC-01～UC-21）與設計概念（給新加入的開發者） |
 | `contracts/inbox/TestReport_sprint*.md` | 每個 Sprint 的測試報告（QA，依 ADR_001 判定） |
 | `docs/poc/M0-report.md`、`docs/poc/evidence/` | M0 結論與實測 JSON |
@@ -66,7 +66,7 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 | `libs/protocol` | IPC 分幀（4-byte LE＋UTF-8 JSON）、訊息封包、錯誤碼、畫面編碼 |
 | `libs/host` | `Session` actor（程序＋引擎＋狀態），M1 的 host 由它組成 |
 | `libs/ui` | `TerminalView`（字元格、輸入、IME、選取、搜尋、捲動）、`Workspace`（space／分頁／分割樹、注意力）、`Keymap`、`ModHost`（載入 C++ DLL mod，ImGui 無關）、`git_info`、`HostClient`、唯一碰 `imgui_internal.h` 的 `imgui_adapter.cpp` |
-| `apps/desktop` | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列：`WM_NCCALCSIZE`／`WM_NCHITTEST`）與崩潰記錄，`app.cpp` 是 `App` 的建構與對外介面；介面依功能分檔（`sidebar.cpp`、`tab_bar.cpp`、`panes.cpp`、`files_changes.cpp`、`commands.cpp`、`settings_dialog.cpp`、`welcome.cpp`、`frame.cpp` 等，清單見設計文件 3.10），AgentDesk 98 在 `win98_*.cpp`（目前隱藏，`AGENTDESK_WIN98=1` 才列出，ADR-24）。共用宣告在 `app_internal.hpp`（`detail` 命名空間） |
+| `apps/desktop` | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列：`WM_NCCALCSIZE`／`WM_NCHITTEST`）與崩潰記錄，`app.cpp` 是 `App` 的建構與對外介面；介面依功能分檔（`sidebar.cpp`、`tab_bar.cpp`、`panes.cpp`、`files_changes.cpp`、`commands.cpp`、`settings_dialog.cpp`、`welcome.cpp`、`frame.cpp` 等，清單見設計文件 3.10）。共用宣告在 `app_internal.hpp`（`detail` 命名空間） |
 | `third_party/fonts`、`third_party/herdr` | 隨附字型（Geist、JetBrains Mono、Symbols Nerd Font）與 herdr 的授權、提示音；建置時複製到執行檔旁的 `fonts\`、`sounds\` |
 | `libs/modapi`、`mods/` | mod 介面（純 C 的 `mod_api.h` 與 header-only 的 `mod_sdk.hpp`，ADR-17）與三個範例 mod（各自編成 `mods\<名稱>\mod.dll`，隨 zip 附上 SDK） |
 | `tools/` | 開發與量測工具（不出貨） |
