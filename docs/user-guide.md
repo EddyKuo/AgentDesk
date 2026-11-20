@@ -148,7 +148,6 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 
 - **workspace**（設定裡顯示為 AgentDesk）：預設，側欄＋分頁＋分割面板＋右側面板。
 - **terminals**：沒有側欄與狀態列的版面。上方的分頁列左邊是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是命令面板與新分頁按鈕。面板標題列的按鈕一直顯示。
-- **AgentDesk 98**（win98 版面）：Windows 98 的樣子，有工作列、開始選單、桌面圖示、踩地雷、接龍和小幫手。按鍵在 keys.json 的 `layout:win98` 區段；Ctrl+Esc 開開始選單、Ctrl+Shift+Esc 開工作管理員，只在 AgentDesk 位於最前面時由它接手，其他時候仍是 Windows 的功能。
 
 自訂版面放在 `%LOCALAPPDATA%\AgentDesk\layouts\<名稱>.json`：
 

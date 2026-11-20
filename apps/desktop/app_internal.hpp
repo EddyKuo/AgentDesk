@@ -213,6 +213,9 @@ std::filesystem::path layout_state_path(const std::string& name);
 void derive_layout(LayoutSpec& l);
 void save_layout_state(const LayoutSpec& l);
 std::vector<LayoutSpec> load_layouts(const Settings& st);
+// AgentDesk 98 is hidden for now (user's choice, 2026-11-20): its code stays and still builds, but
+// the layout is not listed. AGENTDESK_WIN98=1 lists it again (the screenshot checks set it).
+bool agentdesk98_shown();
 void write_example_mods();
 
 // ------------------------------------------------------------ programs.cpp

@@ -1,6 +1,6 @@
 ---
 contract_type: PRD
-version: 2.1.0
+version: 2.2.0
 status: approved
 author_agent: PM
 sprint: 11
@@ -10,12 +10,13 @@ skills_used:
   - shared/domain-coding-agents@1.0.0
 upstream_deps:
   - raw_requirement@2026-11-16
-  - docs/design/AgentDesk_Design.md@2.13
+  - docs/design/AgentDesk_Design.md@2.14
   - sprint/current/status.md@2026-11-20
 downstream_consumers:
   - RD
   - QA
 change_summary: |
+  2.2.0（Minor）：FR-27 的 AgentDesk 98 暫時隱藏（ADR-24，設計文件 v2.14，使用者 2026-11-20 要求）。需求內容保留、程式保留，重新開放不需改版；目前可切換的內建版面是 workspace 與 terminals。
   2.1.0（Minor）：新增 FR-38 視窗開啟的位置與大小（ADR-23，設計文件 v2.13，使用者 2026-11-20 要求），既有需求不變。
   2.0.1（Patch）：FR-21 引用的測試改名為 `Attention.AlertRules`（2026-11-20 重構時拿掉測試名稱裡的 herdr），需求不變。
   2.0.0（Major）：FR-27 刪掉了看板與格狀兩種版面，屬於刪除需求內容，依憲法 6.3 升主版號（下游 RD、QA 需重新確認 FR-27）。其餘：跟上出貨的產品版本 0.2.0，鎖定設計文件 v2.11。新增第 9 節 FR-29～FR-37，都是 Sprint 10 已實作、使用者在 2026-11-19 驗收過的功能：
@@ -164,7 +165,7 @@ v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外�
 | FR-24 | 可為 repo 建立 git worktree 並開成新 space | Given 一個 git repo 的 space，When 使用者執行 New worktree 並輸入分支名稱，Then 在 `%USERPROFILE%\.agentdesk\worktrees\<repo>\<branch>` 建立 checkout，並開成新 space | `HostFixture.WorktreeAddCreatesCheckout` |
 | FR-25 | Agent 可開子 Agent、給第一則任務、等待它、接收它的回報 | Given 一個在 AgentDesk 終端機裡執行的 Agent，When 它執行 `agentctl run --task "<任務>"`，Then 新 session 的 parent 是它，任務在子 Agent 就緒（回報 Idle，或沒有狀態來源時等 8 秒）後送出；子 Agent 執行 `agentctl report` 時，文字加上 `[from <名稱> <id>]` 送進父 Agent 的輸入，父 Agent 正在工作或等待使用者時先排隊 | `HostFixture.SubAgentTaskReportAndWait` |
 | FR-26 | 可加入 ssh 可連線的機器，遠端的 space 與 Agent 顯示在同一個側欄 | Given 遠端是 Windows、已安裝 AgentDesk、`agentctl` 在 PATH 上且設好金鑰登入，When 使用者在 Add machine 選這台主機，Then AgentDesk 執行 `ssh <目標> agentctl bridge`，遠端的 space 與 Agent 列在同一個側欄 | `HostFixture.ProtocolOverBridgeCommand`；實際 ssh 待人工（設計文件 5.5） |
-| FR-27 | 可切換版面（workspace、terminals、AgentDesk 98 與自訂 JSON；v2.0.0 依 ADR-18 更正，原文的看板與格狀已移除），可用 mod（C++ DLL，ADR-17）加命令、面板與通知 | Given 目前是 workspace 版面，When 使用者按 Ctrl+Shift+L 切到 terminals，Then 側欄與狀態列消失，space 改在分頁列左邊選。Given 已啟用一個 mod，When 它的 DLL 當掉，Then 該 mod 被停用、錯誤顯示在設定頁，AgentDesk 照常執行 | `Layout.*`、`ModsTest.*` |
+| FR-27 | 可切換版面（workspace、terminals、AgentDesk 98 與自訂 JSON；v2.0.0 依 ADR-18 更正，原文的看板與格狀已移除；v2.2.0 起 AgentDesk 98 暫時隱藏，ADR-24），可用 mod（C++ DLL，ADR-17）加命令、面板與通知 | Given 目前是 workspace 版面，When 使用者按 Ctrl+Shift+L 切到 terminals，Then 側欄與狀態列消失，space 改在分頁列左邊選。Given 已啟用一個 mod，When 它的 DLL 當掉，Then 該 mod 被停用、錯誤顯示在設定頁，AgentDesk 照常執行 | `Layout.*`、`ModsTest.*` |
 | FR-28 | 已安裝的 WSL 發行版自動列為 shell，在目前資料夾開啟；在 Linux 裡 cd 後，space 名稱、分支與 Files／Changes 跟著變（v1.3.0，ADR-16） | Given 已安裝 Ubuntu（WSL），When 使用者從新增選單開「Ubuntu (WSL)」並在 bash 裡 `cd /mnt/d/src`，Then space 名稱、分支與 Files／Changes 跟著換到 `D:\src` | `CwdUri.*`；實機 Ubuntu 驗證見 TestReport |
 
 ## 9. v2.0.0 新增需求（Sprint 10，設計文件 2.4～2.8、5.6、ADR-15～ADR-21）
