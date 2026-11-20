@@ -3,30 +3,15 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "overlay_kit.hpp"
 
+#include "agentdesk/ui/command_names.hpp"
+
 namespace agentdesk::desktop {
 namespace detail {
 
 namespace {
 // Every command name AgentDesk runs itself; telemetry counts only these.
 bool builtin_command(std::string_view name) {
-    // clang-format off
-    static const std::set<std::string, std::less<>> kNames = {
-        "agent.focus", "agent.keep", "agent.new", "agent.next", "agent.peek", "agent.prev", "app.exit_all",
-        "app.feedback", "app.help", "app.keys", "app.palette", "app.picker", "app.reset", "app.settings",
-        "app.welcome", "app.whats_new", "app.zoom_in", "app.zoom_out", "app.zoom_reset", "details.toggle",
-        "launch", "layout", "layout.clone", "layout.reset", "layout.switch", "layout.toggle", "machine.add",
-        "mod", "mod.clone", "mod.open", "mods.folder", "mods.reload", "pane.close", "pane.go", "pane.park",
-        "pane.rename", "pane.resize", "pane.split", "pane.swap", "pane.zoom", "panel", "session.focus",
-        "session.force_stop", "session.interrupt", "session.restart", "session.stop", "sidebar.rail",
-        "sidebar.toggle", "space.close", "space.move", "space.new", "space.next", "space.prev", "space.rename",
-        "space.select", "tab.close", "tab.move", "tab.new", "tab.next", "tab.prev", "tab.rename", "tab.select",
-        "tab.settle", "tab.unsettle", "terminal.copy", "terminal.kill", "terminal.open", "terminal.park",
-        "terminal.paste", "terminal.paste_image", "terminal.peek", "terminal.pin", "terminal.right_click",
-        "terminal.scroll", "terminal.search", "terminal.select_all", "theme", "window.close", "window.maximize",
-        "window.minimize", "worktree.new", "worktree.open", "worktree.remove", "app.quit", "overlay.close",
-        "app.check_updates", "app.update_core", "app.update"};
-    // clang-format on
-    return kNames.contains(name);
+    return ui::is_builtin_command(name);
 }
 
 // A "<mod>.<command>" name whose mod folder exists in <data>\mods.
@@ -879,6 +864,9 @@ Outcome exec_app_command(App::State& s, const Command& c) {
         ::ShowWindow(s.config.hwnd, ::IsZoomed(s.config.hwnd) ? SW_RESTORE : SW_MAXIMIZE);
     } else if (name == "window.close") {
         ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
+    } else if (name == "window.fill") {
+        // The Mac layout's window fills the desktop (no margins), or floats again.
+        s.mac.fill = !s.mac.fill;
     } else if (name == "machine.add") {
         s.show_machine_add = true;
     } else if (name == "app.welcome") {
@@ -1100,7 +1088,7 @@ Outcome exec_layout_mod_command(App::State& s, const Command& c) {
             next = s.layouts.front().name;
         s.settings.layout = next;
         save_settings(s.settings);
-        s.toast("Layout: " + next, "", "", g_pal->info, 2);
+        s.toast("Layout: " + layout_display_name(next), "", "", g_pal->info, 2);
         s.focus_view(s.ws.focused_session());
     } else if (c.name == "layout.clone") {
         return clone_layout(s, c.arg);

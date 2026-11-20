@@ -78,6 +78,8 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
     const bool rail = r.w < px(160);  // workspace-chrome: the narrow sidebar
     switch (n.content.type) {
         case lay::Content::Type::kTab: {
+            if (l.style == "mac" && s.ws.active_tab() == nullptr)
+                return;  // the desktop says how to start instead (draw_mac_backdrop)
             // The details pane sits beside the panes when it is on (not in styled layouts).
             const bool details = l.style.empty() && l.details.value_or(s.settings.details);
             const float gap = px(8);
@@ -114,6 +116,12 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_status_bar(s, pos, size.x, size.y);
     } else if (m == "files" || m == "changes") {
         draw_side_panel(s, pos, size);
+    } else if (m == "mac-menubar") {
+        draw_mac_menubar(s, pos, size.x, size.y);
+    } else if (m == "mac-window-title") {
+        draw_mac_window_title(s, pos, size.x, size.y);
+    } else if (m == "mac-dock") {
+        draw_mac_dock(s, pos, size.x, size.y);
     } else if (s.mods != nullptr) {
         // A C++ DLL mod: its panels, in the block.
         ImGui::SetCursorScreenPos(pos);
@@ -126,11 +134,11 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
 }
 
 // Backgrounds and borders, parents first: a colour, or a two-colour gradient drawn top to bottom
-// (or left to right for angles near 90 / 270).
-void draw_layout_backgrounds(App::State& s, LayoutSpec& l) {
+// (or left to right for angles near 90 / 270). `tree` is the one placed this frame.
+void draw_layout_backgrounds(App::State& s, const LayoutSpec& l, const lay::Node& tree) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     for (const auto& id : s.placed.order) {
-        const lay::Node* n = l.tree.find(id);
+        const lay::Node* n = tree.find(id);
         const lay::Placed& p = s.placed.nodes.at(id);
         const ImVec2 a(p.outer.x, p.outer.y);
         const ImVec2 b(p.outer.right(), p.outer.bottom());
@@ -198,15 +206,21 @@ void draw_layout_separators(App::State& s, LayoutSpec& l) {
 void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
     LayoutSpec& l = s.layout();
     sync_panel(s, l);
-    s.placed = lay::place(l.tree, lay::Rect{origin.x, origin.y, full.x, full.y}, g_scale, {}, true);
-    draw_layout_backgrounds(s, l);
+    // The Mac layout places an adjusted copy while its window fills the desktop or has no tab;
+    // clicks still go to the layout's own tree (the ids are the same).
+    const std::optional<lay::Node> mac = l.style == "mac" ? mac_layout_tree(s, l.tree) : std::nullopt;
+    const lay::Node& tree = mac ? *mac : l.tree;
+    s.placed = lay::place(tree, lay::Rect{origin.x, origin.y, full.x, full.y}, g_scale, {}, true);
+    if (l.style == "mac")
+        draw_mac_backdrop(s, tree);
+    draw_layout_backgrounds(s, l, tree);
     for (const auto& id : s.placed.order) {  // the blocks, in tree order
-        const lay::Node* n = l.tree.find(id);
+        const lay::Node* n = tree.find(id);
         if (n->is_block())
             draw_layout_block(s, l, *n, s.placed.nodes.at(id), connected);
     }
     for (const auto& [id, r] : s.placed.headers) {
-        const lay::Node* n = l.tree.find(id);
+        const lay::Node* n = tree.find(id);
         if (n != nullptr && n->header && n->header->content.is_string())
             draw_stack_tabs(s, *n, r);
     }

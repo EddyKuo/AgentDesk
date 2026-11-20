@@ -149,13 +149,19 @@ void draw_toasts(App::State& s) {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     const float pill = draw_update_pill(s);
     float y = vp->WorkPos.y + vp->WorkSize.y - px(16) - pill;
+    // The Mac layout keeps its Dock at the bottom: notes drop in under the menu bar, top right.
+    const bool top = s.layout().style == "mac";
+    if (top)
+        y = vp->WorkPos.y + px(28) + px(10);
     const float w = px(340);
     int n = 0;
-    // In the order opened: the oldest at the bottom, newer ones stacked above it.
+    // In the order opened: the oldest at the bottom (at the top under the menu bar), newer ones
+    // stacked above it (below it).
     for (auto it = s.toasts.begin(); it != s.toasts.end(); ++it, ++n) {
         const auto& t = *it;
         const float h = px(72);
-        y -= h;
+        if (!top)
+            y -= h;
         ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - w - px(16), y));
         ImGui::SetNextWindowSize(ImVec2(w, h));
         char name[32];
@@ -188,9 +194,10 @@ void draw_toasts(App::State& s) {
         }
         ImGui::End();
         pop_overlay_style();
-        y -= px(8);
+        y += top ? h + px(8) : -px(8);
     }
-    draw_core_update_error(s, vp->WorkPos.y + vp->WorkSize.y - y);  // above the toasts
+    // Above the toasts (above the update pill when the toasts are at the top).
+    draw_core_update_error(s, top ? px(16) + pill : vp->WorkPos.y + vp->WorkSize.y - y);
 }
 
 // A press outside a dialog closes it (ImGui modals dim the window but leave the press to us).

@@ -1,0 +1,58 @@
+{
+  "id": "root",
+  "type": "column",
+  "titlebar": "none",
+  "traffic_lights": [10, 8],
+  "children": [
+    {
+      "id": "menubar",
+      "type": "block",
+      "size": { "px": 28 },
+      "window_drag": true,
+      "content": { "mod": "mac-menubar" }
+    },
+    {
+      "id": "desktop",
+      "type": "column",
+      "padding": [16, 28],
+      "gap": 12,
+      "resizable": false,
+      "children": [
+        {
+          "id": "window",
+          "type": "column",
+          "background": "surface",
+          "border": { "width": 1, "color": "border" },
+          "radius": 12,
+          "children": [
+            {
+              "id": "title",
+              "type": "block",
+              "size": { "px": 34 },
+              "content": { "mod": "mac-window-title" }
+            },
+            {
+              "id": "main",
+              "type": "block",
+              "padding": [8, 8],
+              "content": {
+                "tab": "active",
+                "pane": {
+                  "radius": 10,
+                  "gap": 8,
+                  "lone": true
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "dock",
+          "type": "block",
+          "size": { "px": 62 },
+          "content": { "mod": "mac-dock" }
+        }
+      ]
+    }
+  ]
+}

@@ -23,6 +23,42 @@ Attention most_urgent_of(App::State& s, const std::vector<std::string>& ids) {
 
 }  // namespace
 
+// ---------------------------------------------------------------- shared marks
+// AgentDesk's mark, `side` px square at `min`: a rounded accent square with two short bars in the
+// card colour. Designed at 20 px; other sizes scale every part.
+void draw_brand_mark(ImDrawList* dl, ImVec2 min, float side) {
+    const float u = side / 20.0f;
+    const float cy = min.y + side * 0.5f;
+    dl->AddRectFilled(min, ImVec2(min.x + side, min.y + side), g_pal->focus, 5.0f * u);
+    dl->AddRectFilled(ImVec2(min.x + 5.0f * u, cy - 4.0f * u), ImVec2(min.x + 14.0f * u, cy - 1.5f * u), g_pal->card,
+                      1.0f * u);
+    dl->AddRectFilled(ImVec2(min.x + 5.0f * u, cy + 1.5f * u), ImVec2(min.x + 11.0f * u, cy + 4.0f * u), g_pal->card,
+                      1.0f * u);
+}
+
+// The avatar letter: the title's first character, upper-cased when ASCII.
+std::string avatar_letter(const std::string& title) {
+    std::string letter = title.empty() ? std::string("?") : title.substr(0, 1);
+    if (static_cast<unsigned char>(letter[0]) >= 0x80) {
+        std::size_t len = 1;
+        while (len < title.size() && (static_cast<unsigned char>(title[len]) & 0xC0) == 0x80)
+            ++len;
+        letter = title.substr(0, len);
+    } else {
+        letter[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(letter[0])));
+    }
+    return letter;
+}
+
+// A space's avatar: a rounded square in `fill` with its letter centred in bold `font` px.
+void draw_space_avatar(App::State& s, ImDrawList* dl, ImVec2 min, float side, ImU32 fill, ImU32 ink,
+                       const std::string& letter, float font, float radius) {
+    dl->AddRectFilled(min, ImVec2(min.x + side, min.y + side), fill, radius);
+    const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(font, FLT_MAX, 0, letter.c_str());
+    dl->AddText(s.fonts.ui_bold, font, ImVec2(min.x + (side - t.x) * 0.5f, min.y + (side - t.y) * 0.5f), ink,
+                letter.c_str());
+}
+
 // ---------------------------------------------------------------- sidebar: brand row
 // The mark and the name, then search and the sidebar toggle; neither button has a tooltip. With
 // the round window buttons the row starts after them, and the rail shows only them.
@@ -34,11 +70,7 @@ void draw_brand(App::State& s, ImVec2 pos, float w, bool rail) {
     const float x = pos.x + (rail ? px(6) : mac_window_buttons(s) ? px(76) : px(14));
     if (!rail) {
         const float m = px(20);
-        dl->AddRectFilled(ImVec2(x, cy - m * 0.5f), ImVec2(x + m, cy + m * 0.5f), g_pal->focus, px(5));
-        dl->AddRectFilled(ImVec2(x + px(5), cy - px(4)), ImVec2(x + px(14), cy - px(1.5f)), g_pal->card,
-                          px(1));
-        dl->AddRectFilled(ImVec2(x + px(5), cy + px(1.5f)), ImVec2(x + px(11), cy + px(4)), g_pal->card,
-                          px(1));
+        draw_brand_mark(dl, ImVec2(x, cy - m * 0.5f), m);
         const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fpx(13.5f), FLT_MAX, 0, "AgentDesk");
         dl->AddText(s.fonts.ui_bold, fpx(13.5f), ImVec2(x + m + px(8), cy - t.y * 0.5f), g_pal->text,
                     "AgentDesk");
@@ -341,20 +373,6 @@ float draw_rail_space(SpaceList& L, int ri, int i, ImVec2 a0) {
     return c.y + ch;
 }
 
-// The avatar letter: the title's first character, upper-cased when ASCII.
-std::string avatar_letter(const std::string& title) {
-    std::string letter = title.empty() ? std::string("?") : title.substr(0, 1);
-    if (static_cast<unsigned char>(letter[0]) >= 0x80) {
-        std::size_t len = 1;
-        while (len < title.size() && (static_cast<unsigned char>(title[len]) & 0xC0) == 0x80)
-            ++len;
-        letter = title.substr(0, len);
-    } else {
-        letter[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(letter[0])));
-    }
-    return letter;
-}
-
 // A dragged row draws at half opacity.
 ImU32 faded(ImU32 c, ImU32 fade) {
     return alpha(c, static_cast<int>(((c >> 24) & 0xFF) * fade / 255));
@@ -458,12 +476,8 @@ float draw_space_row(SpaceList& L, int ri, const SpaceRow& row, ImVec2 a) {
     } else {
         const float side = px(18);
         const ImVec2 am(x, cy - side * 0.5f);
-        d->AddRectFilled(am, ImVec2(am.x + side, am.y + side), faded(avatar_color(sp.color), fade), px(5));
-        const std::string letter = avatar_letter(title);
-        const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fpx(10.5f), FLT_MAX, 0, letter.c_str());
-        d->AddText(s.fonts.ui_bold, fpx(10.5f),
-                   ImVec2(am.x + (side - t.x) * 0.5f, am.y + (side - t.y) * 0.5f),
-                   faded(IM_COL32(255, 255, 255, 255), fade), letter.c_str());
+        draw_space_avatar(s, d, am, side, faded(avatar_color(sp.color), fade),
+                          faded(IM_COL32(255, 255, 255, 255), fade), avatar_letter(title), fpx(10.5f), px(5));
         x += side + px(9);
     }
     draw_space_name_and_tail(L, sp, row, title, x, cy, b.x, fade);

@@ -90,6 +90,8 @@ void draw_new_menu_agents(App::State& s, ui::HostClient* mh,
     }
 }
 
+}  // namespace
+
 // The "+" menu: Terminal and the machine's other shells, "Start an agent", then New space, New
 // worktree… and Open worktree…. The agents and shells are those of the active space's machine.
 void draw_new_menu(App::State& s) {
@@ -144,6 +146,7 @@ void draw_window_buttons(App::State& s, float right, float top, float h) {
         ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
 }
 
+namespace {
 // The Changes and Files toggles, laid out leftwards from `right`; returns the new right edge.
 float draw_panel_buttons(App::State& s, ImDrawList* dl, ImVec2 pos, float height, float right) {
     auto* sp = s.ws.active();
@@ -179,6 +182,8 @@ float draw_panel_buttons(App::State& s, ImDrawList* dl, ImVec2 pos, float height
     return right;
 }
 
+}  // namespace
+
 Attention tab_attention(App::State& s, const std::vector<std::string>& ids) {
     std::vector<Attention> atts;
     for (const auto& id : ids)
@@ -206,6 +211,7 @@ std::string tab_label(App::State& s, const ui::Tab& tab, int i, const std::vecto
     return label;
 }
 
+namespace {
 struct TabItem {
     int i;
     float w;
@@ -255,6 +261,8 @@ void scroll_to_active_tab(App::State& s, const std::vector<TabItem>& items, int 
         s.tab_scroll = active_start;
 }
 
+}  // namespace
+
 // The tab's context menu: Rename, New tab, Close, all acting on this tab by id.
 void tab_menu(App::State& s, const ui::Tab& tab, std::string& close_tab) {
     if (!begin_menu("##tabctx"))
@@ -269,6 +277,7 @@ void tab_menu(App::State& s, const ui::Tab& tab, std::string& close_tab) {
     ImGui::EndPopup();
 }
 
+namespace {
 // One tab between a and b. Selects on mouse-up over the same tab; a press dragged onto another
 // tab sets `drop`; double-click renames. The active tab is raised and has a close button.
 void draw_tab(App::State& s, ImDrawList* dl, ui::Space& sp, const TabItem& it, ImVec2 a, ImVec2 b,

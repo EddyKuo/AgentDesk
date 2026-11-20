@@ -8,6 +8,7 @@ agentdesk_executable(agent-ui WIN32
     frame.cpp
     git_cache.cpp
     layouts.cpp
+    mac_layout.cpp
     machine_add.cpp
     notes.cpp
     notices.cpp
