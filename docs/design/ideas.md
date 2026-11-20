@@ -1,10 +1,34 @@
 # AgentDesk 版面與主題構想
 
-日期：2026-11-20｜狀態：構想，尚未排入計畫
+日期：2026-11-20｜狀態：構想，尚未排入計畫；每一項都已有設計規格（見下方）
 
 這份文件收集版面與主題的發想，給之後挑選、排工作時參考。這些都還不是需求：要做哪一項，由使用者決定，再寫進設計文件（`docs/design/AgentDesk_Design.md`）與 PRD，照一般流程開發。
 
 目前已有的版面：AgentDesk（workspace）、Terminals、AgentDesk Mac（ADR-31）。主題：AgentDesk 自己的四套，加上 herdr 的 graphite、ink、moss、paper、atom-one-dark，以及使用者放進 `themes\` 的主題檔。
+
+## 設計規格
+
+每一項都已寫成設計規格（畫面草圖、元件與狀態、互動、資料與架構、設定、邊界情況、驗收標準、測試、工作量與風險），選定後可以直接排工作：
+
+| 檔案 | 內容 | 工作量估計 |
+|---|---|---|
+| [ideas/A-usage-layouts.md](ideas/A-usage-layouts.md) | A1 Mission Control、A2 Focus、A3 Review、A4 Timeline | A1 L（6～8 天）、A2 S～M（2～3 天）、A3 M（3～4 天）、A4 L（5～7 天，要改 host 與協定） |
+| [ideas/B-style-layouts.md](ideas/B-style-layouts.md) | B1 Terminal Classic、B2 Tiling、B3 Cockpit | B1 L（6～8 天）、B2 M（3～5 天）、B3 M～L（5～7 天） |
+| [ideas/T-themes.md](ideas/T-themes.md) | T1 高對比與色盲友善、T2 依時間切換、T3 跟著狀態變色、T4 成套主題、T5 主題編輯器 | T1 M（5～6 天）、T2 S～M（3 天）、T3 M（4 天）、T4 S～M（3～5 天）、T5 L（8～10 天） |
+
+### 開工前要使用者決定的事
+
+設計過程中發現幾處和現有規則衝突，或只能由使用者決定：
+
+1. **A1 能不能用 Esc 回到牆面**：Claude Code 用 Esc 中斷 Agent，所以設計改成用 Ctrl+Shift+M 回牆面，Esc 照常送給終端機。
+2. **A2 專注模式預設要不要靜音**：設計文件 4.1 規定「Agent 需要你時一定播放提示音」。設計提議專注模式預設只亮視窗邊緣（`focus_alerts`），視窗不在前景時照常出聲；要採用就得修改 4.1 的規則。
+3. **T1 高對比主題與版面指定主題的優先順序**：terminals 版面檔寫死 graphite 主題；使用者選了高對比時，應該以哪個為準。
+4. **T4 成套主題會改變既有外觀**：已升級的使用者切到 mac 版面時會換成建議的配色；要直接套用，還是只在設定頁提示。
+5. **A4 要修改 host 與協定**：新增狀態歷史與 `session.timeline`；host 換版交接時要不要一起搬這些紀錄。
+
+另外，A1 監看牆與 B1 復古終端機原本都提議 Ctrl+Shift+M，審稿時把 B1 的選單鍵改成 F10。
+
+設計時也發現一個現有的問題，與構想無關：`update_attention` 用目前的分頁判斷 Agent 是否「被看到」，不管畫面上實際畫了什麼。A1 的牆面會因此誤清「完成」標記；做 A1 時一併修正（見 A-usage-layouts.md）。
 
 ## 建議優先順序
 
