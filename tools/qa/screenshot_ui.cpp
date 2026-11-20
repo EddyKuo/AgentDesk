@@ -16,7 +16,8 @@
 // The PowerShell spellings (-Out, -WaitSeconds ...) are accepted too. agent-ui writes its
 // --report next to the PNG (same name, .json). Environment: SHOT_CTL_HOST (start the host with
 // agentctl first), SHOT_EXTRA ("profile:name,..." sessions created before the UI starts),
-// SHOT_DEBUG (also save the first session's last lines and host.log next to the PNG).
+// SHOT_DEBUG (also save the first session's last lines and host.log next to the PNG),
+// SHOT_APPEARANCE ("light" or "dark" instead of the system's).
 #include <windows.h>
 // wincodec.h needs windows.h first.
 #include <algorithm>
@@ -240,6 +241,15 @@ Json shot_profiles() {
               {"-NoLogo", "-NoProfile", "-NoExit", "-Command",
                std::string("[Console]::Write([char]27 + ']7501;state=") + st + "' + [char]7)"}}});
     }
+    // "state-later": working at first, blocked 10 s later (an agent that needs you while the UI is
+    // up: Focus's edge glow, Mission Control's ordering).
+    profiles.push_back({{"id", "state-later"},
+                        {"name", "state later"},
+                        {"executable", ps},
+                        {"args",
+                         {"-NoLogo", "-NoProfile", "-NoExit", "-Command",
+                          "[Console]::Write([char]27 + ']7501;state=working' + [char]7); Start-Sleep -Seconds 10; "
+                          "[Console]::Write([char]27 + ']7501;state=blocked' + [char]7)"}}});
     return profiles;
 }
 
@@ -426,6 +436,11 @@ int wmain(int argc, wchar_t** argv) {
             for (const auto& m : split(o.mods, L','))
                 enabled.push_back(dk::u8(m));
             (*ui_doc)["mods_enabled"] = enabled;
+        }
+        if (const auto look = env(L"SHOT_APPEARANCE")) {  // "light" or "dark": not the system's
+            if (!ui_doc)
+                ui_doc = Json{{"schema_version", 1}};
+            (*ui_doc)["appearance"] = dk::u8(*look);
         }
         if (ui_doc)
             dk::write_file(data / L"ui.json", ui_doc->dump(2));

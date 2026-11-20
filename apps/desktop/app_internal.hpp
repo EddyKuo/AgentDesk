@@ -43,6 +43,7 @@
 #include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/ui/chrome_logic.hpp"
+#include "agentdesk/ui/focus_mode.hpp"
 #include "agentdesk/ui/git_info.hpp"
 #include "agentdesk/ui/image_cache.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
@@ -50,6 +51,7 @@
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/mac_layout.hpp"
+#include "agentdesk/ui/mission.hpp"
 #include "agentdesk/ui/mods.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
@@ -172,6 +174,17 @@ struct Settings {
     Json agents_changed = Json::object();  // session id -> {s: state, at: ms since 1970}
     // On unless the file says "telemetry": false; turning it on again removes the key.
     bool telemetry = true;
+    // Focus mode (focus_mode.cpp): on across restarts, and how an agent that needs you is told
+    // while it is on ("edge", "edge_sound" or "normal").
+    bool focus_on = false;
+    std::string focus_alerts = "edge_sound";
+    // The layout a toggle (mission.toggle) goes back to.
+    std::string layout_return;
+    // Mission Control (mission_layout.cpp): the last filter, and whether sub-agents and terminals
+    // without a status get tiles of their own.
+    std::string mission_filter = "all";
+    bool mission_sub_agents = false;
+    bool mission_shells = false;
 };
 // %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk; created when missing.
 std::filesystem::path data_dir();
@@ -315,6 +328,12 @@ inline constexpr CommandInfo kCommands[] = {
     {"mods.reload", "Reload mods and layouts"},
     {"mods.folder", "Open the mods folder"},
     {"app.exit_all", "Exit and stop all sessions"},
+    {"focus.toggle", "Focus mode: one terminal, nothing else"},
+    {"mission.toggle", "Mission Control: every agent on one wall"},
+    {"mission.wall", "Mission Control: back to the wall"},
+    {"mission.filter:all", "Mission Control: show all agents"},
+    {"mission.filter:active", "Mission Control: show active agents"},
+    {"mission.filter:blocked", "Mission Control: show agents that need you"},
 };
 bool known_command(std::string_view name);
 
@@ -799,6 +818,37 @@ struct App::State {
         bool fill = false;
         std::map<std::string, float> scale;
     } mac;
+    // The terminals this frame drew (draw_pane adds them) and the ones the last frame drew: what
+    // the person can see, for update_attention. A small Mission Control tile does not count.
+    std::set<std::string> drawn_sessions;
+    std::set<std::string> visible_sessions;
+    // Focus mode (focus_mode.cpp; on/off is Settings::focus_on): its tree, the edge glow and the
+    // pane header that fades in at the top.
+    struct FocusState {
+        LayoutSpec layout;  // the built-in "focus" tree, made on first use
+        Clock::time_point glow_at{};
+        ImU32 glow_color = 0;
+        int glow_peak = 0;
+        ui::focus::HeaderReveal header;
+    } focus_mode;
+    // Mission Control (mission_layout.cpp): the tile the keys move, the wall's scroll, and each
+    // tile's last lines, worked out again only when its screen changed and at most 4 times a second.
+    struct MissionState {
+        std::string selected;
+        float scroll = 0;
+        bool shells_shown = false;  // "show them" on the empty wall (until the layout is left)
+        bool entered = false;       // mission_entered ran since the app started
+        bool animating = false;     // last frame: a tile waits to refresh, or skeleton bars breathe
+        struct Tile {
+            std::uint64_t seq = 0;
+            std::uint64_t generation = 0;
+            bool filled = false;
+            int lines = 0;
+            Clock::time_point at{};
+            std::vector<ui::mission::TailLine> tail;
+        };
+        std::map<std::string, Tile> tiles;
+    } mission;
 
     // ---------------------------------------------------------------- helpers
     // The UI document (spaces, tabs, panes) changed: persist() sends it to the host soon.
@@ -1033,6 +1083,15 @@ long long now_ms();
 void refresh_git_facts(App::State& s);
 bool live_agent(App::State& s, const std::string& id, const ui::SessionView& v);
 void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail);
+// The agents the sidebar lists, in its order (this also sets State::agent_order, which
+// agent.next / agent.prev follow), with each one's urgency counting its sub-agents and the live
+// sub-agents by parent. Focus's strip and Mission Control use it so their order agrees.
+struct AgentRoster {
+    std::vector<std::string> ids;
+    std::map<std::string, int> urgency;
+    std::map<std::string, std::vector<std::string>> kids;
+};
+AgentRoster agent_roster(App::State& s);
 void draw_sidebar_footer(App::State& s, ImVec2 pos, float w, bool rail);
 
 // ------------------------------------------------------------ tab_bar.cpp
@@ -1078,8 +1137,7 @@ void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::
 void draw_status_bar(App::State& s, ImVec2 pos, float width, float height);
 
 // ------------------------------------------------------------ panes.cpp
-void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected);
-std::string panel_folder(App::State& s, std::string* machine = nullptr);
+void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected);std::string panel_folder(App::State& s, std::string* machine = nullptr);
 ImU32 mark_color(char m);
 void panel_header(App::State& s, ImDrawList* dl, ImVec2 a, float w, const char* title, const std::string& right,
                   bool back, bool* back_clicked);
@@ -1159,6 +1217,62 @@ void draw_settings(App::State& s);
 
 // ------------------------------------------------------------ sessions.cpp
 void play_alert(App::State& s, bool blocked);
+
+// ------------------------------------------------------------ state_card.cpp
+// An empty, loading or error state: a title (18 px semibold), a hint (13 px dim), an optional
+// detail line in its own colour and buttons 36 px high, the first in the accent colour, each
+// running its command. `framed`: on a card (12 px corners, the border), else bare.
+struct StateCard {
+    struct Button {
+        std::string label;
+        std::string command;
+        std::function<void()> action;  // instead of a command
+    };
+    std::string title;
+    std::string hint;
+    std::string detail;
+    ImU32 detail_color = 0;
+    std::vector<Button> buttons;
+    bool framed = true;
+    // A text link under the buttons (accent colour, underlined while hovered).
+    std::string link;
+    std::function<void()> on_link;
+};
+void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& card);
+// A button label followed by the command's key ("New terminal   Ctrl+Shift+T"), when it has one.
+std::string with_chord(const App::State& s, const std::string& label, const char* command);
+// Grey bars standing in for text that is not there yet, `row_h` apart, each `bar_h` high and the
+// given fraction of `w` long; they breathe once every 1.2 s (the caller keeps frames coming).
+void draw_skeleton_rows(ImDrawList* dl, ImVec2 pos, float w, std::initializer_list<float> widths, float row_h,
+                        float bar_h);
+
+// ------------------------------------------------------------ focus_mode.cpp
+// Focus mode: the shown layout gives way to one terminal and a 22 px strip of the other agents.
+LayoutSpec& focus_layout(App::State& s);
+void set_focus(App::State& s, bool on);
+void draw_focus_strip(App::State& s, ImVec2 pos, float w, float h);
+// No tab to show in Focus: "No terminal to focus" (or the connecting card).
+void draw_focus_empty(App::State& s, ImDrawList* dl, ImVec2 pos, ImVec2 size, bool connected);
+// An agent needs you or finished while Focus is on and the window is in front: the edge glows
+// instead of the note (and the sound, unless focus_alerts says to play it). Returns false when the
+// usual alert should run instead.
+bool focus_alert(App::State& s, bool blocked);
+// The glow around the window's inner edge, over everything but dialogs.
+void draw_focus_glow(App::State& s);
+// Something in Focus moves without input (the glow, the header fading): the next frame is due.
+bool focus_animating(const App::State& s);
+// Draws `fn`'s vertices at `alpha` (0..1) of their own opacity.
+void with_alpha(ImDrawList* dl, float alpha, const std::function<void()>& fn);
+
+// ------------------------------------------------------------ mission_layout.cpp
+// Mission Control: every agent as a tile on a wall; a click puts that agent in the layout's
+// "main" block (the stack "wall-body"), Ctrl+Shift+M goes back.
+void draw_mission_bar(App::State& s, ImVec2 pos, float w, float h);
+void draw_mission_wall(App::State& s, ImVec2 pos, ImVec2 size);
+// The mission.* commands; nullopt when `name` is not one.
+std::optional<std::string> mission_command(App::State& s, const std::string& name, const std::string& arg);
+// Switching to the mission layout always starts on the wall.
+void mission_entered(App::State& s);
 
 // ------------------------------------------------------------ welcome.cpp
 void draw_welcome(App::State& s);

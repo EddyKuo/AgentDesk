@@ -189,7 +189,7 @@ void normalize(Json& v);
 // ---------------------------------------------------------------- the shipped layouts
 // main and terminals, compiled in verbatim from the shipped files, and AgentDesk's own mac.
 // AgentDesk calls main "workspace", as its settings always have.
-std::vector<std::string> builtin_names();              // workspace, terminals, mac
+std::vector<std::string> builtin_names();              // workspace, terminals, mac, mission
 std::string_view builtin_text(std::string_view name);  // "" when not one
 std::string_view builtin_file_name(std::string_view name);    // file name of a built-in: workspace -> main
 // A layout as shipped (main for a name that is not a built-in).

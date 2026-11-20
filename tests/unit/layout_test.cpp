@@ -218,8 +218,9 @@ TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
         ASSERT_TRUE(n.has_value()) << name << ": " << error;
         for (const Node* x : n->walk())
             EXPECT_FALSE(x->id.empty()) << name;
-        // herdr-app's files are kept in third_party; AgentDesk's own (mac) beside the engine.
-        const std::string dir = name == "mac" ? AGENTDESK_OWN_LAYOUTS_DIR : AGENTDESK_PRESET_LAYOUTS_DIR;
+        // herdr-app's files are kept in third_party; AgentDesk's own (mac, mission) beside the engine.
+        const std::string dir =
+            name == "mac" || name == "mission" ? AGENTDESK_OWN_LAYOUTS_DIR : AGENTDESK_PRESET_LAYOUTS_DIR;
         std::ifstream in(dir + "/" + std::string(builtin_file_name(name)) + ".json", std::ios::binary);
         std::stringstream ss;
         ss << in.rdbuf();
@@ -231,7 +232,7 @@ TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
     EXPECT_EQ(main.find("sidebar")->size, Span::pixels(268));
     EXPECT_TRUE(main.find("panel")->hidden);
     EXPECT_EQ(main.find("panel-body")->active, "files");
-    EXPECT_EQ(builtin_names(), (std::vector<std::string>{"workspace", "terminals", "mac"}));
+    EXPECT_EQ(builtin_names(), (std::vector<std::string>{"workspace", "terminals", "mac", "mission"}));
     EXPECT_EQ(builtin("nope"), main);
     EXPECT_EQ(builtin("win98"), main);  // a name no longer built in falls back to the workspace
 }

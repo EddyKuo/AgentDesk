@@ -122,6 +122,12 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_mac_window_title(s, pos, size.x, size.y);
     } else if (m == "mac-dock") {
         draw_mac_dock(s, pos, size.x, size.y);
+    } else if (m == "focus-strip") {
+        draw_focus_strip(s, pos, size.x, size.y);
+    } else if (m == "mission-bar") {
+        draw_mission_bar(s, pos, size.x, size.y);
+    } else if (m == "mission-wall") {
+        draw_mission_wall(s, pos, size);
     } else if (s.mods != nullptr) {
         // A C++ DLL mod: its panels, in the block.
         ImGui::SetCursorScreenPos(pos);
@@ -204,7 +210,8 @@ void draw_layout_separators(App::State& s, LayoutSpec& l) {
 }
 
 void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
-    LayoutSpec& l = s.layout();
+    // Focus mode puts its own tree in place of the shown layout's (which keeps its theme).
+    LayoutSpec& l = s.settings.focus_on ? focus_layout(s) : s.layout();
     sync_panel(s, l);
     // The Mac layout places an adjusted copy while its window fills the desktop or has no tab;
     // clicks still go to the layout's own tree (the ids are the same).
@@ -323,9 +330,26 @@ void run_input_step(App::State& s, const std::string& step, Clock::time_point no
         io.AddMousePosEvent(p.x, p.y);
         io.AddMouseButtonEvent(0, op == "press");
     } else if (op == "key") {
-        if (const ImGuiKey k = input_key(arg); k != ImGuiKey_None) {
+        // "ctrl+shift+m": modifiers before the key, held around it.
+        std::string name = arg;
+        std::vector<ImGuiKey> mods;
+        for (const auto& [prefix, mod] : {std::pair<const char*, ImGuiKey>{"ctrl+", ImGuiMod_Ctrl},
+                                          {"shift+", ImGuiMod_Shift}, {"alt+", ImGuiMod_Alt}}) {
+            for (auto at = name.find(prefix); at != std::string::npos; at = name.find(prefix)) {
+                name.erase(at, std::strlen(prefix));
+                mods.push_back(mod);
+            }
+        }
+        if (name == ".")
+            name = "period";
+        const ImGuiKey k = name == "period" ? ImGuiKey_Period : input_key(name);
+        if (k != ImGuiKey_None) {
+            for (const ImGuiKey m : mods)
+                io.AddKeyEvent(m, true);
             io.AddKeyEvent(k, true);
             io.AddKeyEvent(k, false);
+            for (const ImGuiKey m : mods)
+                io.AddKeyEvent(m, false);
         }
     } else if (op == "type") {
         io.AddInputCharactersUTF8(arg.c_str());
@@ -402,10 +426,12 @@ void run_global_shortcuts(App::State& s) {
         chords.insert(chord);
     for (const auto& [chord, cmd] : s.keymap.layout_map())
         chords.insert(chord);
+    // Run at the start of the next frame: a command that brings up a terminal (mission.toggle back
+    // to a layout with a focused pane) must not let that terminal see the same key press again.
     for (const ImGuiKeyChord chord : chords) {
         if (ImGui::IsKeyChordPressed(chord))
             if (const auto cmd = s.keymap.global(chord))
-                run_command(s, *cmd);
+                s.chord_commands.push_back(*cmd);
     }
 }
 
@@ -566,9 +592,12 @@ void App::frame() {
     // Commands raised while the layout draws wait for the end of it (State::deferred_commands).
     traffic_lights_input(s, origin);
     s.defer_commands = true;
+    s.drawn_sessions.clear();
     draw_layout(s, origin, full, connected);
+    s.visible_sessions = s.drawn_sessions;  // what update_attention counts as seen
     run_deferred_commands(s);
     traffic_lights_paint(s);
+    draw_focus_glow(s);
     ImGui::End();
     draw_dialogs(s);
     update_window_title(s);

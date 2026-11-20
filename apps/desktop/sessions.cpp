@@ -316,6 +316,11 @@ namespace {
 void alert(App::State& s, const std::string& id, const ui::SessionView& v, bool looking) {
     const bool blocked = v.agent_state == "Blocked";
     const std::string title = s.pane_title(id);
+    if (focus_alert(s, blocked)) {  // Focus mode in front: the edge glows instead
+        if (s.ws.unsettle_session(id))
+            s.doc_changed();
+        return;
+    }
     if (s.settings.sounds)
         play_alert(s, blocked);
     if (s.ws.unsettle_session(id))
@@ -361,21 +366,18 @@ void report_failed_start(App::State& s, const std::string& id, const ui::Session
 }  // namespace
 
 // Feeds every agent's state to the attention tracker (alerts for new needs-you / done), reports
-// terminals that failed to start, and marks what the person is looking at as seen.
+// terminals that failed to start, and marks what the person is looking at as seen: the panes the
+// last frame really drew (State::visible_sessions), so a layout without the active tab's panes, a
+// Mission Control tile or the panes Focus hides do not count as looked at.
 void update_attention(App::State& s) {
-    const ui::Tab* tab = s.ws.active_tab();
-    std::set<std::string> visible;
-    if (tab != nullptr) {
-        if (!tab->zoomed.empty())
-            visible.insert(tab->zoomed);
-        else
-            for (const auto& id : s.ws.sessions_in(*tab))
-                visible.insert(id);
-    }
+    const std::set<std::string>& visible = s.visible_sessions;
     for (const auto& [id, v] : s.views_by_id) {
         const bool looking = s.window_focused && visible.contains(id);
-        if (s.attention.update(id, v.agent_state, looking) && !s.config.automated)
+        const bool news = s.attention.update(id, v.agent_state, looking);
+        if (news && !s.config.automated)
             alert(s, id, v, looking);
+        else if (news)
+            focus_alert(s, v.agent_state == "Blocked");  // automated runs: Focus's glow only, silent
         if (s.prev_process_state[id] != v.process_state) {
             s.prev_process_state[id] = v.process_state;
             report_failed_start(s, id, v);

@@ -378,6 +378,8 @@ void traffic_lights_input(App::State& s, ImVec2 origin) {
     const ImVec2 p = traffic_lights_point(s);
     s.lights.shown = true;
     s.lights.at = ImVec2(origin.x + px(p.x), origin.y + px(p.y));
+    if (s.settings.focus_on)  // Focus has no top bar: they sit at the left of its 22 px strip
+        s.lights.at = ImVec2(origin.x + px(10), origin.y + ImGui::GetMainViewport()->WorkSize.y - px(22) + px(5));
     // Each button's hit area runs halfway into the gaps, so the group has no dead spots.
     const float step = px(kLightSize + kLightGap);
     const float pad = px(kLightGap * 0.5f);

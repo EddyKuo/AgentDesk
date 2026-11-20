@@ -873,7 +873,16 @@ Outcome exec_app_command(App::State& s, const Command& c) {
         s.show_welcome = true;
     } else if (name == "sidebar.rail") {
         return toggle_sidebar_rail(s);
+    } else if (name == "focus.toggle" || name == "focus.on" || name == "focus.off") {
+        set_focus(s, name == "focus.on" || (name == "focus.toggle" && !s.settings.focus_on));
     } else if (name == "sidebar.toggle") {
+        // In Focus the sidebar is not drawn: asking for it leaves Focus, and shows it if hidden.
+        if (s.settings.focus_on) {
+            set_focus(s, false);
+            const lay::Node* side = s.layout().tree.find("sidebar");
+            if (side == nullptr || !side->hidden)
+                return kDone;
+        }
         // layout.toggle on the "sidebar" node. A layout without one (terminals) switches to the first
         // layout that has a sidebar, shown, so "show the sidebar" works from every layout.
         if (s.layout().tree.find("sidebar") != nullptr)
@@ -1088,6 +1097,8 @@ Outcome exec_layout_mod_command(App::State& s, const Command& c) {
             next = s.layouts.front().name;
         s.settings.layout = next;
         save_settings(s.settings);
+        if (s.layout().style == "mission")
+            mission_entered(s);
         s.toast("Layout: " + layout_display_name(next), "", "", g_pal->info, 2);
         s.focus_view(s.ws.focused_session());
     } else if (c.name == "layout.clone") {
@@ -1132,6 +1143,8 @@ std::string exec_command(App::State& s, const std::string& cmd) {
     if (c.name == "layout.toggle" && c.arg.empty())  // the panel (AgentDesk's older spelling)
         return exec_command(s, "panel");
     if (auto r = layout_command(s, c.name, c.arg))
+        return *r;
+    if (auto r = mission_command(s, c.name, c.arg))
         return *r;
     if (const auto al = kCommandAliases.find(c.name); al != kCommandAliases.end())
         return exec_command(s, c.arg.empty() ? al->second : al->second + ":" + c.arg);
