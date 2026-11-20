@@ -128,7 +128,7 @@ void menu_row_mac(App::State& s, const mac::MenuItem& it, int n, float w) {
         ImGui::Dummy(ImVec2(w, px(9)));
         ImGui::GetWindowDrawList()->AddLine(ImVec2(a.x + px(8), a.y + px(4.5f)),
                                             ImVec2(a.x + w - px(8), a.y + px(4.5f)),
-                                            mix(g_pal->border, g_pal->text, 0.12f));
+                                            mix(g_pal->border, g_pal->text, 0.3f));  // visible on dark menus too
         return;
     }
     if (it.kind == mac::MenuItem::Kind::kHeader) {
