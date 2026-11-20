@@ -1,6 +1,6 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.21  
+產品需求與系統設計文件 v2.22  
 日期：2026-11-20｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；還沒做的人工驗收見 5.4、5.7  
 技術基線：C++20、Windows 11 x64、Dear ImGui（FreeType 繪字）、Win32、DirectX 11、隨附 ConPTY
 
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.22 | 2026-11-20 | 新增 7.5 構想清單，指向 `docs/design/ideas.md`（版面與主題的發想，尚未排入） |
 | 2.21 | 2026-11-20 | ADR-31：新增內建版面 AgentDesk Mac（mac）：選單列、桌布、浮動視窗與 Dock，AgentDesk 自己的設計；2.4、2.8、3.10、4.1 更新 |
 | 2.20 | 2026-11-20 | ADR-30：Mac 風格的視窗按鈕（左上三顆圓鈕，預設），設定 › Look 可切回 Windows 式；4.1 標題列一列更新 |
 | 2.19 | 2026-11-20 | ADR-29：開放 mod 前的四項準備（啟用前的安全說明、相容性規則、卡住時的處理說明、`docs/mods.md` 開發指南） |
@@ -849,6 +850,10 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 需要使用者決定的項目列在這裡，決定前相關工作 BLOCKED。目前沒有待決事項。
 
 先前的 OQ-01～OQ-09 都已決定，結果寫進對應章節，其他文件引用這些編號時可依此查：OQ-01 名稱 AgentDesk、OQ-08 MIT License（ADR-10）；OQ-02 首發 Claude Code 與 Codex CLI；OQ-03 libvterm 0.3.3；OQ-04 隨附 ConPTY 1.24.260710001（ADR-08）；OQ-05 GoogleTest 1.18.0、nlohmann-json 3.12.0；OQ-06 背壓（3.3）；OQ-07 vcpkg manifest（baseline `afa249f`），libvterm 原始碼收錄於 third_party；OQ-09 agent-host 單獨更新時終端機不中斷（ADR-19）。
+
+### 7.5 構想（尚未排入）
+
+版面與主題的發想收在 `docs/design/ideas.md`：依用途的版面（Mission Control 監看牆、Focus 專注模式、Review 審查台、Timeline 時間軸）、風格版面（復古終端機、平鋪式、儀表板）與主題（高對比與色盲友善、依時間切換、跟著 Agent 狀態變色、成套主題、主題編輯器），以及建議的優先順序。這些不是需求；使用者選定後才寫成 ADR 與 PRD 項目。
 
 ## 8. 官方參考資料
 
