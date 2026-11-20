@@ -345,6 +345,94 @@ void window_drag_area(App::State& s, ImVec2 a, ImVec2 b) {
     }
 }
 
+// ------------------------------------------------------------------ round window buttons
+// Close, minimize and zoom as three round buttons, left to right, at the layout's traffic_lights
+// point. AgentDesk's own drawing: 12 px buttons 8 px apart, in its own red, amber and green; the
+// glyphs show only while the pointer is over the group, and an inactive window greys them out.
+namespace {
+constexpr float kLightSize = 12.0f;
+constexpr float kLightGap = 8.0f;
+constexpr float kLightsWidth = kLightSize * 3 + kLightGap * 2;  // 52
+constexpr ImU32 kLightColors[3] = {IM_COL32(232, 98, 88, 255), IM_COL32(230, 176, 62, 255),
+                                   IM_COL32(86, 182, 86, 255)};
+constexpr const char* kLightCommands[3] = {"window.close", "window.minimize", "window.maximize"};
+
+// The layout's [x, y] for the first button's top-left corner, in design pixels; [12, 16] when the
+// layout does not say.
+ImVec2 traffic_lights_point(const App::State& s) {
+    const Json& t = s.layout().tree.traffic_lights;
+    if (t.is_array() && t.size() == 2 && t[0].is_number() && t[1].is_number())
+        return {t[0].get<float>(), t[1].get<float>()};
+    return {12.0f, 16.0f};
+}
+}  // namespace
+
+bool mac_window_buttons(const App::State& s) {
+    return s.config.hwnd != nullptr && s.settings.window_buttons != "windows";
+}
+
+void traffic_lights_input(App::State& s, ImVec2 origin) {
+    s.lights = {};
+    if (!mac_window_buttons(s))
+        return;
+    const ImVec2 p = traffic_lights_point(s);
+    s.lights.shown = true;
+    s.lights.at = ImVec2(origin.x + px(p.x), origin.y + px(p.y));
+    // Each button's hit area runs halfway into the gaps, so the group has no dead spots.
+    const float step = px(kLightSize + kLightGap);
+    const float pad = px(kLightGap * 0.5f);
+    for (int i = 0; i < 3; ++i) {
+        ImGui::PushID(i);
+        ImGui::SetCursorScreenPos(ImVec2(s.lights.at.x + step * static_cast<float>(i) - pad, s.lights.at.y - pad));
+        const bool hit = ImGui::InvisibleButton("##light", ImVec2(px(kLightSize) + pad * 2, px(kLightSize) + pad * 2));
+        if (ImGui::IsItemHovered())
+            s.lights.group_hovered = true;
+        if (ImGui::IsItemActive())
+            s.lights.held = i;
+        if (hit)
+            run_command(s, kLightCommands[i]);
+        ImGui::PopID();
+    }
+}
+
+void traffic_lights_paint(App::State& s) {
+    if (!s.lights.shown)
+        return;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float r = px(kLightSize * 0.5f);
+    const float g = px(3.0f);  // glyph half-length
+    const float thick = std::max(1.0f, px(1.3f));
+    const ImU32 ink = IM_COL32(60, 20, 10, 190);
+    for (int i = 0; i < 3; ++i) {
+        const ImVec2 c(s.lights.at.x + px(kLightSize + kLightGap) * static_cast<float>(i) + r, s.lights.at.y + r);
+        ImU32 fill = s.window_focused || s.lights.group_hovered ? kLightColors[i] : g_pal->border;
+        if (s.lights.held == i)
+            fill = mix(fill, IM_COL32(0, 0, 0, 255), 0.18f);
+        dl->AddCircleFilled(c, r, fill, 24);
+        dl->AddCircle(c, r - 0.5f, mix(fill, IM_COL32(0, 0, 0, 255), 0.22f), 24, 1.0f);
+        if (!s.lights.group_hovered)
+            continue;
+        if (i == 0) {  // close: a cross
+            dl->AddLine(ImVec2(c.x - g, c.y - g), ImVec2(c.x + g, c.y + g), ink, thick);
+            dl->AddLine(ImVec2(c.x - g, c.y + g), ImVec2(c.x + g, c.y - g), ink, thick);
+        } else {  // minimize: a bar; zoom: a plus
+            dl->AddLine(ImVec2(c.x - g - px(0.5f), c.y), ImVec2(c.x + g + px(0.5f), c.y), ink, thick);
+            if (i == 2)
+                dl->AddLine(ImVec2(c.x, c.y - g - px(0.5f)), ImVec2(c.x, c.y + g + px(0.5f)), ink, thick);
+        }
+    }
+}
+
+float clear_of_traffic_lights(const App::State& s, float x, float top, float bottom, float margin) {
+    if (!s.lights.shown)
+        return x;
+    const float lt = s.lights.at.y;
+    const float lb = lt + px(kLightSize);
+    if (bottom <= lt || top >= lb)
+        return x;
+    return std::max(x, s.lights.at.x + px(kLightsWidth) + margin);
+}
+
 GitTail git_tail(const GitInfo& g, const std::string& space_name, bool worktree_row) {
     GitTail t;
     if (!g.repo)

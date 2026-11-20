@@ -838,7 +838,7 @@ void reset_to_default_screen(App::State& s) {
     s.toast("Back to the default screen", "keys.json was set aside as keys.json.aside.", "", g_pal->info);
 }
 
-// Collapses the sidebar to a 44 px rail, remembering its width, or widens it back (at least
+// Collapses the sidebar to a rail (44 px, 76 px with the round window buttons), remembering its width, or widens it back (at least
 // 160 px). A hidden sidebar is shown first.
 std::string toggle_sidebar_rail(App::State& s) {
     LayoutSpec& l = s.layout();
@@ -851,7 +851,7 @@ std::string toggle_sidebar_rail(App::State& s) {
     } else if (width >= 160) {
         s.settings.sidebar_restore = width;
         save_settings(s.settings);
-        side->size = lay::Span::pixels(44);
+        side->size = lay::Span::pixels(mac_window_buttons(s) ? 76.0f : 44.0f);  // the rail holds the round buttons
     } else {
         side->size = lay::Span::pixels(std::max(160.0f, s.settings.sidebar_restore));
     }

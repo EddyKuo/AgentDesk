@@ -550,9 +550,11 @@ void App::frame() {
     ImGui::GetWindowDrawList()->AddRectFilled(origin, ImVec2(origin.x + full.x, origin.y + full.y),
                                               g_pal->bg);
     // Commands raised while the layout draws wait for the end of it (State::deferred_commands).
+    traffic_lights_input(s, origin);
     s.defer_commands = true;
     draw_layout(s, origin, full, connected);
     run_deferred_commands(s);
+    traffic_lights_paint(s);
     ImGui::End();
     draw_dialogs(s);
     update_window_title(s);

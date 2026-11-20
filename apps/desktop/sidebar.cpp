@@ -24,12 +24,14 @@ Attention most_urgent_of(App::State& s, const std::vector<std::string>& ids) {
 }  // namespace
 
 // ---------------------------------------------------------------- sidebar: brand row
-// The mark and the name, then search and the sidebar toggle; neither button has a tooltip.
+// The mark and the name, then search and the sidebar toggle; neither button has a tooltip. With
+// the round window buttons the row starts after them, and the rail shows only them.
 void draw_brand(App::State& s, ImVec2 pos, float w, bool rail) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float h = px(46);
     const float cy = pos.y + h * 0.5f;
-    const float x = pos.x + (rail ? px(6) : px(14));
+    // The round window buttons take the row's left 76 px.
+    const float x = pos.x + (rail ? px(6) : mac_window_buttons(s) ? px(76) : px(14));
     if (!rail) {
         const float m = px(20);
         dl->AddRectFilled(ImVec2(x, cy - m * 0.5f), ImVec2(x + m, cy + m * 0.5f), g_pal->focus, px(5));
@@ -43,7 +45,9 @@ void draw_brand(App::State& s, ImVec2 pos, float w, bool rail) {
     }
     const float b = px(26);
     float bx = rail ? pos.x + (w - b) * 0.5f : pos.x + w - px(10) - b;
-    if (icon_button(s, "##sidebar-toggle", ui::icon::kSidebar, ImVec2(bx, cy - b * 0.5f), b, fpx(15), nullptr,
+    // On the rail the round window buttons fill the row; the rail's own "»" widens it again.
+    if (!(rail && mac_window_buttons(s)) &&
+        icon_button(s, "##sidebar-toggle", ui::icon::kSidebar, ImVec2(bx, cy - b * 0.5f), b, fpx(15), nullptr,
                     g_pal->dim))
         run_command(s, "sidebar.rail");
     if (!rail) {

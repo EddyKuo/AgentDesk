@@ -71,7 +71,7 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
     float right = pos.x + width;
     // Window buttons: 6 px left and 4 px right padding, 8 px apart; 24 px round chips with 14 px
     // icons; hover uses the edge colour and the text colour.
-    if (s.config.hwnd != nullptr) {
+    if (s.config.hwnd != nullptr && !mac_window_buttons(s)) {  // round ones sit at the top left instead
         const bool zoomed = ::IsZoomed(s.config.hwnd) != FALSE;
         struct B {
             const char* id;
@@ -127,7 +127,8 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
     icon_btn("##tm-settings", ui::icon::kSettings, "app.settings", "Settings and layouts");
     // Space chip: 30 px high and round, 10 px left and 12 px right padding, 8 px gap; a 15 px icon
     // and the space name (at most 160 px).
-    float x = pos.x;
+    // With the round window buttons the bar starts 10 px after them.
+    float x = clear_of_traffic_lights(s, pos.x, pos.y, pos.y + height, px(10));
     // Not in the original bar: this layout has no sidebar, so its first button brings one back
     // (sidebar.toggle switches to the AgentDesk layout), the same button and shortcut as there.
     {
