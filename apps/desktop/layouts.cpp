@@ -2,6 +2,7 @@
 // copied in on first run.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
+#include "overlay_kit.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
@@ -36,7 +37,7 @@ void derive_layout(LayoutSpec& l) {
     l.look_applies = theme.empty() || palette_exists(theme);
     l.theme = palette_exists(theme) ? theme : std::string();
     l.style.clear();
-    // "", "terminals", "mac", "focus" (Focus mode's tree) or "mission".
+    // "", "terminals", "mac", "focus" (Focus mode's tree), "mission" or "review".
     for (const lay::Node* n : t.walk()) {
         const std::string m = n->mod();
         if (m == "mac-menubar" || m == "mac-dock" || m == "mac-window-title")  // wins over the rest
@@ -47,6 +48,8 @@ void derive_layout(LayoutSpec& l) {
             l.style = "focus";
         else if ((m == "mission-bar" || m == "mission-wall") && l.style.empty())
             l.style = "mission";
+        else if (m.rfind("review-", 0) == 0 && l.style.empty())
+            l.style = "review";
         if (n->is_block() && n->content.type == lay::Content::Type::kTab && n->content.pane &&
             n->content.pane->header && n->content.pane->header->mod() == "terminals-pane" && l.style.empty())
             l.style = "terminals";
@@ -211,6 +214,34 @@ std::vector<LayoutSpec> load_layouts(const Settings& st) {
     for (auto& l : list)
         apply_layout_state(l, st);
     return list;
+}
+
+std::string toggle_layout(App::State& s, const std::string& style) {
+    // Focus replaces whatever layout shows, so a toggle pressed in Focus leaves it and shows
+    // `style` rather than going back from a layout the person could not see.
+    const bool was_focus = s.settings.focus_on;
+    set_focus(s, false);
+    if (s.layout().style != style) {
+        // The built-in of that name when it has the style, else the first layout that does (a
+        // person's own copy counts).
+        auto it = std::find_if(s.layouts.begin(), s.layouts.end(),
+                               [&](const LayoutSpec& l) { return l.name == style && l.style == style; });
+        if (it == s.layouts.end())
+            it = std::find_if(s.layouts.begin(), s.layouts.end(),
+                              [&](const LayoutSpec& l) { return l.style == style; });
+        if (it == s.layouts.end())
+            return "no " + layout_display_name(style) + " layout";
+        s.settings.layout_return = s.settings.layout;
+        s.settings.layout = it->name;
+    } else if (!was_focus) {
+        const std::string& back = s.settings.layout_return;
+        const auto it = std::find_if(s.layouts.begin(), s.layouts.end(),
+                                     [&](const LayoutSpec& l) { return l.name == back && l.style != style; });
+        s.settings.layout = it != s.layouts.end() ? back : std::string("workspace");
+    }
+    save_settings(s.settings);
+    s.focus_view(s.ws.focused_session());
+    return {};
 }
 
 // ------------------------------------------------------------------ example mods (first run)

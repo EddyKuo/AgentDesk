@@ -1090,3 +1090,138 @@ TEST_F(HostFixture, HookCommandReportsStateSilently) {
     EXPECT_EQ(run_capture(AGENTDESK_CTL_EXE, {L"hook"}, {}, &stop).exit_code, 0u);
     ::SetEnvironmentVariableW(L"AGENTDESK_PIPE", nullptr);
 }
+
+// ---------------------------------------------------------------- session.timeline (A4)
+namespace {
+Json timeline_of(ipc::PipeClient& c, const std::string& id) {
+    const auto r = c.call("session.timeline", {{"session", id}}, 10s);
+    if (!r || !r->result || r->error)
+        return Json::object();
+    const auto list = r->result->value("sessions", Json::array());
+    return list.empty() ? Json::object() : list[0];
+}
+}  // namespace
+
+// The host records each agent and process state change in order, with times, and nothing else;
+// session.state carries the time of the current state ("at").
+TEST_F(HostFixture, TimelineRecordsStateChangesInOrder) {
+    const auto id = create("echo", "timed");
+    auto c = connect();
+    ASSERT_TRUE(c);
+    std::mutex mu;
+    std::vector<Json> events;
+    c->set_event_handler([&](protocol::Event e) {
+        std::lock_guard lock(mu);
+        if (e.event == "session.state")
+            events.push_back(e.body);
+    });
+    ASSERT_TRUE(c->call("session.attach", {{"session", id}}, 5s));
+    const char* states[] = {"working", "blocked", "working", "done"};
+    std::uint64_t seq = 0;
+    for (const char* st : states) {
+        const auto r = c->call("state.report",
+                               {{"session", id},
+                                {"source", "test"},
+                                {"state", st},
+                                {"seq", ++seq},
+                                {"message", "secret text that must not be recorded"}},
+                               5s);
+        ASSERT_TRUE(r && r->result) << st;
+    }
+    Json t;
+    ASSERT_TRUE(wait_until(
+        [&] {
+            t = timeline_of(*c, id);
+            return t.value("marks", Json::array()).size() >= 5;
+        },
+        10s))
+        << t.dump();
+    const auto& marks = t["marks"];
+    const std::vector<std::string> want = {"Unknown", "Working", "Blocked", "Working", "Done"};
+    ASSERT_EQ(marks.size(), want.size()) << t.dump();
+    std::int64_t prev = 0;
+    for (std::size_t i = 0; i < want.size(); ++i) {
+        ASSERT_TRUE(marks[i].is_array() && marks[i].size() == 3u) << marks[i].dump();
+        EXPECT_EQ(marks[i][1], want[i]) << i;
+        EXPECT_EQ(marks[i][2], "Running") << i;
+        EXPECT_GE(marks[i][0].get<std::int64_t>(), prev) << i;
+        prev = marks[i][0].get<std::int64_t>();
+    }
+    EXPECT_EQ(t.dump().find("secret"), std::string::npos) << "times and states only";
+    EXPECT_FALSE(t.value("ended", true));
+    EXPECT_FALSE(t.value("truncated", true));
+    EXPECT_EQ(t.value("name", ""), "timed");
+    // The last session.state event says when Done began.
+    ASSERT_TRUE(wait_until(
+        [&] {
+            std::lock_guard lock(mu);
+            return !events.empty() && events.back().value("agent_state", "") == "Done";
+        },
+        5s));
+    {
+        std::lock_guard lock(mu);
+        EXPECT_EQ(events.back().value("at", std::int64_t{0}), prev);
+    }
+    // Stopping and exiting are process marks; the session reads as ended.
+    ctl({L"stop", w(id), L"--force"});
+    ASSERT_TRUE(wait_until([&] { return timeline_of(*c, id).value("ended", false); }, 10s));
+    EXPECT_EQ(timeline_of(*c, id)["marks"].back()[2], "Exited");
+    // agentctl timeline answers too, as JSON and as text.
+    const auto j = ctl({L"timeline", L"--json"});
+    EXPECT_EQ(j.exit_code, 0u);
+    EXPECT_FALSE(Json::parse(j.out, nullptr, false).is_discarded()) << j.out;
+    const auto text = ctl({L"timeline", w(id), L"--since", L"1h"});
+    EXPECT_EQ(text.exit_code, 0u);
+    EXPECT_NE(text.out.find("Blocked / Running"), std::string::npos) << text.out;
+    c->close();
+}
+
+// 1,100 state changes keep the newest 1,000 and say the rest was dropped; since_ms narrows the
+// answer to the range, led by the state it starts in.
+TEST_F(HostFixture, TimelineIsBoundedAndSaysSo) {
+    const auto id = create("echo", "busy");
+    auto c = connect();
+    ASSERT_TRUE(c);
+    for (std::uint64_t i = 1; i <= 1100; ++i) {
+        const auto r = c->call(
+            "state.report",
+            {{"session", id}, {"source", "test"}, {"state", i % 2 != 0 ? "working" : "idle"}, {"seq", i}}, 5s);
+        ASSERT_TRUE(r && r->result) << i;
+    }
+    Json t;
+    ASSERT_TRUE(wait_until(
+        [&] {
+            t = timeline_of(*c, id);
+            const auto m = t.value("marks", Json::array());
+            return !m.empty() && m.back()[1] == "Idle" && t.value("truncated", false);
+        },
+        10s))
+        << t.value("marks", Json::array()).size();
+    EXPECT_EQ(t["marks"].size(), 1000u);
+    const std::int64_t mid = t["marks"][500][0].get<std::int64_t>();
+    const auto r = c->call("session.timeline", {{"session", id}, {"since_ms", mid + 1}}, 10s);
+    ASSERT_TRUE(r && r->result);
+    const auto& narrow = (*r->result)["sessions"][0]["marks"];
+    ASSERT_FALSE(narrow.empty());
+    EXPECT_LE(narrow[0][0].get<std::int64_t>(), mid + 1);  // the state the range starts in
+    EXPECT_GT(r->result->value("now_ms", std::int64_t{0}), 0);
+    c->close();
+}
+
+// A host without the method (an older agent-host) answers "unknown method", which the UI shows as
+// "needs a newer agent-host"; this one answers it, and says which session it does not know.
+TEST_F(HostFixture, TimelineIsAnOrdinaryReadOnlyMethod) {
+    auto c = connect();
+    ASSERT_TRUE(c);
+    const auto none = c->call("session.timeline", Json::object(), 5s);
+    ASSERT_TRUE(none && none->result);
+    EXPECT_TRUE((*none->result)["sessions"].empty());
+    const auto missing = c->call("session.timeline", {{"session", "nosuch"}}, 5s);
+    ASSERT_TRUE(missing && missing->error);
+    EXPECT_EQ(*missing->error, protocol::ErrorCode::kNotFound);
+    const auto old = c->call("session.timelines", Json::object(), 5s);  // a method this host lacks
+    ASSERT_TRUE(old && old->error);
+    EXPECT_EQ(*old->error, protocol::ErrorCode::kBadRequest);
+    EXPECT_NE(old->error_message.find("unknown method"), std::string::npos);
+    c->close();
+}

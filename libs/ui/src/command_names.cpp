@@ -24,7 +24,10 @@ bool is_builtin_command(std::string_view name) {
         "window.close", "window.fill", "window.maximize", "window.minimize", "worktree.new", "worktree.open",
         "worktree.remove", "app.quit", "overlay.close", "app.check_updates", "app.update_core", "app.update",
         "focus.toggle", "focus.on", "focus.off", "mission.toggle", "mission.expand", "mission.wall",
-        "mission.filter"};
+        "mission.filter",
+        // Review layout, Timeline overlay
+        "review.toggle", "review.next_file", "review.prev_file", "review.refresh", "timeline.toggle",
+        "timeline.range"};
     // clang-format on
     return kNames.contains(name);
 }

@@ -1,5 +1,6 @@
 agentdesk_library(agentdesk_host
     src/states.cpp
+    src/state_timeline.cpp
     src/session.cpp
     src/store.cpp
     src/session_manager.cpp

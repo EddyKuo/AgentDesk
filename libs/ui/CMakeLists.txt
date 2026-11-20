@@ -28,6 +28,8 @@ agentdesk_library(agentdesk_ui
     src/mac_layout.cpp
     src/focus_mode.cpp
     src/mission.cpp
+    src/review.cpp
+    src/timeline.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/layout_defaults.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -44,7 +46,8 @@ foreach(_file
         "${PROJECT_SOURCE_DIR}/third_party/herdr/layouts/terminals.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/mac.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/focus.json"
-        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/mission.json")
+        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/mission.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/review.json")
     get_filename_component(_name "${_file}" NAME_WE)
     file(READ "${_file}" _text)
     string(SUBSTRING "${_name}" 0 1 _first)

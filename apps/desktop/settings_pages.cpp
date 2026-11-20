@@ -362,6 +362,29 @@ void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 siz
         const float tw = (b.x - sx - px(8) - px(3)) * 0.5f;
         term(ImVec2(sx + px(4), ty + px(4)), ImVec2(sx + px(4) + tw, b.y - px(4)));
         term(ImVec2(sx + px(4) + tw + px(3), ty + px(4)), ImVec2(b.x - px(4), b.y - px(4)));
+    } else if (name == "review") {
+        // Review: a terminal on the left; changed files, a diff (green and red rows) and the
+        // commit box on the right.
+        const float mx = a.x + size.x * 0.5f;
+        const float ty = a.y + px(11);
+        d->AddLine(ImVec2(a.x, ty), ImVec2(mx, ty), g_pal->border);
+        d->AddLine(ImVec2(mx, a.y), ImVec2(mx, b.y), g_pal->border);
+        term(ImVec2(a.x + px(4), ty + px(4)), ImVec2(mx - px(4), b.y - px(4)));
+        line(mx + px(4), a.y + px(4), 20, g_pal->dim);
+        for (int i = 0; i < 3; ++i)
+            line(mx + px(4), ty + px(3) + static_cast<float>(i) * px(5), i == 1 ? 26.0f : 18.0f,
+                 i == 1 ? g_pal->text : g_pal->faint);
+        const float dy = ty + px(19);
+        d->AddLine(ImVec2(mx, dy - px(2)), ImVec2(b.x, dy - px(2)), g_pal->border);
+        for (int i = 0; i < 4; ++i) {
+            const ImU32 c = i == 1 ? alpha(g_pal->needs_you, 0x50) : i == 2 ? alpha(g_pal->done, 0x50) : 0;
+            const float y = dy + static_cast<float>(i) * px(5);
+            if (c != 0)
+                d->AddRectFilled(ImVec2(mx + px(1), y - px(1)), ImVec2(b.x - px(1), y + px(4)), c);
+            line(mx + px(6), y, i % 2 ? 30.0f : 22.0f, g_pal->dim);
+        }
+        d->AddRectFilled(ImVec2(mx + px(4), b.y - px(9)), ImVec2(b.x - px(16), b.y - px(4)), g_pal->bg, px(2));
+        d->AddRectFilled(ImVec2(b.x - px(14), b.y - px(9)), ImVec2(b.x - px(4), b.y - px(4)), g_pal->text, px(2));
     } else {
         const float ty = a.y + px(11);
         d->AddLine(ImVec2(a.x, ty), ImVec2(b.x, ty), g_pal->border);

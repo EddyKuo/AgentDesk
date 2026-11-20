@@ -128,6 +128,10 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_mission_bar(s, pos, size.x, size.y);
     } else if (m == "mission-wall") {
         draw_mission_wall(s, pos, size);
+    } else if (draw_review_block(s, m, pos, size)) {
+        // review-head, review-changes, review-commit (review_layout.cpp)
+    } else if (draw_timeline_block(s, m, pos, size)) {
+        // timeline (timeline.cpp)
     } else if (s.mods != nullptr) {
         // A C++ DLL mod: its panels, in the block.
         ImGui::SetCursorScreenPos(pos);
@@ -246,7 +250,8 @@ ImGuiKey input_key(const std::string& n) {
         {"up", ImGuiKey_UpArrow},       {"down", ImGuiKey_DownArrow}, {"left", ImGuiKey_LeftArrow},
         {"right", ImGuiKey_RightArrow}, {"home", ImGuiKey_Home},      {"end", ImGuiKey_End},
         {"pgup", ImGuiKey_PageUp},      {"pgdn", ImGuiKey_PageDown},  {"back", ImGuiKey_Backspace},
-        {"del", ImGuiKey_Delete},       {"space", ImGuiKey_Space},    {"f2", ImGuiKey_F2}};
+        {"del", ImGuiKey_Delete},       {"space", ImGuiKey_Space},    {"period", ImGuiKey_Period},
+        {".", ImGuiKey_Period}};
     for (const auto& [name, key] : kKeys)
         if (n == name)
             return key;
@@ -254,6 +259,11 @@ ImGuiKey input_key(const std::string& n) {
         return static_cast<ImGuiKey>(ImGuiKey_A + (n[0] - 'a'));
     if (n.size() == 1 && n[0] >= '0' && n[0] <= '9')
         return static_cast<ImGuiKey>(ImGuiKey_0 + (n[0] - '0'));
+    if (n.size() >= 2 && n.size() <= 3 && n[0] == 'f') {  // f1..f12
+        const int f = std::atoi(n.c_str() + 1);
+        if (f >= 1 && f <= 12)
+            return static_cast<ImGuiKey>(ImGuiKey_F1 + (f - 1));
+    }
     return ImGuiKey_None;
 }
 
@@ -330,20 +340,18 @@ void run_input_step(App::State& s, const std::string& step, Clock::time_point no
         io.AddMousePosEvent(p.x, p.y);
         io.AddMouseButtonEvent(0, op == "press");
     } else if (op == "key") {
-        // "ctrl+shift+m": modifiers before the key, held around it.
+        // "ctrl+shift+m", "ctrl+shift+.", "shift+f8": modifiers held around the key.
         std::string name = arg;
         std::vector<ImGuiKey> mods;
         for (const auto& [prefix, mod] : {std::pair<const char*, ImGuiKey>{"ctrl+", ImGuiMod_Ctrl},
-                                          {"shift+", ImGuiMod_Shift}, {"alt+", ImGuiMod_Alt}}) {
-            for (auto at = name.find(prefix); at != std::string::npos; at = name.find(prefix)) {
+                                          {"shift+", ImGuiMod_Shift},
+                                          {"alt+", ImGuiMod_Alt}}) {
+            if (const auto at = name.find(prefix); at != std::string::npos) {
                 name.erase(at, std::strlen(prefix));
                 mods.push_back(mod);
             }
         }
-        if (name == ".")
-            name = "period";
-        const ImGuiKey k = name == "period" ? ImGuiKey_Period : input_key(name);
-        if (k != ImGuiKey_None) {
+        if (const ImGuiKey k = input_key(name); k != ImGuiKey_None) {
             for (const ImGuiKey m : mods)
                 io.AddKeyEvent(m, true);
             io.AddKeyEvent(k, true);
@@ -438,6 +446,7 @@ void run_global_shortcuts(App::State& s) {
 // Dialogs and overlays, in the order they stack (later ones on top).
 void draw_dialogs(App::State& s) {
     draw_peek(s);
+    draw_timeline_overlay(s);
     draw_launcher(s);
     draw_rename(s);
     draw_worktree(s);

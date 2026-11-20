@@ -625,7 +625,10 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
             }
         }
     } else if (keymap != nullptr) {
-        for (const ImGuiKey key : {ImGuiKey_F2}) {  // unmodified bound keys (F2 rename)
+        // Unmodified function keys bound for the window (F2 rename; F8 in the Review layout).
+        // Unbound ones still go to the program.
+        for (int f = ImGuiKey_F1; f <= ImGuiKey_F12; ++f) {
+            const auto key = static_cast<ImGuiKey>(f);
             if (!adapter::key_pressed_owned(key, str_id))
                 continue;
             if (const auto g = keymap->global(key)) {

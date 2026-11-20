@@ -1,5 +1,6 @@
-// Empty, loading and error states shared by Focus and Mission Control: a centred card with a
-// title, a hint and buttons (laid out like the "Open a terminal" card), and skeleton bars.
+// The empty, loading and error states every newer view shares (Focus, Mission Control, Review,
+// Timeline): a centred card with a title, a hint and buttons laid out like the "Open a terminal"
+// card, and the grey skeleton bars that stand in for content on the way.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
@@ -11,8 +12,9 @@ std::string with_chord(const App::State& s, const std::string& label, const char
 }
 
 namespace {
-// The buttons in a row centred on `cx`, 10 px apart; the first in the accent colour, as on the
-// "Open a terminal" card.
+constexpr float kButtonH = 36.0f;  // design px, as on the "Open a terminal" card
+
+// The buttons in a row centred on `cx`, 10 px apart; the first in the accent colour.
 void draw_card_buttons(App::State& s, const StateCard& card, float cx, float top) {
     std::vector<float> widths;
     float total = 0;
@@ -32,7 +34,7 @@ void draw_card_buttons(App::State& s, const StateCard& card, float cx, float top
             ImGui::PushStyleColor(ImGuiCol_Text, v4(accent_foreground()));
         }
         ImGui::PushID(static_cast<int>(i));
-        const bool clicked = ImGui::Button(b.label.c_str(), ImVec2(widths[i], px(36)));
+        const bool clicked = ImGui::Button(b.label.c_str(), ImVec2(widths[i], px(kButtonH)));
         ImGui::PopID();
         if (i == 0)
             ImGui::PopStyleColor(3);
@@ -42,33 +44,77 @@ void draw_card_buttons(App::State& s, const StateCard& card, float cx, float top
             run_command(s, b.command);
     }
 }
+
+// Lines of `text` wrapped at `wrap`, each `fs * 1.3` high; draws them centred on `cx` from `y`
+// when `dl` is set. Returns the height.
+float centred_lines(ImDrawList* dl, ImFont* font, float fs, const std::string& text, float cx, float y,
+                    float wrap, ImU32 col) {
+    const char* p = text.c_str();
+    const char* end = p + text.size();
+    float h = 0;
+    while (p < end) {
+        const char* line_end = font->CalcWordWrapPosition(fs, p, end, wrap);
+        if (line_end == p)
+            line_end = p + 1;
+        if (dl != nullptr) {
+            const ImVec2 lw = font->CalcTextSizeA(fs, FLT_MAX, 0, p, line_end);
+            dl->AddText(font, fs, ImVec2(cx - lw.x * 0.5f, y + h), col, p, line_end);
+        }
+        h += fs * 1.3f;
+        p = line_end;
+        while (p < end && (*p == ' ' || *p == '\n'))
+            ++p;
+    }
+    return h;
+}
 }  // namespace
 
 void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& card) {
+    if (size.x <= 0 || size.y <= 0)
+        return;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 end(pos.x + size.x, pos.y + size.y);
     if (card.framed) {
         dl->AddRectFilled(pos, end, g_pal->card, px(12));
         dl->AddRect(pos, end, g_pal->border, px(12));
     }
+    const float wrap = std::max(px(80), std::min(size.x - px(48), px(560)));
+    const float ts = fpx(card.title_size);
+    const float hs = fpx(13);
     const float cx = pos.x + size.x * 0.5f;
-    const float cy = pos.y + size.y * 0.42f;
-    const ImVec2 tsz = s.fonts.ui_bold->CalcTextSizeA(fpx(18), FLT_MAX, 0, card.title.c_str());
-    dl->AddText(s.fonts.ui_bold, fpx(18), ImVec2(cx - tsz.x * 0.5f, cy - tsz.y), g_pal->text,
-                card.title.c_str());
-    float y = cy + px(8);
+    const ImU32 detail_col = card.detail_color != 0 ? card.detail_color : g_pal->dim;
+
+    // Measure first so the whole card sits a little above the middle.
+    const float spinner_h = card.kind == CardKind::kLoading ? px(22) : 0.0f;
+    const float title_h = centred_lines(nullptr, s.fonts.ui_bold, ts, card.title, cx, 0, wrap, 0);
+    float total = spinner_h + title_h;
+    for (const std::string* line : {&card.hint, &card.detail})
+        if (!line->empty())
+            total += px(6) + centred_lines(nullptr, s.fonts.ui, hs, *line, cx, 0, wrap, 0);
+    if (!card.buttons.empty())
+        total += px(16) + px(kButtonH);
+    if (!card.link.empty())
+        total += px(16) + fpx(12.5f);
+    float y = pos.y + std::max(px(12), (size.y - total) * 0.42f);
+
+    if (card.kind == CardKind::kLoading) {
+        const float t = static_cast<float>(ImGui::GetTime());
+        const float a0 = t * (2.0f * 3.14159265f / 0.9f);
+        dl->PathArcTo(ImVec2(cx, y + px(7)), px(7), a0, a0 + 4.4f, 20);
+        dl->PathStroke(g_pal->dim, 0, px(1.8f));
+        y += spinner_h;
+    }
+    const ImU32 title_col = card.kind == CardKind::kError ? g_pal->needs_you : g_pal->text;
+    y += centred_lines(dl, s.fonts.ui_bold, ts, card.title, cx, y, wrap, title_col);
     for (const std::string* line : {&card.hint, &card.detail}) {
         if (line->empty())
             continue;
-        const ImU32 col = line == &card.detail ? card.detail_color : g_pal->dim;
-        const float max_w = std::max(px(80), size.x - px(48));
-        const float lw = std::min(max_w, s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, line->c_str()).x);
-        text_clipped(dl, s.fonts.ui, fpx(13), ImVec2(cx - lw * 0.5f, y), col, *line, max_w);
-        y += px(20);
+        y += px(6);
+        y += centred_lines(dl, s.fonts.ui, hs, *line, cx, y, wrap, line == &card.detail ? detail_col : g_pal->dim);
     }
     if (!card.buttons.empty()) {
         draw_card_buttons(s, card, cx, y + px(16));
-        y += px(16) + px(36);
+        y += px(16) + px(kButtonH);
     }
     if (!card.link.empty()) {
         const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(12.5f), FLT_MAX, 0, card.link.c_str());

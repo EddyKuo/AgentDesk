@@ -32,6 +32,7 @@
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 #include <dwmapi.h>
 #include <imgui.h>
@@ -55,6 +56,7 @@
 #include "agentdesk/ui/mods.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
+#include "agentdesk/ui/timeline.hpp"
 #include "agentdesk/ui/updates.hpp"
 #include "agentdesk/ui/workspace.hpp"
 
@@ -178,13 +180,20 @@ struct Settings {
     // while it is on ("edge", "edge_sound" or "normal").
     bool focus_on = false;
     std::string focus_alerts = "edge_sound";
-    // The layout a toggle (mission.toggle) goes back to.
-    std::string layout_return;
     // Mission Control (mission_layout.cpp): the last filter, and whether sub-agents and terminals
     // without a status get tiles of their own.
     std::string mission_filter = "all";
     bool mission_sub_agents = false;
     bool mission_shells = false;
+    // The layout a toggle (mission.toggle, review.toggle) came from, to go back to on the second
+    // press (toggle_layout).
+    std::string layout_return;
+    // Review: "agent" keeps showing the last agent's changes when the focus moves to a plain
+    // shell; "focused" always follows the focused pane.
+    std::string review_follow = "agent";
+    // Timeline: the range last chosen (15m, 1h, 4h, 24h) and whether the time away is shaded.
+    std::string timeline_range = "1h";
+    bool timeline_since_left = true;
 };
 // %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk; created when missing.
 std::filesystem::path data_dir();
@@ -334,6 +343,15 @@ inline constexpr CommandInfo kCommands[] = {
     {"mission.filter:all", "Mission Control: show all agents"},
     {"mission.filter:active", "Mission Control: show active agents"},
     {"mission.filter:blocked", "Mission Control: show agents that need you"},
+    {"review.toggle", "Review: show the agent's changes beside it (again: back)"},
+    {"review.next_file", "Review: next changed file"},
+    {"review.prev_file", "Review: previous changed file"},
+    {"review.refresh", "Review: read the changes again"},
+    {"timeline.toggle", "Timeline: what each agent did and when"},
+    {"timeline.range:15m", "Timeline: last 15 minutes"},
+    {"timeline.range:1h", "Timeline: last hour"},
+    {"timeline.range:4h", "Timeline: last 4 hours"},
+    {"timeline.range:24h", "Timeline: last 24 hours"},
 };
 bool known_command(std::string_view name);
 
@@ -498,6 +516,11 @@ public:
     void close_preview();
     void select_change(const std::string& path);
     void commit();
+    // Read the changes again on the next track_changes (an agent's turn ended, or Refresh).
+    void refresh_changes() {
+        std::lock_guard lock(mutex);
+        changes_at_ = {};
+    }
 
 private:
     static std::string join(const std::string& root, const std::string& rel);
@@ -849,6 +872,46 @@ struct App::State {
         };
         std::map<std::string, Tile> tiles;
     } mission;
+    // The Review layout (review_layout.cpp): whose changes show, and that agent's state last frame
+    // (a turn ending, Working to anything else, reads the changes again).
+    struct ReviewState {
+        std::string target;
+        std::string target_state;
+        float list_size = 0;  // the list / diff splitter as the person dragged it (real px; 0: default)
+        bool was_committing = false;
+        std::string committing_msg;  // the message of the commit under way
+        std::string committed;       // "Committed ..." after one went through (until the folder changes)
+        std::string shown_diff;      // the open file last frame: the list scrolls to a new one
+    } review;
+    // The Timeline overlay (timeline.cpp): each machine's state history from its agent-host
+    // (session.timeline), asked for while the overlay or a timeline block shows.
+    struct TimelineMachine {
+        std::vector<ui::timeline::HostSession> sessions;  // times already in this computer's clock
+        bool asked = false;      // a request is out
+        bool answered = false;   // at least one answer came
+        bool unsupported = false;  // its agent-host does not know session.timeline
+        std::string error;       // the last request failed (kept data stays)
+        long long last_ok_ms = 0;  // when it last answered (this computer's clock)
+        long long offset_ms = 0;   // this computer's clock minus the host's (from its now_ms)
+        Clock::time_point fetched{};
+        long long fetched_since = 0;  // the earliest time the last request covered (this computer's clock)
+    };
+    struct TimelineState {
+        bool open = false;
+        bool showing = false;  // a timeline block drew this frame (reset when the overlay's turn comes)
+        bool shown = false;    // the overlay or a block showed in the last frame
+        long long end_ms = 0;            // the right edge when panned back; 0 = now
+        std::map<std::string, TimelineMachine> machines;  // "" = this computer
+        // Answers from HostClient worker threads, picked up by the UI thread.
+        struct Inbox {
+            std::mutex mutex;
+            std::vector<std::tuple<std::string, Json, std::string, long long>> answers;  // machine, result, error, at
+        };
+        std::shared_ptr<Inbox> inbox = std::make_shared<Inbox>();
+        std::optional<long long> left_at_ms;  // the window last lost focus (this run only)
+        std::string selected;
+        bool focus_list = false;
+    } timeline;
 
     // ---------------------------------------------------------------- helpers
     // The UI document (spaces, tabs, panes) changed: persist() sends it to the host soon.
@@ -1219,21 +1282,26 @@ void draw_settings(App::State& s);
 void play_alert(App::State& s, bool blocked);
 
 // ------------------------------------------------------------ state_card.cpp
-// An empty, loading or error state: a title (18 px semibold), a hint (13 px dim), an optional
-// detail line in its own colour and buttons 36 px high, the first in the accent colour, each
-// running its command. `framed`: on a card (12 px corners, the border), else bare.
+// One look for the empty, loading and error states of the newer views (Focus, Mission Control,
+// Review, Timeline): a centred title (`title_size` semibold; `needs_you` for an error; a spinner
+// above it while loading), a dim hint, an optional detail line in its own colour, buttons 36 px
+// high (the first in the accent colour, each running its command or action) and a text link.
+// Long lines wrap. `framed`: on a card (12 px corners, the border), else bare.
+enum class CardKind { kEmpty, kLoading, kError };
 struct StateCard {
     struct Button {
         std::string label;
         std::string command;
         std::function<void()> action;  // instead of a command
     };
+    CardKind kind = CardKind::kEmpty;
     std::string title;
     std::string hint;
     std::string detail;
-    ImU32 detail_color = 0;
+    ImU32 detail_color = 0;  // 0: dim
     std::vector<Button> buttons;
-    bool framed = true;
+    float title_size = 18.0f;  // design px
+    bool framed = false;
     // A text link under the buttons (accent colour, underlined while hovered).
     std::string link;
     std::function<void()> on_link;
@@ -1285,6 +1353,28 @@ void draw_notes(App::State& s);
 void draw_confirm(App::State& s);
 void draw_exit(App::State& s);
 void draw_close_notice(App::State& s);
+
+// ------------------------------------------------------------ layouts.cpp (switching)
+// Shows the layout of `style` ("mission", "review": the built-in of that name, else the first
+// layout of that style), remembering the one shown in ui.json layout_return; when one of that
+// style already shows, goes back to the remembered one (the workspace when there is none). Leaves
+// Focus first. Returns an error, or "".
+std::string toggle_layout(App::State& s, const std::string& style);
+
+// ------------------------------------------------------------ review_layout.cpp
+// The Review layout's blocks (review-head, review-changes, review-commit); false for another name.
+bool draw_review_block(App::State& s, const std::string& mod, ImVec2 pos, ImVec2 size);
+// review.* commands, and panel:changes while Review shows. nullopt: not one of them.
+std::optional<std::string> exec_review_command(App::State& s, const std::string& name, const std::string& arg);
+
+// ------------------------------------------------------------ timeline.cpp
+// The Timeline overlay (timeline.toggle) and the "timeline" layout block.
+void draw_timeline_overlay(App::State& s);
+bool draw_timeline_block(App::State& s, const std::string& mod, ImVec2 pos, ImVec2 size);
+// timeline.* commands. nullopt: not one of them.
+std::optional<std::string> exec_timeline_command(App::State& s, const std::string& name, const std::string& arg);
+// How soon the timeline needs a frame (its "now" line, a pending answer); 1 s cap when hidden.
+long long timeline_wakeup_ms(const App::State& s);
 }  // namespace detail
 
 }  // namespace agentdesk::desktop

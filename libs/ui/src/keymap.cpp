@@ -165,6 +165,8 @@ constexpr std::pair<const char*, const char*> kGlobal[] = {
     {"shift-f2", "space.rename"},
     {"ctrl-shift-.", "focus.toggle"},
     {"ctrl-shift-m", "mission.toggle"},
+    {"ctrl-shift-r", "review.toggle"},
+    {"ctrl-shift-h", "timeline.toggle"},
 };
 
 constexpr std::pair<const char*, const char*> kTerminal[] = {
@@ -184,6 +186,18 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
      "f"},
 };
 
+// Defaults that apply only while one layout shows ("layout:<name>" sections): the Review layout's
+// F8 / Shift+F8 move between changed files; elsewhere F8 still reaches the terminal.
+struct LayoutDefault {
+    const char* section;
+    const char* chord;
+    const char* command;
+};
+constexpr LayoutDefault kLayoutDefaults[] = {
+    {"layout:review", "f8", "review.next_file"},
+    {"layout:review", "shift-f8", "review.prev_file"},
+};
+
 // Calls f(section, chord text, command) for every default binding, in install order.
 template <class F>
 void for_each_default(F&& f) {
@@ -195,6 +209,8 @@ void for_each_default(F&& f) {
     }
     for (const auto& [chord, cmd] : kTerminal)
         f("terminal", std::string(chord), std::string(cmd));
+    for (const auto& d : kLayoutDefaults)
+        f(d.section, std::string(d.chord), std::string(d.command));
 }
 
 }  // namespace

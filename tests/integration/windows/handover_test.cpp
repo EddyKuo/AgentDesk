@@ -363,6 +363,11 @@ TEST_F(HostUpdate, TerminalsKeepRunningThroughAnUpdate) {
     ASSERT_TRUE(program);
 
     const auto history_before = history(*c, id);
+    // The state timeline is this host's own (decision: it does not move with an update).
+    const Json timeline_before = call(*c, "session.timeline", {{"session", id}});
+    ASSERT_EQ(timeline_before.value("sessions", Json::array()).size(), 1u) << timeline_before.dump();
+    EXPECT_FALSE(timeline_before["sessions"][0].value("adopted", true));
+    const std::int64_t update_at = timeline_before.value("now_ms", std::int64_t{0});
     const Json updated = call(*c, "host.update", {{"exe", win::to_utf8(AGENTDESK_HOST_EXE)}}, 60s);
     ASSERT_FALSE(updated.contains("error")) << updated.dump();
     EXPECT_EQ(updated.value("now", "").rfind("agent-host ", 0), 0u) << updated.dump();
@@ -382,6 +387,14 @@ TEST_F(HostUpdate, TerminalsKeepRunningThroughAnUpdate) {
     const Json got = call(*c2, "session.get", {{"session", id}});
     EXPECT_EQ(got.value("process_state", ""), "Running") << got.dump();
     EXPECT_EQ(got.value("pid", 0u), pid);
+    // The new host's timeline starts at the takeover, with the state the session had then.
+    const Json timeline_after = call(*c2, "session.timeline", {{"session", id}});
+    ASSERT_EQ(timeline_after.value("sessions", Json::array()).size(), 1u) << timeline_after.dump();
+    const Json& t = timeline_after["sessions"][0];
+    EXPECT_TRUE(t.value("adopted", false));
+    ASSERT_EQ(t["marks"].size(), 1u) << t.dump();
+    EXPECT_GE(t["marks"][0][0].get<std::int64_t>(), update_at);
+    EXPECT_EQ(t["marks"][0][2], "Running");
 
     // History came along, line ids and all, and keeps growing.
     const auto history_after = history(*c2, id);

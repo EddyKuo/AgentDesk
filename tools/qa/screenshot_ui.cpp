@@ -4,11 +4,14 @@
 //                 [--run <command>] [--child profile:name] [--remote <machine>] [--mods a,b]
 //                 [--input "<step>;<step>..."] [--layout <file.json>]
 // --layout copies a layout file into the isolated data folder's layouts\ (show it with
-// --run layout:<name>).
+// --run layout:<name>). --cwd <dir> starts the sessions (the first, SHOT_EXTRA's, --child's) in that
+// folder instead of %TEMP% (a test repository for the Review layout). --appearance light|dark
+// fixes Settings > Look > Appearance (default: follow Windows).
 // --input is passed to agent-ui, which feeds the steps to ImGui as a person's mouse and keys
 // (nothing outside its window is touched): click:x,y rclick:x,y mclick:x,y dblclick:x,y
 // press:x,y release:x,y (a left-button drag, with move steps between) move:x,y
-// key:<enter|esc|tab|up|down|left|right|home|end|pgup|pgdn|back|del|space|f2|a-z|0-9> type:<text> wait:<ms>
+// key:[ctrl+][shift+][alt+]<enter|esc|tab|up|down|left|right|home|end|pgup|pgdn|back|del|space|
+// period|.|f1-f12|a-z|0-9> (key:ctrl+shift+m, key:shift+f8) type:<text> wait:<ms>
 // shot:<png> (a capture, relative to --out's folder). The final capture to --out is taken after the last
 // step.
 // --child starts profile:name as a sub-agent of the first session; --remote adds a second host
@@ -194,6 +197,7 @@ struct Options {
     std::wstring mods;
     std::wstring input;
     std::wstring layout_file;
+    std::wstring cwd;
 };
 
 // The isolated host's profiles: the Chinese text shell (the default --profile), Claude Code when
@@ -250,6 +254,20 @@ Json shot_profiles() {
                          {"-NoLogo", "-NoProfile", "-NoExit", "-Command",
                           "[Console]::Write([char]27 + ']7501;state=working' + [char]7); Start-Sleep -Seconds 10; "
                           "[Console]::Write([char]27 + ']7501;state=blocked' + [char]7)"}}});
+    // Shells that keep changing state (Timeline checks): "state-cycle-a" works, needs the person,
+    // works again and finishes, over and over; "state-cycle-b" the same at another pace.
+    for (const auto& [id, steps] :
+         {std::pair<const char*, const char*>{"state-cycle-a", "working 18 blocked 10 working 14 done 20"},
+          std::pair<const char*, const char*>{"state-cycle-b", "idle 6 working 30 done 8 blocked 6"}}) {
+        std::string script = "$s = '" + std::string(steps) +
+                             "'.Split(' '); while ($true) { for ($i = 0; $i -lt $s.Length; $i += 2) { "
+                             "[Console]::Write([char]27 + ']7501;state=' + $s[$i] + [char]7); "
+                             "Start-Sleep -Seconds ([int]$s[$i + 1]) } }";
+        profiles.push_back({{"id", id},
+                            {"name", id},
+                            {"executable", ps},
+                            {"args", {"-NoLogo", "-NoProfile", "-Command", script}}});
+    }
     return profiles;
 }
 
@@ -406,6 +424,7 @@ int wmain(int argc, wchar_t** argv) {
         o.mods = args.get_or(L"mods", L"");
         o.input = args.get_or(L"input", L"");
         o.layout_file = args.get_or(L"layout", L"");
+        o.cwd = args.get_or(L"cwd", L"");
 
         ::SetProcessDPIAware();
         check(::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED), "CoInitializeEx");
@@ -413,7 +432,8 @@ int wmain(int argc, wchar_t** argv) {
         const fs::path ctl = dir / L"agentctl.exe";
         const fs::path data = dk::temp_dir() / (L"agentdesk-shot-" + dk::pid_string());
         fs::create_directories(data);
-        const std::wstring temp_cwd = dk::temp_dir().native() + L"\\";
+        const std::wstring temp_cwd =
+            o.cwd.empty() ? dk::temp_dir().native() + L"\\" : fs::absolute(o.cwd).native();
 
         dk::write_file(data / L"profiles.json", dk::profiles_json(shot_profiles()));
         if (!o.layout_file.empty()) {  // a layout of the person's: <data>\layouts\<name>.json
@@ -437,10 +457,17 @@ int wmain(int argc, wchar_t** argv) {
                 enabled.push_back(dk::u8(m));
             (*ui_doc)["mods_enabled"] = enabled;
         }
-        if (const auto look = env(L"SHOT_APPEARANCE")) {  // "light" or "dark": not the system's
+        if (!o.cwd.empty()) {  // agent-ui starts its first session in ui.json's last_cwd
             if (!ui_doc)
                 ui_doc = Json{{"schema_version", 1}};
-            (*ui_doc)["appearance"] = dk::u8(*look);
+            (*ui_doc)["last_cwd"] = dk::u8(temp_cwd);
+        }
+        // --appearance light|dark (or SHOT_APPEARANCE): not the system's.
+        const std::wstring look = args.get_or(L"appearance", env(L"SHOT_APPEARANCE").value_or(L""));
+        if (!look.empty()) {
+            if (!ui_doc)
+                ui_doc = Json{{"schema_version", 1}};
+            (*ui_doc)["appearance"] = dk::u8(look);
         }
         if (ui_doc)
             dk::write_file(data / L"ui.json", ui_doc->dump(2));

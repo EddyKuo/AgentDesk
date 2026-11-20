@@ -355,6 +355,7 @@ bool draw_wall_state(App::State& s, ImVec2 pos, ImVec2 size, const Wall& w, std:
             return true;
         }
         StateCard card;
+        card.framed = true;
         card.title = "agent-host is not running";
         card.hint = "Mission Control shows the agents agent-host runs.";
         card.detail = s.host->last_error();
@@ -365,6 +366,7 @@ bool draw_wall_state(App::State& s, ImVec2 pos, ImVec2 size, const Wall& w, std:
     }
     if (w.tiles.empty()) {
         StateCard card;
+        card.framed = true;
         card.title = "No agents running";
         card.hint = "Start Claude Code or Codex in a terminal and it shows up here.";
         card.buttons = {{with_chord(s, "Start a program...", "agent.new"), "agent.new"},
@@ -380,6 +382,7 @@ bool draw_wall_state(App::State& s, ImVec2 pos, ImVec2 size, const Wall& w, std:
     if (shown == 0) {
         const std::string f = s.settings.mission_filter;
         StateCard card;
+        card.framed = true;
         card.title = f == "blocked"   ? "Nothing needs you"
                      : f == "working" ? "Nothing is working"
                      : f == "done"    ? "Nothing has finished"
@@ -662,30 +665,19 @@ void draw_mission_wall(App::State& s, ImVec2 pos, ImVec2 size) {
 
 std::optional<std::string> mission_command(App::State& s, const std::string& name, const std::string& arg) {
     if (name == "mission.toggle") {
-        set_focus(s, false);
-        if (s.layout().style != "mission") {
-            // To the Mission Control layout (the first one, a person's own copy too), remembering
-            // where from.
-            const auto it = std::find_if(s.layouts.begin(), s.layouts.end(),
-                                         [](const LayoutSpec& l) { return l.style == "mission"; });
-            if (it == s.layouts.end())
-                return std::string("no Mission Control layout");
-            s.settings.layout_return = s.settings.layout;
-            s.settings.layout = it->name;
-            save_settings(s.settings);
-            mission_entered(s);
-        } else if (expanded(s)) {
+        // An expanded agent goes back to the wall; otherwise the shared toggle: to the wall from
+        // another layout (or from Focus), back to the layout before from the wall.
+        const bool shown = s.layout().style == "mission" && !s.settings.focus_on;
+        if (shown && expanded(s)) {
             show_child(s, "wall");
-        } else {
-            std::string back = s.settings.layout_return;
-            const auto it = std::find_if(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) {
-                return l.name == back && l.style != "mission";
-            });
-            s.settings.layout = it != s.layouts.end() ? back : std::string("workspace");
-            s.mission.shells_shown = false;
-            save_settings(s.settings);
-            s.focus_view(s.ws.focused_session());
+            return std::string();
         }
+        if (std::string err = toggle_layout(s, "mission"); !err.empty())
+            return err;
+        if (shown)
+            s.mission.shells_shown = false;
+        else
+            mission_entered(s);
         return std::string();
     }
     if (name == "mission.wall") {
