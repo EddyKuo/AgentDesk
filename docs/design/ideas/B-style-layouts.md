@@ -25,7 +25,7 @@ y=0   +-------------------------------------------------------------------------
       |(x)(-)(+) AGENTDESK  File  Edit  View  Window  Help     !2  ~3  Thu 16:25 | A 22
 y=22  |[repo-a v] 1 claude [!] | 2 pwsh | 3 codex [~] | +                        | B 22
 y=44  |  ╔═ claude · repo-a (main) ══════════[!]═╗  ┌─ pwsh · repo-a ──────────┐ | C 20
-      |  ║ > Fix the failing test in ...         ║  │ PS D:\code\repo-a> _     │ |
+      |  ║ > Fix the failing test in ...         ║  │ PS D:\src\repo-a> _     │ |
       |  ║                                       ║  │                          │ | D
       |  ║            （終端機內容）             ║  │                          │ |
       |  ║                                       ║  │                          │ |

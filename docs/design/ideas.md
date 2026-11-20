@@ -1,10 +1,12 @@
 # AgentDesk 版面與主題構想
 
-日期：2026-11-20｜狀態：構想，尚未排入計畫；每一項都已有設計規格（見下方）
+日期：2026-11-20｜狀態：A1～A4、B1～B3、T2～T5 已實作（見設計文件 ADR-32～ADR-35），T1 尚未
 
-這份文件收集版面與主題的發想，給之後挑選、排工作時參考。這些都還不是需求：要做哪一項，由使用者決定，再寫進設計文件（`docs/design/AgentDesk_Design.md`）與 PRD，照一般流程開發。
+> 2026-11-20 更新：使用者選定 A1～A4、B1～B3、T2～T5，都已實作並寫進設計文件 v2.24（2.9～2.12、ADR-32 Mission Control 與 Focus、ADR-33 Review 與 Timeline、ADR-34 風格版面、ADR-35 主題）與 PRD v3.4.0（FR-40～FR-50）。實際做法以 `ideas/IMPL-A12.md`、`IMPL-A34.md`、`IMPL-B.md`、`IMPL-T.md` 為準，和下方構想或規格不同的地方記在那裡。T1（高對比與色盲友善）使用者決定延後。下方內容保留當初的構想原文。
 
-目前已有的版面：AgentDesk（workspace）、Terminals、AgentDesk Mac（ADR-31）。主題：AgentDesk 自己的四套，加上 herdr 的 graphite、ink、moss、paper、atom-one-dark，以及使用者放進 `themes\` 的主題檔。
+這份文件收集版面與主題的發想，給挑選、排工作時參考。要做哪一項由使用者決定，再寫進設計文件（`docs/design/AgentDesk_Design.md`）與 PRD，照一般流程開發。
+
+構想當時已有的版面：AgentDesk（workspace）、Terminals、AgentDesk Mac（ADR-31）。主題：AgentDesk 自己的四套，加上 herdr 的 graphite、ink、moss、paper、atom-one-dark，以及使用者放進 `themes\` 的主題檔。現在內建版面共 8 個，見設計文件 2.4。
 
 ## 設計規格
 
@@ -27,6 +29,8 @@
 5. **A4 要修改 host 與協定**：新增狀態歷史與 `session.timeline`；host 換版交接時要不要一起搬這些紀錄。
 
 另外，A1 監看牆與 B1 復古終端機原本都提議 Ctrl+Shift+M，審稿時把 B1 的選單鍵改成 F10。
+
+使用者的決定（2026-11-20）：1. 不用 Esc，Ctrl+Shift+M 回牆面（ADR-32）。2. `focus_alerts` 預設 `edge_sound`，亮邊緣並照樣播放提示音，4.1 的規則不變（ADR-32）。3. 隨 T1 延後，仍待決定。4. 建議主題只在設定頁提示，絕不自動改外觀（ADR-35）。5. 狀態歷史放在 host，換版交接不搬（ADR-33）。B1 的選單鍵用 F10（ADR-34）。下面提到的 `update_attention` 問題已在 A1 一併修正：「看過」改以畫面上實際畫出的終端機判斷（設計文件 4.1）。
 
 設計時也發現一個現有的問題，與構想無關：`update_attention` 用目前的分頁判斷 Agent 是否「被看到」，不管畫面上實際畫了什麼。A1 的牆面會因此誤清「完成」標記；做 A1 時一併修正（見 A-usage-layouts.md）。
 

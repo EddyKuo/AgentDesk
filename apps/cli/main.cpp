@@ -711,7 +711,7 @@ const char* kUsage =
     "  wait <session> [--until idle|blocked|exited|change] [--timeout-ms N]\n"
     "  report <text...> [--to SESSION] [--from SESSION]\n"
     "  label <session> k=v...\n"
-    "  timeline [<session>] [--since 15m|1h|24h]   when agent and process states changed\n"
+    "  timeline [<session>] [--since 15m|1h|4h|24h|<minutes>]   when agent and process states changed\n"
     "  --skill   how agents use agentctl to run helper agents\n"
     "  bridge    relay stdin/stdout to this machine's agent-host (used through ssh)\n"
     "  update [--version V] [--exe PATH]\n"

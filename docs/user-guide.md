@@ -22,13 +22,15 @@ AgentDesk 是 Windows 11 x64 的 AI coding agent 工作台：在可分割的終�
 - **Files／Changes**：右側面板，跟著目前面板 shell 所在的資料夾。Files 是可展開的檔案樹，檔名旁有 git 狀態字母，點檔案可唯讀預覽。Changes 列出所有未提交的檔案與 +／− 行數，點檔案看差異，下方可輸入訊息 commit（會先 `git add -A`）。開關狀態依 space 記住。
 - **狀態列**：機器、目前分支、Agent 數量與需要你的數量，點右側的快捷鍵提示可以開命令面板。
 
-**Done** 的意思是「在你沒看的時候完成了」，看過之後變回 Idle。沒有可信的狀態來源時，AgentDesk 不會自己猜狀態。
+**Done** 的意思是「在你沒看的時候完成了」，看過之後變回 Idle。「看過」指那個終端機真的畫在畫面上：Mission Control 的小格子、專注模式藏起來的面板都不算。沒有可信的狀態來源時，AgentDesk 不會自己猜狀態。
 
 ## 通知
 
 Agent 需要你時一定會播放提示音；你沒在看的 Agent 完成時也會。你沒在看那個 Agent 時，右下角會出現通知（5 秒，錯誤 8 秒），點一下就跳到那個 Agent。內建兩段提示音，可在「設定 > Alerts」關閉、試聽，或在 `ui.json` 的 `sound_done`／`sound_blocked` 改成自己的 MP3。
 
 程式剛啟動就以錯誤結束時，通知會附上結束碼和最後幾行輸出。
+
+專注模式（見「版面」）的提醒方式不同：預設只亮視窗邊緣並播放提示音，不跳通知。
 
 ## 新增工作
 
@@ -64,8 +66,23 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 | Ctrl+Shift+F | 在終端機裡搜尋 |
 | Ctrl+Shift+B | 隱藏或顯示側欄（在沒有側欄的 terminals 版面，切回 AgentDesk 版面） |
 | Ctrl+Shift+L | 切換版面 |
+| Ctrl+Shift+M | 進出 Mission Control 監看牆 |
+| Ctrl+Shift+. | 進出專注模式 |
+| Ctrl+Shift+R | 進出 Review 審查台 |
+| Ctrl+Shift+H | 開關時間軸（Timeline） |
 | Ctrl+= ／Ctrl+- ／Ctrl+0 | 放大／縮小／重設整個視窗 |
 | Ctrl+, | 設定 |
+
+有些按鍵只在特定版面有作用，在其他版面照常送給程式：
+
+| 版面 | 快捷鍵 | 動作 |
+|---|---|---|
+| Review | F8／Shift+F8 | 下一個／上一個改動的檔案 |
+| AgentDesk Tiling | Alt+R | 調整大小模式 |
+| AgentDesk Tiling | Alt+Shift+Enter | 往面板較長的一邊分割 |
+| AgentDesk Tiling | Alt+Shift+Q | 關閉面板 |
+| AgentDesk Tiling | Alt+Shift+G | 開關面板間距 |
+| AgentDesk Classic | F10 | 打開選單列 |
 
 這些按鍵由 AgentDesk 使用，不會送進終端機裡的程式。要改鍵位，在「設定 > Look」按「Edit keys.json」，例如：
 
@@ -78,6 +95,7 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 - 區段：`global`（整個視窗）、`terminal`（終端機有焦點時）、`layout:<版面名稱>`（顯示該版面時）。同一個鍵在多個區段都有設定時，依 terminal、layout、global 的順序取用。
 - 動作可以是命令名稱、`命令:值`、`{"command": "layout.switch", "args": {"name": "terminals"}}`、`send:<文字>`（送進終端機），或 `terminal`（這個鍵交給程式）。
 - 檔案有錯（無法讀的按鍵、未知的區段或命令）時，整個檔案都不套用，按鍵維持預設，錯誤會顯示在設定頁。
+- 沒按修飾鍵的 F1～F12，只有在 keys.json 裡有綁定時才由 AgentDesk 處理，沒綁定的照常送給程式。預設只綁了 F2、Review 的 F8 和 Classic 的 F10。
 
 存檔後立刻生效，不必重新啟動。檔案不存在時，AgentDesk 會寫入預設的按鍵；檔案有錯時，原因會寫在同一個資料夾的 `keys.error`。
 
@@ -149,6 +167,94 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 - **workspace**（設定裡顯示為 AgentDesk）：預設，側欄＋分頁＋分割面板＋右側面板。
 - **terminals**：沒有側欄與狀態列的版面。上方列最左邊是側欄按鈕（點了切回有側欄的 AgentDesk 版面，Ctrl+Shift+B 也可以），接著是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是設定（齒輪，可在這裡切回 AgentDesk 版面）、命令面板與新分頁按鈕，滑鼠停在按鈕上會顯示名稱與快捷鍵。面板標題列的按鈕一直顯示。
 - **mac**（設定裡顯示為 AgentDesk Mac）：Mac 風格的版面，畫法與配色都是 AgentDesk 自己的。最上面是選單列：圓形視窗按鈕、AgentDesk 標誌（點了開 AgentDesk 選單：What's new、設定、檢查更新、隱藏、關閉視窗），以及 File、Edit、View、Window、Help 五個選單，選單打開時把滑鼠移到另一個標題就換成那個選單；右邊是需要你與執行中的 Agent 數量（點一下跳到第一個需要你的 Agent）和時鐘。中間是桌布，目前的分頁放在一個浮動視窗裡，視窗標題列左邊三顆小圓鈕：紅色與黃色把這個分頁收進 Dock（程式繼續跑），綠色讓視窗填滿桌面，再按一次恢復。最下面是 Dock：每個 space 一個頭像（目前的 space 下面有一個點），接著是目前 space 的分頁（顯示程式圖示，有程式在跑的下面有點，右上角標出需要你、完成或執行中，收起來的分頁顏色變淡），最後是新增與設定。滑鼠移過 Dock 圖塊會放大並顯示名稱；右鍵分頁圖塊有改名、新分頁、關閉。這個版面的通知出現在右上角、選單列下方。Ctrl+Shift+B 會切到有側欄的 AgentDesk 版面。
+- **mission**（Mission Control）：所有 Agent 排成一面牆，見下方「監看牆」。
+- **review**（Review）：左邊是終端機，右邊是改動與 diff，見下方「審查台」。
+- **tiling**（AgentDesk Tiling）、**cockpit**（AgentDesk Cockpit）、**classic**（AgentDesk Classic）：只換外觀與操作方式的風格版面，見下方「風格版面」。
+
+另外有一個任何版面都能用的專注模式（Ctrl+Shift+.），和隨時能打開的時間軸（Ctrl+Shift+H）。
+
+### 監看牆（Mission Control）
+
+同時跑好幾個 Agent 時，按 **Ctrl+Shift+M**（或在 設定 › Look 選「Mission Control」）。所有 Agent 排成格子，每格是程式、名稱、狀態、最後幾行輸出與 Agent 回報的訊息。需要你的格子有紅框，排在最前面。
+
+- 上方的「Needs you」「Working」「Done」計數點一下，只看那一種；右邊的 All／Active 切換是否只看忙碌中的 Agent。
+- 點一格，就以一般面板開啟那個 Agent，可以直接打字。按「← Wall」或 Ctrl+Shift+M 回到牆面；在牆面再按一次 Ctrl+Shift+M，回到原本的版面。
+- 在牆面上可以用方向鍵選格子、Enter 開啟，或直接按 1～9 開啟第幾格。
+- Esc 不會離開牆面，它照常送給終端機（Claude Code 用 Esc 中斷 Agent）。
+- 右鍵格子可以開啟、偷看（peek）、重新命名或關閉面板。
+- 子 Agent 預設不另外成格，父 Agent 的格子會寫「+N sub-agents」，點了用 peek 視窗查看。
+
+只看牆面不算「看過」：完成的 Agent 會一直標示完成，直到你點開它。
+
+要讓子 Agent 或沒有狀態回報的終端機也各成一格，可以在 `ui.json` 把 `mission_sub_agents` 或 `mission_shells` 設成 `true`。
+
+### 專注模式（Focus）
+
+想專心寫程式、只偶爾看一下 Agent 時，按 **Ctrl+Shift+.**（或在命令面板執行「Focus mode」）。畫面只剩目前的終端機，底下一條細列：
+
+- 左邊是這個終端機的程式與 space。
+- 中間的小點代表其他 Agent：紅色實心是需要你，綠色實心是完成，黃色空心圈是工作中，灰色小點是閒置。滑鼠移上去會顯示是哪個 Agent，點一下就換成它，仍留在專注模式。放不下的會顯示「+N」，點了開啟搜尋。
+- 右邊的「Exit focus」或再按一次 Ctrl+Shift+. 就回到原本的版面，分割與放大狀態都不變。
+
+滑鼠在終端機上緣停一下，面板標題列就會浮現，可以分割、放大或關閉。Esc、Ctrl+C 照常送給終端機。
+
+有 Agent 需要你時，視窗邊緣會亮一下，不跳通知。預設也會播放提示音；要完全安靜，到 **設定 › Alerts › In focus mode** 選「Edge」；選「Usual」則和平常一樣跳通知。視窗不在前景時，一律照平常的方式提醒。關掉 AgentDesk 再開，仍會停在專注模式。
+
+### 審查台（Review）
+
+按 Ctrl+Shift+R 切到審查台，再按一次回到原本的版面。左邊是目前的終端機，右邊列出這個 Agent 資料夾裡還沒 commit 的改動和 diff，最下面可以直接 commit。
+
+- 焦點換到另一個 Agent，右邊就跟著換。焦點移到一般 shell 時，右邊預設保留上一個 Agent 的改動；想讓它一律跟著焦點，把 `ui.json` 的 `review_follow` 改成 `"focused"`。
+- 按 F8、Shift+F8 換到下一個、上一個檔案，到最後一個會繞回第一個。這兩個鍵只在審查台有作用，在其他版面照常送給終端機。
+- Agent 做完一輪時清單會自動重讀，也可以按右上角的重新整理。
+- 同一個資料夾有兩個以上的 Agent 在跑時，上方會出現「N agents in this repo」：清單裡是所有人的改動，分不出是誰改的。要分開，請讓每個 Agent 用自己的 worktree。
+- Agent 還在工作時也可以 commit，但會看到提醒，之後它再改的檔案會出現在下一次的清單裡。
+
+`mission.toggle` 和 `review.toggle` 只記得一層「原本的版面」：從 terminals 進 Mission Control、再進 Review，按 Ctrl+Shift+R 會回到 Mission Control，再按 Ctrl+Shift+M 則回到 AgentDesk 版面，不是 terminals。
+
+### 時間軸（Timeline）
+
+按 Ctrl+Shift+H 打開時間軸，看每個 Agent 什麼時候在工作、什麼時候在等你、什麼時候做完。按 Esc 或再按一次 Ctrl+Shift+H 關閉。
+
+- 上方可以切換範圍：15 分鐘、1 小時、4 小時、24 小時（也可以按 1～4）。←、→ 往前往後移，End 回到現在，Ctrl+滾輪在幾種範圍之間放大縮小。
+- 黃色條是工作中，紅色條是需要你（夠寬時中間有「!」），「✓」是做完的時間點，細線是閒置，「×」是程式結束。滑鼠停在色條上可以看起訖時間。
+- 點一列或一段色條，就切到那個 Agent。
+- 勾選「Since you left」時，視窗離開焦點之後的那段時間會加上底色，回來時可以直接看出那段時間誰卡住、誰做完。
+- 紀錄存在 agent-host 裡，關掉 AgentDesk 也會繼續記錄，最多保留 24 小時、每個終端機 1,000 筆，只記時間和狀態，不記畫面內容。更新 agent-host 之後，紀錄會從更新的時間重新開始；遠端機器的 agent-host 太舊時，那台會顯示需要更新。
+- 只有回報過狀態的終端機會出現，一般 shell 不會。
+- 終端機用 `agentctl timeline` 也能看同樣的紀錄（見「agentctl」）。
+
+### 風格版面
+
+設定 › Look 的版面卡片有三個風格版面，也可以在命令面板輸入「Layout」切換。功能和 AgentDesk 版面一樣（space、分頁、分割、命令面板、通知），只換外觀和操作方式。
+
+**AgentDesk Tiling**：沒有側欄和分頁卡片，頂端一條細狀態列，面板直角、彼此留間距，適合用鍵盤操作很多個面板。
+
+- 狀態列由左到右：space 編號、目前 space 的分頁、目前面板、需要你（`!`）與工作中（`~`）的數量、時鐘。
+- Alt+R 進入調整大小模式：H、J、K、L 或方向鍵每次移動 40 px，加 Shift 每次 10 px，按 Esc 或 Enter 結束。模式中按鍵不會送進終端機。
+- Alt+Shift+Enter 往面板較長的那一邊分割；Alt+Shift+Q 關閉面板；Alt+Shift+G 開關間距。
+- 這幾個鍵只在 Tiling 版面有作用。shell 的 Alt+R（readline 還原整行）在這個版面會被攔下，不想要的話可以在 keys.json 的 `layout:tiling` 區段改掉。
+- 設定 › Look 可以調整間距、面板標題列（自動、一律顯示、不顯示）與「滑鼠停留就聚焦」。
+
+**AgentDesk Cockpit**：左邊三個儀表（工作中、需要你、今天完成），右邊 Agent 清單，下方狀態變化紀錄，中間照常是目前分頁的面板。
+
+- 點「NEEDS YOU」儀表跳到第一個需要你的 Agent；點清單或紀錄的一列跳到那個 Agent，清單右鍵可以 Peek 或放進面板。
+- 「今天完成」從本地時間午夜起算，只計 AgentDesk 看得到的完成；AgentDesk 關著時完成的，會在重開時算進去。命令面板的「Cockpit: set Done today back to 0」可以手動歸零。
+- 紀錄只保留最近 200 筆，不存檔。
+- 視窗太窄時會先藏 Agent 清單、再藏紀錄；太矮時儀表改成橫條。
+- 背景格線與柔光可以在設定 › Look 的「Glow and grid」關掉。
+
+**AgentDesk Classic**：整個視窗用字元畫成單色終端機的樣子，選單、分頁、框線和狀態全是文字。
+
+- F10 打開選單列，左右鍵換選單、上下鍵選列、Enter 執行、Esc 關閉。這個鍵只在 Classic 版面有作用；全螢幕終端程式若用 F10，可以在 keys.json 的 `layout:classic` 區段改成別的鍵。
+- Ctrl+Shift+B 開關文字側欄。
+- 狀態一律有字元，不只靠顏色：`[!]` 需要你（反白）、`[~]` 工作中、`[+]` 完成、`[.]` 閒置、`[?]` 未知。
+- 設定 › Look 的「Screen effects」：Off、Light（掃描線與暗角，預設）、Full（再加文字微光）。淺色主題與 Windows 高對比時一律不畫特效。
+- 「Monochrome terminal」會把終端機的顏色轉成主題的單色色階。要看彩色 diff 時請關掉。
+
+Cockpit 與 Classic 附有為它們設計的主題（Cockpit Night／Cockpit Day、Phosphor Green／Phosphor Paper，另外還有 Phosphor Amber），設定 › Look 會出現建議列，按 Use 才會套用（見「主題」）。
+
+### 自訂版面
 
 自訂版面放在 `%LOCALAPPDATA%\AgentDesk\layouts\<名稱>.json`：
 
@@ -162,9 +268,9 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 
 Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy。每次修改都立即生效並儲存，沒有儲存鈕。
 
-- **Look**：版面與主題卡片（我們的 Midnight、Ember、Moss、Paper，加上 graphite、ink、moss、paper、atom one dark；把同樣格式的主題檔放進 `%LOCALAPPDATA%\AgentDesk\themes\` 也會列出來，每個版面各自記住深色與淺色主題）；整體縮放、介面文字大小（預設 15 px，覺得太小可以調大）、終端機字型與大小、行高、字寬、捲動速度；新終端機用的 shell、放開滑鼠就複製、keys.json、worktree 資料夾。
+- **Look**：版面與主題卡片（我們的 Midnight、Ember、Moss、Paper，加上 graphite、ink、moss、paper、atom one dark，以及隨附的 Dusk、Dawn、Cockpit Night、Cockpit Day、Phosphor Green、Phosphor Amber、Phosphor Paper；把同樣格式的主題檔放進 `%LOCALAPPDATA%\AgentDesk\themes\` 也會列出來，每個版面各自記住深色與淺色主題。排程、變色、建議主題與主題編輯器見下方「主題」）；整體縮放、介面文字大小（預設 15 px，覺得太小可以調大）、終端機字型與大小、行高、字寬、捲動速度；新終端機用的 shell、放開滑鼠就複製、keys.json、worktree 資料夾。
 - **Machines**：遠端機器清單與「Add a machine…」。
-- **Alerts**：提示音開關與試聽、右下角通知開關。
+- **Alerts**：提示音開關與試聽、右下角通知開關，以及專注模式的提醒方式（In focus mode：Edge、Edge + sound、Usual）。
 - **Mods**：啟用或停用 mod、看錯誤、重新載入。
 - **Updates**：AgentDesk 與 agent-host 的版本、「What's new」（更新後第一次啟動會自動顯示一次）、「Check now」。AgentDesk 沒有內建的更新伺服器，要設定環境變數 `AGENTDESK_RELEASES_URL` 才會每小時檢查一次；有新版時會在右下角提示，按「Restart to update」換版，或下次結束時換。agent-host 可以單獨更新，終端機裡的程式不會中斷。
 - **Privacy**：使用統計的開關，以及「What we send」逐字顯示會送出的內容。只有設定 `AGENTDESK_TELEMETRY_URL` 時才會送出；`DO_NOT_TRACK` 或 `AGENTDESK_TELEMETRY=0` 會關閉這一次執行。
@@ -172,6 +278,35 @@ Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy
 左下的「Send feedback」開一個草稿視窗，草稿最後會附上 AgentDesk 與 Windows 的版本。Send feedback 的草稿不會自己送出：按「Copy」複製，或按「Save to file」存到 `%LOCALAPPDATA%\AgentDesk\feedback\`，再用你習慣的方式寄出。
 
 介面字型是隨附的 Geist，終端機預設是隨附的 JetBrains Mono Medium；中文字以微軟正黑體補上。
+
+## 主題
+
+### 依時間切換淺色與深色
+
+設定 › Look › Theme 的 Appearance 選 **Schedule**，AgentDesk 就會自己換淺色和深色。
+
+- **Fixed times**：填淺色開始和深色開始的時間（例如 07:00 與 19:00）。欄位裡按上下鍵，一次調 15 分鐘。夜班可以把淺色時間設得比深色晚，例如 22:00 到 06:00。
+- **Sunrise, sunset**：先在 Place 填緯度（必填）和經度（可不填，不填就用時區的標準經線推算）。AgentDesk 不連網，也不讀 Windows 定位，位置只存到小數一位。Shift 可以把日出、日落整體提早或延後，最多兩小時。
+- 下方那一行會寫出今天幾點換色、現在是哪一種。
+- 想暫時換成另一種，執行命令「Toggle light / dark」（`appearance.toggle`），到下一個切換時間就回到排程。
+
+### 版面的建議主題
+
+有些版面附了配好的深淺主題：AgentDesk Mac 配 Dusk 與 Dawn，Cockpit 配 Cockpit Night 與 Cockpit Day，Classic 配 Phosphor Green 與 Phosphor Paper。如果你現在用的不是那一組，設定 › Look › Theme 會出現一列「Made for …」，按 **Use** 才會換。AgentDesk 不會自己改你的主題。建議的主題卡右上角有一顆小星星。
+
+### 跟著 Agent 狀態變色
+
+把 **Tint by agent state** 設成 Subtle 之後，只要有 Agent 需要你，整個介面的底色會稍微偏暖，強調色也跟著偏一點。終端機裡的顏色、文字和狀態色都不變。打開 **Also when done**，有完成但還沒看的 Agent 時會帶一點冷色，強度減半。變色前會先檢查對比，所以淺色主題幾乎看不出變化。Windows 關掉動畫效果時直接換色，不漸變。
+
+### 主題編輯器
+
+在主題卡上按右鍵選 **Edit a copy…**，或按每排最後的 **New theme**，就會打開編輯器。改任何顏色，整個視窗馬上跟著變。
+
+- 每個顏色旁邊是它在主要背景上的對比：打勾表示夠清楚，三角形表示偏低。標著 `auto` 的顏色是從背景推算的，改了才會寫進檔案；旁邊的復原鈕可以改回推算值。
+- 右邊的範例可以切換成紅色盲、綠色盲、藍色盲看到的樣子（只影響範例）。Checks 列出對比不足和難以分辨的狀態色。對比低一樣可以存，只有終端機文字低於 3:1 時會多問一次。
+- 按 **Save**（或 Ctrl+S）存成 `%LOCALAPPDATA%\AgentDesk\themes\<名稱>.json`，存完立刻套用，不用重開。檔案格式和手寫的主題檔一樣。想另存一份，改 Name 欄位再存。
+- 自己的主題卡右鍵還有 **Edit…** 和 **Delete…**。刪除不會真的刪檔，而是改名成 `.json.old-<時間>`；用到它的版面會回到預設主題。
+- 同時開著另一個 AgentDesk 視窗時，那個視窗要重開才看得到新存的主題。
 
 ## 程式圖示
 
@@ -224,8 +359,12 @@ agentctl stop review --force
 agentctl wait review --until idle|blocked|exited|change --timeout-ms 600000
 agentctl label review role=review issue=123
 agentctl report "text"                                     :: 在子 Agent 裡回報給父 Agent
+agentctl timeline review --since 1h                        :: 狀態何時變化（--since 15m|1h|4h|24h）
+agentctl timeline --json
 agentctl shutdown --stop-sessions
 ```
+
+`agentctl timeline` 列出每個終端機的狀態變化（本地時間、Agent 狀態／程序狀態），不給名稱時列出全部；資料和時間軸一樣來自 agent-host，最多 24 小時。agent-host 太舊時會回報 unknown method，更新 agent-host 即可。
 
 - 名稱有重複時會拒絕執行，請改用 `list` 顯示的 session id。
 - `--json` 時 stdout 只有結果 JSON，診斷訊息在 stderr。
@@ -251,6 +390,7 @@ agentctl shutdown --stop-sessions
 - `window.json`：視窗的位置、大小與是否最大化。
 - `keys.json`：自訂快捷鍵。
 - `mods\`、`layouts\`：mod 與自訂版面。
+- `themes\`：自己的主題檔，主題編輯器也存在這裡。
 - `host.log`：只記錄 ID、事件與錯誤碼，不記錄輸入內容。
 - `ui-crash.txt`：介面崩潰時的呼叫堆疊；回報問題時請附上。
 
