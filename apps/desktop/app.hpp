@@ -32,6 +32,8 @@ struct AppConfig {
 
 // %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk (created when missing).
 std::filesystem::path data_folder();
+// The zoom from ui.json (a first run's pick when there is none); sizes the window before App exists.
+float saved_zoom();
 
 class App {
 public:

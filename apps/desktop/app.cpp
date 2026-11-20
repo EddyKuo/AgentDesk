@@ -298,6 +298,10 @@ std::filesystem::path data_folder() {
     return data_dir();
 }
 
+float saved_zoom() {
+    return load_settings().zoom;
+}
+
 // The loop ended: telemetry's clean quit, then a downloaded update goes in place (AgentDesk is
 // not restarted for it).
 void App::on_quit() {

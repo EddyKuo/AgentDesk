@@ -12,6 +12,8 @@ AgentDesk 是 Windows 11 x64 的 AI coding agent 工作台：在可分割的終�
 
 執行 `agent-ui.exe`。它會在背景啟動 `agent-host.exe`，所有工作都跑在 host 裡。視窗沒有系統標題列，最小化、最大化、關閉按鈕在分頁列右端；拖曳分頁列或左上的品牌列可以移動視窗，雙擊切換最大化，也能用 Windows 的貼齊功能。
 
+視窗會記住上次的位置、大小，以及是否最大化，下次開啟時回到原處；那台螢幕不在了，就以同樣大小開在滑鼠所在的螢幕中間。第一次開啟時，大小依螢幕決定：約為 1280×820 乘上 Windows 的縮放比例與 AgentDesk 的縮放（設定裡的 zoom），並保持在螢幕可用範圍的一半到九成之間。所以 Full HD 100% 和 4K 150% 開出來的視窗，看起來的比例差不多。想重新套用預設大小，關掉 AgentDesk 後刪除 `window.json`。
+
 - **側欄**：預設寬 268 px，拖曳右緣可在 44～480 px 之間調整。窄於 160 px 時改成只顯示編號與狀態的窄欄；品牌列的收合鈕在兩者之間切換，Ctrl+Shift+B 整個隱藏。
 - **Spaces**：一個工作地點，通常是一個 repo。每列是彩色字母頭像、名稱，靠右是 `repo · 分支`，再加上領先／落後遠端的 ↑N／↓N（名稱已經說明的部分、main／master 會省略）。沒取名的 space 以第一個終端機所在的 repo 頂層資料夾命名，家目錄顯示 `~`；在 shell 裡 `cd` 之後會跟著變。linked worktree 的 space 以 `├─`／`└─` 掛在主 repo 的 space 下面。拖曳可調整順序；右鍵選單有改名、新增／開啟／移除 worktree、關閉。
 - **Agents**：有回報狀態的 Agent。預設依「Needs you／Done／Working／Idle」分段，同段內最近變動的在前；排序鈕可改成依 space 分組。每列是程式圖示、space 名稱與工作名稱、距離上次變動多久、狀態標記；滑鼠移上去可以釘選到最上面。子 Agent 以樹狀線列在父 Agent 下面。
@@ -246,6 +248,7 @@ agentctl shutdown --stop-sessions
 - `sessions.json`：工作紀錄。
 - `ui-state.json`：space、分頁與分割，由 host 保存。
 - `ui.json`：設定、機器、啟用的 mod、版面、側欄寬度、最近用過的命令。
+- `window.json`：視窗的位置、大小與是否最大化。
 - `keys.json`：自訂快捷鍵。
 - `mods\`、`layouts\`：mod 與自訂版面。
 - `host.log`：只記錄 ID、事件與錯誤碼，不記錄輸入內容。

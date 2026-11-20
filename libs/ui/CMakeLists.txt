@@ -24,11 +24,12 @@ agentdesk_library(agentdesk_ui
     src/image_cache.cpp
     src/programs.cpp
     src/layout.cpp
+    src/window_place.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/layout_defaults.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # host/input.hpp is part of the public interface (TerminalSource::send).
-target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt windowscodecs lunasvg::lunasvg)
+target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt windowscodecs shcore lunasvg::lunasvg)
 target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agentdesk::host agentdesk::ipc agentdesk::protocol)
 
 # The shipped layout files (kept verbatim), compiled in as text for

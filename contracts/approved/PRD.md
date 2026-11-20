@@ -1,6 +1,6 @@
 ---
 contract_type: PRD
-version: 2.0.1
+version: 2.1.0
 status: approved
 author_agent: PM
 sprint: 11
@@ -10,12 +10,13 @@ skills_used:
   - shared/domain-coding-agents@1.0.0
 upstream_deps:
   - raw_requirement@2026-11-16
-  - docs/design/AgentDesk_Design.md@2.11
-  - sprint/current/status.md@2026-11-19
+  - docs/design/AgentDesk_Design.md@2.13
+  - sprint/current/status.md@2026-11-20
 downstream_consumers:
   - RD
   - QA
 change_summary: |
+  2.1.0（Minor）：新增 FR-38 視窗開啟的位置與大小（ADR-23，設計文件 v2.13，使用者 2026-11-20 要求），既有需求不變。
   2.0.1（Patch）：FR-21 引用的測試改名為 `Attention.AlertRules`（2026-11-20 重構時拿掉測試名稱裡的 herdr），需求不變。
   2.0.0（Major）：FR-27 刪掉了看板與格狀兩種版面，屬於刪除需求內容，依憲法 6.3 升主版號（下游 RD、QA 需重新確認 FR-27）。其餘：跟上出貨的產品版本 0.2.0，鎖定設計文件 v2.11。新增第 9 節 FR-29～FR-37，都是 Sprint 10 已實作、使用者在 2026-11-19 驗收過的功能：
   依 herdr-app 複刻的介面與行為（ADR-15）、Files／Changes 面板、Agent 狀態的生命週期（回到 shell 提示時清除）、新增 space 或分頁時選擇 shell（ADR-20）、
@@ -60,7 +61,7 @@ AgentDesk 的介面與行為依 herdr-app 的原始碼複刻（ADR-15），用 C
 - MVP 交付時，設計文件 6.2 驗收矩陣（QA-01～QA-22）全數通過，或未通過項目已寫入限制清單並經使用者同意。
 - 沒有任何一次把未知的 Agent 狀態標成 Done（設計文件 5.3）。
 - 第 1.3 節的數值目標全數達成，並附測試報告證據（設計文件 6.3）。
-- 第 8、9 節的需求（FR-20～FR-37）都有自動化測試或實機證據。使用者已在 2026-11-19 完成整體驗收（`sprint/current/status.md`）；還要人工驗收的項目列在設計文件 5.4、5.5。
+- 第 8、9 節的需求（FR-20～FR-38）都有自動化測試或實機證據。使用者已在 2026-11-19 完成整體驗收（`sprint/current/status.md`）；還要人工驗收的項目列在設計文件 5.4、5.5。
 
 ## 2. 功能需求
 
@@ -249,3 +250,13 @@ v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外�
 - Given 使用者在設定 › Privacy 按「What we send」的 Show，When 畫面打開，Then 顯示待送的報告、今天的草稿與上次送出的內容。
 - Given 使用者在 Privacy 關閉使用統計，When 關閉，Then 清空待送報告並換一個新的 id。
 **驗證**: `Telemetry.*`；本機接收端實測（status.md 2026-11-19「驗證」）。
+
+### FR-38 視窗開啟的位置與大小（ADR-23）
+**優先級**: P2
+**描述**: 視窗記住上次的螢幕、位置、大小與是否最大化（`window.json`，以邏輯像素保存）。沒有紀錄時，大小是 1280×820 邏輯像素乘上 zoom，限制在螢幕可用範圍的 50%～90% 並置中，所以不同解析度與縮放比例的螢幕上，視窗佔畫面的比例相近。設計文件 4.1。
+**驗收標準**:
+- Given 第一次啟動、Full HD 100%、zoom 1.0，When 視窗打開，Then 大小 1280×820，置中在可用範圍內。
+- Given 第一次啟動、4K 150%、zoom 1.2，When 視窗打開，Then 大小 2304×1476 實體像素（1536×984 邏輯像素）。
+- Given 使用者移動並調整視窗大小後關閉，When 再次開啟，Then 回到同一個螢幕、位置與大小；關閉時是最大化就以最大化開啟。
+- Given 上次的螢幕已經不在，When 開啟，Then 以上次的大小置中於滑鼠所在的螢幕，而且不超出可用範圍。
+**驗證**: `WindowPlace.*`；實機（status.md 2026-11-20「視窗依螢幕自動調整大小、記住位置」）。
