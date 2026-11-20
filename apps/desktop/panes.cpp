@@ -1,7 +1,7 @@
 // Panes: one terminal pane with its frame, header, banner and body; the split tree of panes with
 // pane dragging and dividers; and the side panel header.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
-#include "win98_internal.hpp"
+#include "app_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
@@ -9,27 +9,14 @@ namespace detail {
 namespace {
 // Each layout style frames its panes differently:
 // - default: radius 10, a 1 px border (the accent when focused), a 30 px header;
-// - Terminals: radius 12, a quiet border and focus edge, its own 38 px header;
-// - Windows 98: square, a 3 px #c0c0c0 border (the same when focused) on black, its own title bar.
-enum class PaneStyle : std::uint8_t { kDefault, kTerminals, kWin98 };
+// - Terminals: radius 12, a quiet border and focus edge, its own 38 px header.
+enum class PaneStyle : std::uint8_t { kDefault, kTerminals };
 
 PaneStyle pane_style(App::State& s) {
-    const auto& style = s.layout().style;
-    if (style == "win98")
-        return PaneStyle::kWin98;
-    return style == "terminals" ? PaneStyle::kTerminals : PaneStyle::kDefault;
+    return s.layout().style == "terminals" ? PaneStyle::kTerminals : PaneStyle::kDefault;
 }
 
-void draw_pane_frame(ImDrawList* dl, ImVec2 pos, ImVec2 max, PaneStyle style, float edge, bool focused) {
-    if (style == PaneStyle::kWin98) {
-        dl->AddRectFilled(pos, max, IM_COL32(0, 0, 0, 255));
-        const ImU32 face = IM_COL32(0xc0, 0xc0, 0xc0, 255);
-        dl->AddRectFilled(pos, ImVec2(max.x, pos.y + edge), face);
-        dl->AddRectFilled(ImVec2(pos.x, max.y - edge), max, face);
-        dl->AddRectFilled(pos, ImVec2(pos.x + edge, max.y), face);
-        dl->AddRectFilled(ImVec2(max.x - edge, pos.y), max, face);
-        return;
-    }
+void draw_pane_frame(ImDrawList* dl, ImVec2 pos, ImVec2 max, PaneStyle style, bool focused) {
     const bool tm = style == PaneStyle::kTerminals;
     const TerminalsLook tl = terminals_look();
     const float radius = px(tm ? 12.0f : 10.0f);
@@ -295,30 +282,21 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
     const ImVec2 max(r.x + r.w, r.y + r.h);
     const PaneStyle style = pane_style(s);
     const bool tm = style == PaneStyle::kTerminals;
-    const bool w98p = style == PaneStyle::kWin98;
-    const float edge = w98p ? w98::pane_border(s) : 0.0f;
-    draw_pane_frame(dl, pos, max, style, edge, focused);
+    draw_pane_frame(dl, pos, max, style, focused);
 
-    const float header_h = w98p ? w98::pane_header_h(s) : px(tm ? 38.0f : 30.0f);
+    const float header_h = px(tm ? 38.0f : 30.0f);
     ImGui::PushID(id.c_str());
-    if (w98p)
-        w98::pane_header_at(s, id, ImVec2(pos.x + edge, pos.y + edge),
-                            ImVec2(max.x - edge, pos.y + edge + header_h), focused);
-    else if (tm)
+    if (tm)
         draw_terminals_pane_header(s, id, v, pos, r.w, header_h, focused);
     else
         draw_default_pane_header(s, id, v, pos, max, r.w, header_h);
 
-    const float top =
-        draw_pane_banner(s, dl, id, v, *sit->second, pos, max, pos.y + edge + header_h, connected);
+    const float top = draw_pane_banner(s, dl, id, v, *sit->second, pos, max, pos.y + header_h, connected);
 
     // Padding around the terminal: default 14 px sides, 2 px top, 14 px bottom; Terminals 10 px
-    // sides and 6 px top and bottom; Windows 98 4 px sides and 2 px top and bottom inside its border.
-    const ImVec2 body_min = w98p ? ImVec2(pos.x + edge + px(4), top + px(2))
-                                 : ImVec2(pos.x + px(tm ? 10.0f : 14.0f), top + px(tm ? 6.0f : 2.0f));
-    const ImVec2 body_size =
-        w98p ? ImVec2(r.w - edge * 2 - px(8), max.y - edge - top - px(4))
-             : ImVec2(r.w - px(tm ? 20.0f : 28.0f), max.y - top - (tm ? px(12) : px(2) + px(12)));
+    // sides and 6 px top and bottom.
+    const ImVec2 body_min(pos.x + px(tm ? 10.0f : 14.0f), top + px(tm ? 6.0f : 2.0f));
+    const ImVec2 body_size(r.w - px(tm ? 20.0f : 28.0f), max.y - top - (tm ? px(12) : px(2) + px(12)));
     if (body_size.x > px(20) && body_size.y > px(10))
         draw_pane_body(s, id, v, *sit->second, body_min, body_size);
     ImGui::PopID();

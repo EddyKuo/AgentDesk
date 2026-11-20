@@ -31,14 +31,11 @@ void adopt_doc(App::State& s, const Json& doc) {
     s.last_sent_doc = s.last_doc;
 }
 
-// `args` go after the profile's own (session.create "args"; AgentDesk 98's Run line).
 void create_session(App::State& s, const std::string& profile, const std::string& cwd,
-                    const std::string& name, Placement placement, const std::vector<std::string>& args) {
+                    const std::string& name, Placement placement) {
     Json params{{"profile_id", profile}, {"cwd", cwd}};
     if (!name.empty())
         params["name"] = name;
-    if (!args.empty())
-        params["args"] = args;
     s.launch_busy = true;
     s.host_for(placement.machine)
         ->call(
@@ -94,7 +91,7 @@ void place(App::State& s, const Placement& p) {
             [[fallthrough]];
         case LaunchTarget::kTab:
             if (const int sp = tab_space_for(s, p); sp >= 0) {
-                s.ws.add_tab(p.session, sp, p.tab_name);
+                s.ws.add_tab(p.session, sp);
                 s.focus(p.session);
                 return;
             }

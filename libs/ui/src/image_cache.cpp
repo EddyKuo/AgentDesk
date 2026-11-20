@@ -1,7 +1,5 @@
-// SVG (lunasvg) and PNG (WIC) files decoded into ImGui textures, cached by file and size.
+// SVG files (lunasvg) decoded into ImGui textures, cached by file and size.
 #include "agentdesk/ui/image_cache.hpp"
-
-#include <windows.h>
 
 #include <cstring>
 #include <fstream>
@@ -9,7 +7,6 @@
 #include <vector>
 
 #include <lunasvg/lunasvg.h>
-#include <wincodec.h>
 
 #include "agentdesk/ui/imgui_adapter.hpp"
 
@@ -64,16 +61,6 @@ ImageCache::~ImageCache() {
             adapter::unregister_texture(e.data.get());
 }
 
-void ImageCache::add_svg_font(const char* family, bool bold, const std::filesystem::path& file) {
-    const std::string data = read_file(file);
-    if (data.empty())
-        return;
-    auto* copy = new std::string(data);
-    lunasvg_add_font_face_from_data(
-        family, bold, false, copy->data(), copy->size(),
-        [](void* closure) { delete static_cast<std::string*>(closure); }, copy);
-}
-
 ImageCache::Image ImageCache::keep(const std::tuple<std::wstring, int, int, bool>& key, int w, int h,
                                    std::unique_ptr<unsigned char[]> rgba) {
     Entry e;
@@ -125,43 +112,6 @@ ImageCache::Image ImageCache::svg(const std::filesystem::path& file, int w, int 
             rgba[i * 4] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = 255;
     }
     return keep(key, bmp.width(), bmp.height(), std::move(rgba));
-}
-
-ImageCache::Image ImageCache::picture(const std::filesystem::path& file) {
-    const auto key = std::make_tuple(file.native(), 0, 0, false);
-    if (const auto it = entries_.find(key); it != entries_.end())
-        return it->second.image;
-    entries_[key] = Entry{};
-    const HRESULT init = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    Image out;
-    {
-        IWICImagingFactory* factory = nullptr;
-        IWICBitmapDecoder* decoder = nullptr;
-        IWICBitmapFrameDecode* frame = nullptr;
-        IWICFormatConverter* conv = nullptr;
-        if (SUCCEEDED(::CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                         IID_PPV_ARGS(&factory))) &&
-            SUCCEEDED(factory->CreateDecoderFromFilename(file.c_str(), nullptr, GENERIC_READ,
-                                                         WICDecodeMetadataCacheOnDemand, &decoder)) &&
-            SUCCEEDED(decoder->GetFrame(0, &frame)) && SUCCEEDED(factory->CreateFormatConverter(&conv)) &&
-            SUCCEEDED(conv->Initialize(frame, GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr,
-                                       0.0, WICBitmapPaletteTypeCustom))) {
-            UINT w = 0, h = 0;
-            conv->GetSize(&w, &h);
-            if (w > 0 && h > 0 && w < 16384 && h < 16384) {
-                auto rgba = std::make_unique<unsigned char[]>(static_cast<std::size_t>(w) * h * 4);
-                if (SUCCEEDED(conv->CopyPixels(nullptr, w * 4, w * h * 4, rgba.get())))
-                    out = keep(key, static_cast<int>(w), static_cast<int>(h), std::move(rgba));
-            }
-        }
-        for (IUnknown* u : {static_cast<IUnknown*>(conv), static_cast<IUnknown*>(frame),
-                            static_cast<IUnknown*>(decoder), static_cast<IUnknown*>(factory)})
-            if (u != nullptr)
-                u->Release();
-    }
-    if (SUCCEEDED(init))
-        ::CoUninitialize();
-    return out;
 }
 
 }  // namespace agentdesk::ui

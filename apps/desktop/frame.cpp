@@ -1,7 +1,7 @@
 // Drawing the layout tree, the --input automation script, and App's per-frame members (tick,
 // frame, before_new_frame).
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
-#include "win98_internal.hpp"
+#include "app_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
@@ -75,12 +75,9 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         return;
     const ImVec2 pos(r.x, r.y);
     const ImVec2 size(r.w, r.h);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
     const bool rail = r.w < px(160);  // workspace-chrome: the narrow sidebar
     switch (n.content.type) {
         case lay::Content::Type::kTab: {
-            if (l.style == "win98" && s.ws.active_tab() == nullptr)
-                return;
             // The details pane sits beside the panes when it is on (not in styled layouts).
             const bool details = l.style.empty() && l.details.value_or(s.settings.details);
             const float gap = px(8);
@@ -117,13 +114,6 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_status_bar(s, pos, size.x, size.y);
     } else if (m == "files" || m == "changes") {
         draw_side_panel(s, pos, size);
-    } else if (m == "win98") {
-        const std::string role = n.role();
-        const w98::Box b{r.x, r.y, r.right(), r.bottom()};
-        if (role == "desktop")
-            w98::desktop(s, dl, b);
-        else if (role == "taskbar")
-            w98::taskbar(s, dl, b);
     } else if (s.mods != nullptr) {
         // A C++ DLL mod: its panels, in the block.
         ImGui::SetCursorScreenPos(pos);
@@ -136,8 +126,8 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
 }
 
 // Backgrounds and borders, parents first: a colour, or a two-colour gradient drawn top to bottom
-// (or left to right for angles near 90 / 270). The win98 layout's root gets its wallpaper.
-void draw_layout_backgrounds(App::State& s, LayoutSpec& l, bool win98) {
+// (or left to right for angles near 90 / 270).
+void draw_layout_backgrounds(App::State& s, LayoutSpec& l) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     for (const auto& id : s.placed.order) {
         const lay::Node* n = l.tree.find(id);
@@ -145,9 +135,7 @@ void draw_layout_backgrounds(App::State& s, LayoutSpec& l, bool win98) {
         const ImVec2 a(p.outer.x, p.outer.y);
         const ImVec2 b(p.outer.right(), p.outer.bottom());
         const float radius = n->radius ? px(*n->radius) : 0.0f;
-        if (win98 && n == &l.tree) {
-            w98::background(s, dl, w98::Box{a.x, a.y, b.x, b.y});
-        } else if (l.look_applies && n->background.is_string()) {
+        if (l.look_applies && n->background.is_string()) {
             if (const auto c = layout_color(n->background.get<std::string>()))
                 dl->AddRectFilled(a, b, *c, radius);
         } else if (const auto g = l.look_applies ? safe::gradient(n->background) : std::nullopt) {
@@ -210,13 +198,8 @@ void draw_layout_separators(App::State& s, LayoutSpec& l) {
 void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
     LayoutSpec& l = s.layout();
     sync_panel(s, l);
-    const bool win98 = l.style == "win98";
-    if (win98) {
-        w98::begin(s);
-        w98::fit(s, l.tree);
-    }
     s.placed = lay::place(l.tree, lay::Rect{origin.x, origin.y, full.x, full.y}, g_scale, {}, true);
-    draw_layout_backgrounds(s, l, win98);
+    draw_layout_backgrounds(s, l);
     for (const auto& id : s.placed.order) {  // the blocks, in tree order
         const lay::Node* n = l.tree.find(id);
         if (n->is_block())
@@ -531,16 +514,6 @@ void App::frame() {
         run_command(s, cmd);
     g_scale = s.dpi * ui_scale(s.settings);
     s.fonts.mono_size = s.layout().font_size.value_or(s.settings.font_size) / ui_text_factor(s.settings);
-    const bool win98 = s.layout().style == "win98";
-    if (win98)  // its own terminal font size
-        s.fonts.mono_size = w98::terminal_font_size(s) / ui_text_factor(s.settings);
-    if (s.fonts_win98 != win98) {  // into a layout with fonts of its own, or back from it
-        s.fonts_win98 = win98;
-        apply_terminal_font(s);
-        apply_ui_font(s);
-    }
-    if (!win98)
-        w98::hidden(s);
     reload_changed_files(s);
     if (!g_settings_problem.empty()) {
         s.toast(g_settings_problem, "", "", g_pal->needs_you, 8);
@@ -581,8 +554,6 @@ void App::frame() {
     draw_layout(s, origin, full, connected);
     run_deferred_commands(s);
     ImGui::End();
-    if (win98)  // its floating windows and menus
-        w98::overlays(s);
     draw_dialogs(s);
     update_window_title(s);
     persist(s);

@@ -615,7 +615,7 @@ void Workspace::select_shown_tab(int n) {
         }
 }
 
-bool Workspace::settle_tab(int space, int tab, bool keep_shown) {
+bool Workspace::settle_tab(int space, int tab) {
     if (space < 0 || space >= static_cast<int>(spaces.size()))
         return false;
     Space& sp = spaces[static_cast<std::size_t>(space)];
@@ -629,11 +629,9 @@ bool Workspace::settle_tab(int space, int tab, bool keep_shown) {
                 next = i;
                 break;
             }
-    if (next < 0 && !keep_shown)
+    if (next < 0)
         return false;
     sp.tabs[static_cast<std::size_t>(tab)].settled = true;
-    if (next < 0)
-        return true;  // the last one stays shown, settled
     if (sp.active_tab == tab)
         sp.active_tab = next;
     return true;

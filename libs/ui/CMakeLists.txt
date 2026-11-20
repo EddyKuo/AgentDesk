@@ -20,7 +20,6 @@ agentdesk_library(agentdesk_ui
     src/system_process.cpp
     src/telemetry.cpp
     src/updates.cpp
-    src/win98.cpp
     src/image_cache.cpp
     src/programs.cpp
     src/layout.cpp
@@ -29,14 +28,14 @@ agentdesk_library(agentdesk_ui
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # host/input.hpp is part of the public interface (TerminalSource::send).
-target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt windowscodecs shcore lunasvg::lunasvg)
+target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt shcore lunasvg::lunasvg)
 target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agentdesk::host agentdesk::ipc agentdesk::protocol)
 
 # The shipped layout files (kept verbatim), compiled in as text for
-# layout::builtin_text as kPresetMain, kPresetTerminals and kPresetWin98.
+# layout::builtin_text as kPresetMain and kPresetTerminals.
 set(_preset_layouts "${PROJECT_SOURCE_DIR}/third_party/herdr/layouts")
 set(_layout_defaults "")
-foreach(_name main terminals win98)
+foreach(_name main terminals)
     file(READ "${_preset_layouts}/${_name}.json" _text)
     string(SUBSTRING "${_name}" 0 1 _first)
     string(TOUPPER "${_first}" _first)

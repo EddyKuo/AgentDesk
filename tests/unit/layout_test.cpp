@@ -230,11 +230,9 @@ TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
     EXPECT_EQ(main.find("sidebar")->size, Span::pixels(268));
     EXPECT_TRUE(main.find("panel")->hidden);
     EXPECT_EQ(main.find("panel-body")->active, "files");
-    const Node w98 = builtin("win98");
-    EXPECT_EQ(w98.find("screen")->floating.at(0).id, "clippy");
-    EXPECT_EQ(w98.find("screen")->floating.at(0).edge, Edge::kLeft);
-    EXPECT_EQ(w98.find("screen")->floating.at(0).align, Align::kEnd);
+    EXPECT_EQ(builtin_names(), (std::vector<std::string>{"workspace", "terminals"}));
     EXPECT_EQ(builtin("nope"), main);
+    EXPECT_EQ(builtin("win98"), main);  // a name no longer built in falls back to the workspace
 }
 
 TEST(Layout, OldAgentDeskFilesReadAsTheShippedLayoutOfTheirStyle) {
@@ -248,6 +246,7 @@ TEST(Layout, OldAgentDeskFilesReadAsTheShippedLayoutOfTheirStyle) {
     EXPECT_FALSE(n.find("tabs")->hidden);
     EXPECT_EQ(n.look["theme"], "ember");
     EXPECT_EQ(n.font_size(), 72.0f);
+    EXPECT_EQ(from_legacy(Json::parse(R"({"style": "win98"})")), builtin("workspace"));
     EXPECT_NE(from_legacy(Json::parse(R"({"style": "terminals"})")).find("tabs"), nullptr);
     EXPECT_EQ(from_legacy(Json::parse(R"({"style": "terminals"})")).find("tabs")->mod(), "terminals-bar");
 }
@@ -425,11 +424,11 @@ TEST(LayoutFloat, HomeSitsMarginInFromItsEdge) {
     EXPECT_EQ(float_home(owner, 80, 100, Edge::kRight, Align::kStart, 12), (std::array<float, 2>{808, 62}));
 }
 
-TEST(LayoutSync, DesktopWallpaperAndPixelFitAreClicksNotStructureEdits) {
+TEST(LayoutSync, BackgroundFontSizeAndPaneFrameSizesAreClicksNotStructureEdits) {
     const Node file = node(Json::parse(R"({
         "id":"root", "type":"column", "font_size":16, "background":"#008080",
         "children":[{"id":"main", "type":"block", "content":{"tab":"active","pane":{
-            "header":{"content":{"mod":"win98"},"height":18},
+            "header":{"content":{"mod":"terminals-pane"},"height":18},
             "border":{"width":3,"color":"#c0c0c0"}, "focus":{"width":3,"color":"#c0c0c0"}
         }}}]})"));
     Node now = file;
@@ -494,14 +493,16 @@ TEST(LayoutSync, AnEditMadeWhileClosedBeatsAnOlderClick) {
 }
 
 TEST(LayoutSync, FloatsAndThemeAreClicksToo) {
-    const Node file = builtin("win98");
+    const Node file = node(R"({ "id": "root", "type": "row", "children": [
+        { "id": "main", "type": "block", "content": { "tab": "active" },
+          "floating": [ { "id": "helper", "content": { "mod": "team" }, "edge": "left", "align": "end" } ] } ] })");
     Node now = file;
-    now.find_float("clippy")->edge = Edge::kRight;
-    now.find_float("clippy")->align = Align::kStart;
+    now.find_float("helper")->edge = Edge::kRight;
+    now.find_float("helper")->align = Align::kStart;
     now.look["theme"] = "midnight";
     const State s = State::between(file, now);
-    EXPECT_EQ(s.floats.at("clippy").edge, Edge::kRight);
-    EXPECT_FALSE(s.floats.at("clippy").hidden.has_value());
+    EXPECT_EQ(s.floats.at("helper").edge, Edge::kRight);
+    EXPECT_FALSE(s.floats.at("helper").hidden.has_value());
     EXPECT_EQ(s.theme, "midnight");
     Node shown = file;
     State::from_json(s.to_json()).apply(shown);
@@ -510,8 +511,8 @@ TEST(LayoutSync, FloatsAndThemeAreClicksToo) {
 }
 
 TEST(LayoutText, WholeNumbersAreWrittenWithoutAFraction) {
-    const std::string t = text_of(builtin("win98"));
-    EXPECT_NE(t.find("\"px\": 120\n"), std::string::npos);
-    EXPECT_EQ(t.find("120.0"), std::string::npos);
+    const std::string t = text_of(builtin("workspace"));
+    EXPECT_NE(t.find("\"px\": 268\n"), std::string::npos);
+    EXPECT_EQ(t.find("268.0"), std::string::npos);
     EXPECT_EQ(t.back(), '\n');
 }

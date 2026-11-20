@@ -1,5 +1,5 @@
 #pragma once
-// Reading what the UI did not write itself: ui.json, win98.json, layouts\.state, telemetry
+// Reading what the UI did not write itself: ui.json, layouts\.state, telemetry
 // files, other machines' answers (fs.list, git.run) and file names. A value of the wrong type is
 // the fallback and text that is not valid UTF-16 is still shown, never an exception: nlohmann's
 // value() throws type_error when the stored type differs, and win::to_utf8 throws on an unpaired
@@ -47,16 +47,6 @@ inline long long int_or(const Json& j, const char* key, long long fallback) {
                    ? fallback
                    : v->get<long long>();
     return v->is_number_integer() ? v->get<long long>() : fallback;
-}
-
-// v when it is a whole number in [lo, hi].
-inline std::optional<int> int_in(const Json& v, int lo, int hi) {
-    if (!v.is_number_integer())
-        return std::nullopt;
-    if (v.is_number_unsigned() && v.get<unsigned long long>() > static_cast<unsigned long long>(INT_MAX))
-        return std::nullopt;
-    const long long n = v.get<long long>();
-    return n >= lo && n <= hi ? std::optional<int>(static_cast<int>(n)) : std::nullopt;
 }
 
 // A finite number, whole or not.

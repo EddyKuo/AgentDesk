@@ -111,9 +111,8 @@ public:
     // Ctrl+1..9: the n-th tab (1-based) not put away, in the active space.
     void select_shown_tab(int n);
     // Hides a tab from the bar until it is shown or needs you. The last tab still shown in its
-    // space cannot be put away (returns false), unless keep_shown: then it is settled and stays
-    // shown (the win98 layout minimizes its last window this way).
-    bool settle_tab(int space, int tab, bool keep_shown = false);
+    // space cannot be put away (returns false).
+    bool settle_tab(int space, int tab);
     void unsettle_tab(int space, int tab);
     // Shows the tab holding `session` again; true if it was put away.
     bool unsettle_session(const std::string& session);

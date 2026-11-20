@@ -38,9 +38,7 @@ void derive_layout(LayoutSpec& l) {
     l.style.clear();
     for (const lay::Node* n : t.walk()) {
         const std::string m = n->mod();
-        if (m == "win98")
-            l.style = "win98";
-        else if (m == "terminals-bar" && l.style.empty())
+        if (m == "terminals-bar" && l.style.empty())
             l.style = "terminals";
         if (n->is_block() && n->content.type == lay::Content::Type::kTab && n->content.pane &&
             n->content.pane->header && n->content.pane->header->mod() == "terminals-pane" && l.style.empty())
@@ -176,23 +174,11 @@ LayoutSpec read_layout_file(const std::filesystem::path& f) {
 
 }  // namespace
 
-bool agentdesk98_shown() {
-    static const bool shown = [] {
-        wchar_t v[8]{};
-        const DWORD n = ::GetEnvironmentVariableW(L"AGENTDESK_WIN98", v, 8);
-        return n == 1 && v[0] == L'1';
-    }();
-    return shown;
-}
-
 // The built-ins, then <data>\layouts\*.json by file name; a file replaces the built-in it names.
-// While AgentDesk 98 is hidden, neither the built-in nor a win98.json file is listed; a saved
-// "layout": "win98" then shows the first layout (State::layout()).
+// A saved "layout" that names none of them shows the first layout (State::layout()).
 std::vector<LayoutSpec> load_layouts(const Settings& st) {
     std::vector<LayoutSpec> list;
     for (const auto& name : lay::builtin_names()) {
-        if (name == "win98" && !agentdesk98_shown())
-            continue;
         LayoutSpec l;
         l.name = name;
         l.builtin = true;
@@ -207,8 +193,6 @@ std::vector<LayoutSpec> load_layouts(const Settings& st) {
     std::sort(files.begin(), files.end());
     for (const auto& f : files) {
         LayoutSpec l = read_layout_file(f);
-        if (l.name == "win98" && !agentdesk98_shown())
-            continue;
         const auto it = std::find_if(list.begin(), list.end(), [&](const LayoutSpec& x) { return x.name == l.name; });
         if (it != list.end()) {
             l.builtin = it->builtin;
