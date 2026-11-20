@@ -21,7 +21,7 @@ Current version: 0.2.0.
 - **git worktrees.** Type a branch name to create a checkout and open it as a new space.
 - **Sub-agents.** `agentctl run --task ...` inside an AgentDesk terminal starts a sub-agent; `agentctl wait` waits for it and `agentctl report` sends its result back to the parent.
 - **Remote machines.** Through `ssh <target> agentctl bridge`, another Windows machine's spaces and agents appear in the same sidebar.
-- **Layouts, themes and mods.** Two built-in layouts (workspace and terminals) plus custom JSON layouts, AgentDesk's own themes plus herdr's, and mods written as C++ DLLs that add commands, panels and notifications.
+- **Layouts, themes and mods.** Three built-in layouts (workspace, terminals and AgentDesk Mac, a Mac-style desktop with a menu bar, a floating window and a Dock, drawn in AgentDesk's own style) plus custom JSON layouts, AgentDesk's own themes plus herdr's, and mods written as C++ DLLs that add commands, panels and notifications.
 - **Updates.** AgentDesk and agent-host can update; when agent-host updates on its own, the new host takes over and the programs in your terminals keep running. There is no built-in update server: set `AGENTDESK_RELEASES_URL` to enable checks.
 - **`agentctl` CLI.** `run`, `list`, `read`, `send`, `stop`, `wait` and more, with stable `--json` output and fixed exit codes.
 
