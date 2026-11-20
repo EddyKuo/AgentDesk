@@ -45,10 +45,12 @@
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/ui/chrome_logic.hpp"
 #include "agentdesk/ui/focus_mode.hpp"
+#include "agentdesk/ui/color_math.hpp"
 #include "agentdesk/ui/git_info.hpp"
 #include "agentdesk/ui/image_cache.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
 #include "agentdesk/ui/programs.hpp"
+#include "agentdesk/ui/schedule.hpp"
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/mac_layout.hpp"
@@ -57,6 +59,7 @@
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
 #include "agentdesk/ui/timeline.hpp"
+#include "agentdesk/ui/theme_file.hpp"
 #include "agentdesk/ui/updates.hpp"
 #include "agentdesk/ui/workspace.hpp"
 
@@ -118,6 +121,21 @@ bool system_light();
 const Palette* effective_palette(const std::string& appearance, const std::string& dark, const std::string& light,
                                  const std::string& layout_theme);
 void apply_style(float dpi, float zoom);
+// Only the ImGui colours from g_pal (sizes stay): for a palette whose colours move each frame.
+void apply_style_colors();
+// Theme files (the theme editor): where a theme's file is (empty for ours and the presets),
+// whether it is the person's own (<data>\themes), reading a saved one again in place (or adding
+// it), and dropping a deleted one from the lists. reload_theme returns why it failed, or "".
+std::filesystem::path theme_file_path(const std::string& id);
+bool is_user_theme(const std::string& id);
+std::string reload_theme(const std::string& name);
+void forget_theme(const std::string& id);
+// A Palette for a theme that is not in the lists (the editor's draft); its ANSI table is kept in
+// `ansi_storage`, which must outlive the Palette.
+Palette palette_from_theme(const ui::theme::ThemeFile& t, const char* id, const char* label,
+                           std::array<ImU32, 16>& ansi_storage);
+std::uint32_t rgb_of(ImU32 c);  // 0xRRGGBB
+ui::color::PaletteColors check_colors_of(const Palette& p);
 
 // ------------------------------------------------------------ settings_store.cpp
 // ------------------------------------------------------------------ settings (ui.json)
@@ -156,7 +174,7 @@ struct Settings {
     std::string terminal_font;   // font family; "" = JetBrains Mono (bundled)
     int terminal_weight = 500;   // terminal font weight (500: JetBrains Mono Medium)
     std::string ui_font;         // interface font family; "" = Geist (bundled)
-    std::string appearance = "system";  // "system", "light" or "dark"
+    std::string appearance = "system";  // "system", "light", "dark" or "schedule"
     // "mac": three round buttons at the top left (the layout's traffic_lights); "windows": the usual
     // minimize, maximize and close at the top right.
     std::string window_buttons = "mac";
@@ -194,6 +212,11 @@ struct Settings {
     // Timeline: the range last chosen (15m, 1h, 4h, 24h) and whether the time away is shaded.
     std::string timeline_range = "1h";
     bool timeline_since_left = true;
+    // Appearance "schedule": light and dark by clock time or by the sun (appearance.cpp).
+    ui::schedule::AppearanceSchedule appearance_schedule;
+    // Tint by agent state (ambient.cpp): "off" or "subtle"; also a cool tint for finished agents.
+    std::string ambient = "off";
+    bool ambient_done = false;
 };
 // %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk; created when missing.
 std::filesystem::path data_dir();
@@ -234,6 +257,9 @@ struct LayoutSpec {
     bool look_applies = true;  // false when the layout names a theme AgentDesk lacks
     std::string style;         // "", "terminals" or "mac": which renderers its blocks name
     std::optional<float> font_size;
+    // The theme pair (dark, light) it was designed with: the file's "suggested_themes", else the
+    // shipped table (ui::theme::builtin_suggestion). Only offered in Settings, never applied by itself.
+    std::optional<std::pair<std::string, std::string>> suggested;
 };
 std::filesystem::path layouts_dir();
 std::filesystem::path layout_state_path(const std::string& name);
@@ -352,6 +378,18 @@ inline constexpr CommandInfo kCommands[] = {
     {"timeline.range:1h", "Timeline: last hour"},
     {"timeline.range:4h", "Timeline: last 4 hours"},
     {"timeline.range:24h", "Timeline: last 24 hours"},
+    // Theme features (theme_commands.cpp).
+    {"appearance:system", "Appearance: System"},
+    {"appearance:light", "Appearance: Light"},
+    {"appearance:dark", "Appearance: Dark"},
+    {"appearance:schedule", "Appearance: Schedule"},
+    {"appearance.toggle", "Toggle light / dark"},
+    {"theme.suggested", "Use the layout's suggested themes"},
+    {"theme.ambient:off", "Tint by agent state: Off"},
+    {"theme.ambient:subtle", "Tint by agent state: Subtle"},
+    {"theme.new", "New theme..."},
+    {"theme.edit", "Edit current theme..."},
+    {"theme.folder", "Open the themes folder"},
 };
 bool known_command(std::string_view name);
 
@@ -640,6 +678,9 @@ struct App::State {
     Clock::time_point keys_checked{};
     ui::FontSet fonts;
     float dpi = 1.0f;
+    // Appearance "schedule": appearance.toggle shows the other look until the next switch.
+    std::optional<std::chrono::system_clock::time_point> schedule_override_until;
+    bool schedule_override_light = false;
     bool window_focused = true;
     // This frame's round window buttons (traffic_lights_input): where they start and the pointer.
     struct TrafficLights {
@@ -1375,6 +1416,47 @@ bool draw_timeline_block(App::State& s, const std::string& mod, ImVec2 pos, ImVe
 std::optional<std::string> exec_timeline_command(App::State& s, const std::string& name, const std::string& arg);
 // How soon the timeline needs a frame (its "now" line, a pending answer); 1 s cap when hidden.
 long long timeline_wakeup_ms(const App::State& s);
+// ------------------------------------------------------------ theme features
+// appearance.cpp: the appearance to pick the theme half by ("system", "light" or "dark"), with
+// "schedule" worked out; the Settings rows under Appearance when it is "schedule".
+std::string resolved_appearance(App::State& s);
+std::optional<std::string> exec_appearance_command(App::State& s, const std::string& name, const std::string& arg);
+bool look_schedule(App::State& s);
+// theme_suggest.cpp: a layout's suggested pair when both themes exist and the layout does not
+// force its own (else nullopt; a missing theme is reported once); the star on suggested cards;
+// the palette a layout shows with now (its card's thumbnail); the Settings row; theme.suggested.
+std::optional<std::pair<std::string, std::string>> usable_suggestion(const LayoutSpec& l);
+void draw_suggested_mark(ImDrawList* dl, ImVec2 c, float r, ImU32 col);
+const Palette* layout_palette(App::State& s, const LayoutSpec& l);
+bool look_theme_suggestion(App::State& s);
+std::optional<std::string> exec_suggest_command(App::State& s, const std::string& name);
+// ambient.cpp: tint by agent state. ambient_palette() returns `base` or a tinted copy of it;
+// recolor says the copy's colours changed this frame (apply_style_colors). `paused` (the theme
+// editor is open) drops the tint at once. ambient_moving() asks for ~30 frames a second.
+struct AmbientResult {
+    const Palette* palette = nullptr;
+    bool recolor = false;
+};
+AmbientResult ambient_palette(App::State& s, const Palette* base, bool paused);
+bool ambient_moving();
+double ambient_strength();  // 0..1, for --report
+bool look_ambient(App::State& s);  // its Settings rows
+// Windows' "Animation effects" is off (checked at most every 2 s).
+bool motion_reduced();
+// theme_commands.cpp: appearance:*, appearance.toggle and theme.* (nullopt: not one of them,
+// else "" when it ran or why it failed).
+std::optional<std::string> exec_theme_command(App::State& s, const std::string& name, const std::string& arg);
+// Sets g_pal for this frame (and the ImGui style when it changed).
+void update_palette(App::State& s);
+// theme_editor.cpp: the editor's draft palette while it is open (`changed`: its colours moved
+// since the last call), whether it is open, opening it on a theme (the person's own in place when
+// `in_place`, else a copy; `from_settings` goes back to Settings when it closes), its commands
+// (theme.new, theme.edit, theme.delete, theme.folder) and the dialog.
+const Palette* theme_editor_draft(const App::State& s, bool* changed);
+bool theme_editor_open(const App::State& s);
+void edit_theme(App::State& s, const std::string& id, bool in_place, bool from_settings);
+std::optional<std::string> exec_theme_editor_command(App::State& s, const std::string& name, const std::string& arg);
+void draw_theme_editor(App::State& s);
 }  // namespace detail
 
 }  // namespace agentdesk::desktop

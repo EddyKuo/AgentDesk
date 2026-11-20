@@ -27,7 +27,10 @@ bool is_builtin_command(std::string_view name) {
         "mission.filter",
         // Review layout, Timeline overlay
         "review.toggle", "review.next_file", "review.prev_file", "review.refresh", "timeline.toggle",
-        "timeline.range"};
+        "timeline.range",
+        // Theme features: appearance by schedule, suggested themes, tint by agent state, the editor.
+        "appearance", "appearance.toggle", "theme.suggested", "theme.ambient", "theme.new", "theme.edit",
+        "theme.folder", "theme.delete"};
     // clang-format on
     return kNames.contains(name);
 }

@@ -36,6 +36,10 @@ void derive_layout(LayoutSpec& l) {
     }
     l.look_applies = theme.empty() || palette_exists(theme);
     l.theme = palette_exists(theme) ? theme : std::string();
+    if (const auto st = t.look.find("suggested_themes"); st != t.look.end() && st->is_object())
+        l.suggested = std::pair{st->value("dark", std::string()), st->value("light", std::string())};
+    else
+        l.suggested = ui::theme::builtin_suggestion(l.name);
     l.style.clear();
     // "", "terminals", "mac", "focus" (Focus mode's tree), "mission" or "review".
     for (const lay::Node* n : t.walk()) {

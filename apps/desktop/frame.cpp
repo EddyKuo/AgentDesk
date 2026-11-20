@@ -241,7 +241,7 @@ void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
 // ------------------------------------------------------------------ --input automation
 // The script is ";"-separated steps run one per turn after the --run commands, once sessions
 // exist: wait:MS, move:X,Y, click / rclick / mclick / dblclick:X,Y, press:X,Y and release:X,Y
-// (a drag, with move steps between), key:NAME, type:TEXT, and shot:NAME (asks the screenshot
+// (a drag, with move steps between), key:NAME, type:TEXT, wheel:N, and shot:NAME (asks the screenshot
 // tool for a picture and waits until it has taken it, up to 10 s).
 
 ImGuiKey input_key(const std::string& n) {
@@ -361,6 +361,8 @@ void run_input_step(App::State& s, const std::string& step, Clock::time_point no
         }
     } else if (op == "type") {
         io.AddInputCharactersUTF8(arg.c_str());
+    } else if (op == "wheel") {  // wheel:N, notches (negative scrolls down) where the mouse is
+        io.AddMouseWheelEvent(0, static_cast<float>(std::atof(arg.c_str())));
     } else if (op == "shot" && !s.config.shot_signal.empty()) {
         std::ofstream(s.config.shot_signal, std::ios::binary) << arg;
         s.input_shot_wait = true;
@@ -451,6 +453,7 @@ void draw_dialogs(App::State& s) {
     draw_rename(s);
     draw_worktree(s);
     draw_settings(s);
+    draw_theme_editor(s);
     draw_exit(s);
     draw_welcome(s);
     draw_machine_add(s);
@@ -569,13 +572,7 @@ void App::frame() {
         g_settings_problem.clear();
     }
     s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
-    const auto theme_pair = layout_theme_pair(s.settings);
-    if (const Palette* want =
-            effective_palette(s.settings.appearance, theme_pair.first, theme_pair.second, s.layout().theme);
-        want != g_pal) {
-        g_pal = want;
-        apply_style(s.dpi, ui_scale(s.settings));
-    }
+    update_palette(s);  // theme, appearance schedule, editor preview, tint (theme_commands.cpp)
     const bool connected = s.host->connected();
     for (const auto& c : std::exchange(s.pending_mod_commands, {}))
         run_command(s, c, false);

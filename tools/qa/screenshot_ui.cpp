@@ -12,6 +12,7 @@
 // press:x,y release:x,y (a left-button drag, with move steps between) move:x,y
 // key:[ctrl+][shift+][alt+]<enter|esc|tab|up|down|left|right|home|end|pgup|pgdn|back|del|space|
 // period|.|f1-f12|a-z|0-9> (key:ctrl+shift+m, key:shift+f8) type:<text> wait:<ms>
+// wheel:<notches> (at the last mouse position; negative scrolls down)
 // shot:<png> (a capture, relative to --out's folder). The final capture to --out is taken after the last
 // step.
 // --child starts profile:name as a sub-agent of the first session; --remote adds a second host

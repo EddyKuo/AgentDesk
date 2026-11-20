@@ -63,6 +63,34 @@ namespace {
 // the person's file until they fix it (as when it does not parse).
 bool g_settings_unreadable = false;
 
+// The appearance schedule and the ambient tint. A value of the wrong kind falls back to its
+// default here (it is rewritten on the next save); times are "HH:MM" strings.
+void read_theme_features(const Json& j, Settings& s) {
+    if (const auto it = j.find("appearance_schedule"); it != j.end() && it->is_object()) {
+        auto& a = s.appearance_schedule;
+        const Json& o = *it;
+        if (o.value("mode", Json()) == "sun")
+            a.mode = "sun";
+        for (const auto& [key, field] : {std::pair{"light_at", &a.light_at}, {"dark_at", &a.dark_at}})
+            if (const auto v = o.find(key); v != o.end() && v->is_string())
+                if (const auto m = ui::schedule::parse_hhmm(v->get<std::string>()))
+                    *field = *m;
+        if (a.light_at == a.dark_at)  // an error the file can't keep: back to the defaults
+            a = ui::schedule::AppearanceSchedule{a.mode, 7 * 60, 19 * 60, a.latitude, a.longitude, a.sun_offset};
+        for (const auto& [key, field, limit] :
+             {std::tuple{"latitude", &a.latitude, 90.0}, {"longitude", &a.longitude, 180.0}})
+            if (const auto v = o.find(key); v != o.end() && v->is_number() && std::abs(v->get<double>()) <= limit)
+                *field = ui::schedule::round_tenth(v->get<double>());
+        if (const auto v = o.find("sun_offset"); v != o.end() && v->is_number_integer())
+            a.sun_offset = std::clamp(v->get<int>(), -120, 120);
+        if (a.mode == "sun" && !a.latitude)
+            a.mode = "fixed";
+    }
+    s.ambient = j.value("ambient", Json()) == "subtle" ? "subtle" : "off";
+    if (const auto v = j.find("ambient_done"); v != j.end() && v->is_boolean())
+        s.ambient_done = v->get<bool>();
+}
+
 // The theme keys. Files from before "appearance" existed keep their one theme as the fixed
 // choice; ids of the older preset spelling are read as today's (theme_id).
 void read_themes(const Json& j, Settings& s) {
@@ -76,6 +104,7 @@ void read_themes(const Json& j, Settings& s) {
             if (pair.is_object())
                 s.layout_themes[name] = {theme_id(pair.value("dark", s.theme_dark)),
                                          theme_id(pair.value("light", s.theme_light))};
+    read_theme_features(j, s);
 }
 
 // The string elements of `list`, in order; anything else in it is skipped.
@@ -211,6 +240,19 @@ void save_settings(const Settings& s) {
             {"terminal_weight", s.terminal_weight},
             {"ui_font", s.ui_font},
             {"appearance", s.appearance},
+            {"appearance_schedule",
+             [&] {
+                 const auto& a = s.appearance_schedule;
+                 auto deg = [](const std::optional<double>& v) { return v ? Json(*v) : Json(nullptr); };
+                 return Json{{"mode", a.mode},
+                             {"light_at", ui::schedule::format_hhmm(a.light_at)},
+                             {"dark_at", ui::schedule::format_hhmm(a.dark_at)},
+                             {"latitude", deg(a.latitude)},
+                             {"longitude", deg(a.longitude)},
+                             {"sun_offset", a.sun_offset}};
+             }()},
+            {"ambient", s.ambient},
+            {"ambient_done", s.ambient_done},
             {"window_buttons", s.window_buttons},
             {"theme_dark", s.theme_dark},
             {"theme_light", s.theme_light},

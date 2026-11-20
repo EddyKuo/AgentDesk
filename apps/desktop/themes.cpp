@@ -140,160 +140,183 @@ ImU32 rgb_col(std::uint32_t c, int a = 255) {
     return IM_COL32((c >> 16) & 255, (c >> 8) & 255, c & 255, a);
 }
 
-// Relative luminance (Rec. 709 weights) above one half.
-bool rgb_is_light(std::uint32_t c) {
-    auto ch = [&](int sh) { return static_cast<float>((c >> sh) & 255) / 255.0f; };
-    return 0.2126f * ch(16) + 0.7152f * ch(8) + 0.0722f * ch(0) > 0.5f;
+ImU32 token_col(const ui::theme::Token& t) {
+    return rgb_col(t.rgb, t.alpha);
 }
 
-// a mixed toward b by t (0..1), per channel, rounded.
-std::uint32_t rgb_mix(std::uint32_t a, std::uint32_t b, float t) {
-    std::uint32_t out = 0;
-    for (const int sh : {16, 8, 0}) {
-        const float x = static_cast<float>((a >> sh) & 255), y = static_cast<float>((b >> sh) & 255);
-        out |= static_cast<std::uint32_t>(std::lround(x * (1.0f - t) + y * t)) << sh;
-    }
-    return out;
-}
-
-// "#rrggbb" or "#rrggbbaa".
-std::optional<ImU32> parse_hex_color(const std::string& h) {
-    if ((h.size() != 7 && h.size() != 9) || h[0] != '#')
-        return std::nullopt;
-    char* end = nullptr;
-    const unsigned long v = std::strtoul(h.c_str() + 1, &end, 16);
-    if (end != h.c_str() + h.size())
-        return std::nullopt;
-    if (h.size() == 7)
-        return rgb_col(static_cast<std::uint32_t>(v));
-    return rgb_col(static_cast<std::uint32_t>(v >> 8), static_cast<int>(v & 255));
-}
-
+// A loaded theme: the presets and the theme files. The file and where it came from are kept for
+// Settings (edit, delete) and so a saved theme can be read again in place.
 struct OwnedPalette {
     std::string id, label;
     std::array<ImU32, 16> ansi{};
     Palette p{};
+    std::filesystem::path file;  // empty for a preset
+    bool user = false;           // from <data>\themes (the person's own)
+    bool removed = false;        // deleted this run: no longer listed
 };
 std::deque<OwnedPalette> g_loaded_palettes;  // a deque keeps addresses stable: g_pal may point in
 
-// Derives the chrome colours from a theme's background, foreground and ANSI table, then applies
-// the theme file's "colors" overrides by name. Mapping onto Palette: bg = canvas (behind the
-// panes), sidebar = chrome, card = surface (the terminal background), text = foreground,
-// dim = muted, faint = dim, focus and info = accent.
-void add_preset_palette(const std::string& id, const std::string& label, const PresetPalette& h,
-                        const std::map<std::string, std::string>& colors) {
+ui::theme::ThemeFile file_of_preset(const PresetPalette& h) {
+    ui::theme::ThemeFile t;
+    t.background = h.background;
+    t.foreground = h.foreground;
+    t.selection = h.selection;
+    t.cursor = h.cursor;
+    t.ansi = h.ansi;
+    t.status = h.status;
+    return t;
+}
+
+// Fills `o` (its id and label already set) from a theme: the derived interface colours with the
+// file's "colors" overrides (ui::theme::derive).
+void fill_palette(OwnedPalette& o, const ui::theme::ThemeFile& h) {
+    const ui::theme::Derived d = ui::theme::derive(h);
+    auto t = [&](const char* k) { return token_col(d.tokens.at(k)); };
+    for (std::size_t i = 0; i < 16; ++i)
+        o.ansi[i] = rgb_col(h.ansi[i]);
+    const ImU32 sel = (t("selection") & 0x00FFFFFFu) | (static_cast<ImU32>(d.light ? 0xa0 : 0x90) << 24);
+    o.p = Palette{o.id.c_str(), o.label.c_str(), d.light,       t("canvas"),  t("chrome"),
+                  t("surface"), t("border"),     t("accent"),   t("hover"),   t("selected"),
+                  t("foreground"), t("muted"),   t("dim"),      t("blocked"), t("done"),
+                  t("working"), t("idle"),       t("info"),     t("background"), t("terminal_foreground"),
+                  t("cursor"),  sel,             &o.ansi};
+}
+
+void add_preset_palette(const std::string& id, const std::string& label, const ui::theme::ThemeFile& h,
+                        const std::filesystem::path& file = {}, bool user = false) {
     OwnedPalette& o = g_loaded_palettes.emplace_back();
     o.id = id;
     o.label = label;
-    const std::uint32_t bg = h.background;
-    const bool light = rgb_is_light(bg);
-    const std::uint32_t fg = light ? 0x1b1b1e : 0xeeeeef;
-    const auto st = h.status.value_or(std::array<std::uint32_t, 3>{h.ansi[3], h.ansi[1], h.ansi[4]});
-    std::map<std::string, ImU32> t;
-    t["background"] = rgb_col(bg);
-    t["terminal_foreground"] = rgb_col(h.foreground);
-    t["foreground"] = rgb_col(fg);
-    t["surface"] = rgb_col(bg);
-    if (light) {
-        const std::uint32_t warm = 0xe8e8e2;
-        t["hover"] = IM_COL32(0, 0, 0, 0x0c);
-        t["selected"] = IM_COL32(0, 0, 0, 0x12);
-        t["border"] = IM_COL32(0, 0, 0, 0x17);
-        t["canvas"] = rgb_col(rgb_mix(bg, warm, 0.2f));
-        t["chrome"] = rgb_col(rgb_mix(bg, warm, 0.6f));
-    } else {
-        t["hover"] = IM_COL32(255, 255, 255, 0x0e);
-        t["selected"] = IM_COL32(255, 255, 255, 0x17);
-        t["border"] = IM_COL32(255, 255, 255, 0x18);
-        t["canvas"] = rgb_col(rgb_mix(bg, 0, 0.16f));
-        t["chrome"] = rgb_col(rgb_mix(bg, 0, 0.32f));
-    }
-    t["muted"] = rgb_col(rgb_mix(bg, fg, light ? 0.66f : 0.6f));
-    t["dim"] = rgb_col(rgb_mix(bg, fg, light ? 0.46f : 0.38f));
-    t["accent"] = rgb_col(h.ansi[4]);
-    t["selection"] = rgb_col(h.selection);
-    t["cursor"] = rgb_col(h.cursor.value_or(h.foreground));
-    t["working"] = rgb_col(st[0]);
-    t["blocked"] = rgb_col(st[1]);
-    t["done"] = rgb_col(st[2]);
-    t["idle"] = rgb_col(rgb_mix(bg, fg, 0.38f));
-    for (std::size_t i = 0; i < 16; ++i)
-        o.ansi[i] = rgb_col(h.ansi[i]);
-    for (const auto& [k, v] : colors)
-        if (const auto c = parse_hex_color(v))
-            t[k] = *c;
-    o.p = Palette{o.id.c_str(), o.label.c_str(), light, t["canvas"], t["chrome"], t["surface"], t["border"],
-                  t["accent"], t["hover"], t["selected"], t["foreground"], t["muted"], t["dim"], t["blocked"],
-                  t["done"], t["working"], t["idle"], t["accent"], t["background"], t["terminal_foreground"],
-                  t["cursor"], (t["selection"] & 0x00FFFFFFu) | (static_cast<ImU32>(light ? 0xa0 : 0x90) << 24), &o.ansi};
+    o.file = file;
+    o.user = user;
+    fill_palette(o, h);
 }
 
-// A theme file: {background, foreground, selection, cursor?, ansi[16], colors{}}, colours as
-// "#rrggbb". A file that does not have that shape is skipped (not listed).
-std::optional<std::pair<PresetPalette, std::map<std::string, std::string>>> read_theme_file(const std::filesystem::path& f) {
-    const auto j = nlohmann::json::parse(read_text_file(f), nullptr, false);
-    if (!j.is_object())
-        return std::nullopt;
-    auto hex = [](const nlohmann::json& v) -> std::optional<std::uint32_t> {
-        if (!v.is_string())
-            return std::nullopt;
-        const std::string h = v.get<std::string>();
-        if (h.size() != 7 || h[0] != '#')
-            return std::nullopt;
-        return static_cast<std::uint32_t>(std::strtoul(h.c_str() + 1, nullptr, 16));
-    };
-    PresetPalette p;
-    const auto b = hex(j.value("background", nlohmann::json())), fgc = hex(j.value("foreground", nlohmann::json())),
-               sel = hex(j.value("selection", nlohmann::json()));
-    if (!b || !fgc || !sel || !j.contains("ansi") || !j["ansi"].is_array() || j["ansi"].size() != 16)
-        return std::nullopt;
-    p.background = *b;
-    p.foreground = *fgc;
-    p.selection = *sel;
-    if (j.contains("cursor"))
-        p.cursor = hex(j["cursor"]);
-    for (std::size_t i = 0; i < 16; ++i) {
-        const auto c = hex(j["ansi"][i]);
-        if (!c)
-            return std::nullopt;
-        p.ansi[i] = *c;
-    }
-    std::map<std::string, std::string> colors;
-    if (j.contains("colors") && j["colors"].is_object())
-        for (const auto& [k, v] : j["colors"].items())
-            if (v.is_string())
-                colors[k] = v.get<std::string>();
-    return std::make_pair(p, colors);
+// A theme file; nullopt (skipped, not listed) when it does not have the theme file's shape.
+std::optional<ui::theme::ThemeFile> read_theme_file(const std::filesystem::path& f) {
+    return ui::theme::parse(read_text_file(f));
+}
+
+// The file's optional "name", else its file name with spaces ("atom-one-dark" -> "atom one dark").
+std::string label_of(std::string name, const ui::theme::ThemeFile& t) {
+    if (const auto it = t.raw.find("name"); it != t.raw.end() && it->is_string() && !it->get<std::string>().empty())
+        return it->get<std::string>();
+    std::replace(name.begin(), name.end(), '-', ' ');
+    return name;
 }
 
 bool g_themes_loaded = false;
 
 // The presets, then the theme files by name (a file in <data>\themes wins over a shipped one of
-// the same name). Loaded once per run, so the addresses g_pal holds stay valid; a changed file applies at the next start.
+// the same name). Loaded once per run, so the addresses g_pal holds stay valid; reload_theme()
+// updates one in place after the theme editor saves it.
 void load_theme_files() {
     g_themes_loaded = true;
     if (!g_loaded_palettes.empty())
         return;
     for (const auto& [name, pal] : preset_palettes())
-        add_preset_palette(std::string(kPresetPrefix) + name, name, pal, {});
-    std::map<std::string, std::filesystem::path> files;
+        add_preset_palette(std::string(kPresetPrefix) + name, name, file_of_preset(pal));
+    std::map<std::string, std::pair<std::filesystem::path, bool>> files;
     std::error_code ec;
-    for (const auto& dir : {exe_dir() / L"themes", data_dir() / L"themes"})
+    for (const auto& [dir, user] : {std::pair{exe_dir() / L"themes", false}, {data_dir() / L"themes", true}})
         for (const auto& e : std::filesystem::directory_iterator(dir, ec))
             if (e.path().extension() == L".json") {
                 const auto stem = e.path().stem().u8string();
                 const std::string name(stem.begin(), stem.end());
-                files[name] = e.path();
+                files[name] = {e.path(), user};
             }
     for (const auto& [name, file] : files)
-        if (const auto t = read_theme_file(file)) {
-            std::string label = name;
-            std::replace(label.begin(), label.end(), '-', ' ');  // "atom-one-dark" -> "atom one dark"
-            add_preset_palette(name, label, t->first, t->second);
-        }
+        if (const auto t = read_theme_file(file.first))
+            add_preset_palette(name, label_of(name, *t), *t, file.first, file.second);
+}
+
+OwnedPalette* owned(const std::string& id) {
+    for (auto& o : g_loaded_palettes)
+        if (o.id == id && !o.removed)
+            return &o;
+    return nullptr;
 }
 
 }  // namespace
+
+std::filesystem::path theme_file_path(const std::string& id) {
+    if (!g_themes_loaded)
+        load_theme_files();
+    const OwnedPalette* o = owned(id);
+    return o != nullptr ? o->file : std::filesystem::path();
+}
+
+bool is_user_theme(const std::string& id) {
+    if (!g_themes_loaded)
+        load_theme_files();
+    const OwnedPalette* o = owned(id);
+    return o != nullptr && o->user;
+}
+
+std::string reload_theme(const std::string& name) {
+    if (!g_themes_loaded)
+        load_theme_files();
+    const auto file = data_dir() / L"themes" / win::to_wide(name + ".json");
+    std::string why;
+    const auto t = ui::theme::parse(read_text_file(file), &why);
+    if (!t)
+        return "themes\\" + name + ".json can't be read: " + why;
+    // A deleted entry of that name is taken back (its address may still be in a setting).
+    for (auto& o : g_loaded_palettes)
+        if (o.id == name) {
+            o.file = file;
+            o.user = true;
+            o.removed = false;
+            o.label = label_of(name, *t);
+            fill_palette(o, *t);  // sets the Palette's id and label pointers again
+            return {};
+        }
+    add_preset_palette(name, label_of(name, *t), *t, file, true);
+    return {};
+}
+
+void forget_theme(const std::string& id) {
+    if (OwnedPalette* o = owned(id))
+        o->removed = true;
+}
+
+Palette palette_from_theme(const ui::theme::ThemeFile& t, const char* id, const char* label,
+                           std::array<ImU32, 16>& ansi_storage) {
+    OwnedPalette o;
+    o.id = id;
+    o.label = label;
+    fill_palette(o, t);
+    ansi_storage = o.ansi;
+    Palette p = o.p;
+    p.id = id;
+    p.label = label;
+    p.ansi = &ansi_storage;
+    return p;
+}
+
+std::uint32_t rgb_of(ImU32 c) {
+    return ((c & 0xff) << 16) | (c & 0xff00) | ((c >> 16) & 0xff);
+}
+
+ui::color::PaletteColors check_colors_of(const Palette& p) {
+    auto flat = [](ImU32 c, std::uint32_t under) { return ui::color::over(rgb_of(c), static_cast<int>(c >> 24), under); };
+    ui::color::PaletteColors c;
+    c.canvas = flat(p.bg, 0);
+    c.chrome = flat(p.sidebar, 0);
+    c.surface = flat(p.card, 0);
+    c.selected = flat(p.selected, c.chrome);
+    c.foreground = rgb_of(p.text);
+    c.muted = rgb_of(p.dim);
+    c.dim = rgb_of(p.faint);
+    c.accent = rgb_of(p.focus);
+    c.blocked = rgb_of(p.needs_you);
+    c.working = rgb_of(p.working);
+    c.done = rgb_of(p.done);
+    c.idle = rgb_of(p.idle);
+    c.term_bg = flat(p.term_bg, 0);
+    c.term_fg = rgb_of(p.term_fg);
+    return c;
+}
 
 std::string theme_id(std::string id) {
     const auto dash = id.find('-');
@@ -313,7 +336,8 @@ std::vector<const Palette*> all_palettes() {
     for (const auto& p : kPalettes)
         out.push_back(&p);
     for (const auto& o : g_loaded_palettes)
-        out.push_back(&o.p);
+        if (!o.removed)  // a theme deleted this run
+            out.push_back(&o.p);
     return out;
 }
 
@@ -368,10 +392,7 @@ const Palette* effective_palette(const std::string& appearance, const std::strin
 void apply_style(float dpi, float zoom) {
     ImGuiStyle& s = ImGui::GetStyle();
     s = ImGuiStyle();
-    if (g_pal->light)
-        ImGui::StyleColorsLight(&s);
-    else
-        ImGui::StyleColorsDark(&s);
+    apply_style_colors();
     s.WindowRounding = 8;  // overlays: radius 8, popover background, 1 px border
     s.ChildRounding = 10;
     s.FrameRounding = 7;
@@ -387,6 +408,18 @@ void apply_style(float dpi, float zoom) {
     s.ItemInnerSpacing = ImVec2(8, 6);
     s.ScrollbarSize = 10;
     s.SelectableTextAlign = ImVec2(0, 0.5f);
+    s.ScaleAllSizes(dpi * zoom);
+    s.FontScaleDpi = dpi;
+    s.FontScaleMain = zoom;
+}
+
+// Every ImGui colour from g_pal; sizes stay as they are.
+void apply_style_colors() {
+    ImGuiStyle& s = ImGui::GetStyle();
+    if (g_pal->light)
+        ImGui::StyleColorsLight(&s);
+    else
+        ImGui::StyleColorsDark(&s);
     ImVec4* c = s.Colors;
     c[ImGuiCol_Text] = v4(g_pal->text);
     c[ImGuiCol_TextDisabled] = v4(g_pal->dim);
@@ -420,9 +453,6 @@ void apply_style(float dpi, float zoom) {
     c[ImGuiCol_TitleBgActive] = v4(g_pal->card);
     c[ImGuiCol_NavCursor] = v4(g_pal->focus);
     c[ImGuiCol_TextSelectedBg] = v4(alpha(g_pal->focus, 90));
-    s.ScaleAllSizes(dpi * zoom);
-    s.FontScaleDpi = dpi;
-    s.FontScaleMain = zoom;
 }
 }  // namespace detail
 
