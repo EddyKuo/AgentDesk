@@ -417,11 +417,15 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
     dl->AddLine(ImVec2(pos.x, pos.y + height - 1), ImVec2(pos.x + width, pos.y + height - 1), g_pal->border);
     // Right part first, so the tabs know how much room is left.
     float right = pos.x + width - px(10);
-    if (s.config.hwnd != nullptr && !mac_window_buttons(s)) {  // round ones sit at the top left instead
+    // In Review the bar ends mid-window: the window buttons sit on the review column's head, and
+    // the changes always show there (no panel buttons).
+    const bool review = s.layout().style == "review";
+    if (s.config.hwnd != nullptr && !mac_window_buttons(s) && !review) {  // round ones sit at the top left instead
         draw_window_buttons(s, right + px(10) - px(6), pos.y, height);
         right -= px(26) * 3 + px(4) + px(12);
     }
-    right = draw_panel_buttons(s, dl, pos, height, right);
+    if (!review)
+        right = draw_panel_buttons(s, dl, pos, height, right);
     const float plus_x = right - px(26);
     // With the sidebar hidden (or narrower than them) the round window buttons are over this bar.
     float x = clear_of_traffic_lights(s, pos.x + px(10), pos.y, pos.y + height, px(12));

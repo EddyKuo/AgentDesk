@@ -149,6 +149,8 @@ Settings load_settings_unchecked() {
     s.seen_version = j.value("seen_version", "");
     read_lists(j, s);
     s.layout = j.value("layout", s.layout);
+    s.layout_return = j.value("layout_return", "");
+    s.review_follow = j.value("review_follow", "agent") == "focused" ? "focused" : "agent";
     for (const auto& m : j.value("machines", Json::array())) {
         if (m.is_object() && !m.value("name", "").empty() && !m.value("target", "").empty())
             s.machines.push_back({m.value("name", ""), m.value("target", ""), m.value("ctl", "")});
@@ -239,6 +241,8 @@ void save_settings(const Settings& s) {
             {"agents_changed", s.agents_changed},
             {"mods_enabled", std::vector<std::string>(s.mods_enabled.begin(), s.mods_enabled.end())},
             {"layout", s.layout},
+            {"layout_return", s.layout_return},
+            {"review_follow", s.review_follow},
             {"machines", [&] {
                  Json list = Json::array();
                  for (const auto& m : s.machines)

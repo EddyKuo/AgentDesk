@@ -172,6 +172,11 @@ struct Settings {
     Json agents_changed = Json::object();  // session id -> {s: state, at: ms since 1970}
     // On unless the file says "telemetry": false; turning it on again removes the key.
     bool telemetry = true;
+    // The layout a toggle (review.toggle) came from, to go back to on the second press.
+    std::string layout_return;
+    // Review: "agent" keeps showing the last agent's changes when the focus moves to a plain
+    // shell; "focused" always follows the focused pane.
+    std::string review_follow = "agent";
 };
 // %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk; created when missing.
 std::filesystem::path data_dir();
@@ -315,6 +320,10 @@ inline constexpr CommandInfo kCommands[] = {
     {"mods.reload", "Reload mods and layouts"},
     {"mods.folder", "Open the mods folder"},
     {"app.exit_all", "Exit and stop all sessions"},
+    {"review.toggle", "Review: show the agent's changes beside it (again: back)"},
+    {"review.next_file", "Review: next changed file"},
+    {"review.prev_file", "Review: previous changed file"},
+    {"review.refresh", "Review: read the changes again"},
 };
 bool known_command(std::string_view name);
 
@@ -479,6 +488,11 @@ public:
     void close_preview();
     void select_change(const std::string& path);
     void commit();
+    // Read the changes again on the next track_changes (an agent's turn ended, or Refresh).
+    void refresh_changes() {
+        std::lock_guard lock(mutex);
+        changes_at_ = {};
+    }
 
 private:
     static std::string join(const std::string& root, const std::string& rel);
@@ -799,6 +813,17 @@ struct App::State {
         bool fill = false;
         std::map<std::string, float> scale;
     } mac;
+    // The Review layout (review_layout.cpp): whose changes show, and that agent's state last frame
+    // (a turn ending, Working to anything else, reads the changes again).
+    struct ReviewState {
+        std::string target;
+        std::string target_state;
+        float list_size = 0;  // the list / diff splitter as the person dragged it (real px; 0: default)
+        bool was_committing = false;
+        std::string committing_msg;  // the message of the commit under way
+        std::string committed;       // "Committed ..." after one went through (until the folder changes)
+        std::string shown_diff;      // the open file last frame: the list scrolls to a new one
+    } review;
 
     // ---------------------------------------------------------------- helpers
     // The UI document (spaces, tabs, panes) changed: persist() sends it to the host soon.
@@ -1171,6 +1196,37 @@ void draw_notes(App::State& s);
 void draw_confirm(App::State& s);
 void draw_exit(App::State& s);
 void draw_close_notice(App::State& s);
+
+// ------------------------------------------------------------ state_card.cpp
+// One look for the empty, loading and error states of the newer views: a centred title, a dim
+// hint, and buttons that run commands (the first one solid).
+enum class CardKind { kEmpty, kLoading, kError };
+struct CardButton {
+    std::string label;
+    std::string command;
+};
+struct StateCard {
+    CardKind kind = CardKind::kEmpty;
+    std::string title;
+    std::string hint;
+    std::vector<CardButton> buttons;
+    float title_size = 18.0f;  // design px
+    bool framed = false;       // a card (surface, border, rounded 12) behind it
+};
+void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& card);
+// `rows` grey placeholder bars (70 %, 50 %, 60 % ... of `w`), `row_h` apart, pulsing every 1.2 s.
+void draw_skeleton_rows(ImDrawList* dl, ImVec2 pos, float w, int rows, float row_h);
+
+// ------------------------------------------------------------ layouts.cpp (switching)
+// Shows layout `name`, remembering the one shown (ui.json layout_return); when `name` already
+// shows, goes back to the remembered one (the workspace when there is none).
+std::string toggle_layout(App::State& s, const std::string& name);
+
+// ------------------------------------------------------------ review_layout.cpp
+// The Review layout's blocks (review-head, review-changes, review-commit); false for another name.
+bool draw_review_block(App::State& s, const std::string& mod, ImVec2 pos, ImVec2 size);
+// review.* commands, and panel:changes while Review shows. nullopt: not one of them.
+std::optional<std::string> exec_review_command(App::State& s, const std::string& name, const std::string& arg);
 }  // namespace detail
 
 }  // namespace agentdesk::desktop

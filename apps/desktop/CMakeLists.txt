@@ -15,12 +15,14 @@ agentdesk_executable(agent-ui WIN32
     overlays.cpp
     panes.cpp
     programs.cpp
+    review_layout.cpp
     sessions.cpp
     settings_dialog.cpp
     settings_pages.cpp
     settings_store.cpp
     side_panels.cpp
     sidebar.cpp
+    state_card.cpp
     tab_bar.cpp
     terminals_layout.cpp
     themes.cpp

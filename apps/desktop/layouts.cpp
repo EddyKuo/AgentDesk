@@ -42,6 +42,8 @@ void derive_layout(LayoutSpec& l) {
             l.style = "mac";
         else if (m == "terminals-bar" && l.style.empty())
             l.style = "terminals";
+        else if (m.rfind("review-", 0) == 0 && l.style.empty())
+            l.style = "review";
         if (n->is_block() && n->content.type == lay::Content::Type::kTab && n->content.pane &&
             n->content.pane->header && n->content.pane->header->mod() == "terminals-pane" && l.style.empty())
             l.style = "terminals";
@@ -206,6 +208,26 @@ std::vector<LayoutSpec> load_layouts(const Settings& st) {
     for (auto& l : list)
         apply_layout_state(l, st);
     return list;
+}
+
+std::string toggle_layout(App::State& s, const std::string& name) {
+    const auto exists = [&](const std::string& n) {
+        return !n.empty() &&
+               std::any_of(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) { return l.name == n; });
+    };
+    if (!exists(name))
+        return "no layout \"" + name + "\"";
+    std::string to = name;
+    if (s.settings.layout == name) {
+        to = s.settings.layout_return != name && exists(s.settings.layout_return) ? s.settings.layout_return
+                                                                                  : std::string("workspace");
+    } else {
+        s.settings.layout_return = s.settings.layout;
+    }
+    s.settings.layout = to;
+    save_settings(s.settings);
+    s.focus_view(s.ws.focused_session());
+    return {};
 }
 
 // ------------------------------------------------------------------ example mods (first run)

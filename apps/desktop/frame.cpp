@@ -122,6 +122,8 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_mac_window_title(s, pos, size.x, size.y);
     } else if (m == "mac-dock") {
         draw_mac_dock(s, pos, size.x, size.y);
+    } else if (draw_review_block(s, m, pos, size)) {
+        // review-head, review-changes, review-commit (review_layout.cpp)
     } else if (s.mods != nullptr) {
         // A C++ DLL mod: its panels, in the block.
         ImGui::SetCursorScreenPos(pos);
@@ -247,6 +249,11 @@ ImGuiKey input_key(const std::string& n) {
         return static_cast<ImGuiKey>(ImGuiKey_A + (n[0] - 'a'));
     if (n.size() == 1 && n[0] >= '0' && n[0] <= '9')
         return static_cast<ImGuiKey>(ImGuiKey_0 + (n[0] - '0'));
+    if (n.size() >= 2 && n.size() <= 3 && n[0] == 'f') {  // f1..f12
+        const int f = std::atoi(n.c_str() + 1);
+        if (f >= 1 && f <= 12)
+            return static_cast<ImGuiKey>(ImGuiKey_F1 + (f - 1));
+    }
     return ImGuiKey_None;
 }
 
@@ -323,9 +330,24 @@ void run_input_step(App::State& s, const std::string& step, Clock::time_point no
         io.AddMousePosEvent(p.x, p.y);
         io.AddMouseButtonEvent(0, op == "press");
     } else if (op == "key") {
-        if (const ImGuiKey k = input_key(arg); k != ImGuiKey_None) {
+        // "ctrl+shift+r", "shift+f8": modifiers held around the key.
+        std::string name = arg;
+        std::vector<ImGuiKey> mods;
+        for (const auto& [prefix, mod] : {std::pair<const char*, ImGuiKey>{"ctrl+", ImGuiMod_Ctrl},
+                                          {"shift+", ImGuiMod_Shift},
+                                          {"alt+", ImGuiMod_Alt}}) {
+            if (const auto at = name.find(prefix); at != std::string::npos) {
+                name.erase(at, std::strlen(prefix));
+                mods.push_back(mod);
+            }
+        }
+        if (const ImGuiKey k = input_key(name); k != ImGuiKey_None) {
+            for (const ImGuiKey m : mods)
+                io.AddKeyEvent(m, true);
             io.AddKeyEvent(k, true);
             io.AddKeyEvent(k, false);
+            for (const ImGuiKey m : mods)
+                io.AddKeyEvent(m, false);
         }
     } else if (op == "type") {
         io.AddInputCharactersUTF8(arg.c_str());
