@@ -400,7 +400,7 @@ void draw_tab_strip(App::State& s, ImDrawList* dl, ui::Space& sp, ImVec2 pos, fl
 
 }  // namespace
 
-// Left to right: the tabs, "+" (the New menu), the Files and Changes toggles, the window buttons.
+// Left to right: a "show sidebar" button while the sidebar is hidden, the tabs, "+" (the New menu), the Files and Changes toggles, the window buttons.
 // The strip takes the room left over, so "+" sits right after the last tab's area.
 void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -414,7 +414,17 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
     }
     right = draw_panel_buttons(s, dl, pos, height, right);
     const float plus_x = right - px(26);
-    const float x = pos.x + px(10);
+    float x = pos.x + px(10);
+    // Not in the original bar: once the sidebar is hidden (sidebar.toggle) nothing on screen could
+    // bring it back, so a sidebar button leads the bar while it is hidden.
+    if (const lay::Node* side = s.layout().tree.find("sidebar"); side != nullptr && side->hidden) {
+        const std::string chord = s.keymap.chord_for("sidebar.toggle");
+        const std::string tip = chord.empty() ? std::string("Show sidebar") : "Show sidebar  " + chord;
+        if (icon_button(s, "##sidebar-show", ui::icon::kSidebar, ImVec2(x, pos.y + (height - px(26)) * 0.5f),
+                        px(26), fpx(15), tip.c_str(), g_pal->dim))
+            run_command(s, "sidebar.toggle");
+        x += px(26) + px(6);
+    }
     const float tabs_right = plus_x - px(3);
     std::string close_tab;  // id of the tab to close after drawing
     if (auto* sp = s.ws.active(); sp != nullptr)
