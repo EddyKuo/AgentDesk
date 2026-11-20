@@ -135,7 +135,11 @@ void look_layout_cards(App::State& s) {
             d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), raised_color(), px(10));
         if (on)
             d->AddRect(a, ImVec2(a.x + cw, a.y + ch), g_pal->focus, px(10), 0, px(2));
-        layout_preview(d, l.name, ImVec2(a.x + pad, a.y + pad), ImVec2(cw - pad * 2, ph));
+        {  // drawn in the theme that layout shows with, not the current one
+            const Palette* const shown = std::exchange(g_pal, layout_palette(s, l));
+            layout_preview(d, l.name, ImVec2(a.x + pad, a.y + pad), ImVec2(cw - pad * 2, ph));
+            g_pal = shown;
+        }
         card_name(s, d, ImVec2(a.x + pad, a.y + pad + ph + px(6)), layout_display_name(l.name), on,
                   fpx(12.5f) * 0.55f);
     }
@@ -148,6 +152,7 @@ void look_layout_cards(App::State& s) {
 // Raised on hover, a 2 px accent border when chosen. Returns true when a theme was picked.
 bool look_theme_cards(App::State& s, bool light_cards) {
     bool changed = false;
+    const auto suggested = usable_suggestion(s.layout());
     CardFlow tf = CardFlow::at_cursor();
     for (const Palette* pal : all_palettes()) {
         const Palette& p = *pal;
@@ -192,6 +197,12 @@ bool look_theme_cards(App::State& s, bool light_cards) {
             dx += px(8) + px(4);
         }
         card_name(s, d, ImVec2(a.x + pad, pb.y + px(6)), p.label, on, line_h(12.5f) * 0.5f);
+        // Made for this layout: a small accent star in the preview's top right corner.
+        if (suggested && (light_cards ? suggested->second : suggested->first) == p.id) {
+            const ImVec2 c(pb.x - px(9), pa.y + px(9));
+            d->AddCircleFilled(c, px(7), alpha(p.bg, 230));
+            draw_suggested_mark(d, c, px(5.5f), g_pal->focus);
+        }
     }
     tf.end();
     return changed;
@@ -218,6 +229,7 @@ bool look_theme(App::State& s) {
     settings_wrapped(s, "For the layout you're in: each layout keeps its own light and dark theme.",
                      g_pal->faint);
     settings_gap(px(8));
+    changed |= look_theme_suggestion(s);
     for (const bool light_cards : {false, true}) {
         if (light_cards)
             settings_gap(px(10));

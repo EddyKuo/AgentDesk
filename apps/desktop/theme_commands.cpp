@@ -9,6 +9,8 @@ std::optional<std::string> exec_theme_command(App::State& s, const std::string& 
                                               const std::string& arg) {
     if (auto r = exec_appearance_command(s, name, arg))
         return r;
+    if (auto r = exec_suggest_command(s, name))
+        return r;
     return std::nullopt;
 }
 

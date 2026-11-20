@@ -55,6 +55,7 @@
 #include "agentdesk/ui/mods.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
+#include "agentdesk/ui/theme_file.hpp"
 #include "agentdesk/ui/updates.hpp"
 #include "agentdesk/ui/workspace.hpp"
 
@@ -116,6 +117,21 @@ bool system_light();
 const Palette* effective_palette(const std::string& appearance, const std::string& dark, const std::string& light,
                                  const std::string& layout_theme);
 void apply_style(float dpi, float zoom);
+// Only the ImGui colours from g_pal (sizes stay): for a palette whose colours move each frame.
+void apply_style_colors();
+// Theme files (the theme editor): where a theme's file is (empty for ours and the presets),
+// whether it is the person's own (<data>\themes), reading a saved one again in place (or adding
+// it), and dropping a deleted one from the lists. reload_theme returns why it failed, or "".
+std::filesystem::path theme_file_path(const std::string& id);
+bool is_user_theme(const std::string& id);
+std::string reload_theme(const std::string& name);
+void forget_theme(const std::string& id);
+// A Palette for a theme that is not in the lists (the editor's draft); its ANSI table is kept in
+// `ansi_storage`, which must outlive the Palette.
+Palette palette_from_theme(const ui::theme::ThemeFile& t, const char* id, const char* label,
+                           std::array<ImU32, 16>& ansi_storage);
+std::uint32_t rgb_of(ImU32 c);  // 0xRRGGBB
+ui::color::PaletteColors check_colors_of(const Palette& p);
 
 // ------------------------------------------------------------ settings_store.cpp
 // ------------------------------------------------------------------ settings (ui.json)
@@ -219,6 +235,9 @@ struct LayoutSpec {
     bool look_applies = true;  // false when the layout names a theme AgentDesk lacks
     std::string style;         // "", "terminals" or "mac": which renderers its blocks name
     std::optional<float> font_size;
+    // The theme pair (dark, light) it was designed with: the file's "suggested_themes", else the
+    // shipped table (ui::theme::builtin_suggestion). Only offered in Settings, never applied by itself.
+    std::optional<std::pair<std::string, std::string>> suggested;
 };
 std::filesystem::path layouts_dir();
 std::filesystem::path layout_state_path(const std::string& name);
@@ -328,6 +347,7 @@ inline constexpr CommandInfo kCommands[] = {
     {"appearance:dark", "Appearance: Dark"},
     {"appearance:schedule", "Appearance: Schedule"},
     {"appearance.toggle", "Toggle light / dark"},
+    {"theme.suggested", "Use the layout's suggested themes"},
 };
 bool known_command(std::string_view name);
 
@@ -1194,6 +1214,14 @@ void draw_close_notice(App::State& s);
 std::string resolved_appearance(App::State& s);
 std::optional<std::string> exec_appearance_command(App::State& s, const std::string& name, const std::string& arg);
 bool look_schedule(App::State& s);
+// theme_suggest.cpp: a layout's suggested pair when both themes exist and the layout does not
+// force its own (else nullopt; a missing theme is reported once); the star on suggested cards;
+// the palette a layout shows with now (its card's thumbnail); the Settings row; theme.suggested.
+std::optional<std::pair<std::string, std::string>> usable_suggestion(const LayoutSpec& l);
+void draw_suggested_mark(ImDrawList* dl, ImVec2 c, float r, ImU32 col);
+const Palette* layout_palette(App::State& s, const LayoutSpec& l);
+bool look_theme_suggestion(App::State& s);
+std::optional<std::string> exec_suggest_command(App::State& s, const std::string& name);
 // theme_commands.cpp: appearance:*, appearance.toggle and theme.* (nullopt: not one of them,
 // else "" when it ran or why it failed).
 std::optional<std::string> exec_theme_command(App::State& s, const std::string& name, const std::string& arg);

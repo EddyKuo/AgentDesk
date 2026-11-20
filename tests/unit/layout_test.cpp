@@ -84,6 +84,20 @@ TEST(Layout, NodesCarryLooksBackgroundsPaddingAndShadows) {
     EXPECT_EQ(round_trip(n), n);
 }
 
+TEST(Layout, SuggestedThemesAreReadAndWrittenBack) {
+    const Node n = node(R"({ "id": "root", "type": "block", "content": { "mod": "x" },
+      "suggested_themes": { "dark": "mac-dusk", "light": "mac-dawn" } })");
+    EXPECT_EQ(n.look["suggested_themes"]["dark"], "mac-dusk");
+    EXPECT_EQ(n.look["suggested_themes"]["light"], "mac-dawn");
+    EXPECT_FALSE(n.look.contains("theme"));  // a suggestion, not a forced theme
+    EXPECT_EQ(round_trip(n), n);
+    std::string error;
+    EXPECT_FALSE(parse_text(R"({ "id": "root", "type": "block", "content": { "mod": "x" },
+      "suggested_themes": "mac-dusk" })",
+                            &error));
+    EXPECT_NE(error.find("suggested_themes"), std::string::npos);
+}
+
 TEST(Layout, TabBlocksSayHowTheirPanesAreFramed) {
     const Node n = node(R"({ "id": "main", "type": "block", "content": { "tab": "active",
       "pane": { "header": { "content": { "mod": "pane" }, "height": 28, "reveal": "hover", "position": "bottom" },

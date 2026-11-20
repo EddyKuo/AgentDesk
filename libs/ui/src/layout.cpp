@@ -301,6 +301,14 @@ bool read_look(const Json& v, Json& look, const Reader& r, const std::string& at
         else
             return r.fail(at, "`theme` is a name or {\"light\", \"dark\"}");
     }
+    // A theme pair the layout was designed with: offered in Settings, never applied by itself.
+    if (!absent(v, "suggested_themes")) {
+        const Json& t = v.at("suggested_themes");
+        if (!t.is_object() || !t.contains("light") || !t.at("light").is_string() || !t.contains("dark") ||
+            !t.at("dark").is_string())
+            return r.fail(at, "`suggested_themes` is {\"dark\": name, \"light\": name}");
+        look["suggested_themes"] = Json{{"dark", t.at("dark")}, {"light", t.at("light")}};
+    }
     if (!absent(v, "colors")) {
         const Json& c = v.at("colors");
         if (!c.is_object())

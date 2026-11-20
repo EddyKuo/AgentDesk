@@ -28,6 +28,7 @@ agentdesk_library(agentdesk_ui
     src/mac_layout.cpp
     src/color_math.cpp
     src/schedule.cpp
+    src/theme_file.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/layout_defaults.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

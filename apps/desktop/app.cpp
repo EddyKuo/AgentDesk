@@ -80,7 +80,9 @@ ui::telemetry::Config telemetry_config(App::State& s) {
         c.shipped_themes.emplace_back(p.id);
     for (const auto& [name, pal] : preset_palettes())
         c.shipped_themes.emplace_back(std::string(kPresetPrefix) + name);
-    c.shipped_themes.emplace_back("atom-one-dark");  // the shipped theme file
+    c.shipped_themes.emplace_back("atom-one-dark");  // the shipped theme files
+    c.shipped_themes.emplace_back("mac-dusk");
+    c.shipped_themes.emplace_back("mac-dawn");
     c.mod_kinds = mod_kinds;
     // keys.json differs from the shipped one.
     c.keys_custom = [] {

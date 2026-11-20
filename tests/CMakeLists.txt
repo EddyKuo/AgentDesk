@@ -28,7 +28,8 @@ agentdesk_executable(unit_tests
     unit/window_place_test.cpp
     unit/mac_layout_test.cpp
     unit/color_math_test.cpp
-    unit/schedule_test.cpp)
+    unit/schedule_test.cpp
+    unit/theme_file_test.cpp)
 # agent-ui's header-only helpers (apps/desktop/safe_read.hpp).
 target_include_directories(unit_tests PRIVATE ${PROJECT_SOURCE_DIR}/apps/desktop)
 target_link_libraries(unit_tests PRIVATE
@@ -48,6 +49,7 @@ target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK
     AGENTDESK_PROGRAMS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/programs"
     AGENTDESK_PRESET_LAYOUTS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/layouts"
     AGENTDESK_OWN_LAYOUTS_DIR="${PROJECT_SOURCE_DIR}/libs/ui/layouts"
+    AGENTDESK_OWN_THEMES_DIR="${PROJECT_SOURCE_DIR}/assets/themes"
     AGENTDESK_TEST_MOD=L"$<TARGET_FILE:test_mod>")
 gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)
 
