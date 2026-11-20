@@ -34,6 +34,7 @@
 #include "agentdesk/ui/imgui_adapter.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/updates.hpp"
+#include "agentdesk/ui/window_place.hpp"
 #include "app.hpp"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam,
@@ -75,6 +76,8 @@ std::atomic<int> g_focus_change{-1};  // -1 none, 0 lost, 1 gained
 // and keys.json binds the chord (its layout section or global), a low-level keyboard hook keeps
 // it from the shell and hands it to the app. Anywhere else Windows keeps them.
 HWND g_main_hwnd = nullptr;
+// The window's last rect while neither maximized nor minimized: what window.json keeps.
+ui::window_place::Rect g_normal_rect;
 std::atomic<bool> g_take_ctrl_esc{false};
 std::atomic<bool> g_take_ctrl_shift_esc{false};
 std::atomic<int> g_reserved_chord{0};  // 1 Ctrl+Esc, 2 Ctrl+Shift+Esc, waiting for the next frame
@@ -187,6 +190,12 @@ void destroy_device() {
     g_gfx = {};
 }
 
+void note_normal_rect(HWND hwnd) {
+    RECT r{};
+    if (::IsZoomed(hwnd) == FALSE && ::IsIconic(hwnd) == FALSE && ::GetWindowRect(hwnd, &r) != FALSE)
+        g_normal_rect = {r.left, r.top, r.right - r.left, r.bottom - r.top};
+}
+
 LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam))
         return 1;
@@ -237,7 +246,11 @@ LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
                 return HTBOTTOM;
             return HTCLIENT;
         }
+        case WM_MOVE:
+            note_normal_rect(hwnd);
+            return 0;
         case WM_SIZE:
+            note_normal_rect(hwnd);
             if (wparam != SIZE_MINIMIZED) {
                 g_gfx.pending_w = LOWORD(lparam);
                 g_gfx.pending_h = HIWORD(lparam);
@@ -424,6 +437,34 @@ void use_custom_frame(HWND hwnd) {
     ::SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
 }
 
+// Where the window opens. Automated runs (--exit-after-ms) keep a fixed 1400x900 at (100, 100):
+// the screenshot checks compare against that size, and they must not read or write window.json.
+ui::window_place::Place start_place(bool automated) {
+    namespace place = ui::window_place;
+    if (automated)
+        return {{100, 100, 1400, 900}, false};
+    std::size_t under_cursor = 0;
+    const auto monitors = place::monitors(&under_cursor);
+    return place::restore(place::load(agentdesk::desktop::data_folder() / L"window.json"), monitors, under_cursor,
+                          agentdesk::desktop::saved_zoom());
+}
+
+// Keeps the window's place for the next start.
+void save_place(HWND hwnd) {
+    namespace place = ui::window_place;
+    if (g_normal_rect.w <= 0 || g_normal_rect.h <= 0)
+        return;
+    WINDOWPLACEMENT wp{};
+    wp.length = sizeof(wp);
+    ::GetWindowPlacement(hwnd, &wp);
+    // Minimized from maximized: it reopens maximized.
+    const bool maximized = ::IsZoomed(hwnd) != FALSE ||
+                           (::IsIconic(hwnd) != FALSE && (wp.flags & WPF_RESTORETOMAXIMIZED) != 0);
+    const auto monitors = place::monitors();
+    place::save(agentdesk::desktop::data_folder() / L"window.json",
+                place::capture(g_normal_rect, maximized, place::monitor_for(g_normal_rect, monitors)));
+}
+
 agentdesk::desktop::AppConfig app_config(const DevOptions& dev, HWND hwnd) {
     agentdesk::desktop::AppConfig cfg;
     cfg.hwnd = hwnd;
@@ -470,8 +511,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, wnd_proc,       0,      0, instance, nullptr, nullptr,
                    nullptr,    nullptr,    L"AgentDeskUi", nullptr};
     ::RegisterClassExW(&wc);
-    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"AgentDesk", WS_OVERLAPPEDWINDOW, 100, 100, 1400, 900,
+    const bool automated = dev.exit_after_ms > 0;
+    const ui::window_place::Place place = start_place(automated);
+    const auto& pr = place.rect;
+    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"AgentDesk", WS_OVERLAPPEDWINDOW, pr.x, pr.y, pr.w, pr.h,
                                 nullptr, nullptr, instance, nullptr);
+    g_normal_rect = pr;
     g_main_hwnd = hwnd;
     HHOOK reserved_hook = nullptr;  // see sync_reserved_hook
     if (!create_device(hwnd)) {
@@ -482,7 +527,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
     use_custom_frame(hwnd);
     ::DragAcceptFiles(hwnd, TRUE);
-    ::ShowWindow(hwnd, SW_SHOWDEFAULT);
+    ::ShowWindow(hwnd, place.maximized ? SW_SHOWMAXIMIZED : SW_SHOWDEFAULT);
     ::UpdateWindow(hwnd);
 
     IMGUI_CHECKVERSION();
@@ -611,6 +656,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         --frames_to_draw;
     }
     g_draw_now = nullptr;
+    if (!automated)
+        save_place(hwnd);
 
     app.on_quit();
     if (!dev.report.empty())

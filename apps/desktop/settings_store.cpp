@@ -3,6 +3,9 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
+// GetDpiForMonitor; app_internal.hpp brings in windows.h first.
+#include <shellscalingapi.h>
+
 namespace agentdesk::desktop {
 namespace detail {
 
@@ -29,14 +32,19 @@ std::filesystem::path exe_dir() {
 }
 
 namespace {
-// The first run's zoom: Windows' text size (Accessibility TextScaleFactor, 100..225 %), x1.15 on
-// a screen 2400 px or wider, rounded to tenths.
+// The first run's zoom: Windows' text size (Accessibility TextScaleFactor, 100..225 %), x1.15 when
+// the primary screen is 2400 DIPs or wider, rounded to tenths. DIPs, not pixels: Windows' display
+// scale already draws everything bigger, so a 4K screen at 200 % (1920 DIPs) gets no extra.
 float first_run_zoom() {
     DWORD factor = 100, size = sizeof(factor);
     ::RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Accessibility", L"TextScaleFactor", RRF_RT_REG_DWORD,
                    nullptr, &factor, &size);
     float z = std::clamp(static_cast<float>(factor) / 100.0f, 1.0f, 2.0f);
-    if (::GetSystemMetrics(SM_CXSCREEN) >= 2400)
+    UINT dpi = 96, dpi_y = 96;
+    const HMONITOR primary = ::MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    if (FAILED(::GetDpiForMonitor(primary, MDT_EFFECTIVE_DPI, &dpi, &dpi_y)) || dpi == 0)
+        dpi = 96;
+    if (::GetSystemMetrics(SM_CXSCREEN) * 96.0 / dpi >= 2400.0)
         z *= 1.15f;
     return std::clamp(std::round(z * 10.0f) / 10.0f, 0.5f, 3.0f);
 }
