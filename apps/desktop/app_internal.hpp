@@ -350,6 +350,9 @@ inline constexpr CommandInfo kCommands[] = {
     {"theme.suggested", "Use the layout's suggested themes"},
     {"theme.ambient:off", "Tint by agent state: Off"},
     {"theme.ambient:subtle", "Tint by agent state: Subtle"},
+    {"theme.new", "New theme..."},
+    {"theme.edit", "Edit current theme..."},
+    {"theme.folder", "Open the themes folder"},
 };
 bool known_command(std::string_view name);
 
@@ -1242,6 +1245,15 @@ bool motion_reduced();
 std::optional<std::string> exec_theme_command(App::State& s, const std::string& name, const std::string& arg);
 // Sets g_pal for this frame (and the ImGui style when it changed).
 void update_palette(App::State& s);
+// theme_editor.cpp: the editor's draft palette while it is open (`changed`: its colours moved
+// since the last call), whether it is open, opening it on a theme (the person's own in place when
+// `in_place`, else a copy; `from_settings` goes back to Settings when it closes), its commands
+// (theme.new, theme.edit, theme.delete, theme.folder) and the dialog.
+const Palette* theme_editor_draft(const App::State& s, bool* changed);
+bool theme_editor_open(const App::State& s);
+void edit_theme(App::State& s, const std::string& id, bool in_place, bool from_settings);
+std::optional<std::string> exec_theme_editor_command(App::State& s, const std::string& name, const std::string& arg);
+void draw_theme_editor(App::State& s);
 }  // namespace detail
 
 }  // namespace agentdesk::desktop

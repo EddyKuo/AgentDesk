@@ -1,6 +1,6 @@
 // The theme features' glue: picking this frame's palette (the layout's theme for the appearance,
-// then the tint by agent state), and their commands, so commands.cpp and frame.cpp only hand over
-// to here.
+// the theme editor's draft in its place while the editor is open, then the tint by agent state),
+// and their commands, so commands.cpp and frame.cpp only hand over to here.
 #include "app_internal.hpp"
 
 namespace agentdesk::desktop {
@@ -11,12 +11,15 @@ void update_palette(App::State& s) {
     const auto pair = layout_theme_pair(s.settings);
     const Palette* base =
         effective_palette(resolved_appearance(s), pair.first, pair.second, s.layout().theme);
-    const AmbientResult tinted = ambient_palette(s, base, false);
+    bool draft_changed = false;
+    if (const Palette* draft = theme_editor_draft(s, &draft_changed))
+        base = draft;  // the whole window previews the theme being edited
+    const AmbientResult tinted = ambient_palette(s, base, theme_editor_open(s));
     if (base != shown_base) {  // another theme (or its other kind): the whole style again
         shown_base = base;
         g_pal = tinted.palette;
         apply_style(s.dpi, ui_scale(s.settings));
-    } else if (tinted.palette != g_pal || tinted.recolor) {  // only the colours moved
+    } else if (tinted.palette != g_pal || tinted.recolor || draft_changed) {  // only the colours moved
         g_pal = tinted.palette;
         apply_style_colors();
     }
@@ -35,6 +38,8 @@ std::optional<std::string> exec_theme_command(App::State& s, const std::string& 
         save_settings(s.settings);
         return std::string();
     }
+    if (auto r = exec_theme_editor_command(s, name, arg))
+        return r;
     return std::nullopt;
 }
 

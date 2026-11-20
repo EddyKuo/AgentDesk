@@ -146,6 +146,62 @@ void look_layout_cards(App::State& s) {
     lf.end();
 }
 
+// A theme card's right-click menu: edit a copy of any theme; edit or delete the person's own.
+void theme_card_menu(App::State& s, const Palette& p) {
+    if (!begin_menu("##theme-menu"))
+        return;
+    if (menu_row(s, ui::icon::kEdit, "Edit a copy..."))
+        edit_theme(s, p.id, false, true);
+    if (is_user_theme(p.id)) {
+        if (menu_row(s, ui::icon::kEdit, "Edit..."))
+            edit_theme(s, p.id, true, true);
+        if (menu_row(s, ui::icon::kClose, "Delete...")) {
+            s.confirm_title = std::string("Delete ") + p.label + "?";
+            s.confirm_detail = std::string("themes\\") + p.id +
+                               ".json is set aside (renamed .json.old-...), not erased. Layouts using it go back "
+                               "to the default theme.";
+            s.confirm_command = std::string("theme.delete:") + p.id;
+            s.show_confirm = true;
+        }
+    }
+    ImGui::EndPopup();
+}
+
+// The last card of a row: a dashed outline with a plus, "New theme". It starts a copy of the
+// layout's current theme of that kind.
+void new_theme_card(App::State& s, ImVec2 a, bool light_cards) {
+    const float cw = px(kCardW), pad = px(kCardPad), ph = px(46);
+    const float ch = pad + ph + px(6) + line_h(12.5f) + pad;
+    ImGui::SetCursorScreenPos(a);
+    ImGui::PushID(light_cards ? "new-light" : "new-dark");
+    const bool clicked = ImGui::InvisibleButton("##new-theme", ImVec2(cw, ch));
+    const bool hov = ImGui::IsItemHovered();
+    ImGui::PopID();
+    ImDrawList* d = ImGui::GetWindowDrawList();
+    if (hov)
+        d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), raised_color(), px(10));
+    const ImVec2 pa(a.x + pad, a.y + pad);
+    const ImVec2 pb(a.x + cw - pad, pa.y + ph);
+    // Dashed outline: short segments along each side.
+    const ImU32 line = hov ? g_pal->dim : g_pal->faint;
+    const float dash = px(5), gap = px(4);
+    for (float x = pa.x + px(6); x < pb.x - px(6); x += dash + gap) {
+        d->AddLine(ImVec2(x, pa.y), ImVec2(std::min(x + dash, pb.x - px(6)), pa.y), line, px(1));
+        d->AddLine(ImVec2(x, pb.y), ImVec2(std::min(x + dash, pb.x - px(6)), pb.y), line, px(1));
+    }
+    for (float y = pa.y + px(6); y < pb.y - px(6); y += dash + gap) {
+        d->AddLine(ImVec2(pa.x, y), ImVec2(pa.x, std::min(y + dash, pb.y - px(6))), line, px(1));
+        d->AddLine(ImVec2(pb.x, y), ImVec2(pb.x, std::min(y + dash, pb.y - px(6))), line, px(1));
+    }
+    draw_icon(s, d, ui::icon::kPlus, fpx(16), ImVec2((pa.x + pb.x) * 0.5f, (pa.y + pb.y) * 0.5f),
+              hov ? g_pal->text : g_pal->dim);
+    card_name(s, d, ImVec2(a.x + pad, pb.y + px(6)), "New theme", false, 0);
+    if (clicked) {
+        const auto pair = layout_theme_pair(s.settings);
+        edit_theme(s, light_cards ? pair.second : pair.first, false, true);
+    }
+}
+
 // The theme cards of one kind (dark or light) for the current layout. Each has a 46 px preview
 // in the theme's background (rounded 6, 1 px border) with a 44 x 4 bar in its terminal
 // foreground and five 8 px dots (accent, then ANSI red, green, yellow, magenta), then its name.
@@ -170,6 +226,7 @@ bool look_theme_cards(App::State& s, bool light_cards) {
             changed = true;
         }
         const bool hov = ImGui::IsItemHovered();
+        theme_card_menu(s, p);
         ImGui::PopID();
         ImDrawList* d = ImGui::GetWindowDrawList();
         if (hov)
@@ -204,6 +261,7 @@ bool look_theme_cards(App::State& s, bool light_cards) {
             draw_suggested_mark(d, c, px(5.5f), g_pal->focus);
         }
     }
+    new_theme_card(s, tf.next(px(kCardW), px(kCardPad) * 2 + px(46) + px(6) + line_h(12.5f)), light_cards);
     tf.end();
     return changed;
 }

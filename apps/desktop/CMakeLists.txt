@@ -28,6 +28,7 @@ agentdesk_executable(agent-ui WIN32
     theme_commands.cpp
     theme_suggest.cpp
     ambient.cpp
+    theme_editor.cpp
     welcome.cpp
     worktrees.cpp
     agent-ui.manifest)

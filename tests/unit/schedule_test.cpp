@@ -147,6 +147,6 @@ TEST(Schedule, DayOfYear) {
 
 TEST(ThemeCommands, NamesAreBuiltIn) {
     for (const char* name : {"appearance", "appearance.toggle", "theme.suggested", "theme.ambient", "theme.new",
-                             "theme.edit", "theme.folder"})
+                             "theme.edit", "theme.folder", "theme.delete"})
         EXPECT_TRUE(agentdesk::ui::is_builtin_command(name)) << name;
 }

@@ -418,6 +418,7 @@ void draw_dialogs(App::State& s) {
     draw_rename(s);
     draw_worktree(s);
     draw_settings(s);
+    draw_theme_editor(s);
     draw_exit(s);
     draw_welcome(s);
     draw_machine_add(s);

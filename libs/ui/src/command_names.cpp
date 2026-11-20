@@ -25,7 +25,7 @@ bool is_builtin_command(std::string_view name) {
         "worktree.remove", "app.quit", "overlay.close", "app.check_updates", "app.update_core", "app.update",
         // Theme features: appearance by schedule, suggested themes, tint by agent state, the editor.
         "appearance", "appearance.toggle", "theme.suggested", "theme.ambient", "theme.new", "theme.edit",
-        "theme.folder"};
+        "theme.folder", "theme.delete"};
     // clang-format on
     return kNames.contains(name);
 }
