@@ -179,7 +179,7 @@ std::deque<OwnedPalette> g_loaded_palettes;  // a deque keeps addresses stable: 
 // Derives the chrome colours from a theme's background, foreground and ANSI table, then applies
 // the theme file's "colors" overrides by name. Mapping onto Palette: bg = canvas (behind the
 // panes), sidebar = chrome, card = surface (the terminal background), text = foreground,
-// dim = muted, faint = dim, focus and info = accent.
+// dim = muted, faint = dim, focus = accent, info = "info" when the file sets it, else the accent.
 void add_preset_palette(const std::string& id, const std::string& label, const PresetPalette& h,
                         const std::map<std::string, std::string>& colors) {
     OwnedPalette& o = g_loaded_palettes.emplace_back();
@@ -224,7 +224,8 @@ void add_preset_palette(const std::string& id, const std::string& label, const P
             t[k] = *c;
     o.p = Palette{o.id.c_str(), o.label.c_str(), light, t["canvas"], t["chrome"], t["surface"], t["border"],
                   t["accent"], t["hover"], t["selected"], t["foreground"], t["muted"], t["dim"], t["blocked"],
-                  t["done"], t["working"], t["idle"], t["accent"], t["background"], t["terminal_foreground"],
+                  t["done"], t["working"], t["idle"], t.contains("info") ? t["info"] : t["accent"], t["background"],
+                  t["terminal_foreground"],
                   t["cursor"], (t["selection"] & 0x00FFFFFFu) | (static_cast<ImU32>(light ? 0xa0 : 0x90) << 24), &o.ansi};
 }
 

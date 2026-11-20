@@ -2,6 +2,7 @@ agentdesk_executable(agent-ui WIN32
     main.cpp
     app.cpp
     chrome.cpp
+    cockpit_layout.cpp
     code_preview.cpp
     commands.cpp
     files_changes.cpp
@@ -41,7 +42,9 @@ add_custom_command(TARGET agent-ui POST_BUILD
     # The source notes stay in the repository; the app ships the files and their licenses.
     COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:agent-ui>/fonts/README.agentdesk.md"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/programs" "$<TARGET_FILE_DIR:agent-ui>/programs"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/themes" "$<TARGET_FILE_DIR:agent-ui>/themes")
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/themes" "$<TARGET_FILE_DIR:agent-ui>/themes"
+    # AgentDesk's own theme files (the style layouts' suggested themes), MIT like the rest.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/libs/ui/themes" "$<TARGET_FILE_DIR:agent-ui>/themes")
 # Last: a running agent-host holds its exe and conpty.dll open, and a failed copy stops the steps
 # after it.
 add_custom_command(TARGET agent-ui POST_BUILD

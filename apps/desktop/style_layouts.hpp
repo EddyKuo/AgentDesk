@@ -12,6 +12,7 @@
 #include <imgui.h>
 #include <nlohmann/json.hpp>
 
+#include "agentdesk/ui/cockpit.hpp"
 #include "agentdesk/ui/host_client.hpp"
 #include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/layout_styles.hpp"
@@ -28,6 +29,9 @@ struct StyleSettings {
     bool tiling_gaps_on = true;          // tiling.gaps turns them off and on
     std::string tiling_titles = "auto";  // pane title rows: auto (2+ panes), always, never
     bool tiling_focus_follows_mouse = false;
+    // Cockpit
+    std::string cockpit_effects = "full";  // "full" (grid and glow) or "off"
+    ui::cockpit::DoneToday cockpit_done;   // cockpit_done_today: {"date", "count"}
 };
 
 // What the styles remember between frames (one window).
@@ -42,6 +46,14 @@ struct StyleUi {
         std::string hover_pane;  // focus follows mouse: the pane under the pointer, since when
         std::chrono::steady_clock::time_point hover_since{};
     } tiling;
+    struct Cockpit {
+        // Each agent's last state and when it changed (steady ms), and its first sighting.
+        std::map<std::string, ui::Attention> last;
+        std::map<std::string, long long> changed_at;
+        ui::cockpit::EventLog log;
+        float shown[3] = {0, 0, 0};  // the gauges' eased values: working, needs you, done today
+        bool shown_set = false;
+    } cockpit;
 };
 
 namespace detail {
@@ -55,6 +67,10 @@ std::optional<ImU32> layout_color(const std::string& c);
 // A line `w` design px wide in screen px: 1 stays a hairline (one device pixel), wider lines
 // scale with the zoom and land on whole pixels.
 float line_px(float w);
+
+// Windows' high contrast is on; Windows animates controls (both read once a second).
+bool system_high_contrast();
+bool system_animations();
 
 // The keys bound to `command`, as shown in menus: the shown layout's keys.json section first,
 // then the global and terminal ones.
@@ -111,6 +127,20 @@ std::optional<ui::layout::Node> tiling_layout_tree(const App::State& s, const ui
 void tiling_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
 bool look_tiling_options(App::State& s);
 std::optional<std::string> exec_tiling_command(App::State& s, const std::string& name);
+
+// ------------------------------------------------------------ cockpit_layout.cpp
+void draw_cockpit_header(App::State& s, ImVec2 pos, float w, float h);
+void draw_cockpit_gauges(App::State& s, ImVec2 pos, float w, float h);
+void draw_cockpit_roster(App::State& s, ImVec2 pos, float w, float h);
+void draw_cockpit_log(App::State& s, ImVec2 pos, float w, float h);
+void draw_cockpit_backdrop(App::State& s);
+void draw_cockpit_overlay(App::State& s);
+std::optional<ui::layout::Node> cockpit_layout_tree(const App::State& s, const ui::layout::Node& tree);
+void cockpit_tick(App::State& s);
+float cockpit_toast_offset(const App::State& s);
+void cockpit_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
+bool look_cockpit_options(App::State& s);
+std::optional<std::string> exec_cockpit_command(App::State& s, const std::string& name);
 }  // namespace detail
 
 }  // namespace agentdesk::desktop

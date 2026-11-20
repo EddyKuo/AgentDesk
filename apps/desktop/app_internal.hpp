@@ -321,6 +321,7 @@ inline constexpr CommandInfo kCommands[] = {
     {"pane.split:auto", "Split along the longer side"},
     {"tiling.resize_mode", "Tiling: resize panes with the keyboard"},
     {"tiling.gaps", "Tiling: gaps off / on"},
+    {"cockpit.reset_today", "Cockpit: set Done today back to 0"},
 };
 bool known_command(std::string_view name);
 
