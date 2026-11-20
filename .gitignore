@@ -45,3 +45,6 @@ desktop.ini
 # Packaging output
 /dist/
 soak.err
+
+# Claude Code session data (agent worktrees, local settings)
+/.claude/
