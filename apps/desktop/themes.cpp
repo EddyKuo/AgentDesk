@@ -336,7 +336,8 @@ std::vector<const Palette*> all_palettes() {
     for (const auto& p : kPalettes)
         out.push_back(&p);
     for (const auto& o : g_loaded_palettes)
-        out.push_back(&o.p);
+        if (!o.removed)  // a theme deleted this run
+            out.push_back(&o.p);
     return out;
 }
 
