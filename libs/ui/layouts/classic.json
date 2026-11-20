@@ -1,0 +1,55 @@
+{
+  "id": "root",
+  "type": "column",
+  "titlebar": "none",
+  "traffic_lights": [10, 5],
+  "children": [
+    {
+      "id": "menubar",
+      "type": "block",
+      "size": { "px": 22 },
+      "window_drag": true,
+      "content": { "mod": "classic-menubar" }
+    },
+    {
+      "id": "tabs",
+      "type": "block",
+      "size": { "px": 22 },
+      "window_drag": true,
+      "content": { "mod": "classic-tabs" }
+    },
+    {
+      "id": "body",
+      "type": "row",
+      "children": [
+        {
+          "id": "sidebar",
+          "type": "block",
+          "hidden": true,
+          "size": { "px": 248 },
+          "content": { "mod": "classic-sidebar" }
+        },
+        {
+          "id": "main",
+          "type": "block",
+          "padding": [4, 8],
+          "content": {
+            "tab": "active",
+            "pane": {
+              "header": { "content": { "mod": "classic-pane" }, "height": 20 },
+              "radius": 0,
+              "gap": 8,
+              "lone": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "status",
+      "type": "block",
+      "size": { "px": 22 },
+      "content": { "mod": "classic-status" }
+    }
+  ]
+}

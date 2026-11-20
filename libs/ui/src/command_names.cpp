@@ -23,8 +23,8 @@ bool is_builtin_command(std::string_view name) {
         "terminal.right_click", "terminal.scroll", "terminal.search", "terminal.select_all", "theme",
         "window.close", "window.fill", "window.maximize", "window.minimize", "worktree.new", "worktree.open",
         "worktree.remove", "app.quit", "overlay.close", "app.check_updates", "app.update_core", "app.update",
-        // the style layouts (Tiling, Cockpit)
-        "tiling.resize_mode", "tiling.gaps", "cockpit.reset_today"};
+        // the style layouts (Tiling, Cockpit, Classic)
+        "tiling.resize_mode", "tiling.gaps", "cockpit.reset_today", "classic.menu", "classic.effects"};
     // clang-format on
     return kNames.contains(name);
 }

@@ -2,6 +2,7 @@ agentdesk_executable(agent-ui WIN32
     main.cpp
     app.cpp
     chrome.cpp
+    classic_layout.cpp
     cockpit_layout.cpp
     code_preview.cpp
     commands.cpp

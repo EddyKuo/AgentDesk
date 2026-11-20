@@ -40,6 +40,12 @@ void read_style_settings(const nlohmann::json& j, StyleSettings& out) {
         out.cockpit_done.date = safe::string_or(dt, "date");
         out.cockpit_done.count = std::max(0, static_cast<int>(safe::int_or(dt, "count", 0)));
     }
+    if (is_string(j, "classic_effects")) {
+        const std::string e = j["classic_effects"].get<std::string>();
+        out.classic_effects = e == "off" || e == "full" ? e : d.classic_effects;
+    }
+    if (is_bool(j, "classic_mono_terminal"))
+        out.classic_mono_terminal = j["classic_mono_terminal"].get<bool>();
 }
 
 void write_style_settings(nlohmann::json& j, const StyleSettings& in) {
@@ -49,6 +55,8 @@ void write_style_settings(nlohmann::json& j, const StyleSettings& in) {
     j["tiling_focus_follows_mouse"] = in.tiling_focus_follows_mouse;
     j["cockpit_effects"] = in.cockpit_effects;
     j["cockpit_done_today"] = {{"date", in.cockpit_done.date}, {"count", in.cockpit_done.count}};
+    j["classic_effects"] = in.classic_effects;
+    j["classic_mono_terminal"] = in.classic_mono_terminal;
 }
 
 namespace {
@@ -98,13 +106,15 @@ float line_px(float w) {
 }
 
 bool styled_panes(const std::string& style) {
-    return style == "tiling";
+    return style == "tiling" || style == "classic";
 }
 
 StyledPane draw_styled_pane(App::State& s, const std::string& id, const ui::SessionView& v, ImVec2 pos,
                             ImVec2 max, const ui::styles::PaneLook& look, bool focused, bool connected) {
     if (style_of(s) == "tiling")
         return draw_tiling_pane(s, id, v, pos, max, look, focused, connected);
+    if (style_of(s) == "classic")
+        return draw_classic_pane(s, id, v, pos, max, look, focused, connected);
     return {pos, max};
 }
 
@@ -112,22 +122,23 @@ bool draw_styled_no_tab(App::State& s, ImDrawList* dl, ImVec2 pos, ImVec2 size, 
     (void)connected;
     if (style_of(s) == "tiling")
         return draw_tiling_no_tab(s, dl, pos, size);
+    if (style_of(s) == "classic")
+        return draw_classic_no_tab(s, dl, pos, size);
     return false;
 }
 
 void style_terminal_theme(App::State& s, ui::TerminalTheme& theme) {
-    (void)s;
-    (void)theme;
+    if (style_of(s) == "classic")
+        classic_terminal_theme(s, theme);
 }
 
 bool style_holds_keyboard(const App::State& s) {
-    return s.styles.tiling.resizing;
+    return s.styles.tiling.resizing || (style_of(s) == "classic" && s.styles.classic.menu >= 0);
 }
 
 void style_terminal_overlay(App::State& s, ImVec2 body_min, ImVec2 body_size) {
-    (void)s;
-    (void)body_min;
-    (void)body_size;
+    if (style_of(s) == "classic")
+        classic_terminal_overlay(s, body_min, body_size);
 }
 
 bool draw_style_block(App::State& s, const lay::Node& n, ImVec2 pos, ImVec2 size) {
@@ -142,6 +153,14 @@ bool draw_style_block(App::State& s, const lay::Node& n, ImVec2 pos, ImVec2 size
         draw_cockpit_roster(s, pos, size.x, size.y);
     else if (m == "cockpit-log")
         draw_cockpit_log(s, pos, size.x, size.y);
+    else if (m == "classic-menubar")
+        draw_classic_menubar(s, pos, size.x, size.y);
+    else if (m == "classic-tabs")
+        draw_classic_tabs(s, pos, size.x, size.y);
+    else if (m == "classic-status")
+        draw_classic_status(s, pos, size.x, size.y);
+    else if (m == "classic-sidebar")
+        draw_classic_sidebar(s, pos, size.x, size.y);
     else
         return false;
     return true;
@@ -165,6 +184,8 @@ void draw_style_overlay(App::State& s) {
     draw_tiling_overlay(s);  // also ends its resize mode once another layout shows
     if (style_of(s) == "cockpit")
         draw_cockpit_overlay(s);
+    if (style_of(s) == "classic")
+        draw_classic_overlay(s);
 }
 
 // A style designed with its own themes gets them the first time it shows, when the person has
@@ -193,8 +214,7 @@ ui::styles::ToastArea style_toast_area(const App::State& s) {
 }
 
 bool style_draws_window_buttons(const App::State& s) {
-    (void)s;
-    return false;
+    return style_of(s) == "classic";  // text buttons in its menu bar
 }
 
 bool style_layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 size) {
@@ -202,6 +222,8 @@ bool style_layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVe
         tiling_layout_preview(d, a, size);
     else if (name == "cockpit")
         cockpit_layout_preview(d, a, size);
+    else if (name == "classic")
+        classic_layout_preview(d, a, size);
     else
         return false;
     return true;
@@ -209,13 +231,15 @@ bool style_layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVe
 
 bool look_style_options(App::State& s) {
     const std::string& st = style_of(s);
-    if (st != "tiling" && st != "cockpit")
+    if (st != "tiling" && st != "cockpit" && st != "classic")
         return false;
     settings_gap(px(14));
     settings_wrapped(s, ui::styles::display_name(s.layout().name).c_str(), g_pal->dim, 12.5f, 12.5f * 1.3f,
                      s.fonts.ui_medium);
     if (st == "tiling")
         return look_tiling_options(s);
+    if (st == "classic")
+        return look_classic_options(s);
     return look_cockpit_options(s);
 }
 
@@ -243,7 +267,9 @@ std::optional<std::string> exec_style_command(App::State& s, const std::string& 
     }
     if (auto r = exec_tiling_command(s, name))
         return r;
-    return exec_cockpit_command(s, name);
+    if (auto r = exec_cockpit_command(s, name))
+        return r;
+    return exec_classic_command(s, name);
 }
 
 }  // namespace detail

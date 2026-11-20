@@ -29,6 +29,7 @@ agentdesk_library(agentdesk_ui
     src/layout_styles.cpp
     src/tiling_layout.cpp
     src/cockpit.cpp
+    src/classic_layout.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/layout_defaults.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -37,15 +38,16 @@ target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcryp
 target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agentdesk::host agentdesk::ipc agentdesk::protocol)
 
 # The shipped layout files (kept verbatim), compiled in as text for layout::builtin_text as
-# kPresetMain, kPresetTerminals (herdr-app's, third_party/herdr/layouts) and kPresetMac
-# (AgentDesk's own, layouts/ here).
+# kPresetMain, kPresetTerminals (herdr-app's, third_party/herdr/layouts) and kPresetMac,
+# kPresetTiling, kPresetCockpit, kPresetClassic (AgentDesk's own, layouts/ here).
 set(_layout_defaults "")
 foreach(_file
         "${PROJECT_SOURCE_DIR}/third_party/herdr/layouts/main.json"
         "${PROJECT_SOURCE_DIR}/third_party/herdr/layouts/terminals.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/mac.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/tiling.json"
-        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/cockpit.json")
+        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/cockpit.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/classic.json")
     get_filename_component(_name "${_file}" NAME_WE)
     file(READ "${_file}" _text)
     string(SUBSTRING "${_name}" 0 1 _first)

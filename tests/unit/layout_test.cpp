@@ -233,7 +233,7 @@ TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
     EXPECT_EQ(main.find("sidebar")->size, Span::pixels(268));
     EXPECT_TRUE(main.find("panel")->hidden);
     EXPECT_EQ(main.find("panel-body")->active, "files");
-    EXPECT_EQ(builtin_names(), (std::vector<std::string>{"workspace", "terminals", "mac", "tiling", "cockpit"}));
+    EXPECT_EQ(builtin_names(), (std::vector<std::string>{"workspace", "terminals", "mac", "tiling", "cockpit", "classic"}));
     EXPECT_EQ(builtin("nope"), main);
     EXPECT_EQ(builtin("win98"), main);  // a name no longer built in falls back to the workspace
 }

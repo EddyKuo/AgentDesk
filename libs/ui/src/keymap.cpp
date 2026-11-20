@@ -194,6 +194,7 @@ constexpr LayoutKey kLayoutKeys[] = {
     {"layout:tiling", "alt-shift-enter", "pane.split:auto"},
     {"layout:tiling", "alt-shift-q", "pane.close"},
     {"layout:tiling", "alt-shift-g", "tiling.gaps"},
+    {"layout:classic", "f10", "classic.menu"},
 };
 
 // Calls f(section, chord text, command) for every default binding, in install order.

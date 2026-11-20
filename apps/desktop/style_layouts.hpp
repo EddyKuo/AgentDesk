@@ -32,6 +32,9 @@ struct StyleSettings {
     // Cockpit
     std::string cockpit_effects = "full";  // "full" (grid and glow) or "off"
     ui::cockpit::DoneToday cockpit_done;   // cockpit_done_today: {"date", "count"}
+    // Classic
+    std::string classic_effects = "light";  // "off", "light" (scan lines, vignette), "full" (+ glow)
+    bool classic_mono_terminal = true;      // terminal colours put on the theme's one-colour ramp
 };
 
 // What the styles remember between frames (one window).
@@ -54,6 +57,12 @@ struct StyleUi {
         float shown[3] = {0, 0, 0};  // the gauges' eased values: working, needs you, done today
         bool shown_set = false;
     } cockpit;
+    struct Classic {
+        int menu = -1;                // the open menu (index among the shown titles), -1: none
+        int open_request = -1;        // classic.menu asked for this one, opened on the next draw
+        bool keyed = false;           // the open menu is being moved through with the keys
+        std::vector<ImVec2> menu_at;  // where each menu's dropdown opens, this frame
+    } classic;
 };
 
 namespace detail {
@@ -141,6 +150,21 @@ float cockpit_toast_offset(const App::State& s);
 void cockpit_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
 bool look_cockpit_options(App::State& s);
 std::optional<std::string> exec_cockpit_command(App::State& s, const std::string& name);
+
+// ------------------------------------------------------------ classic_layout.cpp
+void draw_classic_menubar(App::State& s, ImVec2 pos, float w, float h);
+void draw_classic_tabs(App::State& s, ImVec2 pos, float w, float h);
+void draw_classic_status(App::State& s, ImVec2 pos, float w, float h);
+void draw_classic_sidebar(App::State& s, ImVec2 pos, float w, float h);
+StyledPane draw_classic_pane(App::State& s, const std::string& id, const ui::SessionView& v, ImVec2 pos,
+                             ImVec2 max, const ui::styles::PaneLook& look, bool focused, bool connected);
+bool draw_classic_no_tab(App::State& s, ImDrawList* dl, ImVec2 pos, ImVec2 size);
+void draw_classic_overlay(App::State& s);
+void classic_terminal_overlay(App::State& s, ImVec2 body_min, ImVec2 body_size);
+void classic_terminal_theme(App::State& s, ui::TerminalTheme& theme);
+void classic_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
+bool look_classic_options(App::State& s);
+std::optional<std::string> exec_classic_command(App::State& s, const std::string& name);
 }  // namespace detail
 
 }  // namespace agentdesk::desktop
