@@ -55,6 +55,7 @@
 #include "agentdesk/ui/terminal_view.hpp"
 #include "agentdesk/ui/updates.hpp"
 #include "agentdesk/ui/workspace.hpp"
+#include "style_layouts.hpp"
 
 namespace agentdesk::desktop {
 // detail stands where app.cpp's anonymous namespace was: its names are visible unqualified
@@ -172,6 +173,7 @@ struct Settings {
     Json agents_changed = Json::object();  // session id -> {s: state, at: ms since 1970}
     // On unless the file says "telemetry": false; turning it on again removes the key.
     bool telemetry = true;
+    StyleSettings styles;  // Tiling, Cockpit and Classic keys (style_layouts.hpp)
 };
 // %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk; created when missing.
 std::filesystem::path data_dir();
@@ -799,6 +801,7 @@ struct App::State {
         bool fill = false;
         std::map<std::string, float> scale;
     } mac;
+    StyleUi styles;  // Tiling, Cockpit and Classic (style_layouts.hpp)
 
     // ---------------------------------------------------------------- helpers
     // The UI document (spaces, tabs, panes) changed: persist() sends it to the host soon.
@@ -1078,7 +1081,8 @@ void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::
 void draw_status_bar(App::State& s, ImVec2 pos, float width, float height);
 
 // ------------------------------------------------------------ panes.cpp
-void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected);
+// `frame`: the layout's pane frame for these panes (null: the style's defaults).
+void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected, const lay::PaneFrame* frame = nullptr);
 std::string panel_folder(App::State& s, std::string* machine = nullptr);
 ImU32 mark_color(char m);
 void panel_header(App::State& s, ImDrawList* dl, ImVec2 a, float w, const char* title, const std::string& right,

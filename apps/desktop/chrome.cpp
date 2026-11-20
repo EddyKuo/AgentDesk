@@ -368,7 +368,7 @@ ImVec2 traffic_lights_point(const App::State& s) {
 }  // namespace
 
 bool mac_window_buttons(const App::State& s) {
-    return s.config.hwnd != nullptr && s.settings.window_buttons != "windows";
+    return s.config.hwnd != nullptr && s.settings.window_buttons != "windows" && !style_draws_window_buttons(s);
 }
 
 void traffic_lights_input(App::State& s, ImVec2 origin) {

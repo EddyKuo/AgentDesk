@@ -35,17 +35,8 @@ void derive_layout(LayoutSpec& l) {
     }
     l.look_applies = theme.empty() || palette_exists(theme);
     l.theme = palette_exists(theme) ? theme : std::string();
-    l.style.clear();
-    for (const lay::Node* n : t.walk()) {
-        const std::string m = n->mod();
-        if (m == "mac-menubar" || m == "mac-dock" || m == "mac-window-title")  // wins over the rest
-            l.style = "mac";
-        else if (m == "terminals-bar" && l.style.empty())
-            l.style = "terminals";
-        if (n->is_block() && n->content.type == lay::Content::Type::kTab && n->content.pane &&
-            n->content.pane->header && n->content.pane->header->mod() == "terminals-pane" && l.style.empty())
-            l.style = "terminals";
-    }
+    // The mod names its blocks and pane headers use pick the renderers (ui::styles' table).
+    l.style = ui::styles::style_of_tree(t);
     // Font size: on the path from the root to the first shown panes' block, the deepest node that
     // sets one wins.
     l.font_size.reset();

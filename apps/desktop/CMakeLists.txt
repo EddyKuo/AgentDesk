@@ -21,6 +21,7 @@ agentdesk_executable(agent-ui WIN32
     settings_store.cpp
     side_panels.cpp
     sidebar.cpp
+    style_layouts.cpp
     tab_bar.cpp
     terminals_layout.cpp
     themes.cpp

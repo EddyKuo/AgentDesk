@@ -374,7 +374,7 @@ long long App::next_wakeup_ms() const {
         if (v.agent_state == "Working")
             ms = std::min<long long>(ms, 50);  // the working mark spins
     }
-    if (s_->layout().style == "mac") {  // the menu bar clock turns over on the minute
+    if (ui::styles::has_clock(s_->layout().style)) {  // a bar's clock turns over on the minute
         const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
                                   std::chrono::system_clock::now().time_since_epoch())
                                   .count();

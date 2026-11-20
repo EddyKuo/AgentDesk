@@ -336,8 +336,9 @@ bool look_terminals(App::State& s) {
 bool settings_look(App::State& s) {
     settings_section(s, "Layout");
     look_layout_cards(s);
+    bool changed = look_style_options(s);  // the shown style's own rows, if any
     settings_gap(px(18));
-    bool changed = look_theme(s);
+    changed |= look_theme(s);
     settings_gap(px(18));
     changed |= look_size_and_fonts(s);
     settings_gap(px(18));

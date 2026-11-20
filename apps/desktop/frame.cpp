@@ -6,7 +6,6 @@
 namespace agentdesk::desktop {
 namespace detail {
 
-namespace {
 // ------------------------------------------------------------------ the layout, drawn
 // Every shown node of the layout tree gets its rect (lay::place). A node's background and
 // border are painted under its children, and each block is drawn by what its content names:
@@ -43,6 +42,7 @@ std::optional<ImU32> layout_color(const std::string& c) {
     return std::nullopt;
 }
 
+namespace {
 // A stack's `"header": {"content": "tabs"}`: one tab per child, by its title (else its number);
 // a click selects it (layout.select).
 void draw_stack_tabs(App::State& s, const lay::Node& stack, const lay::Rect& r) {
@@ -85,7 +85,7 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
             const float gap = px(8);
             const float details_w = details ? std::min(px(320), (r.w + 2 * gap) * 0.3f) : 0.0f;
             const ImVec2 panes(size.x - (details_w > 0 ? details_w + gap : 0.0f), size.y);
-            draw_panes(s, pos, panes, connected);
+            draw_panes(s, pos, panes, connected, n.content.pane ? &*n.content.pane : nullptr);
             if (details_w > 0)
                 draw_details(s, ImVec2(pos.x + panes.x + gap, pos.y), ImVec2(details_w, size.y), connected);
             return;
@@ -116,6 +116,8 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_status_bar(s, pos, size.x, size.y);
     } else if (m == "files" || m == "changes") {
         draw_side_panel(s, pos, size);
+    } else if (draw_style_block(s, n, pos, size)) {
+        // a Tiling, Cockpit or Classic block
     } else if (m == "mac-menubar") {
         draw_mac_menubar(s, pos, size.x, size.y);
     } else if (m == "mac-window-title") {
@@ -208,11 +210,15 @@ void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
     sync_panel(s, l);
     // The Mac layout places an adjusted copy while its window fills the desktop or has no tab;
     // clicks still go to the layout's own tree (the ids are the same).
-    const std::optional<lay::Node> mac = l.style == "mac" ? mac_layout_tree(s, l.tree) : std::nullopt;
+    // The other styles may adjust the tree the same way (Tiling's gaps, Cockpit's narrow window).
+    const std::optional<lay::Node> mac =
+        l.style == "mac" ? mac_layout_tree(s, l.tree) : style_layout_tree(s, l.tree);
     const lay::Node& tree = mac ? *mac : l.tree;
     s.placed = lay::place(tree, lay::Rect{origin.x, origin.y, full.x, full.y}, g_scale, {}, true);
     if (l.style == "mac")
         draw_mac_backdrop(s, tree);
+    else
+        draw_style_backdrop(s, tree);
     draw_layout_backgrounds(s, l, tree);
     for (const auto& id : s.placed.order) {  // the blocks, in tree order
         const lay::Node* n = tree.find(id);
@@ -225,6 +231,7 @@ void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
             draw_stack_tabs(s, *n, r);
     }
     draw_layout_separators(s, l);
+    draw_style_overlay(s);
 }
 
 // ------------------------------------------------------------------ --input automation
@@ -513,6 +520,7 @@ void App::tick() {
         create_session(s, s.config.start_profile, s.launch_cwd, "", p);
     }
     update_attention(s);
+    style_tick(s);
     // What is open, for usage data: every 10 s.
     if (Clock::now() - s.observed_at >= std::chrono::seconds(10)) {
         s.observed_at = Clock::now();
@@ -534,6 +542,7 @@ void App::frame() {
         g_settings_problem.clear();
     }
     s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
+    style_frame_upkeep(s);
     const auto theme_pair = layout_theme_pair(s.settings);
     if (const Palette* want =
             effective_palette(s.settings.appearance, theme_pair.first, theme_pair.second, s.layout().theme);
