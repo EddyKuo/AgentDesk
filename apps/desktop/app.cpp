@@ -336,6 +336,8 @@ void App::on_close_requested() {
 }
 
 void App::on_focus_changed(bool focused) {
+    if (!focused && s_->window_focused)  // the Timeline shades the time away from here
+        s_->timeline.left_at_ms = now_ms();
     s_->window_focused = focused;
 }
 
@@ -370,6 +372,7 @@ long long App::next_wakeup_ms() const {
         ms = std::min<long long>(ms, 250);
     if (s_->updates_asked)
         ms = std::min<long long>(ms, 300);  // Settings polls the update check every 300 ms
+    ms = std::min<long long>(ms, timeline_wakeup_ms(*s_));
     for (const auto& [id, v] : s_->views_by_id) {
         if (v.agent_state == "Working")
             ms = std::min<long long>(ms, 50);  // the working mark spins

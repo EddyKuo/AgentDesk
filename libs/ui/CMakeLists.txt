@@ -27,6 +27,7 @@ agentdesk_library(agentdesk_ui
     src/command_names.cpp
     src/mac_layout.cpp
     src/review.cpp
+    src/timeline.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/layout_defaults.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

@@ -25,6 +25,7 @@ agentdesk_executable(agent-ui WIN32
     state_card.cpp
     tab_bar.cpp
     terminals_layout.cpp
+    timeline.cpp
     themes.cpp
     welcome.cpp
     worktrees.cpp

@@ -124,6 +124,8 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_mac_dock(s, pos, size.x, size.y);
     } else if (draw_review_block(s, m, pos, size)) {
         // review-head, review-changes, review-commit (review_layout.cpp)
+    } else if (draw_timeline_block(s, m, pos, size)) {
+        // timeline (timeline.cpp)
     } else if (s.mods != nullptr) {
         // A C++ DLL mod: its panels, in the block.
         ImGui::SetCursorScreenPos(pos);
@@ -434,6 +436,7 @@ void run_global_shortcuts(App::State& s) {
 // Dialogs and overlays, in the order they stack (later ones on top).
 void draw_dialogs(App::State& s) {
     draw_peek(s);
+    draw_timeline_overlay(s);
     draw_launcher(s);
     draw_rename(s);
     draw_worktree(s);

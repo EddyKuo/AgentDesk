@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "agentdesk/host/input.hpp"
+#include "agentdesk/host/state_timeline.hpp"
 #include "agentdesk/host/states.hpp"
 #include "agentdesk/platform/win/conpty_api.hpp"
 #include "agentdesk/platform/win/process_tree.hpp"
@@ -60,6 +61,8 @@ struct SessionInfo {
     std::uint64_t backpressure_waits = 0;  // times the reader paused because the queue was full
     std::uint64_t first_history_line_id = 0;
     std::string cwd_uri;  // last OSC 7 the shell sent ("" until one arrives)
+    // When the agent state or the process state last changed (ms since 1970); 0 before the first.
+    std::int64_t state_changed_ms = 0;
 };
 
 // Callbacks run on the session actor thread; keep them short and never call back into the
@@ -97,6 +100,14 @@ public:
     [[nodiscard]] std::vector<terminal::HistoryLine> history(std::uint64_t from, std::size_t max_lines) const;
     // The newest `max_lines` history lines (oldest first).
     [[nodiscard]] std::vector<terminal::HistoryLine> history_tail(std::size_t max_lines) const;
+
+    // The state history since `since_ms` (StateTimeline::since), for session.timeline.
+    struct Timeline {
+        std::vector<StateMark> marks;
+        bool truncated = false;  // older marks were dropped (more than 1,000, or a day old)
+        bool adopted = false;    // taken over from another agent-host: history starts at the takeover
+    };
+    [[nodiscard]] Timeline timeline(std::int64_t since_ms) const;
 
     // Blocks until the root process exited (or timeout). Returns the exit code.
     std::optional<std::uint32_t> wait_exit(std::chrono::milliseconds timeout) const;
@@ -189,6 +200,8 @@ private:
     void queue_pty_bytes(std::string bytes);
     void publish(bool force);
     void publish_info();
+    // Adds a timeline mark when the agent or process state changed; state_mutex_ held.
+    void note_state_locked();
 
     SessionConfig config_;
     SessionListener listener_;
@@ -220,6 +233,8 @@ private:
     mutable std::mutex state_mutex_;
     std::shared_ptr<const terminal::ScreenSnapshot> snapshot_;
     SessionInfo info_;
+    StateTimeline timeline_;  // guarded by state_mutex_; not carried across a handover
+    bool adopted_ = false;    // guarded by state_mutex_
     std::map<std::string, std::uint64_t> report_seq_;  // actor thread only
     std::uint64_t published_seq_ = 0;                  // actor thread only
     std::chrono::steady_clock::time_point last_publish_{};

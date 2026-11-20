@@ -163,6 +163,8 @@ constexpr std::pair<const char*, const char*> kGlobal[] = {
     {"ctrl-0", "app.zoom_reset"},
     {"f2", "tab.rename"},
     {"shift-f2", "space.rename"},
+    {"ctrl-shift-r", "review.toggle"},
+    {"ctrl-shift-h", "timeline.toggle"},
 };
 
 constexpr std::pair<const char*, const char*> kTerminal[] = {

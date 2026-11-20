@@ -1135,6 +1135,8 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         return *r;
     if (auto r = exec_review_command(s, c.name, c.arg))  // review_layout.cpp
         return *r;
+    if (auto r = exec_timeline_command(s, c.name, c.arg))  // timeline.cpp
+        return *r;
     if (const auto al = kCommandAliases.find(c.name); al != kCommandAliases.end())
         return exec_command(s, c.arg.empty() ? al->second : al->second + ":" + c.arg);
     if (c.name == "mod.open" && c.arg == "picker")

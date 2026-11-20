@@ -47,6 +47,9 @@ struct SessionView {
     std::string agent_kind;
     std::string agent_message;
     std::string last_agent_state = "Unknown";
+    // When the agent or process state took its current value, in the host's clock (ms since
+    // 1970; session.state "at"); 0 when the host does not say (an older agent-host).
+    long long state_at_ms = 0;
     bool still_running_after_interrupt = false;
     std::uint32_t remaining_processes = 0;
     bool history_truncated = false;

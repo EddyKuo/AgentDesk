@@ -106,6 +106,9 @@ private:
         std::chrono::steady_clock::time_point task_after{};
         // Reports from sub-agents, delivered when this agent is not busy (session.report).
         std::vector<std::string> pending_reports;
+        // The state history kept once prune_exited released the Session (session.timeline shows
+        // ended sessions for a day; the record itself is bounded with the others).
+        Session::Timeline ended_timeline;
     };
     using ManagedPtr = std::shared_ptr<Managed>;
 
@@ -133,6 +136,9 @@ private:
     protocol::Response do_wait(const protocol::Request& req);
     protocol::Response do_label(const protocol::Request& req);
     protocol::Response do_report(const protocol::Request& req);
+    // session.timeline {session?, since_ms?}: when each session's agent and process states
+    // changed (times and states only).
+    protocol::Response do_timeline(const protocol::Request& req);
     // host.update {exe}: hands every session to a new agent-host (handover.cpp).
     protocol::Response do_update(const protocol::Request& req);
     void start_maintenance();

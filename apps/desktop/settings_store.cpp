@@ -151,6 +151,10 @@ Settings load_settings_unchecked() {
     s.layout = j.value("layout", s.layout);
     s.layout_return = j.value("layout_return", "");
     s.review_follow = j.value("review_follow", "agent") == "focused" ? "focused" : "agent";
+    s.timeline_range = j.value("timeline_range", "1h");
+    if (s.timeline_range != "15m" && s.timeline_range != "4h" && s.timeline_range != "24h")
+        s.timeline_range = "1h";
+    s.timeline_since_left = j.value("timeline_since_left", true);
     for (const auto& m : j.value("machines", Json::array())) {
         if (m.is_object() && !m.value("name", "").empty() && !m.value("target", "").empty())
             s.machines.push_back({m.value("name", ""), m.value("target", ""), m.value("ctl", "")});
@@ -243,6 +247,8 @@ void save_settings(const Settings& s) {
             {"layout", s.layout},
             {"layout_return", s.layout_return},
             {"review_follow", s.review_follow},
+            {"timeline_range", s.timeline_range},
+            {"timeline_since_left", s.timeline_since_left},
             {"machines", [&] {
                  Json list = Json::array();
                  for (const auto& m : s.machines)

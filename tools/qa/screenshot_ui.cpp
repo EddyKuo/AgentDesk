@@ -243,6 +243,20 @@ Json shot_profiles() {
               {"-NoLogo", "-NoProfile", "-NoExit", "-Command",
                std::string("[Console]::Write([char]27 + ']7501;state=") + st + "' + [char]7)"}}});
     }
+    // Shells that keep changing state (Timeline checks): "state-cycle-a" works, needs the person,
+    // works again and finishes, over and over; "state-cycle-b" the same at another pace.
+    for (const auto& [id, steps] :
+         {std::pair<const char*, const char*>{"state-cycle-a", "working 18 blocked 10 working 14 done 20"},
+          std::pair<const char*, const char*>{"state-cycle-b", "idle 6 working 30 done 8 blocked 6"}}) {
+        std::string script = "$s = '" + std::string(steps) +
+                             "'.Split(' '); while ($true) { for ($i = 0; $i -lt $s.Length; $i += 2) { "
+                             "[Console]::Write([char]27 + ']7501;state=' + $s[$i] + [char]7); "
+                             "Start-Sleep -Seconds ([int]$s[$i + 1]) } }";
+        profiles.push_back({{"id", id},
+                            {"name", id},
+                            {"executable", ps},
+                            {"args", {"-NoLogo", "-NoProfile", "-Command", script}}});
+    }
     return profiles;
 }
 

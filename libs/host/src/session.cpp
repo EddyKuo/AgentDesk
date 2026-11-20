@@ -30,6 +30,12 @@ DWORD millis_until(Clock::time_point t) {
     return static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(t - now).count() + 1);
 }
 
+std::int64_t wall_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
 // A new agent state; the one it replaces becomes last_state when it differs.
 void set_agent_state(AgentStatus& a, AgentState next) {
     if (next != a.state)
@@ -86,6 +92,7 @@ std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener li
         std::lock_guard lock(self->state_mutex_);
         self->info_.process_state = ProcessState::kRunning;
         self->info_.pid = self->process_->pid();
+        self->note_state_locked();
     }
     self->write_cv_.notify_all();  // replies queued before the process pointer existed
     self->actor_ = std::thread([raw = self.get()] { raw->actor_loop(); });
@@ -188,6 +195,7 @@ void Session::force_stop() {
             return;
         info_.process_state = ProcessState::kStopping;
         info_.stop_requested = true;
+        note_state_locked();
     }
     if (process_)
         process_->terminate(1);
@@ -371,6 +379,7 @@ void Session::on_root_exit() {
         info_.exit_code = code.value_or(0);
         info_.remaining_processes = remaining > 0 ? remaining - 1 : 0;  // excluding the root
         info_.still_running_after_interrupt = false;
+        note_state_locked();
     }
     interrupt_deadline_.reset();
     exit_cv_.notify_all();
@@ -428,6 +437,7 @@ void Session::handle(InterruptCmd&) {
         info_.process_state = ProcessState::kStopping;
         info_.stop_requested = true;
         info_.still_running_after_interrupt = false;
+        note_state_locked();
     }
     queue_pty_bytes(std::string("\x03", 1));
     interrupt_deadline_ = Clock::now() + config_.interrupt_grace;
@@ -447,6 +457,7 @@ void Session::handle(ReportCmd& c) {
         a.kind = c.state == AgentState::kBlocked ? c.kind : terminal::StatusKind::kNone;
         a.message = c.message;
         a.updated_at = std::chrono::system_clock::now();
+        note_state_locked();
     }
     publish_info();
 }
@@ -501,6 +512,8 @@ void Session::refresh_agent_from_engine() {
             a.updated_at = std::chrono::system_clock::now();
             changed = true;
         }
+        if (changed)
+            note_state_locked();
     }
     if (changed)
         publish_info();
@@ -523,6 +536,16 @@ void Session::publish(bool force) {
     }
     if (listener_.on_snapshot)
         listener_.on_snapshot(std::move(snap));
+}
+
+void Session::note_state_locked() {
+    if (timeline_.add(wall_ms(), info_.agent.state, info_.process_state))
+        info_.state_changed_ms = timeline_.marks().back().at_ms;
+}
+
+Session::Timeline Session::timeline(std::int64_t since_ms) const {
+    std::lock_guard lock(state_mutex_);
+    return {timeline_.since(since_ms), timeline_.truncated(), adopted_};
 }
 
 void Session::publish_info() {
@@ -781,6 +804,12 @@ std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener li
 }
 
 void Session::start_adopted() {
+    {
+        // The history does not move with a handover (it starts at the takeover).
+        std::lock_guard lock(state_mutex_);
+        adopted_ = true;
+        note_state_locked();
+    }
     writer_ = std::thread([this] { writer_loop(); });
     actor_ = std::thread([this] { actor_loop(); });
     if (process_)
