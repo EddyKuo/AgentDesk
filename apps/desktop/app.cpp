@@ -378,6 +378,8 @@ long long App::next_wakeup_ms() const {
     }
     if (focus_animating(*s_))
         ms = std::min<long long>(ms, 16);  // the edge glow, the header fading
+    if (s_->mission.animating && !s_->settings.focus_on)
+        ms = std::min<long long>(ms, 100);  // a tile's lines held back, skeleton bars breathing
     if (s_->layout().style == "mac") {  // the menu bar clock turns over on the minute
         const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
                                   std::chrono::system_clock::now().time_since_epoch())
@@ -416,6 +418,8 @@ Json App::report() const {
     out["spaces"] = s_->ws.spaces.size();
     out["tabs"] = tabs;
     out["selected"] = s_->ws.focused_session();
+    out["layout"] = s_->settings.layout;
+    out["focus_on"] = s_->settings.focus_on;
     out["workspace"] = s_->ws.to_json();
 
     return out;

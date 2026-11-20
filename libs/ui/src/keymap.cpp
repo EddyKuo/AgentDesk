@@ -164,6 +164,7 @@ constexpr std::pair<const char*, const char*> kGlobal[] = {
     {"f2", "tab.rename"},
     {"shift-f2", "space.rename"},
     {"ctrl-shift-.", "focus.toggle"},
+    {"ctrl-shift-m", "mission.toggle"},
 };
 
 constexpr std::pair<const char*, const char*> kTerminal[] = {

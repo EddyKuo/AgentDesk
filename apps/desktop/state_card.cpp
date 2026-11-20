@@ -10,6 +10,40 @@ std::string with_chord(const App::State& s, const std::string& label, const char
     return chord.empty() ? label : label + "   " + chord;
 }
 
+namespace {
+// The buttons in a row centred on `cx`, 10 px apart; the first in the accent colour, as on the
+// "Open a terminal" card.
+void draw_card_buttons(App::State& s, const StateCard& card, float cx, float top) {
+    std::vector<float> widths;
+    float total = 0;
+    for (const auto& b : card.buttons) {
+        widths.push_back(ImGui::CalcTextSize(b.label.c_str()).x + px(36));
+        total += widths.back();
+    }
+    total += px(10) * static_cast<float>(card.buttons.size() - 1);
+    ImGui::SetCursorScreenPos(ImVec2(cx - total * 0.5f, top));
+    for (std::size_t i = 0; i < card.buttons.size(); ++i) {
+        const auto& b = card.buttons[i];
+        if (i > 0)
+            ImGui::SameLine(0, px(10));
+        if (i == 0) {
+            ImGui::PushStyleColor(ImGuiCol_Button, v4(g_pal->focus));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, v4(alpha(g_pal->focus, 220)));
+            ImGui::PushStyleColor(ImGuiCol_Text, v4(accent_foreground()));
+        }
+        ImGui::PushID(static_cast<int>(i));
+        const bool clicked = ImGui::Button(b.label.c_str(), ImVec2(widths[i], px(36)));
+        ImGui::PopID();
+        if (i == 0)
+            ImGui::PopStyleColor(3);
+        if (clicked && b.action)
+            b.action();
+        else if (clicked)
+            run_command(s, b.command);
+    }
+}
+}  // namespace
+
 void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& card) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 end(pos.x + size.x, pos.y + size.y);
@@ -32,32 +66,23 @@ void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& ca
         text_clipped(dl, s.fonts.ui, fpx(13), ImVec2(cx - lw * 0.5f, y), col, *line, max_w);
         y += px(20);
     }
-    if (card.buttons.empty())
-        return;
-    std::vector<float> widths;
-    float total = 0;
-    for (const auto& b : card.buttons) {
-        widths.push_back(ImGui::CalcTextSize(b.label.c_str()).x + px(36));
-        total += widths.back();
+    if (!card.buttons.empty()) {
+        draw_card_buttons(s, card, cx, y + px(16));
+        y += px(16) + px(36);
     }
-    total += px(10) * static_cast<float>(card.buttons.size() - 1);
-    ImGui::SetCursorScreenPos(ImVec2(cx - total * 0.5f, y + px(16)));
-    for (std::size_t i = 0; i < card.buttons.size(); ++i) {
-        const auto& b = card.buttons[i];
-        if (i > 0)
-            ImGui::SameLine(0, px(10));
-        if (i == 0) {  // the first in the accent colour, as on the "Open a terminal" card
-            ImGui::PushStyleColor(ImGuiCol_Button, v4(g_pal->focus));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, v4(alpha(g_pal->focus, 220)));
-            ImGui::PushStyleColor(ImGuiCol_Text, v4(accent_foreground()));
+    if (!card.link.empty()) {
+        const ImVec2 t = s.fonts.ui->CalcTextSizeA(fpx(12.5f), FLT_MAX, 0, card.link.c_str());
+        const ImVec2 p(cx - t.x * 0.5f, y + px(16));
+        ImGui::SetCursorScreenPos(p);
+        const bool clicked = ImGui::InvisibleButton("##card-link", ImVec2(t.x, t.y + px(4)));
+        const bool hov = ImGui::IsItemHovered();
+        dl->AddText(s.fonts.ui, fpx(12.5f), p, g_pal->focus, card.link.c_str());
+        if (hov) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            dl->AddLine(ImVec2(p.x, p.y + t.y + px(1)), ImVec2(p.x + t.x, p.y + t.y + px(1)), g_pal->focus);
         }
-        ImGui::PushID(static_cast<int>(i));
-        const bool clicked = ImGui::Button(b.label.c_str(), ImVec2(widths[i], px(36)));
-        ImGui::PopID();
-        if (i == 0)
-            ImGui::PopStyleColor(3);
-        if (clicked)
-            run_command(s, b.command);
+        if (clicked && card.on_link)
+            card.on_link();
     }
 }
 

@@ -1097,6 +1097,8 @@ Outcome exec_layout_mod_command(App::State& s, const Command& c) {
             next = s.layouts.front().name;
         s.settings.layout = next;
         save_settings(s.settings);
+        if (s.layout().style == "mission")
+            mission_entered(s);
         s.toast("Layout: " + layout_display_name(next), "", "", g_pal->info, 2);
         s.focus_view(s.ws.focused_session());
     } else if (c.name == "layout.clone") {
@@ -1141,6 +1143,8 @@ std::string exec_command(App::State& s, const std::string& cmd) {
     if (c.name == "layout.toggle" && c.arg.empty())  // the panel (AgentDesk's older spelling)
         return exec_command(s, "panel");
     if (auto r = layout_command(s, c.name, c.arg))
+        return *r;
+    if (auto r = mission_command(s, c.name, c.arg))
         return *r;
     if (const auto al = kCommandAliases.find(c.name); al != kCommandAliases.end())
         return exec_command(s, c.arg.empty() ? al->second : al->second + ":" + c.arg);

@@ -1,0 +1,52 @@
+{
+  "id": "root",
+  "type": "column",
+  "titlebar": "none",
+  "traffic_lights": [12, 15],
+  "background": "canvas",
+  "children": [
+    {
+      "id": "bar",
+      "type": "block",
+      "size": { "px": 42 },
+      "window_drag": true,
+      "content": { "mod": "mission-bar" }
+    },
+    {
+      "id": "wall-body",
+      "type": "stack",
+      "active": "wall",
+      "children": [
+        {
+          "id": "wall",
+          "type": "block",
+          "padding": 12,
+          "content": { "mod": "mission-wall" }
+        },
+        {
+          "id": "main",
+          "type": "block",
+          "padding": 8,
+          "content": {
+            "tab": "active",
+            "pane": {
+              "gap": 8,
+              "radius": 10,
+              "background": "background",
+              "lone": true,
+              "border": { "width": 1, "color": "border" },
+              "focus": { "width": 1, "color": "accent" },
+              "header": { "content": { "mod": "pane" }, "height": 30 }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "status",
+      "type": "block",
+      "size": { "px": 28 },
+      "content": { "mod": "workspace-status" }
+    }
+  ]
+}

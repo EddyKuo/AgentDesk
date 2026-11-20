@@ -324,6 +324,29 @@ void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 siz
         d->AddRect(a, b, g_pal->border, px(6));
         return;
     }
+    if (name == "mission") {
+        // A bar over a 3 x 2 wall of tiles; the first needs you (red edge), the second is done.
+        d->AddRectFilled(a, b, g_pal->bg, px(6));
+        d->AddRectFilled(a, ImVec2(b.x, a.y + px(8)), g_pal->sidebar, px(6), ImDrawFlags_RoundCornersTop);
+        d->AddLine(ImVec2(a.x, a.y + px(8)), ImVec2(b.x, a.y + px(8)), g_pal->border);
+        line(a.x + px(4), a.y + px(2.5f), 16, g_pal->dim);
+        const float gap = px(3);
+        const float tw = (size.x - px(8) - gap * 2) / 3.0f;
+        const float th = (size.y - px(8) - px(8) - gap) / 2.0f;
+        for (int i = 0; i < 6; ++i) {
+            const ImVec2 p(a.x + px(4) + static_cast<float>(i % 3) * (tw + gap),
+                           a.y + px(12) + static_cast<float>(i / 3) * (th + gap));
+            const ImVec2 q(p.x + tw, p.y + th);
+            d->AddRectFilled(p, q, g_pal->card, px(2));
+            d->AddRect(p, q, i == 0 ? g_pal->needs_you : i == 1 ? g_pal->done : g_pal->border, px(2), 0,
+                       i == 0 ? px(1.5f) : 1.0f);
+            line(p.x + px(1), p.y + px(1), 10, g_pal->faint);
+            d->AddRectFilled(ImVec2(p.x + px(3), p.y + px(7)), ImVec2(q.x - px(3), q.y - px(3)), g_pal->term_bg,
+                             px(1));
+        }
+        d->AddRect(a, b, g_pal->border, px(6));
+        return;
+    }
     d->AddRectFilled(a, b, g_pal->sidebar, px(6));
     if (name == "workspace") {
         const float sx = a.x + px(42);

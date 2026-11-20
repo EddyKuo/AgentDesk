@@ -51,6 +51,7 @@
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/mac_layout.hpp"
+#include "agentdesk/ui/mission.hpp"
 #include "agentdesk/ui/mods.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
@@ -328,6 +329,11 @@ inline constexpr CommandInfo kCommands[] = {
     {"mods.folder", "Open the mods folder"},
     {"app.exit_all", "Exit and stop all sessions"},
     {"focus.toggle", "Focus mode: one terminal, nothing else"},
+    {"mission.toggle", "Mission Control: every agent on one wall"},
+    {"mission.wall", "Mission Control: back to the wall"},
+    {"mission.filter:all", "Mission Control: show all agents"},
+    {"mission.filter:active", "Mission Control: show active agents"},
+    {"mission.filter:blocked", "Mission Control: show agents that need you"},
 };
 bool known_command(std::string_view name);
 
@@ -825,6 +831,24 @@ struct App::State {
         int glow_peak = 0;
         ui::focus::HeaderReveal header;
     } focus_mode;
+    // Mission Control (mission_layout.cpp): the tile the keys move, the wall's scroll, and each
+    // tile's last lines, worked out again only when its screen changed and at most 4 times a second.
+    struct MissionState {
+        std::string selected;
+        float scroll = 0;
+        bool shells_shown = false;  // "show them" on the empty wall (until the layout is left)
+        bool entered = false;       // mission_entered ran since the app started
+        bool animating = false;     // last frame: a tile waits to refresh, or skeleton bars breathe
+        struct Tile {
+            std::uint64_t seq = 0;
+            std::uint64_t generation = 0;
+            bool filled = false;
+            int lines = 0;
+            Clock::time_point at{};
+            std::vector<ui::mission::TailLine> tail;
+        };
+        std::map<std::string, Tile> tiles;
+    } mission;
 
     // ---------------------------------------------------------------- helpers
     // The UI document (spaces, tabs, panes) changed: persist() sends it to the host soon.
@@ -1113,8 +1137,7 @@ void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::
 void draw_status_bar(App::State& s, ImVec2 pos, float width, float height);
 
 // ------------------------------------------------------------ panes.cpp
-void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected);
-std::string panel_folder(App::State& s, std::string* machine = nullptr);
+void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected);std::string panel_folder(App::State& s, std::string* machine = nullptr);
 ImU32 mark_color(char m);
 void panel_header(App::State& s, ImDrawList* dl, ImVec2 a, float w, const char* title, const std::string& right,
                   bool back, bool* back_clicked);
@@ -1203,6 +1226,7 @@ struct StateCard {
     struct Button {
         std::string label;
         std::string command;
+        std::function<void()> action;  // instead of a command
     };
     std::string title;
     std::string hint;
@@ -1210,6 +1234,9 @@ struct StateCard {
     ImU32 detail_color = 0;
     std::vector<Button> buttons;
     bool framed = true;
+    // A text link under the buttons (accent colour, underlined while hovered).
+    std::string link;
+    std::function<void()> on_link;
 };
 void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& card);
 // A button label followed by the command's key ("New terminal   Ctrl+Shift+T"), when it has one.
@@ -1236,6 +1263,16 @@ void draw_focus_glow(App::State& s);
 bool focus_animating(const App::State& s);
 // Draws `fn`'s vertices at `alpha` (0..1) of their own opacity.
 void with_alpha(ImDrawList* dl, float alpha, const std::function<void()>& fn);
+
+// ------------------------------------------------------------ mission_layout.cpp
+// Mission Control: every agent as a tile on a wall; a click puts that agent in the layout's
+// "main" block (the stack "wall-body"), Ctrl+Shift+M goes back.
+void draw_mission_bar(App::State& s, ImVec2 pos, float w, float h);
+void draw_mission_wall(App::State& s, ImVec2 pos, ImVec2 size);
+// The mission.* commands; nullopt when `name` is not one.
+std::optional<std::string> mission_command(App::State& s, const std::string& name, const std::string& arg);
+// Switching to the mission layout always starts on the wall.
+void mission_entered(App::State& s);
 
 // ------------------------------------------------------------ welcome.cpp
 void draw_welcome(App::State& s);

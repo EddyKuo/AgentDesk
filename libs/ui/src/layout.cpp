@@ -15,6 +15,7 @@ extern const char* const kPresetMain;
 extern const char* const kPresetTerminals;
 extern const char* const kPresetMac;
 extern const char* const kPresetFocus;
+extern const char* const kPresetMission;
 }  // namespace detail
 
 namespace {
@@ -1062,7 +1063,7 @@ std::string text_of(const Node& n) {
 
 // ---------------------------------------------------------------- the shipped layouts
 std::vector<std::string> builtin_names() {
-    return {"workspace", "terminals", "mac"};
+    return {"workspace", "terminals", "mac", "mission"};
 }
 
 std::string_view builtin_file_name(std::string_view name) {
@@ -1079,6 +1080,8 @@ std::string_view builtin_text(std::string_view name) {
         return detail::kPresetMac;
     if (h == "focus")  // Focus mode's tree: built in, but not one of the layouts to pick
         return detail::kPresetFocus;
+    if (h == "mission")
+        return detail::kPresetMission;
     return {};
 }
 

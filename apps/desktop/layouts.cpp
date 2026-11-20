@@ -45,6 +45,8 @@ void derive_layout(LayoutSpec& l) {
             l.style = "terminals";
         else if (m == "focus-strip" && l.style.empty())
             l.style = "focus";
+        else if ((m == "mission-bar" || m == "mission-wall") && l.style.empty())
+            l.style = "mission";
         if (n->is_block() && n->content.type == lay::Content::Type::kTab && n->content.pane &&
             n->content.pane->header && n->content.pane->header->mod() == "terminals-pane" && l.style.empty())
             l.style = "terminals";
