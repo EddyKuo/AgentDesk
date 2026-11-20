@@ -182,6 +182,20 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
      "f"},
 };
 
+// The style layouts' own sections: keys that only act while that layout shows. None of them is
+// bound in "global" or "terminal".
+struct LayoutKey {
+    const char* section;
+    const char* chord;
+    const char* command;
+};
+constexpr LayoutKey kLayoutKeys[] = {
+    {"layout:tiling", "alt-r", "tiling.resize_mode"},
+    {"layout:tiling", "alt-shift-enter", "pane.split:auto"},
+    {"layout:tiling", "alt-shift-q", "pane.close"},
+    {"layout:tiling", "alt-shift-g", "tiling.gaps"},
+};
+
 // Calls f(section, chord text, command) for every default binding, in install order.
 template <class F>
 void for_each_default(F&& f) {
@@ -193,6 +207,8 @@ void for_each_default(F&& f) {
     }
     for (const auto& [chord, cmd] : kTerminal)
         f("terminal", std::string(chord), std::string(cmd));
+    for (const auto& k : kLayoutKeys)
+        f(k.section, std::string(k.chord), std::string(k.command));
 }
 
 }  // namespace

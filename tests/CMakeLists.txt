@@ -27,7 +27,8 @@ agentdesk_executable(unit_tests
     unit/safe_read_test.cpp
     unit/window_place_test.cpp
     unit/mac_layout_test.cpp
-    unit/layout_styles_test.cpp)
+    unit/layout_styles_test.cpp
+    unit/tiling_layout_test.cpp)
 # agent-ui's header-only helpers (apps/desktop/safe_read.hpp).
 target_include_directories(unit_tests PRIVATE ${PROJECT_SOURCE_DIR}/apps/desktop)
 target_link_libraries(unit_tests PRIVATE

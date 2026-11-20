@@ -317,6 +317,10 @@ inline constexpr CommandInfo kCommands[] = {
     {"mods.reload", "Reload mods and layouts"},
     {"mods.folder", "Open the mods folder"},
     {"app.exit_all", "Exit and stop all sessions"},
+    // the style layouts
+    {"pane.split:auto", "Split along the longer side"},
+    {"tiling.resize_mode", "Tiling: resize panes with the keyboard"},
+    {"tiling.gaps", "Tiling: gaps off / on"},
 };
 bool known_command(std::string_view name);
 

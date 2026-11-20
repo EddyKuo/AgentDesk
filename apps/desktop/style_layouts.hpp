@@ -22,11 +22,26 @@
 namespace agentdesk::desktop {
 
 // The styles' keys in ui.json (all optional; defaults as below).
-struct StyleSettings {};
+struct StyleSettings {
+    // Tiling
+    float tiling_gaps = 8.0f;            // window edge to panes and between panes, design px 0..24
+    bool tiling_gaps_on = true;          // tiling.gaps turns them off and on
+    std::string tiling_titles = "auto";  // pane title rows: auto (2+ panes), always, never
+    bool tiling_focus_follows_mouse = false;
+};
 
 // What the styles remember between frames (one window).
 struct StyleUi {
-    std::string themed;  // layouts whose suggested themes were checked this run
+    std::string themed;  // the layout whose suggested themes were last checked
+    struct Tiling {
+        bool resizing = false;    // the keyboard resize mode is on
+        bool popup_open = false;  // its keyboard-holding popup is open
+        ImVec2 hint_min{};        // where the bar drew the mode's hint (the popup sits on it)
+        ImVec2 hint_size{};
+        std::chrono::steady_clock::time_point flash_until{};  // a resize that could not move
+        std::string hover_pane;  // focus follows mouse: the pane under the pointer, since when
+        std::chrono::steady_clock::time_point hover_since{};
+    } tiling;
 };
 
 namespace detail {
@@ -40,6 +55,10 @@ std::optional<ImU32> layout_color(const std::string& c);
 // A line `w` design px wide in screen px: 1 stays a hairline (one device pixel), wider lines
 // scale with the zoom and land on whole pixels.
 float line_px(float w);
+
+// The keys bound to `command`, as shown in menus: the shown layout's keys.json section first,
+// then the global and terminal ones.
+std::string style_chord_for(const App::State& s, const std::string& command);
 
 // Styles whose panes are drawn by their own files.
 bool styled_panes(const std::string& style);
@@ -81,6 +100,17 @@ bool look_style_options(App::State& s);
 // The styles' commands, and the arguments they add to existing ones (pane.split:auto,
 // pane.resize:<dir>:<px>). nullopt: not one of them; "" ran; else why it failed.
 std::optional<std::string> exec_style_command(App::State& s, const std::string& name, const std::string& arg);
+
+// ------------------------------------------------------------ tiling_layout.cpp
+void draw_tiling_bar(App::State& s, ImVec2 pos, float w, float h);
+StyledPane draw_tiling_pane(App::State& s, const std::string& id, const ui::SessionView& v, ImVec2 pos,
+                            ImVec2 max, const ui::styles::PaneLook& look, bool focused, bool connected);
+bool draw_tiling_no_tab(App::State& s, ImDrawList* dl, ImVec2 pos, ImVec2 size);
+void draw_tiling_overlay(App::State& s);
+std::optional<ui::layout::Node> tiling_layout_tree(const App::State& s, const ui::layout::Node& tree);
+void tiling_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
+bool look_tiling_options(App::State& s);
+std::optional<std::string> exec_tiling_command(App::State& s, const std::string& name);
 }  // namespace detail
 
 }  // namespace agentdesk::desktop
