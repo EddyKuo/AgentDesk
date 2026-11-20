@@ -1,6 +1,6 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.19  
+產品需求與系統設計文件 v2.20  
 日期：2026-11-20｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；還沒做的人工驗收見 5.4、5.7  
 技術基線：C++20、Windows 11 x64、Dear ImGui（FreeType 繪字）、Win32、DirectX 11、隨附 ConPTY
 
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.20 | 2026-11-20 | ADR-30：Mac 風格的視窗按鈕（左上三顆圓鈕，預設），設定 › Look 可切回 Windows 式；4.1 標題列一列更新 |
 | 2.19 | 2026-11-20 | ADR-29：開放 mod 前的四項準備（啟用前的安全說明、相容性規則、卡住時的處理說明、`docs/mods.md` 開發指南） |
 | 2.18 | 2026-11-20 | ADR-28：移除 AgentDesk 98（程式、素材、測試與建置步驟），取代 ADR-24 的隱藏做法；2.4、2.8、3.1、3.9、3.10、4.1、5.6 更新 |
 | 2.17 | 2026-11-20 | ADR-27：terminals 版面上方列最左邊加「顯示側欄」按鈕；`sidebar.toggle` 在沒有側欄的版面改為切到有側欄的版面；4.1 更新 |
@@ -553,7 +554,7 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 | 區域 | 內容 |
 |---|---|
 | 視窗位置與大小 | 重開時回到上次的螢幕、位置與大小，關閉時是最大化就以最大化開啟（`window.json`，以邏輯像素保存，換了縮放比例也不會變形）。那台螢幕已不在、或上次的位置不在任何螢幕上時，以上次的大小置中於滑鼠所在的螢幕。第一次啟動是 1280×820 邏輯像素乘上 zoom，限制在可用範圍（扣掉工作列）的 50%～90% 之間並置中（ADR-23） |
-| 標題列 | 自繪（`WM_NCCALCSIZE`／`WM_NCHITTEST`），沒有系統標題列。最小化、最大化、關閉按鈕在分頁列右端；拖曳分頁列或品牌列移動視窗，雙擊切換最大化，可用 Windows 的貼齊 |
+| 標題列 | 自繪（`WM_NCCALCSIZE`／`WM_NCHITTEST`），沒有系統標題列。視窗按鈕預設是左上角三顆圓鈕（關閉、最小化、縮放，位置取版面的 `traffic_lights`，ADR-30）；設定 › Look › Window buttons 選 Windows 時改為分頁列右端的最小化、最大化、關閉；拖曳分頁列或品牌列移動視窗，雙擊切換最大化，可用 Windows 的貼齊 |
 | 側欄 | 預設寬 268 px，可拖曳在 44～480 px 之間調整；窄於 160 px 改成只顯示編號與狀態的窄欄（rail）。上方是品牌列（含收合鈕），底部是 Settings 與 Add machine；Ctrl+Shift+B 整個隱藏 ；整個隱藏時，分頁列最左邊出現側欄按鈕（提示「Show sidebar」與快捷鍵），點一下顯示（ADR-26） |
 | Spaces | 彩色字母頭像、名稱、`repo · branch`、領先／落後的 ↑N／↓N。沒命名的 space 用第一個終端機所在 checkout 的頂層資料夾名稱，在 shell 裡 `cd` 後跟著變。linked worktree 掛在主 repo 下面成樹狀；可拖曳排序；右鍵選單有改名、worktree 與關閉。遠端機器各有一個標頭。標題旁的「+」列出偵測到的 shell（ADR-20，見 4.2） |
 | Agents | 只列出各 space 面板裡正在執行、而且目前有狀態的終端機；Agent 回到 shell 提示時就移除（3.6）。預設依 Needs you／Done／Working／Idle 分段，同段內最近變動的在前，也可改成依 space 分組；每列有程式圖示、space 與工作名稱、距離上次變動多久、狀態標記；可釘選；子 Agent 以樹狀線列在父 Agent 下面 |
@@ -793,6 +794,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-27 | 在 terminals 版面叫出側欄（2026-11-20） | 使用者回報：按 Ctrl+Shift+L 切到 terminals 後，看不到能叫出左側欄的按鈕。terminals 版面本身沒有側欄，ADR-26 的按鈕只在有側欄的版面出現，ADR-25 的齒輪要進設定才能換版面，不夠直接。做法：(1) terminals 上方列最左邊（space 前面）加一個側欄圖示按鈕，樣式同該列其他 31 px 圖示按鈕，提示「Show sidebar」與快捷鍵；(2) `sidebar.toggle`（Ctrl+Shift+B）在沒有側欄節點的版面，改為切到第一個有側欄的版面（內建是 workspace）並確保側欄顯示。所以「顯示側欄」在每個版面都是同一個圖示、同一個快捷鍵；切換時照常顯示「Layout: workspace」提示 |
 | ADR-28 | AgentDesk 98 移除（2026-11-20） | 使用者要求：準備公開到 GitHub，不要在版本庫裡留下模仿 Windows 98 的素材與程式。做法：刪除 `apps/desktop/win98_*.cpp`、`libs/ui` 的 win98 邏輯、`third_party/herdr/win98`（像素字型、圖示、圖片、音效）、`third_party/herdr/layouts/win98.json`、win98 單元測試，以及建置時複製 `win98\`、打包與 THIRD_PARTY_NOTICES 裡的對應項目；內建版面剩 workspace 與 terminals，keys.json 的 `layout:win98` 預設區段與 `win98.*` 命令一併拿掉。`ui.json` 存的版面是 win98 時顯示 workspace，舊格式版面檔的 style win98 讀成 workspace。取代 ADR-24 的隱藏做法 |
 | ADR-29 | 開放 mod 給其他人寫（2026-11-20） | 準備公開到 GitHub，讓別人也能寫 mod。四項準備：(1) 設定 › Mods 打開開關時不直接啟用，先在該列下方說明 mod 以使用者的 Windows 權限執行（能讀寫檔案、啟動程式、在終端機輸入）以及卡住時視窗會停住，按「Turn on」才啟用，每次啟用都會說明；關閉不需確認。(2) 相容性：介面新版本只在結構尾端加成員、不改不刪，AgentDesk 載入 api_version 介於 1 與自己版本之間的 mod（載入前結構清為零，舊 mod 不認得的成員是 NULL），比自己新的 mod 拒絕並在設定頁說明；`mod_sdk.hpp` 也改為只拒絕比標頭舊的 AgentDesk。目前只有版本 1，行為不變。(3) 卡住無法從程式中斷，`mod_api.h`、使用說明與開發指南寫明處理方式：終端機在 agent-host 繼續跑，結束 agent-ui、從 `mods_enabled` 拿掉 mod 再開。(4) 開發指南 `docs/mods.md`（英文）：檔案配置、建置、範例、host 與 mod 的每個呼叫、UI 執行緒規則、相容性、純 C 寫法、發布建議 |
+| ADR-30 | Mac 風格的視窗按鈕（2026-11-20） | 使用者要求換成 Mac 風格，並要求查過 UI 設計、風格可以一樣但不能抄。調查：macOS 的設計原則是標題列與工具列合一、側欄從頂端延伸到底且選取用圓角、視窗按鈕是左上三顆圓鈕並有一般、懸停、非作用中三種狀態（Apple HIG 側欄頁、WWDC25「Designing for macOS」）。AgentDesk 依 herdr 複刻，herdr 本身就照 macOS 設計，側欄、圓角與膠囊分頁已具備；差的是視窗按鈕，所以照 herdr-app 在 macOS 上的版面規則做：按鈕位置取版面的 `traffic_lights`（workspace [12, 16]、terminals [16, 18]），品牌列左側讓出 76 px，窄欄寬 76 px 且只放按鈕（展開用窄欄底部的 »），分頁列與 terminals 上方列從按鈕之後開始（分別留 12、10 px），右上角不畫 Windows 式按鈕。按鈕由 AgentDesk 自己畫，不用 Apple 的素材、字型或色碼：直徑 12、間距 8，自訂的紅、琥珀、綠，滑鼠在這組按鈕上時才顯示 ×、−、＋，視窗非作用中時改用框線色，按下時變暗；點擊區延伸到間距的一半。新設定 `window_buttons`（`mac` 預設、`windows`），設定 › Look 的「Window buttons」切換；舊的 `ui.json` 沒有這個鍵，所以一律改為 Mac 式 |
 | ADR-21 | 程式裡不出現 herdr 的名稱 | 使用者要求（2026-11-19）：執行檔、畫面與跟著發布的檔案只寫 AgentDesk。win98 版面改名 AgentDesk 98；開機、關於與開始選單側邊的「Herdr 98」圖片改由程式用像素字型畫出；Start 與 Update 圖示的 herdr 標誌換成 AgentDesk 的標誌（依 herdr art/generate.ts 的畫法重新產生）；預設主題 id 改為 `preset-<名稱>`，舊設定照樣讀得到。保留的部分：THIRD_PARTY_NOTICES 裡 herdr-app 的授權聲明（Apache-2.0 第 4 條要求）、原始碼註解裡的出處、版本庫的 `third_party/herdr/` |
 
 ### 7.2 主要風險

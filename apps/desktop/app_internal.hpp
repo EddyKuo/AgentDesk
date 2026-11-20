@@ -152,6 +152,9 @@ struct Settings {
     int terminal_weight = 500;   // terminal font weight (500: JetBrains Mono Medium)
     std::string ui_font;         // interface font family; "" = Geist (bundled)
     std::string appearance = "system";  // "system", "light" or "dark"
+    // "mac": three round buttons at the top left (the layout's traffic_lights); "windows": the usual
+    // minimize, maximize and close at the top right.
+    std::string window_buttons = "mac";
     std::string theme_dark = "midnight";
     std::string theme_light = "paper";
     // A layout is a look: each keeps its own dark and light theme (layout -> {dark, light}).
@@ -595,6 +598,13 @@ struct App::State {
     ui::FontSet fonts;
     float dpi = 1.0f;
     bool window_focused = true;
+    // This frame's round window buttons (traffic_lights_input): where they start and the pointer.
+    struct TrafficLights {
+        bool shown = false;
+        ImVec2 at{};
+        bool group_hovered = false;
+        int held = -1;  // 0 close, 1 minimize, 2 zoom
+    } lights;
     std::atomic<bool> exit_now{false};  // also set by shutdown_host's answer (a HostClient thread)
     // Updates and Privacy.
     std::optional<Clock::time_point> updates_asked;  // Settings asked for an update check (polls while set)
@@ -974,6 +984,14 @@ void draw_shell_picker(App::State& s, const char* id, const char* target);
 void menu_separator();
 float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a, bool compact, bool measure = false);
 void window_drag_area(App::State& s, ImVec2 a, ImVec2 b);
+// Round window buttons (Settings > Look > Window buttons = "mac"). Input before the layout draws,
+// so the bars' drag areas leave them alone; paint after it, on top of the bars.
+bool mac_window_buttons(const App::State& s);
+void traffic_lights_input(App::State& s, ImVec2 origin);
+void traffic_lights_paint(App::State& s);
+// The first x a bar spanning [top, bottom] may use without covering the round buttons, `margin`
+// after them; `x` itself when they are not shown there.
+float clear_of_traffic_lights(const App::State& s, float x, float top, float bottom, float margin);
 
 // The space's git tail: "repo · branch" without the parts the name already says, main/master
 // dropped, then ahead/behind.

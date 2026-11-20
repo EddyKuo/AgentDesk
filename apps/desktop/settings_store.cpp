@@ -122,6 +122,7 @@ Settings load_settings_unchecked() {
     s.last_cwd = j.value("last_cwd", "");
     s.terminal_weight = std::clamp(j.value("terminal_weight", s.terminal_weight), 100, 900);
     s.ui_font = j.value("ui_font", "");
+    s.window_buttons = j.value("window_buttons", "mac") == "windows" ? "windows" : "mac";
     read_themes(j, s);
     s.zoom = std::clamp(j.value("zoom", 1.0f), 0.5f, 3.0f);
     s.font_size = std::clamp(j.value("font_size", 14.0f), 8.0f, 32.0f);  // the stepper's 8-32
@@ -199,6 +200,7 @@ void save_settings(const Settings& s) {
             {"terminal_weight", s.terminal_weight},
             {"ui_font", s.ui_font},
             {"appearance", s.appearance},
+            {"window_buttons", s.window_buttons},
             {"theme_dark", s.theme_dark},
             {"theme_light", s.theme_light},
             {"layout_themes",

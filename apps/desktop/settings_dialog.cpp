@@ -206,6 +206,10 @@ bool look_theme(App::State& s) {
                   {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}}))
         changed = true;
     settings_row_done(s);
+    settings_row(s, "Window buttons", "Round ones at the top left, or Windows' at the top right.", px(240), px(32));
+    if (segmented(s, "##window-buttons", s.settings.window_buttons, {{"mac", "Round"}, {"windows", "Windows"}}))
+        changed = true;
+    settings_row_done(s);
     settings_gap(px(12));
     settings_wrapped(s, "For the layout you're in: each layout keeps its own light and dark theme.",
                      g_pal->faint);

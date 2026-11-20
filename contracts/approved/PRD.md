@@ -1,6 +1,6 @@
 ---
 contract_type: PRD
-version: 3.1.0
+version: 3.2.0
 status: approved
 author_agent: PM
 sprint: 11
@@ -10,12 +10,13 @@ skills_used:
   - shared/domain-coding-agents@1.0.0
 upstream_deps:
   - raw_requirement@2026-11-16
-  - docs/design/AgentDesk_Design.md@2.19
+  - docs/design/AgentDesk_Design.md@2.20
   - sprint/current/status.md@2026-11-20
 downstream_consumers:
   - RD
   - QA
 change_summary: |
+  3.2.0（Minor）：新增 FR-39 Mac 風格的視窗按鈕（ADR-30，設計文件 v2.20，使用者 2026-11-20 要求），既有需求不變。
   3.1.0（Minor）：FR-27 加一條驗收：在設定裡打開 mod 前先說明權限，確認才啟用（ADR-29，設計文件 v2.19）；mod 介面相容性規則見設計文件 ADR-29 與 `docs/mods.md`。既有需求不變。
   3.0.0（Major）：移除 AgentDesk 98（ADR-28，設計文件 v2.18，使用者 2026-11-20 要求，準備公開到 GitHub）。FR-27 的內建版面只剩 workspace、terminals 與自訂 JSON，FR-33 拿掉 AgentDesk 98 的圖片與圖示描述；刪除需求內容，依憲法 6.3 升主版號（下游 RD、QA 需重新確認 FR-27、FR-33）。程式、素材與 win98 測試已刪除；`ui.json` 存的 win98 改顯示 workspace。上一版保存在 `contracts/deprecated/PRD_v2.2.0.md`。
   2.2.0（Minor）：FR-27 的 AgentDesk 98 暫時隱藏（ADR-24，設計文件 v2.14，使用者 2026-11-20 要求）。需求內容保留、程式保留，重新開放不需改版；目前可切換的內建版面是 workspace 與 terminals。
@@ -263,3 +264,13 @@ v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外�
 - Given 使用者移動並調整視窗大小後關閉，When 再次開啟，Then 回到同一個螢幕、位置與大小；關閉時是最大化就以最大化開啟。
 - Given 上次的螢幕已經不在，When 開啟，Then 以上次的大小置中於滑鼠所在的螢幕，而且不超出可用範圍。
 **驗證**: `WindowPlace.*`；實機（status.md 2026-11-20「視窗依螢幕自動調整大小、記住位置」）。
+
+### FR-39 Mac 風格的視窗按鈕（ADR-30）
+**優先級**: P2
+**描述**: 視窗按鈕預設是左上角三顆圓鈕（關閉、最小化、縮放），位置與周圍留白依版面的 `traffic_lights`；設定 › Look › Window buttons 可改回 Windows 式的右上按鈕。圖形與顏色由 AgentDesk 自己繪製，不使用 Apple 的素材。設計文件 4.1。
+**驗收標準**:
+- Given 預設設定，When 視窗打開，Then 左上角有三顆圓鈕，右上角沒有 Windows 式按鈕，品牌列、分頁列與 terminals 上方列都不被圓鈕遮住。
+- Given 滑鼠移到圓鈕上，When 停留，Then 三顆都顯示符號（×、−、＋）；點擊分別關閉（只關介面）、最小化、切換最大化。
+- Given 視窗不在前景，When 畫面更新，Then 圓鈕顯示為灰色。
+- Given 使用者在設定選 Windows，When 關閉設定，Then 圓鈕消失，分頁列右端出現最小化、最大化、關閉。
+**驗證**: 截圖（status.md 2026-11-20「Mac 風格的視窗按鈕」）。
