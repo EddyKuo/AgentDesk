@@ -897,9 +897,18 @@ Outcome exec_app_command(App::State& s, const Command& c) {
     } else if (name == "sidebar.rail") {
         return toggle_sidebar_rail(s);
     } else if (name == "sidebar.toggle") {
-        // layout.toggle on the "sidebar" node; nothing when the layout has none.
+        // layout.toggle on the "sidebar" node. A layout without one (terminals) switches to the first
+        // layout that has a sidebar, shown, so "show the sidebar" works from every layout.
         if (s.layout().tree.find("sidebar") != nullptr)
             return *layout_command(s, "layout.toggle", "sidebar");
+        for (auto& l : s.layouts)
+            if (lay::Node* side = l.tree.find("sidebar"); side != nullptr) {
+                if (side->hidden) {
+                    side->hidden = false;
+                    save_layout_state(l);
+                }
+                return exec_command(s, "layout.switch:" + l.name);
+            }
     } else if (name == "details.toggle") {
         s.settings.details = !s.settings.details;
         save_settings(s.settings);

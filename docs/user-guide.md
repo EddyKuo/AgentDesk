@@ -62,7 +62,7 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 | Alt+↑／Alt+↓ | 上一個／下一個 Agent |
 | F2／Shift+F2 | 分頁／space 改名 |
 | Ctrl+Shift+F | 在終端機裡搜尋 |
-| Ctrl+Shift+B | 隱藏或顯示側欄 |
+| Ctrl+Shift+B | 隱藏或顯示側欄（在沒有側欄的 terminals 版面，切回 AgentDesk 版面） |
 | Ctrl+Shift+L | 切換版面 |
 | Ctrl+= ／Ctrl+- ／Ctrl+0 | 放大／縮小／重設整個視窗 |
 | Ctrl+, | 設定 |
@@ -147,7 +147,7 @@ agentctl report "found 3 problems: ..."
 Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 
 - **workspace**（設定裡顯示為 AgentDesk）：預設，側欄＋分頁＋分割面板＋右側面板。
-- **terminals**：沒有側欄與狀態列的版面。上方的分頁列左邊是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是設定（齒輪，可在這裡切回 AgentDesk 版面）、命令面板與新分頁按鈕，滑鼠停在按鈕上會顯示名稱與快捷鍵。面板標題列的按鈕一直顯示。
+- **terminals**：沒有側欄與狀態列的版面。上方列最左邊是側欄按鈕（點了切回有側欄的 AgentDesk 版面，Ctrl+Shift+B 也可以），接著是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是設定（齒輪，可在這裡切回 AgentDesk 版面）、命令面板與新分頁按鈕，滑鼠停在按鈕上會顯示名稱與快捷鍵。面板標題列的按鈕一直顯示。
 
 自訂版面放在 `%LOCALAPPDATA%\AgentDesk\layouts\<名稱>.json`：
 

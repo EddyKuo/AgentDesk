@@ -128,6 +128,24 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
     // Space chip: 30 px high and round, 10 px left and 12 px right padding, 8 px gap; a 15 px icon
     // and the space name (at most 160 px).
     float x = pos.x;
+    // Not in the original bar: this layout has no sidebar, so its first button brings one back
+    // (sidebar.toggle switches to the AgentDesk layout), the same button and shortcut as there.
+    {
+        const float side = px(17) + px(14);
+        const ImVec2 a(x, cy - side * 0.5f);
+        ImGui::SetCursorScreenPos(a);
+        const bool hit = ImGui::InvisibleButton("##tm-sidebar", ImVec2(side, side));
+        const bool hov = ImGui::IsItemHovered();
+        if (hov) {
+            dl->AddRectFilled(a, ImVec2(a.x + side, a.y + side), l.chip, px(8));
+            const std::string chord = s.keymap.chord_for("sidebar.toggle");
+            ImGui::SetTooltip("%s", chord.empty() ? "Show sidebar" : ("Show sidebar  " + chord).c_str());
+        }
+        draw_icon(s, dl, ui::icon::kSidebar, fpx(17), ImVec2(a.x + side * 0.5f, cy), hov ? l.text : l.dim);
+        if (hit)
+            run_command(s, "sidebar.toggle");
+        x += side + px(8);
+    }
     const auto cwds = s.session_cwds();
     const std::string sname = s.ws.space_title(s.ws.active_space, cwds);
     const float nw = std::min(s.fonts.ui->CalcTextSizeA(fpx(13), FLT_MAX, 0, sname.c_str()).x, px(160));
