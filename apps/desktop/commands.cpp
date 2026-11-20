@@ -873,7 +873,16 @@ Outcome exec_app_command(App::State& s, const Command& c) {
         s.show_welcome = true;
     } else if (name == "sidebar.rail") {
         return toggle_sidebar_rail(s);
+    } else if (name == "focus.toggle" || name == "focus.on" || name == "focus.off") {
+        set_focus(s, name == "focus.on" || (name == "focus.toggle" && !s.settings.focus_on));
     } else if (name == "sidebar.toggle") {
+        // In Focus the sidebar is not drawn: asking for it leaves Focus, and shows it if hidden.
+        if (s.settings.focus_on) {
+            set_focus(s, false);
+            const lay::Node* side = s.layout().tree.find("sidebar");
+            if (side == nullptr || !side->hidden)
+                return kDone;
+        }
         // layout.toggle on the "sidebar" node. A layout without one (terminals) switches to the first
         // layout that has a sidebar, shown, so "show the sidebar" works from every layout.
         if (s.layout().tree.find("sidebar") != nullptr)

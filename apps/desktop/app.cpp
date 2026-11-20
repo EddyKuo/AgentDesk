@@ -370,10 +370,14 @@ long long App::next_wakeup_ms() const {
         ms = std::min<long long>(ms, 250);
     if (s_->updates_asked)
         ms = std::min<long long>(ms, 300);  // Settings polls the update check every 300 ms
+    // The working mark spins; in Focus only the pane header (while shown) has one.
+    const bool spinners = !s_->settings.focus_on || s_->focus_mode.header.alpha() > 0.0f;
     for (const auto& [id, v] : s_->views_by_id) {
-        if (v.agent_state == "Working")
-            ms = std::min<long long>(ms, 50);  // the working mark spins
+        if (v.agent_state == "Working" && spinners)
+            ms = std::min<long long>(ms, 50);
     }
+    if (focus_animating(*s_))
+        ms = std::min<long long>(ms, 16);  // the edge glow, the header fading
     if (s_->layout().style == "mac") {  // the menu bar clock turns over on the minute
         const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
                                   std::chrono::system_clock::now().time_since_epoch())

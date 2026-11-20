@@ -10,9 +10,12 @@ namespace {
 // Each layout style frames its panes differently:
 // - default: radius 10, a 1 px border (the accent when focused), a 30 px header;
 // - Terminals: radius 12, a quiet border and focus edge, its own 38 px header.
-enum class PaneStyle : std::uint8_t { kDefault, kTerminals };
+// - Focus mode: no frame, the default header only while the pointer rests at the top.
+enum class PaneStyle : std::uint8_t { kDefault, kTerminals, kFocus };
 
 PaneStyle pane_style(App::State& s) {
+    if (s.settings.focus_on)
+        return PaneStyle::kFocus;
     return s.layout().style == "terminals" ? PaneStyle::kTerminals : PaneStyle::kDefault;
 }
 
@@ -50,7 +53,8 @@ std::string default_pane_title(App::State& s, const std::string& id, const ui::S
 void draw_pane_grip(App::State& s, ImDrawList* dl, const std::string& id, ImVec2 pos, ImVec2 max, float w,
                     float header_h, float cy) {
     const auto* tab = s.ws.active_tab();
-    const bool can_drag = tab != nullptr && tab->zoomed.empty() && s.ws.sessions_in(*tab).size() >= 2;
+    const bool can_drag = tab != nullptr && tab->zoomed.empty() && s.ws.sessions_in(*tab).size() >= 2 &&
+                          !s.settings.focus_on;  // Focus shows one pane: nowhere to drop it
     const bool header_hov = ImGui::IsMouseHoveringRect(pos, ImVec2(max.x, pos.y + header_h), false);
     if (!can_drag || !(header_hov || s.drag_pane == id))
         return;
@@ -276,6 +280,7 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
         return;
     const auto& v = vit->second;
     s.views[id];  // make sure the pane has its view state
+    s.drawn_sessions.insert(id);
     const bool focused = s.ws.focused_session() == id;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 pos(r.x, r.y);
@@ -299,6 +304,54 @@ void draw_pane(App::State& s, const std::string& id, ui::Rect r, bool connected)
     const ImVec2 body_size(r.w - px(tm ? 20.0f : 28.0f), max.y - top - (tm ? px(12) : px(2) + px(12)));
     if (body_size.x > px(20) && body_size.y > px(10))
         draw_pane_body(s, id, v, *sit->second, body_min, body_size);
+    ImGui::PopID();
+}
+
+// Focus mode's one pane: the terminal fills the area on its own background (12 px sides, 8 px top,
+// 6 px bottom). The default header fades in over the terminal's top 30 px once the pointer has
+// rested there (ui::focus::HeaderReveal), so the terminal never changes size for it.
+void draw_focus_pane(App::State& s, const std::string& id, ui::Rect r, bool connected) {
+    const auto vit = s.views_by_id.find(id);
+    const auto sit = s.by_id.find(id);
+    if (vit == s.views_by_id.end() || sit == s.by_id.end())
+        return;
+    const auto& v = vit->second;
+    s.views[id];
+    s.drawn_sessions.insert(id);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 pos(r.x, r.y);
+    const ImVec2 max(r.x + r.w, r.y + r.h);
+    dl->AddRectFilled(pos, max, g_pal->term_bg);
+    const float header_h = px(30);
+    const bool in_band =
+        ImGui::IsMouseHoveringRect(pos, ImVec2(max.x, pos.y + header_h), false) &&
+        ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    // A drag that started in the terminal (selecting text) does not bring the header up.
+    const bool band = in_band && (s.focus_mode.header.alpha() > 0.0f || !ImGui::IsMouseDown(ImGuiMouseButton_Left));
+    const double now_ms =
+        std::chrono::duration<double, std::milli>(Clock::now().time_since_epoch()).count();
+    const float a = s.focus_mode.header.update(band, now_ms);
+    ImGui::PushID(id.c_str());
+    const float top = draw_pane_banner(s, dl, id, v, *sit->second, pos, max, pos.y + px(8), connected);
+    const ImVec2 body_min(pos.x + px(12), top);
+    const ImVec2 body_size(r.w - px(24), max.y - top - px(6));
+    if (body_size.x > px(20) && body_size.y > px(10))
+        draw_pane_body(s, id, v, *sit->second, body_min, body_size);
+    if (a > 0.0f) {
+        // Its own child window after the body's, so it sits over the terminal and takes the clicks.
+        ImGui::SetCursorScreenPos(pos);
+        ImGui::BeginChild("##focus-header", ImVec2(r.w, header_h), ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar |
+                              ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoNav);
+        ImDrawList* hd = ImGui::GetWindowDrawList();
+        with_alpha(hd, a, [&] {
+            hd->AddRectFilled(pos, ImVec2(max.x, pos.y + header_h), g_pal->sidebar);
+            hd->AddLine(ImVec2(pos.x, pos.y + header_h - 1.0f), ImVec2(max.x, pos.y + header_h - 1.0f),
+                        g_pal->border);
+            draw_default_pane_header(s, id, v, pos, max, r.w, header_h);
+        });
+        ImGui::EndChild();
+    }
     ImGui::PopID();
 }
 
@@ -412,6 +465,23 @@ void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected) {
     s.pane_area = {pos.x, pos.y, size.x, size.y};
     ui::Tab* tab = s.ws.active_tab();
     ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (s.settings.focus_on) {
+        // Only the focused pane, at the tab's full size; the tab's own splits and zoom stay as
+        // they are for when Focus ends.
+        s.pane_rects.clear();
+        std::string id = tab != nullptr ? s.ws.focused_session() : std::string();
+        if (id.empty() && tab != nullptr) {
+            const auto ids = s.ws.sessions_in(*tab);
+            id = !tab->zoomed.empty() ? tab->zoomed : ids.empty() ? std::string() : ids.front();
+        }
+        if (id.empty() && !connected)
+            draw_no_tab(s, dl, pos, size, connected);  // "Connecting to agent-host..."
+        else if (id.empty())
+            draw_focus_empty(s, dl, pos, size, connected);
+        else
+            draw_focus_pane(s, id, ui::Rect{pos.x, pos.y, size.x, size.y}, connected);
+        return;
+    }
     if (tab == nullptr) {
         draw_no_tab(s, dl, pos, size, connected);
         return;

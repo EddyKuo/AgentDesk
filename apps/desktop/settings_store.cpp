@@ -147,6 +147,12 @@ Settings load_settings_unchecked() {
     s.sound_blocked = j.value("sound_blocked", "");
     s.welcomed = j.value("welcomed", "");
     s.seen_version = j.value("seen_version", "");
+    s.focus_on = j.value("focus_on", false);
+    s.focus_alerts = ui::focus::alerts_mode(j.value("focus_alerts", std::string("edge_sound")));
+    s.layout_return = j.value("layout_return", "");
+    s.mission_filter = j.value("mission_filter", std::string("all"));
+    s.mission_sub_agents = j.value("mission_sub_agents", false);
+    s.mission_shells = j.value("mission_shells", false);
     read_lists(j, s);
     s.layout = j.value("layout", s.layout);
     for (const auto& m : j.value("machines", Json::array())) {
@@ -234,6 +240,12 @@ void save_settings(const Settings& s) {
             {"sound_blocked", s.sound_blocked},
             {"welcomed", s.welcomed},
             {"seen_version", s.seen_version},
+            {"focus_on", s.focus_on},
+            {"focus_alerts", s.focus_alerts},
+            {"layout_return", s.layout_return},
+            {"mission_filter", s.mission_filter},
+            {"mission_sub_agents", s.mission_sub_agents},
+            {"mission_shells", s.mission_shells},
             {"folded_machines", s.folded_machines},
             {"panels", s.panels},
             {"agents_changed", s.agents_changed},

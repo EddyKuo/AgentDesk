@@ -36,12 +36,15 @@ void derive_layout(LayoutSpec& l) {
     l.look_applies = theme.empty() || palette_exists(theme);
     l.theme = palette_exists(theme) ? theme : std::string();
     l.style.clear();
+    // "", "terminals", "mac", "focus" (Focus mode's tree) or "mission".
     for (const lay::Node* n : t.walk()) {
         const std::string m = n->mod();
         if (m == "mac-menubar" || m == "mac-dock" || m == "mac-window-title")  // wins over the rest
             l.style = "mac";
         else if (m == "terminals-bar" && l.style.empty())
             l.style = "terminals";
+        else if (m == "focus-strip" && l.style.empty())
+            l.style = "focus";
         if (n->is_block() && n->content.type == lay::Content::Type::kTab && n->content.pane &&
             n->content.pane->header && n->content.pane->header->mod() == "terminals-pane" && l.style.empty())
             l.style = "terminals";

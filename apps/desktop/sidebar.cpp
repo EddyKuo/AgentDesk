@@ -801,6 +801,14 @@ AgentList collect_agents(App::State& s, bool rail, bool by_priority) {
     return out;
 }
 
+}  // namespace
+
+AgentRoster agent_roster(App::State& s) {
+    AgentList l = collect_agents(s, false, s.settings.agents_sort != "space");
+    return {std::move(l.ids), std::move(l.urgency), std::move(l.kids)};
+}
+
+namespace {
 // A row reads "space · detail": the detail is a tab someone named or the agent's own title, never
 // an automatic tab number unless two rows would otherwise read the same.
 void label_agents(App::State& s, AgentList& out) {

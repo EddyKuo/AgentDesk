@@ -1,0 +1,27 @@
+{
+  "id": "root",
+  "type": "column",
+  "titlebar": "none",
+  "children": [
+    {
+      "id": "main",
+      "type": "block",
+      "content": {
+        "tab": "active",
+        "pane": {
+          "lone": true,
+          "radius": 0,
+          "background": "background",
+          "header": { "content": { "mod": "pane" }, "height": 30, "reveal": "hover" }
+        }
+      }
+    },
+    {
+      "id": "focus-strip",
+      "type": "block",
+      "size": { "px": 22 },
+      "window_drag": true,
+      "content": { "mod": "focus-strip" }
+    }
+  ]
+}

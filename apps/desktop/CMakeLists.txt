@@ -26,6 +26,8 @@ agentdesk_executable(agent-ui WIN32
     themes.cpp
     welcome.cpp
     worktrees.cpp
+    focus_mode.cpp
+    state_card.cpp
     agent-ui.manifest)
 target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc d3d11 dxgi dwmapi shcore dbghelp winmm imm32 shell32 nlohmann_json::nlohmann_json)
 # The UI starts agent-host.exe from its own directory (design doc 2.2).

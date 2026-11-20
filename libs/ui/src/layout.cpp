@@ -14,6 +14,7 @@ namespace detail {
 extern const char* const kPresetMain;
 extern const char* const kPresetTerminals;
 extern const char* const kPresetMac;
+extern const char* const kPresetFocus;
 }  // namespace detail
 
 namespace {
@@ -1076,6 +1077,8 @@ std::string_view builtin_text(std::string_view name) {
         return detail::kPresetTerminals;
     if (h == "mac")
         return detail::kPresetMac;
+    if (h == "focus")  // Focus mode's tree: built in, but not one of the layouts to pick
+        return detail::kPresetFocus;
     return {};
 }
 

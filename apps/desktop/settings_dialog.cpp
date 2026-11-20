@@ -582,6 +582,14 @@ bool settings_alerts(App::State& s) {
     };
     sound_row("An agent needs you", s.settings.sound_blocked, true);
     sound_row("An agent finished", s.settings.sound_done, false);
+    // Focus mode, with the window in front: the window's edge glows instead of the note.
+    settings_row(s, "In focus mode",
+                 "With the window in front, the window's edge glows instead of a note.",
+                 px(240), px(32));
+    if (segmented(s, "##st-focus-alerts", s.settings.focus_alerts,
+                  {{"edge", "Edge"}, {"edge_sound", "Edge + sound"}, {"normal", "Usual"}}))
+        changed = true;
+    settings_row_done(s);
     settings_footnote(
         s,
         "Want your own sounds? Ask your agent to set sound_done and sound_blocked in ui.json to "

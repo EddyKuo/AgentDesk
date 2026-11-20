@@ -150,7 +150,7 @@ void draw_toasts(App::State& s) {
     const float pill = draw_update_pill(s);
     float y = vp->WorkPos.y + vp->WorkSize.y - px(16) - pill;
     // The Mac layout keeps its Dock at the bottom: notes drop in under the menu bar, top right.
-    const bool top = s.layout().style == "mac";
+    const bool top = s.layout().style == "mac" && !s.settings.focus_on;
     if (top)
         y = vp->WorkPos.y + px(28) + px(10);
     const float w = px(340);
