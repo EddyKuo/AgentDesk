@@ -230,7 +230,7 @@ void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
 // ------------------------------------------------------------------ --input automation
 // The script is ";"-separated steps run one per turn after the --run commands, once sessions
 // exist: wait:MS, move:X,Y, click / rclick / mclick / dblclick:X,Y, press:X,Y and release:X,Y
-// (a drag, with move steps between), key:NAME, type:TEXT, and shot:NAME (asks the screenshot
+// (a drag, with move steps between), key:NAME, type:TEXT, wheel:N, and shot:NAME (asks the screenshot
 // tool for a picture and waits until it has taken it, up to 10 s).
 
 ImGuiKey input_key(const std::string& n) {
@@ -329,6 +329,8 @@ void run_input_step(App::State& s, const std::string& step, Clock::time_point no
         }
     } else if (op == "type") {
         io.AddInputCharactersUTF8(arg.c_str());
+    } else if (op == "wheel") {  // wheel:N, notches (negative scrolls down) where the mouse is
+        io.AddMouseWheelEvent(0, static_cast<float>(std::atof(arg.c_str())));
     } else if (op == "shot" && !s.config.shot_signal.empty()) {
         std::ofstream(s.config.shot_signal, std::ios::binary) << arg;
         s.input_shot_wait = true;
@@ -536,7 +538,7 @@ void App::frame() {
     s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
     const auto theme_pair = layout_theme_pair(s.settings);
     if (const Palette* want =
-            effective_palette(s.settings.appearance, theme_pair.first, theme_pair.second, s.layout().theme);
+            effective_palette(resolved_appearance(s), theme_pair.first, theme_pair.second, s.layout().theme);
         want != g_pal) {
         g_pal = want;
         apply_style(s.dpi, ui_scale(s.settings));

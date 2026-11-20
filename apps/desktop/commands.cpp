@@ -1137,6 +1137,8 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         return exec_command(s, c.arg.empty() ? al->second : al->second + ":" + c.arg);
     if (c.name == "mod.open" && c.arg == "picker")
         return exec_command(s, "app.picker");
+    if (auto r = exec_theme_command(s, c.name, c.arg))  // appearance:*, theme.* (theme_commands.cpp)
+        return *r;
     for (const auto group :
          {exec_launch_command, exec_pane_command, exec_tab_space_command, exec_agent_command,
           exec_worktree_command, exec_app_command, exec_layout_mod_command})

@@ -43,10 +43,12 @@
 #include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/ui/chrome_logic.hpp"
+#include "agentdesk/ui/color_math.hpp"
 #include "agentdesk/ui/git_info.hpp"
 #include "agentdesk/ui/image_cache.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
 #include "agentdesk/ui/programs.hpp"
+#include "agentdesk/ui/schedule.hpp"
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/mac_layout.hpp"
@@ -152,7 +154,7 @@ struct Settings {
     std::string terminal_font;   // font family; "" = JetBrains Mono (bundled)
     int terminal_weight = 500;   // terminal font weight (500: JetBrains Mono Medium)
     std::string ui_font;         // interface font family; "" = Geist (bundled)
-    std::string appearance = "system";  // "system", "light" or "dark"
+    std::string appearance = "system";  // "system", "light", "dark" or "schedule"
     // "mac": three round buttons at the top left (the layout's traffic_lights); "windows": the usual
     // minimize, maximize and close at the top right.
     std::string window_buttons = "mac";
@@ -172,6 +174,11 @@ struct Settings {
     Json agents_changed = Json::object();  // session id -> {s: state, at: ms since 1970}
     // On unless the file says "telemetry": false; turning it on again removes the key.
     bool telemetry = true;
+    // Appearance "schedule": light and dark by clock time or by the sun (appearance.cpp).
+    ui::schedule::AppearanceSchedule appearance_schedule;
+    // Tint by agent state (ambient.cpp): "off" or "subtle"; also a cool tint for finished agents.
+    std::string ambient = "off";
+    bool ambient_done = false;
 };
 // %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk; created when missing.
 std::filesystem::path data_dir();
@@ -315,6 +322,12 @@ inline constexpr CommandInfo kCommands[] = {
     {"mods.reload", "Reload mods and layouts"},
     {"mods.folder", "Open the mods folder"},
     {"app.exit_all", "Exit and stop all sessions"},
+    // Theme features (theme_commands.cpp).
+    {"appearance:system", "Appearance: System"},
+    {"appearance:light", "Appearance: Light"},
+    {"appearance:dark", "Appearance: Dark"},
+    {"appearance:schedule", "Appearance: Schedule"},
+    {"appearance.toggle", "Toggle light / dark"},
 };
 bool known_command(std::string_view name);
 
@@ -598,6 +611,9 @@ struct App::State {
     Clock::time_point keys_checked{};
     ui::FontSet fonts;
     float dpi = 1.0f;
+    // Appearance "schedule": appearance.toggle shows the other look until the next switch.
+    std::optional<std::chrono::system_clock::time_point> schedule_override_until;
+    bool schedule_override_light = false;
     bool window_focused = true;
     // This frame's round window buttons (traffic_lights_input): where they start and the pointer.
     struct TrafficLights {
@@ -1171,6 +1187,16 @@ void draw_notes(App::State& s);
 void draw_confirm(App::State& s);
 void draw_exit(App::State& s);
 void draw_close_notice(App::State& s);
+
+// ------------------------------------------------------------ theme features
+// appearance.cpp: the appearance to pick the theme half by ("system", "light" or "dark"), with
+// "schedule" worked out; the Settings rows under Appearance when it is "schedule".
+std::string resolved_appearance(App::State& s);
+std::optional<std::string> exec_appearance_command(App::State& s, const std::string& name, const std::string& arg);
+bool look_schedule(App::State& s);
+// theme_commands.cpp: appearance:*, appearance.toggle and theme.* (nullopt: not one of them,
+// else "" when it ran or why it failed).
+std::optional<std::string> exec_theme_command(App::State& s, const std::string& name, const std::string& arg);
 }  // namespace detail
 
 }  // namespace agentdesk::desktop

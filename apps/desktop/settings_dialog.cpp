@@ -201,11 +201,15 @@ bool look_theme_cards(App::State& s, bool light_cards) {
 bool look_theme(App::State& s) {
     bool changed = false;
     settings_section(s, "Theme");
-    settings_row(s, "Appearance", "Light or dark, or as your system is now.", px(240), px(32));
+    settings_row(s, "Appearance", "Schedule switches by the clock.", px(320), px(32));
     if (segmented(s, "##appearance", s.settings.appearance,
-                  {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}}))
+                  {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}, {"schedule", "Schedule"}})) {
+        s.schedule_override_until.reset();
         changed = true;
+    }
     settings_row_done(s);
+    if (s.settings.appearance == "schedule")
+        changed |= look_schedule(s);
     settings_row(s, "Window buttons", "Round ones at the top left, or Windows' at the top right.", px(240), px(32));
     if (segmented(s, "##window-buttons", s.settings.window_buttons, {{"mac", "Round"}, {"windows", "Windows"}}))
         changed = true;
