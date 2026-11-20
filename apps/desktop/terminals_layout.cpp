@@ -100,8 +100,9 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
         window_drag_area(s, pos, ImVec2(pos.x + width, pos.y + height));
         return;
     }
-    // Icon buttons: 7 px padding, radius 8, 17 px dim icons; hover adds the chip and the text colour.
-    auto icon_btn = [&](const char* id, const char* glyph, const char* cmd) {
+    // Icon buttons: 7 px padding, radius 8, 17 px dim icons; hover adds the chip and the text colour
+    // and a tooltip with the button's name and its shortcut, so the bar can be learned by pointing.
+    auto icon_btn = [&](const char* id, const char* glyph, const char* cmd, const char* name) {
         const float side = px(17) + px(14);
         right -= side;
         const ImVec2 a(right, cy - side * 0.5f);
@@ -111,12 +112,19 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
         if (hov)
             dl->AddRectFilled(a, ImVec2(a.x + side, a.y + side), l.chip, px(8));
         draw_icon(s, dl, glyph, fpx(17), ImVec2(a.x + side * 0.5f, cy), hov ? l.text : l.dim);
+        if (hov) {
+            const std::string chord = s.keymap.chord_for(cmd);
+            ImGui::SetTooltip("%s", chord.empty() ? name : (std::string(name) + "  " + chord).c_str());
+        }
         if (hit)
             run_command(s, cmd);
         right -= px(8);
     };
-    icon_btn("##tm-new", ui::icon::kPlus, "tab.new");             // no menu: a new tab at once
-    icon_btn("##tm-keys", "\xF3\xB0\x98\xB3", "app.palette");  // nf-md-apple_keyboard_command
+    icon_btn("##tm-new", ui::icon::kPlus, "tab.new", "New tab");                 // no menu: a new tab at once
+    icon_btn("##tm-keys", "\xF3\xB0\x98\xB3", "app.palette", "Commands");  // nf-md-apple_keyboard_command
+    // Not in the original bar: this layout has no sidebar, so without this button Settings (and the
+    // layout picker on its Look page) could only be found through a shortcut or the palette.
+    icon_btn("##tm-settings", ui::icon::kSettings, "app.settings", "Settings and layouts");
     // Space chip: 30 px high and round, 10 px left and 12 px right padding, 8 px gap; a 15 px icon
     // and the space name (at most 160 px).
     float x = pos.x;

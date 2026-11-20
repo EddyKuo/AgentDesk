@@ -147,7 +147,7 @@ agentctl report "found 3 problems: ..."
 Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 
 - **workspace**（設定裡顯示為 AgentDesk）：預設，側欄＋分頁＋分割面板＋右側面板。
-- **terminals**：沒有側欄與狀態列的版面。上方的分頁列左邊是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是命令面板與新分頁按鈕。面板標題列的按鈕一直顯示。
+- **terminals**：沒有側欄與狀態列的版面。上方的分頁列左邊是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是設定（齒輪，可在這裡切回 AgentDesk 版面）、命令面板與新分頁按鈕，滑鼠停在按鈕上會顯示名稱與快捷鍵。面板標題列的按鈕一直顯示。
 
 自訂版面放在 `%LOCALAPPDATA%\AgentDesk\layouts\<名稱>.json`：
 
