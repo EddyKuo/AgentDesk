@@ -308,8 +308,7 @@ void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 siz
         d->AddRect(wa, wb, g_pal->border, px(4));
         for (int i = 0; i < 3; ++i)
             d->AddCircleFilled(ImVec2(wa.x + px(4) + static_cast<float>(i) * px(4), wa.y + px(3.5f)), px(1.3f),
-                               i == 0 ? IM_COL32(232, 98, 88, 255)
-                                      : i == 1 ? IM_COL32(230, 176, 62, 255) : IM_COL32(86, 182, 86, 255));
+                               window_button_color(i, g_pal->card));
         const float pw = (wb.x - wa.x - px(9)) * 0.5f;
         term(ImVec2(wa.x + px(3), wa.y + px(7)), ImVec2(wa.x + px(3) + pw, wb.y - px(3)));
         term(ImVec2(wb.x - px(3) - pw, wa.y + px(7)), ImVec2(wb.x - px(3), wb.y - px(3)));

@@ -144,7 +144,16 @@ float draw_strip_window_buttons(App::State& s, float right, float top, float h) 
                     fpx(13), nullptr, g_pal->dim))
         ::ShowWindow(s.config.hwnd, zoomed ? SW_RESTORE : SW_MAXIMIZE);
     x += b + px(2);
-    if (icon_button(s, "##fwin-close", ui::icon::kWinClose, ImVec2(x, y), b, fpx(13), nullptr, g_pal->dim))
+    // Close: the theme's close colour under the pointer, as in the tab bar.
+    ImGui::SetCursorScreenPos(ImVec2(x, y));
+    const bool close = ImGui::InvisibleButton("##fwin-close", ImVec2(b, b));
+    const bool hov = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (hov)
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + b, y + b), window_button_color(0, g_pal->sidebar), px(6));
+    draw_icon(s, dl, ui::icon::kWinClose, fpx(13), ImVec2(x + b * 0.5f, y + b * 0.5f),
+              hov ? window_button_glyph(0, g_pal->sidebar) : g_pal->dim);
+    if (close)
         ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
     return left - px(8);
 }

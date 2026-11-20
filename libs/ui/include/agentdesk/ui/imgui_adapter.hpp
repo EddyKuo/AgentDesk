@@ -24,6 +24,10 @@ void set_ime_caret(ImVec2 caret_top_left, float line_height);
 // True when the key was pressed this frame (with repeat) and is owned by the active grid item.
 bool key_pressed_owned(ImGuiKey key, const char* str_id);
 
+// Called inside a window (a modal): takes the keyboard away from an item of another window that
+// holds it (a terminal grid stays active through a modal otherwise, and would see its keys).
+void release_keyboard();
+
 // Turns off ImGui's Ctrl+Tab window switcher: AgentDesk uses Ctrl+Tab to switch tabs.
 void disable_nav_windowing();
 

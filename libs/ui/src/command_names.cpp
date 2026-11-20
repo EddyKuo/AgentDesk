@@ -32,7 +32,9 @@ bool is_builtin_command(std::string_view name) {
         "appearance", "appearance.toggle", "theme.suggested", "theme.ambient", "theme.new", "theme.edit",
         "theme.folder", "theme.delete",
         // the style layouts (Tiling, Cockpit, Classic)
-        "tiling.resize_mode", "tiling.gaps", "cockpit.reset_today", "classic.menu", "classic.effects"};
+        "tiling.resize_mode", "tiling.gaps", "cockpit.reset_today", "classic.menu", "classic.effects",
+        // first-use tips for the shown layout
+        "layout.tips"};
     // clang-format on
     return kNames.contains(name);
 }

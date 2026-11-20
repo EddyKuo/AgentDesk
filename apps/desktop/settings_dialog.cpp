@@ -412,6 +412,7 @@ bool settings_look(App::State& s) {
     settings_section(s, "Layout");
     look_layout_cards(s);
     bool changed = look_style_options(s);  // the shown style's own rows, if any
+    changed |= look_tips_row(s);
     settings_gap(px(18));
     changed |= look_theme(s);
     settings_gap(px(18));
@@ -792,7 +793,7 @@ void draw_settings(App::State& s) {
     ImGui::EndChild();
     if (changed)
         save_settings(s.settings);
-    if (close || ImGui::IsKeyPressed(ImGuiKey_Escape))
+    if (close || std::exchange(s.layout_tips.close_settings, false) || ImGui::IsKeyPressed(ImGuiKey_Escape))
         ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
 }

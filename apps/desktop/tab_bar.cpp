@@ -138,10 +138,11 @@ void draw_window_buttons(App::State& s, float right, float top, float h) {
     const bool close = ImGui::InvisibleButton("##win-close", ImVec2(b, b));
     const bool hov = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
+    // Under the pointer close takes the theme's close colour, as the round buttons do.
     if (hov)
-        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + b, y + b), g_pal->hover, px(6));
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + b, y + b), window_button_color(0, g_pal->sidebar), px(6));
     draw_icon(s, dl, ui::icon::kWinClose, fpx(16), ImVec2(x + b * 0.5f, y + b * 0.5f),
-              hov ? g_pal->text : g_pal->dim);
+              hov ? window_button_glyph(0, g_pal->sidebar) : g_pal->dim);
     if (close)
         ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
 }

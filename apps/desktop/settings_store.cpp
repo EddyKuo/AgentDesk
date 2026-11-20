@@ -190,6 +190,10 @@ Settings load_settings_unchecked() {
         s.timeline_range = "1h";
     s.timeline_since_left = j.value("timeline_since_left", true);
     read_style_settings(j, s.styles);
+    if (const auto it = j.find("tips"); it != j.end() && it->is_boolean())
+        s.tips = it->get<bool>();
+    if (const auto it = j.find("tips_seen"); it != j.end() && it->is_array())
+        add_strings(*it, s.tips_seen);
     for (const auto& m : j.value("machines", Json::array())) {
         if (m.is_object() && !m.value("name", "").empty() && !m.value("target", "").empty())
             s.machines.push_back({m.value("name", ""), m.value("target", ""), m.value("ctl", "")});
@@ -309,6 +313,8 @@ void save_settings(const Settings& s) {
                  return list;
              }()}};
     write_style_settings(ours, s.styles);
+    ours["tips"] = s.tips;
+    ours["tips_seen"] = s.tips_seen;
     for (int attempt = 0; attempt < 3; ++attempt) {
         std::error_code ec;
         const bool exists = std::filesystem::exists(path, ec);

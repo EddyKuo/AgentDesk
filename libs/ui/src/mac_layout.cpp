@@ -126,7 +126,8 @@ std::vector<MenuItem> menu_items(Menu m, const MenuContext& c) {
         }
         case Menu::kHelp:
             out = {item("Welcome", "app.welcome"), item("What's new", "app.whats_new"),
-                   item("Keyboard shortcuts", "app.help"), separator(),
+                   item("Keyboard shortcuts", "app.help"), item("Tips for this layout", "layout.tips"),
+                   separator(),
                    item(dots("Send feedback"), "app.feedback")};
             break;
     }

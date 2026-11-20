@@ -346,16 +346,19 @@ void window_drag_area(App::State& s, ImVec2 a, ImVec2 b) {
 }
 
 // ------------------------------------------------------------------ round window buttons
-// Close, minimize and zoom as three round buttons, left to right, at the layout's traffic_lights
-// point. AgentDesk's own drawing: 12 px buttons 8 px apart, in its own red, amber and green; the
-// glyphs show only while the pointer is over the group, and an inactive window greys them out.
+// Close, minimize and zoom as three buttons, left to right, at the layout's traffic_lights point:
+// 12 px buttons 8 px apart in colours worked out from the theme (libs/ui window_buttons). The
+// glyphs show only while the pointer is over the group, and an inactive window mutes them. Most
+// layouts draw them round; Cockpit as outlined rings, Tiling as small flat squares.
 namespace {
 constexpr float kLightSize = 12.0f;
 constexpr float kLightGap = 8.0f;
 constexpr float kLightsWidth = kLightSize * 3 + kLightGap * 2;  // 52
-constexpr ImU32 kLightColors[3] = {IM_COL32(232, 98, 88, 255), IM_COL32(230, 176, 62, 255),
-                                   IM_COL32(86, 182, 86, 255)};
 constexpr const char* kLightCommands[3] = {"window.close", "window.minimize", "window.maximize"};
+
+ImU32 col_of(std::uint32_t rgb, int a = 255) {
+    return IM_COL32((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, a);
+}
 
 // The layout's [x, y] for the first button's top-left corner, in design pixels; [12, 16] when the
 // layout does not say.
@@ -365,7 +368,47 @@ ImVec2 traffic_lights_point(const App::State& s) {
         return {t[0].get<float>(), t[1].get<float>()};
     return {12.0f, 16.0f};
 }
+
+// The look of the shown layout's window buttons (Focus mode keeps them round).
+WindowButtonLook light_look(const App::State& s) {
+    if (s.settings.focus_on)
+        return WindowButtonLook::kRound;
+    const std::string& st = s.layout().style;
+    if (st == "cockpit")
+        return WindowButtonLook::kRing;
+    if (st == "tiling")
+        return WindowButtonLook::kSquare;
+    return WindowButtonLook::kRound;
+}
 }  // namespace
+
+ui::window_buttons::Colors window_button_colors(ImU32 bar) {
+    ui::window_buttons::Input in;
+    in.blocked = rgb_of(g_pal->needs_you);
+    in.working = rgb_of(g_pal->working);
+    in.done = rgb_of(g_pal->done);
+    in.accent = rgb_of(g_pal->focus);
+    in.bar = rgb_of(bar);
+    in.border = rgb_of(g_pal->border);
+    in.text = rgb_of(g_pal->text);
+    // Worked out once per theme and bar (the ambient tint moves the palette, so key on the colours).
+    static std::map<std::array<std::uint32_t, 7>, ui::window_buttons::Colors> cache;
+    const std::array<std::uint32_t, 7> k = {in.blocked, in.working, in.done, in.accent,
+                                            in.bar,     in.border,  in.text};
+    if (const auto it = cache.find(k); it != cache.end())
+        return it->second;
+    if (cache.size() > 64)
+        cache.clear();
+    return cache.emplace(k, ui::window_buttons::derive(in)).first->second;
+}
+
+ImU32 window_button_color(int kind, ImU32 bar) {
+    return col_of(window_button_colors(bar).fill[static_cast<std::size_t>(std::clamp(kind, 0, 2))]);
+}
+
+ImU32 window_button_glyph(int kind, ImU32 bar) {
+    return col_of(window_button_colors(bar).glyph[static_cast<std::size_t>(std::clamp(kind, 0, 2))]);
+}
 
 bool mac_window_buttons(const App::State& s) {
     return s.config.hwnd != nullptr && s.settings.window_buttons != "windows" && !style_draws_window_buttons(s);
@@ -397,24 +440,56 @@ void traffic_lights_input(App::State& s, ImVec2 origin) {
     }
 }
 
-// One round button: `kind` 0 red with a cross, 1 amber with a bar, 2 green with a plus. Unlit ones
-// take the border colour; the glyph shows only with `glyph`; a held one darkens.
-void paint_round_button(ImDrawList* dl, ImVec2 c, float r, int kind, bool lit, bool glyph, bool held) {
+// One button: `kind` 0 close (a cross), 1 minimize (a bar), 2 zoom (a plus), in the theme's
+// colours for buttons on `bar` (0: the chrome). Unlit ones take the muted colour; the glyph shows
+// only with `glyph`; a held one darkens.
+void paint_round_button(ImDrawList* dl, ImVec2 c, float r, int kind, bool lit, bool glyph, bool held,
+                        ImU32 bar, WindowButtonLook look) {
     const int k = std::clamp(kind, 0, 2);
-    ImU32 fill = lit ? kLightColors[k] : g_pal->border;
+    const auto colors = window_button_colors(bar != 0 ? bar : g_pal->sidebar);
+    const auto ki = static_cast<std::size_t>(k);
+    ImU32 fill = lit ? col_of(colors.fill[ki]) : col_of(colors.muted);
     if (held)
         fill = mix(fill, IM_COL32(0, 0, 0, 255), 0.18f);
-    dl->AddCircleFilled(c, r, fill, 24);
-    dl->AddCircle(c, r - 0.5f, mix(fill, IM_COL32(0, 0, 0, 255), 0.22f), 24, 1.0f);
+    ImU32 ink = col_of(colors.glyph[ki], 225);
+    // Glyph half-length: smaller inside a ring or a square, so it clears the edge.
+    const float g = r * (look == WindowButtonLook::kRound  ? 0.5f
+                         : look == WindowButtonLook::kRing ? 0.34f
+                                                           : 0.4f);
+    float thick = std::max(1.0f, r * 0.22f);
+    switch (look) {
+        case WindowButtonLook::kRound:
+            dl->AddCircleFilled(c, r, fill, 24);
+            dl->AddCircle(c, r - 0.5f, mix(fill, IM_COL32(0, 0, 0, 255), 0.22f), 24, 1.0f);
+            break;
+        case WindowButtonLook::kRing: {
+            // A neon ring: a soft halo, the ring, and a faint fill that brightens under the pointer.
+            const float w = std::max(1.0f, std::round(r * 0.26f));
+            if (lit) {
+                if (!g_pal->light)  // a glow reads as a smudge on a light theme
+                    dl->AddCircle(c, r + w * 0.4f, alpha(fill, 0x2c), 24, w * 2.0f);
+                dl->AddCircleFilled(c, r - w, alpha(fill, glyph ? 0x50 : 0x1a), 24);
+            } else {
+                fill = alpha(g_pal->focus, 0x66);  // an inactive window: the cockpit's line colour, faint
+            }
+            dl->AddCircle(c, r - w * 0.5f, fill, 24, w);
+            ink = lit ? mix(fill, g_pal->text, 0.25f) : fill;
+            thick = std::max(1.0f, r * 0.2f);
+            break;
+        }
+        case WindowButtonLook::kSquare: {
+            const float h = std::round(r * 0.84f);
+            dl->AddRectFilled(ImVec2(c.x - h, c.y - h), ImVec2(c.x + h, c.y + h), fill,
+                              std::max(1.0f, r * 0.18f));
+            break;
+        }
+    }
     if (!glyph)
         return;
-    const float g = r * 0.5f;  // glyph half-length
-    const float thick = std::max(1.0f, r * 0.22f);
-    const ImU32 ink = IM_COL32(60, 20, 10, 190);
     if (k == 0) {  // a cross
         dl->AddLine(ImVec2(c.x - g, c.y - g), ImVec2(c.x + g, c.y + g), ink, thick);
         dl->AddLine(ImVec2(c.x - g, c.y + g), ImVec2(c.x + g, c.y - g), ink, thick);
-    } else {  // a bar, and a plus for the green one
+    } else {  // a bar, and a plus for zoom
         dl->AddLine(ImVec2(c.x - g - r * 0.08f, c.y), ImVec2(c.x + g + r * 0.08f, c.y), ink, thick);
         if (k == 2)
             dl->AddLine(ImVec2(c.x, c.y - g - r * 0.08f), ImVec2(c.x, c.y + g + r * 0.08f), ink, thick);
@@ -426,10 +501,11 @@ void traffic_lights_paint(App::State& s) {
         return;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float r = px(kLightSize * 0.5f);
+    const WindowButtonLook look = light_look(s);
     for (int i = 0; i < 3; ++i) {
         const ImVec2 c(s.lights.at.x + px(kLightSize + kLightGap) * static_cast<float>(i) + r, s.lights.at.y + r);
         paint_round_button(dl, c, r, i, s.window_focused || s.lights.group_hovered, s.lights.group_hovered,
-                           s.lights.held == i);
+                           s.lights.held == i, g_pal->sidebar, look);
     }
 }
 

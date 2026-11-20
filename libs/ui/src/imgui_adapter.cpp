@@ -56,6 +56,14 @@ bool key_pressed_owned(ImGuiKey key, const char* str_id) {
     return ImGui::IsKeyPressed(key, ImGuiInputFlags_Repeat, id);
 }
 
+void release_keyboard() {
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    ImGuiWindow* here = ImGui::GetCurrentWindow();
+    if (g.ActiveId != 0 && g.ActiveIdWindow != nullptr && here != nullptr &&
+        g.ActiveIdWindow->RootWindow != here->RootWindow)
+        ImGui::ClearActiveID();
+}
+
 void disable_nav_windowing() {
     ImGuiContext& g = *ImGui::GetCurrentContext();
     g.ConfigNavWindowingKeyNext = 0;

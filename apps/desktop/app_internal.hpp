@@ -62,6 +62,8 @@
 #include "agentdesk/ui/theme_file.hpp"
 #include "agentdesk/ui/updates.hpp"
 #include "agentdesk/ui/workspace.hpp"
+#include "agentdesk/ui/window_buttons.hpp"
+#include "agentdesk/ui/layout_tips.hpp"
 #include "style_layouts.hpp"
 
 namespace agentdesk::desktop {
@@ -219,6 +221,10 @@ struct Settings {
     std::string ambient = "off";
     bool ambient_done = false;
     StyleSettings styles;  // Tiling, Cockpit and Classic keys (style_layouts.hpp)
+    // First-use tips (layout_tips.cpp): on unless turned off; the cards already seen (layout names
+    // and "focus").
+    bool tips = true;
+    std::vector<std::string> tips_seen;
 };
 // %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk; created when missing.
 std::filesystem::path data_dir();
@@ -399,6 +405,7 @@ inline constexpr CommandInfo kCommands[] = {
     {"cockpit.reset_today", "Cockpit: set Done today back to 0"},
     {"classic.menu", "Classic: open the menu bar"},
     {"classic.effects", "Classic: screen effects off / light / full"},
+    {"layout.tips", "Tips for this layout"},
 };
 bool known_command(std::string_view name);
 
@@ -963,6 +970,14 @@ struct App::State {
         bool focus_list = false;
     } timeline;
     StyleUi styles;  // Tiling, Cockpit and Classic (style_layouts.hpp)
+    // First-use tips (layout_tips.cpp).
+    struct LayoutTips {
+        std::string open_key;   // the card shown now ("" none)
+        std::string request;    // a card to open once no other popup is open
+        std::string shown_key;  // the card of what is on screen, and since when
+        Clock::time_point shown_since{};
+        bool close_settings = false;  // Settings' "Show tips" closes the dialog first
+    } layout_tips;
 
     // ---------------------------------------------------------------- helpers
     // The UI document (spaces, tabs, panes) changed: persist() sends it to the host soon.
@@ -1166,9 +1181,19 @@ void traffic_lights_paint(App::State& s);
 // The first x a bar spanning [top, bottom] may use without covering the round buttons, `margin`
 // after them; `x` itself when they are not shown there.
 float clear_of_traffic_lights(const App::State& s, float x, float top, float bottom, float margin);
-// One round button (kind 0 red cross, 1 amber bar, 2 green plus) of radius `r` centred on `c`; the
-// window buttons and the Mac layout's inner window draw theirs with it.
-void paint_round_button(ImDrawList* dl, ImVec2 c, float r, int kind, bool lit, bool glyph, bool held);
+// The window buttons' colours (close, minimize, zoom, their glyphs, the inactive colour) in the
+// active theme, for buttons drawn on `bar` (libs/ui window_buttons; cached per theme and bar).
+ui::window_buttons::Colors window_button_colors(ImU32 bar);
+ImU32 window_button_color(int kind, ImU32 bar);  // kind 0 close, 1 minimize, 2 zoom
+ImU32 window_button_glyph(int kind, ImU32 bar);
+// How a layout draws its window buttons: round (most), outlined rings (Cockpit), flat squares
+// (Tiling).
+enum class WindowButtonLook { kRound, kRing, kSquare };
+// One window button (kind 0 close with a cross, 1 minimize with a bar, 2 zoom with a plus) of radius
+// `r` centred on `c`, in the theme's colours for `bar` (0: the chrome); the window buttons and the
+// Mac layout's inner window draw theirs with it.
+void paint_round_button(ImDrawList* dl, ImVec2 c, float r, int kind, bool lit, bool glyph, bool held,
+                        ImU32 bar = 0, WindowButtonLook look = WindowButtonLook::kRound);
 
 // The space's git tail: "repo · branch" without the parts the name already says, main/master
 // dropped, then ahead/behind.
@@ -1428,6 +1453,12 @@ bool draw_timeline_block(App::State& s, const std::string& mod, ImVec2 pos, ImVe
 std::optional<std::string> exec_timeline_command(App::State& s, const std::string& name, const std::string& arg);
 // How soon the timeline needs a frame (its "now" line, a pending answer); 1 s cap when hidden.
 long long timeline_wakeup_ms(const App::State& s);
+// ------------------------------------------------------------ layout_tips.cpp
+// The first-use tips card (opens by itself the first time a layout shows; layout.tips brings it
+// back), its command, and the Settings > Look row ("Show tips for this layout", tips on / off).
+void draw_layout_tips(App::State& s);
+std::optional<std::string> exec_tips_command(App::State& s, const std::string& name, const std::string& arg);
+bool look_tips_row(App::State& s);
 // ------------------------------------------------------------ theme features
 // appearance.cpp: the appearance to pick the theme half by ("system", "light" or "dark"), with
 // "schedule" worked out; the Settings rows under Appearance when it is "schedule".

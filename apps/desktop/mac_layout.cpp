@@ -430,7 +430,8 @@ void draw_mac_window_title(App::State& s, ImVec2 pos, float w, float h) {
         ImGui::PopID();
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", i == 2 && s.mac.fill ? "Float the window again" : kTips[i]);
-        paint_round_button(dl, c, r, i, s.window_focused || group, group, ImGui::IsItemActive());
+        paint_round_button(dl, c, r, i, s.window_focused || group, group, ImGui::IsItemActive(),
+                           title_color());
         if (hit)
             run_command(s, i == 2 ? "window.fill" : "tab.settle");
     }

@@ -334,11 +334,13 @@ int draw_text_buttons(App::State& s, ImDrawList* dl, const Chrome& c, float x0, 
         ImGui::PushID(i);
         const bool clicked = cell_button("##classic-win", c, x0, y, col, 3, &hov, &held);
         ImGui::PopID();
+        // Under the pointer each takes the theme's colour for its kind (close, minimize, zoom).
+        const int kind = windows ? (i + 1) % 3 : i;
         if (held)
             fill_cells(dl, c, x0, y, col, 3, g_pal->text);
         put(dl, c, x0, y, col, windows ? kWin[i] : kMac[i],
             held  ? g_pal->sidebar
-            : hov ? g_pal->text
+            : hov ? window_button_color(kind, g_pal->sidebar)
                   : g_pal->dim);
         if (clicked)
             run_command(s, windows ? kWinCmd[i] : kMacCmd[i]);

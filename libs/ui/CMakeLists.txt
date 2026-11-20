@@ -38,6 +38,8 @@ agentdesk_library(agentdesk_ui
     src/tiling_layout.cpp
     src/cockpit.cpp
     src/classic_layout.cpp
+    src/window_buttons.cpp
+    src/layout_tips.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/layout_defaults.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

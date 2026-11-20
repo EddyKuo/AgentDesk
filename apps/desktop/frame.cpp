@@ -468,6 +468,7 @@ void draw_dialogs(App::State& s) {
     draw_notes(s);
     draw_worktree_open(s);
     draw_close_notice(s);
+    draw_layout_tips(s);
     draw_palette(s);
     draw_picker(s);
     draw_help(s);
