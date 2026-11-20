@@ -1,6 +1,6 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.17  
+產品需求與系統設計文件 v2.18  
 日期：2026-11-20｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；還沒做的人工驗收見 5.4、5.7  
 技術基線：C++20、Windows 11 x64、Dear ImGui（FreeType 繪字）、Win32、DirectX 11、隨附 ConPTY
 
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.18 | 2026-11-20 | ADR-28：移除 AgentDesk 98（程式、素材、測試與建置步驟），取代 ADR-24 的隱藏做法；2.4、2.8、3.1、3.9、3.10、4.1、5.6 更新 |
 | 2.17 | 2026-11-20 | ADR-27：terminals 版面上方列最左邊加「顯示側欄」按鈕；`sidebar.toggle` 在沒有側欄的版面改為切到有側欄的版面；4.1 更新 |
 | 2.16 | 2026-11-20 | ADR-26：側欄整個隱藏時，分頁列最左邊顯示「顯示側欄」按鈕；4.1 更新 |
 | 2.15 | 2026-11-20 | ADR-25：terminals 版面的上方列加設定按鈕，三個按鈕都有名稱與快捷鍵的提示；4.1 更新 |
@@ -185,10 +186,10 @@ VT Engine 需要回覆的終端機查詢由 host 處理，UI 不連線時仍可�
 
 ### 2.4 版面與版面引擎（ADR-15、ADR-18）
 
-內建三個版面：workspace（herdr 的 main，預設；設定與命令面板顯示為 AgentDesk）、terminals、win98（AgentDesk 98，見 2.8；目前隱藏，ADR-24）。herdr-app 的 `main.json`、`terminals.json`、`win98.json` 原檔放在 `third_party/herdr/layouts`，建置時編進程式。
+內建兩個版面：workspace（herdr 的 main，預設；設定與命令面板顯示為 AgentDesk）與 terminals。herdr-app 的 `main.json`、`terminals.json` 原檔放在 `third_party/herdr/layouts`，建置時編進程式。原本的第三個版面 AgentDesk 98 已移除（ADR-28，見 2.8）；`ui.json` 存的版面名稱找不到時，顯示第一個版面。
 
 - 版面模型在 `libs/ui`（`layout.hpp`）：節點樹由 block、row、column、stack、floating 組成，JSON 的鍵與預設值都照 herdr。大小計算、分隔線拖曳、浮動區塊的吸附與位置也照 herdr，herdr 的 layout.rs、layout_sync.rs 與拖曳測試已移植成單元測試。
-- 側欄、分頁列、窗格、右側面板、狀態列，以及 AgentDesk 98 的桌面、工作列、小幫手，位置都由目前版面的樹決定。每個區塊依它寫的 mod 名稱交給對應的 C++ 繪製函式；寫的是 C++ DLL mod 的名稱時，畫那個 mod 的面板。
+- 側欄、分頁列、窗格、右側面板、狀態列的位置都由目前版面的樹決定。每個區塊依它寫的 mod 名稱交給對應的 C++ 繪製函式；寫的是 C++ DLL mod 的名稱時，畫那個 mod 的面板。
 - 自訂版面放在 `%LOCALAPPDATA%\AgentDesk\layouts\<名稱>.json`。使用者拖曳、開關造成的改動另存到 `layouts\.state\<名稱>.json`，不改版面檔。`layout.toggle`、`layout.show`、`layout.hide`、`layout.resize`、`layout.select` 照 herdr。`layout.clone` 複製成 `<名稱>-copy`（已存在就失敗）；`layout.reset` 只接受內建版面，同名的使用者檔改名成 `<名稱>.json.old-<時間>`。
 - 舊格式的版面檔（有 `sidebar`、`tab_bar` 等鍵、沒有樹）在讀取時轉換：當成同 `style` 的內建版面，再隱藏關掉的部分、套上 theme 與 font_size，檔案本身不改寫。`ui.json` 原本存的側欄寬度、面板寬度、Spaces／Agents 比例與側欄開關，第一次啟動時轉成 workspace 的 `.state`。
 - 每個版面各自記住一組深色與淺色主題（`ui.json` 的 `layout_themes`）。主題有我們的四套，加上 herdr 的 graphite、ink、moss、paper、atom-one-dark，以及使用者放進 `themes\` 的主題檔；介面顏色照 herdr 的 resolve() 從主題推算。
@@ -244,17 +245,13 @@ sequenceDiagram
 
 **使用統計**（設定 › Privacy）：每個 UTC 日一份報告，跨日後放進待送佇列，7 天後丟棄；報告用隨機 id，送出失敗時以指數退避重試；使用者關閉統計時清空報告並換 id。`DO_NOT_TRACK`、`AGENTDESK_TELEMETRY=0`、CI 環境只關閉這一次執行。「What we send」逐字顯示待送報告、今天的草稿與上次送出的內容。
 
-### 2.8 AgentDesk 98（win98 版面，ADR-18、ADR-21）
+### 2.8 AgentDesk 98（已移除，ADR-28）
 
-> **目前隱藏（ADR-24）**：版面清單、Ctrl+Shift+L、命令面板與設定都不列出 AgentDesk 98，歡迎頁也不再提到它；`ui.json` 存的是 win98 時改顯示第一個版面（workspace），`layouts\win98.json` 也不列出。程式與素材都保留並照常編譯、測試；設環境變數 `AGENTDESK_WIN98=1` 再啟動就會列出（截圖工具在 `--run` 含 win98 時自動設定）。
+AgentDesk 98 是從 herdr 的 Herdr 98 移植來的 Windows 98 風格版面（ADR-18、ADR-21），v2.14 起先隱藏（ADR-24）。2026-11-20 使用者要在公開到 GitHub 前把它整個拿掉，所以程式、素材（模仿 Windows 98 的圖片、音效與字型）、單元測試、建置與打包步驟都已刪除（ADR-28）。
 
-移植自 herdr 的 Herdr 98，依 ADR-21 改名為 AgentDesk 98。桌面、工作列、開始選單、窗格標題列、對話框、踩地雷、接龍與小幫手都由程式自己畫。
-
-- 程式：繪製在 `apps/desktop/win98_*.cpp`（kit、dialogs、chrome、desktop、games），純邏輯在 `libs/ui/src/win98.cpp`；素材（像素字型、圖示、圖片、音效、版面專用主題）在 `third_party/herdr/win98`。SVG 用 lunasvg 點陣化成 DX11 貼圖，PNG 用 WIC 解碼。
-- 開機畫面、關於與開始選單側邊的標題圖由程式用像素字型畫出，Start 與 Update 圖示換成 AgentDesk 的標誌（ADR-21）。
-- 狀態存在資料目錄的 `win98.json`（scale、mute、桌面、小幫手位置、遊戲設定等）。
-- 版面專用主題 win98 不列在主題清單；終端機用它的 16 色表（格子記住自己用的是哪一個 ANSI 色，3.7.3）。
-- 按鍵在 keys.json 的 `layout:win98` 區段。Ctrl+Esc、Ctrl+Shift+Esc 只在 AgentDesk 位於最前面、且 keys.json 有綁定時，由低階鍵盤 hook 先接下，執行 `win98.start`、`win98.taskman`；其他時候仍是 Windows 的開始選單與工作管理員。
+- `ui.json` 存的版面是 `win98` 時，顯示第一個版面（workspace）；舊格式版面檔的 `"style": "win98"` 讀成 workspace。
+- 資料目錄裡留下的 `win98.json` 不再讀取。使用者自己的 `layouts\win98.json` 會當成一般的自訂版面載入，裡面寫的 `win98` 區塊找不到對應的繪製函式，就什麼都不畫。
+- keys.json 不再有預設的 `layout:win98` 區段，`win98.*` 不再是已知命令。
 
 ## 3. 技術詳細設計（SD）
 
@@ -267,7 +264,7 @@ sequenceDiagram
 | GUI | Dear ImGui 1.93.0（vcpkg `imgui` 的 `docking-experimental`、`win32-binding`、`dx11-binding`、`wchar32`、`freetype` features，以 builtin-baseline＋overrides 固定）；Win32 + DX11 backends。主畫面不用 DockSpace（ADR-12），由版面引擎排版（2.4） | 決定 |
 | 繪字 | FreeType 2.15.0（vcpkg，經 `imgui[freetype]`，FTL 授權，與 MIT 相容）；框線、方塊、點字、Powerline 字元由 `libs/ui` 的 sprites 照格子像素畫成圖形（移植自 herdr 的 sprites.rs） | 決定（Sprint 10） |
 | 字型 | 隨附 Geist（介面）、JetBrains Mono Medium（終端機）、Symbols Nerd Font；中文以微軟正黑體補上 | 決定（ADR-15） |
-| 圖片 | lunasvg 3.5.0＋plutovg 1.3.3（vcpkg，MIT）點陣化 SVG；PNG 用 WIC 解碼 | 決定（Sprint 10） |
+| 圖片 | lunasvg 3.5.0＋plutovg 1.3.3（vcpkg，MIT）把程式圖示的 SVG 點陣化（v2.18 起不再需要 PNG 解碼） | 決定（Sprint 10） |
 | 終端機核心 | libvterm 0.3.3（官方 tarball 原始碼收錄於 third_party，tarball 已含產生的 `.inc`，建置不需 perl；呼叫端加 `/utf-8`）。libghostty-vt 因需要 Zig 不採用（ADR-11） | 決定（M0） |
 | ConPTY 實作 | 隨附 Microsoft.Windows.Console.ConPTY 1.24.260710001（`conpty.dll` + `OpenConsole.exe`），`fetch_conpty.exe`（`tools/fetch_conpty`）釘選版本並驗 SHA-256，以 LoadLibraryExW 從執行檔旁的 `conpty\` 載入；找不到時退回系統內建並在 UI 標示「狀態回報不可用」 | 決定（M0，ADR-08） |
 | JSON | nlohmann/json 3.12.0（vcpkg） | 決定（S1-1） |
@@ -516,7 +513,7 @@ v2.1 起支援子 Agent 協作（ADR-13）：在 session 內執行 `agentctl run
 
 ### 3.9 設定與資料保存
 
-資料根目錄為 %LOCALAPPDATA%\AgentDesk（`--data-dir` 或 `AGENTDESK_DATA_DIR` 可覆寫，3.7.1）。host 持有 profiles.json、sessions.json、ui-state.json（space、分頁與分割，3.7.2）與 host.log；UI 持有 ui.json（設定、機器、啟用的 mod、各版面的主題、最近用過的命令）、keys.json（錯誤寫在 keys.error）、layouts\（含 `.state\`）、themes\、mods\、programs.json（覆蓋隨附程式表，錯誤寫在 programs.error）、win98.json、feedback\、使用統計的報告與 ui-crash.txt。UI 不使用 imgui.ini（版面在 host 的 ui.state 與版面檔）。host 的檔案與 ui.json 帶 schema_version=1。JSON 設定檔以寫暫存檔再替換的方式保存，保留一份上一版備份；備份也不能用時，損毀檔改名為 `*.corrupt-<時間>` 保留，並以預設值啟動。
+資料根目錄為 %LOCALAPPDATA%\AgentDesk（`--data-dir` 或 `AGENTDESK_DATA_DIR` 可覆寫，3.7.1）。host 持有 profiles.json、sessions.json、ui-state.json（space、分頁與分割，3.7.2）與 host.log；UI 持有 ui.json（設定、機器、啟用的 mod、各版面的主題、最近用過的命令）、keys.json（錯誤寫在 keys.error）、layouts\（含 `.state\`）、themes\、mods\、programs.json（覆蓋隨附程式表，錯誤寫在 programs.error）、feedback\、使用統計的報告與 ui-crash.txt。UI 不使用 imgui.ini（版面在 host 的 ui.state 與版面檔）。host 的檔案與 ui.json 帶 schema_version=1。JSON 設定檔以寫暫存檔再替換的方式保存，保留一份上一版備份；備份也不能用時，損毀檔改名為 `*.corrupt-<時間>` 保留，並以預設值啟動。
 
 sessions.json 保存識別、名稱、cwd、profile、時間及退出結果，不保存可重用的原工作程序 handle。預設歷史及原始 VT 留在記憶體，host 重啟後不恢復執行中畫面。磁碟 transcript 為後續選配，啟用前需告知可能含憑證與原始碼。
 
@@ -530,7 +527,7 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 
 | 路徑 | 內容 |
 |---|---|
-| apps/desktop | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列、崩潰記錄），`app.cpp` 是 `App` 的建構與對外介面。介面依功能分檔：`themes`、`settings_store`（ui.json）、`layouts`、`programs`、`commands`（命令表與執行）、`sessions`、`git_cache`、`side_panels`、`chrome`、`sidebar`、`tab_bar`、`terminals_layout`、`panes`、`code_preview`、`files_changes`、`overlays`（命令面板、picker、說明）、`notices`、`notes`、`worktrees`、`settings_dialog`、`settings_pages`、`welcome`、`machine_add`、`frame`（版面繪製與每幀流程）；`win98_*.cpp` 是 AgentDesk 98。共用宣告在 `app_internal.hpp`（`detail` 命名空間）、`win98_internal.hpp`、`overlay_kit.hpp` |
+| apps/desktop | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列、崩潰記錄），`app.cpp` 是 `App` 的建構與對外介面。介面依功能分檔：`themes`、`settings_store`（ui.json）、`layouts`、`programs`、`commands`（命令表與執行）、`sessions`、`git_cache`、`side_panels`、`chrome`、`sidebar`、`tab_bar`、`terminals_layout`、`panes`、`code_preview`、`files_changes`、`overlays`（命令面板、picker、說明）、`notices`、`notes`、`worktrees`、`settings_dialog`、`settings_pages`、`welcome`、`machine_add`、`frame`（版面繪製與每幀流程）。共用宣告在 `app_internal.hpp`（`detail` 命名空間）、`overlay_kit.hpp` |
 | apps/host | `agent-host.exe`：背景程序入口、單例 mutex、`--takeover` 交接入口 |
 | apps/cli | `agentctl.exe`：指令解析、JSON 輸出、`hook`、`bridge`、`update` |
 | libs/platform/windows | `PtyProcess`（ConPTY＋Job＋reader 執行緒）、ConPTY 載入、argv quoting、脫離 Job 的背景啟動、程序樹、RAII handle |
@@ -538,12 +535,12 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 | libs/protocol | IPC 分幀（4-byte LE＋UTF-8 JSON）、訊息封包、錯誤碼、畫面編碼 |
 | libs/ipc | Named Pipe 伺服器與客戶端、啟動或連上 host |
 | libs/host | `Session` actor、`SessionManager`（協定方法）、狀態、持久化、git 工具、換版交接（`handover.cpp`） |
-| libs/ui | `TerminalView`、`Workspace`（space／分頁／分割樹、注意力）、版面引擎（`layout`）、`Keymap`、ModHost（`mods`）、程式表（`programs`）、sprites、字型、連結、剪貼簿、`git_info`、`HostClient`、遠端畫面、更新（`updates`）、使用統計（`telemetry`）、AgentDesk 98 的邏輯（`win98`）；只有 `imgui_adapter.cpp` 碰 `imgui_internal.h` |
+| libs/ui | `TerminalView`、`Workspace`（space／分頁／分割樹、注意力）、版面引擎（`layout`）、`Keymap`、ModHost（`mods`）、程式表（`programs`）、sprites、字型、連結、剪貼簿、`git_info`、`HostClient`、遠端畫面、更新（`updates`）、使用統計（`telemetry`）；只有 `imgui_adapter.cpp` 碰 `imgui_internal.h` |
 | libs/modapi | mod 介面：純 C 的 `mod_api.h`、header-only 的 `mod_sdk.hpp`，以及隨 zip 附上的 SDK 建置檔 |
 | mods | 三個範例 mod（tab-timer、ntfy-notify、agent-summary），各自編成 `mods\<名稱>\mod.dll` |
 | tools | 開發與量測工具，不出貨：`pty_run`、`session_bench`、`vt_probe`、`soak`、`qa`（QA-05、QA-07、QA-10、`screenshot_ui`、`smoke_zip`）、`fetch_conpty`、`make_fixtures`、`package`（發布用 `agentdesk_package.exe`）、`devkit` |
-| tests/unit、tests/integration/windows、tests/fixtures | GoogleTest：協定、VT、版面、sprites、更新、使用統計、AgentDesk 98、Windows 實機測試；fixture 是原始位元組檔 |
-| third_party | libvterm 0.3.3（加了換版用的狀態存取，ADR-19）、隨附 ConPTY 的授權與 NOTICE、字型、herdr 的授權與素材（版面、主題、程式表與圖示、提示音、win98） |
+| tests/unit、tests/integration/windows、tests/fixtures | GoogleTest：協定、VT、版面、sprites、更新、使用統計、Windows 實機測試；fixture 是原始位元組檔 |
+| third_party | libvterm 0.3.3（加了換版用的狀態存取，ADR-19）、隨附 ConPTY 的授權與 NOTICE、字型、herdr 的授權與素材（版面、主題、程式表與圖示、提示音） |
 | docs | 設計文件、使用說明、研究筆記、POC 報告、整合說明 |
 
 ## 4. 介面與操作設計
@@ -565,7 +562,7 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 | Details | AgentDesk 自己的面板（herdr 沒有），開啟時貼在窗格右邊：Agent 狀態與來源、訊息、程序與退出碼、控制權、停止按鈕 |
 | 狀態列 | 機器、目前分支、Agent 數量與需要你的數量；點右側的快捷鍵提示開命令面板 |
 
-terminals 版面沒有側欄與狀態列，分頁列最左邊是「顯示側欄」按鈕（切回 AgentDesk 版面，ADR-27），接著是目前的 space（點一下開 picker），右邊是設定、命令面板與新分頁三個按鈕（滑鼠停在上面會顯示名稱與快捷鍵；設定按鈕是 AgentDesk 加的，ADR-25），面板標題列的按鈕一直顯示。AgentDesk 98 見 2.8。
+terminals 版面沒有側欄與狀態列，分頁列最左邊是「顯示側欄」按鈕（切回 AgentDesk 版面，ADR-27），接著是目前的 space（點一下開 picker），右邊是設定、命令面板與新分頁三個按鈕（滑鼠停在上面會顯示名稱與快捷鍵；設定按鈕是 AgentDesk 加的，ADR-25），面板標題列的按鈕一直顯示。
 
 狀態用文字與圖示搭配顏色，不能只靠顏色。Unknown 使用中性標示，Blocked（畫面上是 Needs you）才提示需要處理。根程序已退出但子程序仍存在時，明確顯示「正在清理子程序」。
 
@@ -691,7 +688,7 @@ M0～M4 已實作，驗收矩陣結果見 `contracts/inbox/TestReport_sprint5.md
 | 複製、重設版面（`layout.clone`／`layout.reset`），複製 mod（`mod.clone`） | frame/palette | ✅ |
 | What's new（更新後顯示一次）、Send feedback（複製或存檔，不自動送出） | frame/settings、window.rs | ✅ |
 | 逐項比對後補齊（2026-11-18）：keys.json 的 layout／mod 區段、物件動作、`terminal` 與錯誤檢查；預設按鍵；命令面板標題與順序；面板右鍵選單與標題列；Appearance 與深淺主題；所有已安裝字型、終端機字重、介面字型；歡迎頁；機器標頭與空機器列；新增選單的未安裝 Agent；移除 worktree 的子模組與重新檢查；遠端 space 的分支 | 四份規格（docs/research/herdr-app/） | ✅ |
-| Herdr 98 版面（ADR-21 改名 AgentDesk 98，2.8）、程式表與圖示、Updates／Privacy、Look 的版面卡片 | mods/win98、src/programs.rs、src/update.rs、src/telemetry.rs、frame/settings | ✅ |
+| Herdr 98 版面（ADR-21 改名 AgentDesk 98，v2.18 依 ADR-28 移除，2.8）、程式表與圖示、Updates／Privacy、Look 的版面卡片 | mods/win98、src/programs.rs、src/update.rs、src/telemetry.rs、frame/settings | ✅ |
 | agent-host 換版時接手終端機、`agentctl update`（2.7、ADR-19） | src/update.rs、src/core_bin.rs | ✅ |
 | 版面引擎：版面樹、分隔線拖曳、浮動區塊、`.state`、舊格式轉換（2.4） | src/layout.rs、src/layout_sync.rs | ✅ |
 | herdr 的主題（graphite、ink、moss、paper、atom-one-dark、使用者主題檔），每個版面各自記住深淺主題 | src/settings.rs、frame/settings | ✅ |
@@ -789,10 +786,11 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-20 | 新增 space 或分頁時選擇 shell（AgentDesk 的亮點，herdr 沒有） | 使用者要求（2026-11-19）：按側欄的「+」時，列出程式啟動時在這台電腦偵測到的 shell（PowerShell 7、Windows PowerShell、Command Prompt、各個 WSL 發行版），選哪個就用哪個開新 space；分頁列的「+」選單也把預設以外的 shell 都列出來，直接開成新分頁。herdr 只開一種 shell，在 Windows 上就沒辦法同時用 cmd 與 PowerShell。快捷鍵 Ctrl+Shift+N、Ctrl+Shift+T 維持直接開預設 shell |
 | ADR-22 | 全面重構與程式註解（2026-11-20） | 使用者要求重構所有程式、註解改用自己的話、移除所有 herdr 的註解與對應行數。做法：行為不變的重構（拆長函式、合併重複、刪死碼），12,700 行的 `app.cpp` 依功能拆成約 30 個檔案；驗收依據是 292 個測試全過，以及重構前後 15 張介面截圖逐像素相同（只剩游標閃爍與 Changes 清單內容這類每次執行就會變的差異）。程式裡 herdr 的出處與行號全部移除，原本的對照整理在 `docs/research/herdr-app/code-map.md`（herdr-app commit 321c9a8；`sol.js` 原本多算 200 行，表中已更正）；名稱含 herdr 的識別字改名，存檔裡的資料字串（主題 id、舊值轉換）不變。例外：有轉寫 herdr 程式的檔案保留一行 `Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.`，這是 Apache-2.0 §4(b) 對修改檔案的要求。之後新寫的程式也不加 herdr 出處；要查 herdr 行為時查對照表或 herdr 原始碼，再用自己的話寫註解 |
 | ADR-23 | 視窗開啟的位置與大小（2026-11-20） | 使用者回報：4K 32 吋（150%）上視窗太小，Full HD 上又偏大，希望依螢幕自動調整，並考慮 Windows 的縮放比例。原因：視窗固定開成 1400×900 實體像素，沒有乘上縮放比例，在 4K 150% 上只等於 933×600 邏輯像素。做法：(1) 照 herdr-app 的 `place.rs`，記住上次的位置、大小、螢幕與是否最大化（`window.json`），重開時回到原處；螢幕不在或位置不在任何螢幕上時，以上次的大小置中於滑鼠所在的螢幕。(2) 沒有紀錄時，大小是 herdr 的首次尺寸 1280×820 邏輯像素乘上目前的 zoom，再限制在可用範圍（扣掉工作列）的 50%～90%：Full HD 100% 得 1280×820（約 67%×79%）；4K 150%、zoom 1.2 得 1536×984 邏輯像素（2304×1476 實體像素，約 60%×71%）；4K 100% 至少佔半個螢幕；125% 的筆電高度不超過 90%。下限 50% 是 herdr 沒有的，避免 100% 的大螢幕開出很小的視窗。(3) 首次啟動縮放（zoom）的「寬螢幕 ×1.15」改用邏輯像素判斷（≥ 2400），和 herdr 一致：縮放比例已經放大畫面，4K 200%（1920 邏輯像素）不再額外放大。Windows 的「文字大小」（TextScaleFactor）照舊算進首次 zoom。自動化執行（`--exit-after-ms`）固定 1400×900 且不讀寫 `window.json`，截圖比對不受影響 |
-| ADR-24 | AgentDesk 98 暫時隱藏（2026-11-20） | 使用者要求：先讓 AgentDesk 98 不要出現，但程式碼保留（使用者偏好 Mac 風格，是否移除 98 風格還沒決定）。做法：只在 agent-ui 列出版面的地方（`load_layouts`）略過 win98，內建的和 `layouts\win98.json` 都不列；`ui.json` 存的版面是 win98 時顯示第一個版面，存檔的值不改，重新開放時會回到 98。歡迎頁「More examples」不再提 AgentDesk 98。程式、素材、keys.json 的 `layout:win98` 區段與 `win98.*` 命令名稱都保留，`libs/ui` 的版面與 win98 單元測試照跑；`AGENTDESK_WIN98=1` 重新列出，截圖工具在 `--run` 含 win98 時自動設定，所以 98 的截圖比對仍可做。執行檔大小不變（程式照樣連結進去）；真正移除時再處理 |
+| ADR-24 | AgentDesk 98 暫時隱藏（2026-11-20；已由 ADR-28 取代） | 使用者要求：先讓 AgentDesk 98 不要出現，但程式碼保留（使用者偏好 Mac 風格，是否移除 98 風格還沒決定）。做法：只在 agent-ui 列出版面的地方（`load_layouts`）略過 win98，內建的和 `layouts\win98.json` 都不列；`ui.json` 存的版面是 win98 時顯示第一個版面，存檔的值不改，重新開放時會回到 98。歡迎頁「More examples」不再提 AgentDesk 98。程式、素材、keys.json 的 `layout:win98` 區段與 `win98.*` 命令名稱都保留，`libs/ui` 的版面與 win98 單元測試照跑；`AGENTDESK_WIN98=1` 重新列出，截圖工具在 `--run` 含 win98 時自動設定，所以 98 的截圖比對仍可做。執行檔大小不變（程式照樣連結進去）；真正移除時再處理 |
 | ADR-25 | terminals 版面加設定按鈕（2026-11-20） | 使用者回報：切到 terminals 版面後左側欄不見，畫面上沒有按鈕能回到設定或換版面，第一次使用的人不會知道快捷鍵。herdr-app 的 terminals-bar 只有命令面板與新分頁兩個按鈕，設定與換版面只能靠快捷鍵或命令面板。做法：上方列在命令面板按鈕左邊加一個齒輪按鈕，開啟設定的 Look 頁（最上面就是版面選擇）；三個按鈕滑鼠停留時顯示名稱與目前綁定的快捷鍵（New tab、Commands、Settings and layouts）。和 herdr 不同的地方只有這兩點，尺寸與樣式沿用原本的按鈕 |
 | ADR-26 | 側欄隱藏後的「顯示側欄」按鈕（2026-11-20） | 使用者回報：按 Ctrl+Shift+B 後側欄整個不見，不用快捷鍵就叫不回來。herdr-app 也一樣：側欄自己的按鈕只把它縮成 44 px 的窄欄，整個隱藏後畫面上沒有按鈕，只能用快捷鍵或命令面板。做法：側欄節點隱藏時，分頁列最左邊（分頁前面）畫一個側欄圖示按鈕，樣式同分頁列其他 26 px 圖示按鈕，滑鼠停留顯示「Show sidebar」與目前綁定的快捷鍵，點一下執行 `sidebar.toggle`。側欄顯示時不畫，畫面與原本相同 |
 | ADR-27 | 在 terminals 版面叫出側欄（2026-11-20） | 使用者回報：按 Ctrl+Shift+L 切到 terminals 後，看不到能叫出左側欄的按鈕。terminals 版面本身沒有側欄，ADR-26 的按鈕只在有側欄的版面出現，ADR-25 的齒輪要進設定才能換版面，不夠直接。做法：(1) terminals 上方列最左邊（space 前面）加一個側欄圖示按鈕，樣式同該列其他 31 px 圖示按鈕，提示「Show sidebar」與快捷鍵；(2) `sidebar.toggle`（Ctrl+Shift+B）在沒有側欄節點的版面，改為切到第一個有側欄的版面（內建是 workspace）並確保側欄顯示。所以「顯示側欄」在每個版面都是同一個圖示、同一個快捷鍵；切換時照常顯示「Layout: workspace」提示 |
+| ADR-28 | AgentDesk 98 移除（2026-11-20） | 使用者要求：準備公開到 GitHub，不要在版本庫裡留下模仿 Windows 98 的素材與程式。做法：刪除 `apps/desktop/win98_*.cpp`、`libs/ui` 的 win98 邏輯、`third_party/herdr/win98`（像素字型、圖示、圖片、音效）、`third_party/herdr/layouts/win98.json`、win98 單元測試，以及建置時複製 `win98\`、打包與 THIRD_PARTY_NOTICES 裡的對應項目；內建版面剩 workspace 與 terminals，keys.json 的 `layout:win98` 預設區段與 `win98.*` 命令一併拿掉。`ui.json` 存的版面是 win98 時顯示 workspace，舊格式版面檔的 style win98 讀成 workspace。取代 ADR-24 的隱藏做法 |
 | ADR-21 | 程式裡不出現 herdr 的名稱 | 使用者要求（2026-11-19）：執行檔、畫面與跟著發布的檔案只寫 AgentDesk。win98 版面改名 AgentDesk 98；開機、關於與開始選單側邊的「Herdr 98」圖片改由程式用像素字型畫出；Start 與 Update 圖示的 herdr 標誌換成 AgentDesk 的標誌（依 herdr art/generate.ts 的畫法重新產生）；預設主題 id 改為 `preset-<名稱>`，舊設定照樣讀得到。保留的部分：THIRD_PARTY_NOTICES 裡 herdr-app 的授權聲明（Apache-2.0 第 4 條要求）、原始碼註解裡的出處、版本庫的 `third_party/herdr/` |
 
 ### 7.2 主要風險

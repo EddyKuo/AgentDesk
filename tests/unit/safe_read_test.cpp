@@ -30,18 +30,6 @@ TEST(SafeRead, NotAnObjectIsEmpty) {
     }
 }
 
-// Solitaire's draw (1 or 3) and deck (0 or 1) from win98.json.
-TEST(SafeRead, IntInRange) {
-    EXPECT_EQ(safe::int_in(Json(3), 1, 3), 3);
-    EXPECT_EQ(safe::int_in(Json(1), 1, 3), 1);
-    EXPECT_FALSE(safe::int_in(Json(0), 1, 3));
-    EXPECT_FALSE(safe::int_in(Json(-5), 0, 1));
-    EXPECT_FALSE(safe::int_in(Json(2.0), 1, 3));
-    EXPECT_FALSE(safe::int_in(Json("3"), 1, 3));
-    EXPECT_FALSE(safe::int_in(Json(4294967297ULL), 0, 1));
-    EXPECT_FALSE(safe::int_in(Json(18446744073709551615ULL), 0, 999));
-}
-
 // A background from layouts\.state: only two colors and a numeric angle make a gradient.
 TEST(SafeRead, GradientIsCheckedLikeTheLayoutFile) {
     const auto g = safe::gradient(Json::parse(R"({"gradient": ["#000000", "#ffffff"], "angle": 90})"));

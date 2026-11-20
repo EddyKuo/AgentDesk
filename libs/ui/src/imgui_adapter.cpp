@@ -71,9 +71,4 @@ void unregister_texture(ImTextureData* tex) {
         ImGui::UnregisterUserTexture(tex);
 }
 
-void bring_to_front(const char* window_name) {
-    if (ImGuiWindow* w = ImGui::FindWindowByName(window_name))
-        ImGui::BringWindowToDisplayFront(w);
-}
-
 }  // namespace agentdesk::ui::adapter

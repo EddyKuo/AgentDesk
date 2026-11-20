@@ -4,7 +4,6 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app.hpp"
 #include "safe_read.hpp"
-#include "win98_state.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -19,11 +18,14 @@
 #include <deque>
 #include <filesystem>
 #include <array>
+#include <functional>
 #include <future>
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <span>
 #include <sstream>
@@ -80,7 +82,6 @@ struct Palette {
     ImU32 bg, sidebar, card, border, focus, hover, selected, text, dim, faint;
     ImU32 needs_you, done, working, idle, info;
     ImU32 term_bg, term_fg, cursor, selection;
-    bool layout_only = false;  // a layout's own theme: not offered in Settings or the palette
     const std::array<ImU32, 16>* ansi = nullptr;  // the theme's 16 ANSI colours (null: VtEngine's)
 };
 // AgentDesk's own palettes, in the order Settings lists them. The first is the fallback.
@@ -183,8 +184,8 @@ void save_settings(const Settings& s);
 // ------------------------------------------------------------ layouts.cpp
 // ------------------------------------------------------------------ layouts
 // A layout is a tree of blocks (rows, columns, stacks; the sidebar, tab bar, panes, panel and
-// status bar are blocks), parsed by libs/ui layout.hpp. Built-ins are workspace, terminals and
-// win98; <data>\layouts\<name>.json adds one or replaces a built-in of that name. The person's
+// status bar are blocks), parsed by libs/ui layout.hpp. Built-ins are workspace and
+// terminals; <data>\layouts\<name>.json adds one or replaces a built-in of that name. The person's
 // clicks on a layout (sizes, shown/hidden, a stack's child, where a float sits) live apart from
 // the file, in <data>\layouts\.state\<name>.json, so editing the file never loses them.
 // AgentDesk's older files ({"sidebar", "tab_bar", "status_bar", "theme", "style", "font_size",
@@ -205,7 +206,7 @@ struct LayoutSpec {
     // From the tree.
     std::string theme;         // a palette AgentDesk has, else "" (the person's theme)
     bool look_applies = true;  // false when the layout names a theme AgentDesk lacks
-    std::string style;         // "", "terminals" or "win98": which renderers its blocks name
+    std::string style;         // "" or "terminals": which renderers its blocks name
     std::optional<float> font_size;
 };
 std::filesystem::path layouts_dir();
@@ -213,9 +214,6 @@ std::filesystem::path layout_state_path(const std::string& name);
 void derive_layout(LayoutSpec& l);
 void save_layout_state(const LayoutSpec& l);
 std::vector<LayoutSpec> load_layouts(const Settings& st);
-// AgentDesk 98 is hidden for now (user's choice, 2026-11-20): its code stays and still builds, but
-// the layout is not listed. AGENTDESK_WIN98=1 lists it again (the screenshot checks set it).
-bool agentdesk98_shown();
 void write_example_mods();
 
 // ------------------------------------------------------------ programs.cpp
@@ -567,7 +565,6 @@ struct Placement {
     std::string split_of;
     std::string replace;  // restart in place
     std::string space_name;
-    std::string tab_name;  // the new tab's name (AgentDesk 98 names its tabs)
 };
 
 struct WorktreeEntry {
@@ -781,9 +778,6 @@ struct App::State {
     bool defer_commands = false;
     std::vector<DeferredCommand> deferred_commands;
     ui::ImageCache program_images;  // the program icons (programs\icons), as textures
-    // AgentDesk 98 (win98_*.cpp): its menus, dialogs, games and shared values.
-    std::unique_ptr<w98state::W98> win98 = std::make_unique<w98state::W98>();
-    bool fonts_win98 = false;  // AgentDesk 98's fonts are the ones in use
 
     // ---------------------------------------------------------------- helpers
     // The UI document (spaces, tabs, panes) changed: persist() sends it to the host soon.
@@ -942,7 +936,7 @@ void start_remotes(App::State& s);
 // ------------------------------------------------------------ sessions.cpp
 void adopt_doc(App::State& s, const Json& doc);
 void create_session(App::State& s, const std::string& profile, const std::string& cwd,
-                    const std::string& name, Placement placement, const std::vector<std::string>& args = {});
+                    const std::string& name, Placement placement);
 void sync_sessions(App::State& s);
 void persist(App::State& s);
 void run_mods(App::State& s);

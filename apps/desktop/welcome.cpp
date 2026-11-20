@@ -379,11 +379,8 @@ void page_keys(App::State& s) {
     ImGui::TextUnformatted("More examples in Settings");
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0, px(2)));
-    ImGui::TextWrapped("%s", agentdesk98_shown()
-                                 ? "Settings \xE2\x80\xBA Look has more layouts to try or start from, AgentDesk 98 "
-                                   "among them. Your agent can copy any of them and change anything."
-                                 : "Settings \xE2\x80\xBA Look has more layouts to try or start from. Your agent "
-                                   "can copy any of them and change anything.");
+    ImGui::TextWrapped("%s", "Settings \xE2\x80\xBA Look has more layouts to try or start from. Your agent "
+                             "can copy any of them and change anything.");
     ImGui::EndChild();
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor();

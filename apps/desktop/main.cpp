@@ -72,8 +72,7 @@ std::atomic<bool> g_close_requested{false};
 std::atomic<int> g_focus_change{-1};  // -1 none, 0 lost, 1 gained
 
 // Windows takes Ctrl+Esc (Start) and Ctrl+Shift+Esc (Task Manager) before any window sees them.
-// The AgentDesk 98 layout binds both (win98.start, win98.taskman); while AgentDesk is in front
-// and keys.json binds the chord (its layout section or global), a low-level keyboard hook keeps
+// While AgentDesk is in front and keys.json binds the chord (its layout section or global), a low-level keyboard hook keeps
 // it from the shell and hands it to the app. Anywhere else Windows keeps them.
 HWND g_main_hwnd = nullptr;
 // The window's last rect while neither maximized nor minimized: what window.json keeps.

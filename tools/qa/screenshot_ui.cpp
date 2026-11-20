@@ -412,9 +412,6 @@ int wmain(int argc, wchar_t** argv) {
                           fs::copy_options::overwrite_existing);
         }
         ::SetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", data.c_str());
-        // AgentDesk 98 is hidden from people for now; shots that ask for it list it again.
-        if (o.run_cmd.find(L"win98") != std::wstring::npos)
-            ::SetEnvironmentVariableW(L"AGENTDESK_WIN98", L"1");
 
         // ui.json is written only when --remote or --mods needs it.
         std::optional<Json> ui_doc;

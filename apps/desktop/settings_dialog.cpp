@@ -2,7 +2,6 @@
 // (Updates and Privacy are in settings_pages.cpp). Every change applies and saves at once.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "overlay_kit.hpp"
-#include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
@@ -136,10 +135,7 @@ void look_layout_cards(App::State& s) {
             d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), raised_color(), px(10));
         if (on)
             d->AddRect(a, ImVec2(a.x + cw, a.y + ch), g_pal->focus, px(10), 0, px(2));
-        if (l.style == "win98")  // its "preview" picture, rounded 6 with a 1 px border
-            w98::preview(s, d, ImVec2(a.x + pad, a.y + pad), ImVec2(cw - pad * 2, ph), px(6), g_pal->border);
-        else
-            layout_preview(d, l.name, ImVec2(a.x + pad, a.y + pad), ImVec2(cw - pad * 2, ph));
+        layout_preview(d, l.name, ImVec2(a.x + pad, a.y + pad), ImVec2(cw - pad * 2, ph));
         card_name(s, d, ImVec2(a.x + pad, a.y + pad + ph + px(6)), layout_display_name(l.name), on,
                   fpx(12.5f) * 0.55f);
     }
@@ -155,7 +151,7 @@ bool look_theme_cards(App::State& s, bool light_cards) {
     CardFlow tf = CardFlow::at_cursor();
     for (const Palette* pal : all_palettes()) {
         const Palette& p = *pal;
-        if (p.light != light_cards || p.layout_only)
+        if (p.light != light_cards)
             continue;
         const auto shown = layout_theme_pair(s.settings);
         const bool on = (light_cards ? shown.second : shown.first) == p.id;

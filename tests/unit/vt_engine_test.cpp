@@ -398,7 +398,7 @@ TEST(VtEngine, MouseIsReportedOnlyInTheModeTheProgramAsked) {
     EXPECT_EQ(e.take_pty_input(), "");
 }
 
-// A theme with its own 16 ANSI colours (the Win98 theme, for one) needs the index, not just the RGB.
+// A theme with its own 16 ANSI colours (a theme file, say) needs the index, not just the RGB.
 TEST(VtEngine, CellsRememberWhichOfTheSixteenAnsiColoursTheyUse) {
     VtEngine e(small_options());
     e.feed("\x1b[31mR\x1b[0m\x1b[44mB\x1b[0m\x1b[91mr\x1b[0m\x1b[38;5;200mx\x1b[0m\x1b[38;2;1;2;3my\x1b[0mz");

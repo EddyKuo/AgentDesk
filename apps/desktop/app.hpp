@@ -51,7 +51,7 @@ public:
     void before_new_frame();    // after the platform backend's NewFrame, before ImGui::NewFrame
     void on_close_requested();  // window X
     void on_focus_changed(bool focused);
-    // A window chord keys.json binds in the shown layout or globally (AgentDesk 98's Ctrl+Esc).
+    // A window chord keys.json binds in the shown layout or globally (Ctrl+Esc, say).
     [[nodiscard]] bool binds_chord(int chord) const;
     void run_chord(int chord);  // runs the command keys.json binds to that window chord
     // Files dropped on the window: their paths go to the terminal under the pointer (else the

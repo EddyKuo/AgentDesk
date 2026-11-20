@@ -7,15 +7,6 @@ namespace agentdesk::desktop {
 namespace detail {
 
 namespace {
-// The AgentDesk 98 layout's 16 ANSI colours (0-7, then the bright 8-15).
-constexpr std::array<ImU32, 16> kWin98Ansi = {
-    IM_COL32(0x55, 0x55, 0x55, 255), IM_COL32(0xaa, 0x00, 0x00, 255), IM_COL32(0x00, 0xaa, 0x00, 255),
-    IM_COL32(0xaa, 0x55, 0x00, 255), IM_COL32(0x00, 0x00, 0xbb, 255), IM_COL32(0xaa, 0x00, 0xaa, 255),
-    IM_COL32(0x00, 0xaa, 0xaa, 255), IM_COL32(0xaa, 0xaa, 0xaa, 255), IM_COL32(0x55, 0x55, 0x55, 255),
-    IM_COL32(0xff, 0x55, 0x55, 255), IM_COL32(0x55, 0xff, 0x55, 255), IM_COL32(0xff, 0xff, 0x55, 255),
-    IM_COL32(0x55, 0x55, 0xff, 255), IM_COL32(0xff, 0x55, 0xff, 255), IM_COL32(0x55, 0xff, 0xff, 255),
-    IM_COL32(0xff, 0xff, 0xff, 255)};
-
 // Defined in this one translation unit, so a Palette* compares equal to the same entry wherever
 // it was taken (g_pal, palette_by_id, the Settings lists).
 constexpr Palette kPalettes[] = {
@@ -107,35 +98,6 @@ constexpr Palette kPalettes[] = {
      IM_COL32(36, 38, 46, 255),
      IM_COL32(60, 60, 200, 255),
      IM_COL32(88, 92, 220, 70)},
-    // The AgentDesk 98 layout's own theme. A theme named like a layout belongs to that layout, so
-    // Settings and the palette do not offer it elsewhere (layout_only). Chrome: surfaces #c0c0c0,
-    // raised and hover #dfdfdf, border #808080, text #000000, dim #808080, muted #404040, accent
-    // #000080; status blocked #ff0000, done #0000ff, working #808000, idle #808080. Terminals are
-    // black with #c0c0c0 text and cursor and a navy selection.
-    {"win98",
-     "AgentDesk 98",
-     true,
-     IM_COL32(0xc0, 0xc0, 0xc0, 255),
-     IM_COL32(0xc0, 0xc0, 0xc0, 255),
-     IM_COL32(0xc0, 0xc0, 0xc0, 255),
-     IM_COL32(0x80, 0x80, 0x80, 255),
-     IM_COL32(0x00, 0x00, 0x80, 255),
-     IM_COL32(0xdf, 0xdf, 0xdf, 255),
-     IM_COL32(0xdf, 0xdf, 0xdf, 255),
-     IM_COL32(0x00, 0x00, 0x00, 255),
-     IM_COL32(0x80, 0x80, 0x80, 255),
-     IM_COL32(0x40, 0x40, 0x40, 255),
-     IM_COL32(0xff, 0x00, 0x00, 255),
-     IM_COL32(0x00, 0x00, 0xff, 255),
-     IM_COL32(0x80, 0x80, 0x00, 255),
-     IM_COL32(0x80, 0x80, 0x80, 255),
-     IM_COL32(0x00, 0x00, 0x80, 255),
-     IM_COL32(0x00, 0x00, 0x00, 255),
-     IM_COL32(0xc0, 0xc0, 0xc0, 255),
-     IM_COL32(0xc0, 0xc0, 0xc0, 255),
-     IM_COL32(0x00, 0x00, 0x80, 0x80),  // drawn over the text here, so not opaque
-     true,
-     &kWin98Ansi},
 };
 
 // Status colours (working, blocked, done) of the dark presets.
@@ -263,7 +225,7 @@ void add_preset_palette(const std::string& id, const std::string& label, const P
     o.p = Palette{o.id.c_str(), o.label.c_str(), light, t["canvas"], t["chrome"], t["surface"], t["border"],
                   t["accent"], t["hover"], t["selected"], t["foreground"], t["muted"], t["dim"], t["blocked"],
                   t["done"], t["working"], t["idle"], t["accent"], t["background"], t["terminal_foreground"],
-                  t["cursor"], (t["selection"] & 0x00FFFFFFu) | (static_cast<ImU32>(light ? 0xa0 : 0x90) << 24), false, &o.ansi};
+                  t["cursor"], (t["selection"] & 0x00FFFFFFu) | (static_cast<ImU32>(light ? 0xa0 : 0x90) << 24), &o.ansi};
 }
 
 // A theme file: {background, foreground, selection, cursor?, ansi[16], colors{}}, colours as
@@ -307,8 +269,7 @@ std::optional<std::pair<PresetPalette, std::map<std::string, std::string>>> read
 bool g_themes_loaded = false;
 
 // The presets, then the theme files by name (a file in <data>\themes wins over a shipped one of
-// the same name). win98.json is skipped: that theme is one of our own palettes. Loaded once per
-// run, so the addresses g_pal holds stay valid; a changed file applies at the next start.
+// the same name). Loaded once per run, so the addresses g_pal holds stay valid; a changed file applies at the next start.
 void load_theme_files() {
     g_themes_loaded = true;
     if (!g_loaded_palettes.empty())
@@ -322,8 +283,7 @@ void load_theme_files() {
             if (e.path().extension() == L".json") {
                 const auto stem = e.path().stem().u8string();
                 const std::string name(stem.begin(), stem.end());
-                if (name != "win98")
-                    files[name] = e.path();
+                files[name] = e.path();
             }
     for (const auto& [name, file] : files)
         if (const auto t = read_theme_file(file)) {

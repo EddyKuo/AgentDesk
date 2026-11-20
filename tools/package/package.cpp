@@ -81,8 +81,6 @@ void stage_app(const fs::path& bin, const fs::path& stage) {
         copy_into(bin / f, stage);
     dk::copy_tree(bin / L"fonts", stage / L"fonts");
     dk::copy_tree(bin / L"sounds", stage / L"sounds");
-    // AgentDesk 98 layout: its fonts, icons, images, sounds and layout file.
-    dk::copy_tree(bin / L"win98", stage / L"win98");
     // Program table (programs.json) and the program icons.
     dk::copy_tree(bin / L"programs", stage / L"programs");
     dk::copy_tree(bin / L"themes", stage / L"themes");  // built-in colour themes
@@ -161,13 +159,6 @@ std::vector<Component> shipped_components(const fs::path& root, const fs::path& 
          share / L"lunasvg/copyright"},
         {"plutovg 1.3.3 (used by lunasvg)", "https://github.com/sammycage/plutovg",
          share / L"plutovg/copyright"},
-        {"Pixelated MS Sans Serif fonts (AgentDesk 98, win98\\fonts)", "https://github.com/jdan/98.css",
-         root / L"third_party/herdr/win98/fonts/LICENSE-MSSansSerif.txt"},
-        {"Creative Commons Attribution-ShareAlike 3.0 (the Pixelated MS Sans Serif fonts)",
-         "https://creativecommons.org/licenses/by-sa/3.0/",
-         root / L"third_party/herdr/win98/fonts/CC-BY-SA-3.0.txt"},
-        {"PxPlus IBM VGA 8x16 font (AgentDesk 98, win98\\fonts)", "https://int10h.org/oldschool-pc-fonts/",
-         root / L"third_party/herdr/win98/fonts/LICENSE-PxPlus.txt"},
         {"LobeHub icons (agent icons, programs\\icons)", "https://github.com/lobehub/lobe-icons",
          root / L"third_party/herdr/programs/icons/LICENSE-LobeHub.txt"},
         {"Lucide icons (glyphs, programs\\icons)", "https://lucide.dev",

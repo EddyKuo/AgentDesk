@@ -1,9 +1,8 @@
 #pragma once
-// Pictures as ImGui textures: SVG files rasterised at the size they are drawn (lunasvg), PNG files
-// decoded once (Windows Imaging Component). The Win98 layout draws its icons, cards and pictures
-// this way. The textures go through
-// ImGui's own texture list (ImTextureData), so the renderer creates them and recreates them after
-// a lost device. UI thread only; the cache must outlive the ImGui context's last frame.
+// SVG files as ImGui textures, rasterised at the size they are drawn (lunasvg). The program icons
+// are drawn this way. The textures go through ImGui's own texture list (ImTextureData), so the
+// renderer creates them and recreates them after a lost device. UI thread only; the cache must
+// outlive the ImGui context's last frame.
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -31,11 +30,6 @@ public:
     // An SVG file drawn at w x h pixels. `mono`: its shape in white, to be tinted by the color it
     // is drawn with (GPUI's svg().text_color(): the SVG is a mask). Missing or unreadable: !ok().
     Image svg(const std::filesystem::path& file, int w, int h, bool mono = false);
-    // A PNG (or any WIC format) at its own size.
-    Image picture(const std::filesystem::path& file);
-
-    // Fonts an SVG's <text> may name (lunasvg looks fonts up by family): registered once.
-    static void add_svg_font(const char* family, bool bold, const std::filesystem::path& file);
 
 private:
     struct Entry {

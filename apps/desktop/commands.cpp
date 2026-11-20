@@ -2,7 +2,6 @@
 // clicks) and the layout commands.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "overlay_kit.hpp"
-#include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
@@ -42,16 +41,6 @@ bool mod_folder_exists(std::string_view mod) {
 // "<mod>.<command>" action is accepted when that mod folder exists.
 bool known_command(std::string_view name) {
     if (builtin_command(name))
-        return true;
-    // The AgentDesk 98 layout's commands.
-    // clang-format off
-    static const std::set<std::string, std::less<>> kWin98 = {
-        "win98.start",       "win98.taskman", "win98.new_tab", "win98.new_space", "win98.rename_tab", "win98.rename_space",
-        "win98.run",         "win98.shutdown", "win98.about",  "win98.display",   "win98.welcome",    "win98.boot",
-        "win98.mines",       "win98.sol",     "win98.mycomputer", "win98.network", "win98.bin",       "win98.datetime",
-        "win98.logoff",      "win98.small_fonts", "win98.large_fonts", "win98.close_tab", "win98.close_space"};
-    // clang-format on
-    if (kWin98.contains(name))
         return true;
     const auto dot = name.find('.');
     return dot != std::string_view::npos && mod_folder_exists(name.substr(0, dot));
@@ -1165,12 +1154,6 @@ std::string exec_command(App::State& s, const std::string& cmd) {
           exec_worktree_command, exec_app_command, exec_layout_mod_command})
         if (auto r = group(s, c))
             return *r;
-    if (c.name.rfind("win98.", 0) == 0) {
-        // AgentDesk 98's own commands go to its taskbar, while that layout shows.
-        if (s.layout().style == "win98")
-            w98::command(s, c.name.substr(6));
-        return {};
-    }
     // "<mod>.<command>": keys.json accepts it when that mod folder exists.
     if (const auto dot = c.name.find('.');
         dot != std::string::npos && mod_folder_exists(c.name.substr(0, dot))) {

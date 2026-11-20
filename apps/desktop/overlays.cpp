@@ -268,9 +268,7 @@ std::vector<PaletteEntry> palette_entries(App::State& s) {
             add(n.title, n.cmd, n.group, n.words);
         if (std::string_view(n.cmd) == "app.quit")
             for (const Palette* p : all_palettes())
-                if (!p->layout_only)
-                    add(std::string("Theme: ") + p->label, std::string("theme:") + p->id, "App",
-                        "colors look");
+                add(std::string("Theme: ") + p->label, std::string("theme:") + p->id, "App", "colors look");
     }
     for (const auto& l : s.layouts) {  // "Layout: <Name>", capitalised
         std::string t = layout_display_name(l.name);

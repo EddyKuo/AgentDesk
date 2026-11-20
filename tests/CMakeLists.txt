@@ -21,7 +21,6 @@ agentdesk_executable(unit_tests
     unit/mods_test.cpp
     unit/updates_test.cpp
     unit/telemetry_test.cpp
-    unit/win98_test.cpp
     unit/programs_test.cpp
     unit/layout_test.cpp
     unit/sprites_test.cpp

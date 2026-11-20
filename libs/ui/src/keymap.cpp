@@ -182,12 +182,6 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
      "f"},
 };
 
-// Section "layout:win98": the Start menu (Ctrl+Esc) and Task Manager (Ctrl+Shift+Esc).
-constexpr std::pair<const char*, const char*> kWin98[] = {
-    {"ctrl-escape", "win98.start"},
-    {"ctrl-shift-escape", "win98.taskman"},
-};
-
 // Calls f(section, chord text, command) for every default binding, in install order.
 template <class F>
 void for_each_default(F&& f) {
@@ -199,8 +193,6 @@ void for_each_default(F&& f) {
     }
     for (const auto& [chord, cmd] : kTerminal)
         f("terminal", std::string(chord), std::string(cmd));
-    for (const auto& [chord, cmd] : kWin98)
-        f("layout:win98", std::string(chord), std::string(cmd));
 }
 
 }  // namespace

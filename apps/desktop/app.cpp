@@ -374,8 +374,6 @@ long long App::next_wakeup_ms() const {
         if (v.agent_state == "Working")
             ms = std::min<long long>(ms, 50);  // the working mark spins
     }
-    if (s_->layout().style == "win98")  // AgentDesk 98's clock, carets, badges, games and screens
-        ms = std::min<long long>(ms, s_->win98->wakeup_ms);
     return ms;
 }
 

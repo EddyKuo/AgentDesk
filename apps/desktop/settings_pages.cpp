@@ -2,7 +2,6 @@
 // controls, layout previews) and the Updates and Privacy pages.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "overlay_kit.hpp"
-#include "win98_internal.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
@@ -138,13 +137,8 @@ const ui::FontFamily* find_family(const std::string& name) {
 }
 
 // Terminal font: the chosen family (empty: the bundled JetBrains Mono) at the chosen weight, and
-// its 700 face for bold. A layout with fonts of its own (the win98 layout) uses those instead.
+// its 700 face for bold.
 void apply_terminal_font(App::State& s) {
-    if (s.layout().style == "win98") {
-        w98::ensure_fonts(s);
-        s.fonts.mono = s.fonts.mono_bold = w98::layout_font(s, 0);
-        return;
-    }
     const auto* f = find_family(s.settings.terminal_font.empty() ? std::string("JetBrains Mono")
                                                                  : s.settings.terminal_font);
     ImFont* mono =
@@ -162,13 +156,6 @@ void apply_ui_font(App::State& s) {
         s.base_ui = s.fonts.ui;
         s.base_ui_medium = s.fonts.ui_medium;
         s.base_ui_bold = s.fonts.ui_bold;
-    }
-    if (s.layout().style == "win98") {  // win98.json "ui_font"
-        w98::ensure_fonts(s);
-        s.fonts.ui = s.fonts.ui_medium = w98::layout_font(s, 1);
-        s.fonts.ui_bold = w98::layout_font(s, 2);
-        ImGui::GetIO().FontDefault = s.fonts.ui;
-        return;
     }
     const auto* f = s.settings.ui_font.empty() ? nullptr : find_family(s.settings.ui_font);
     ImFont* r = f != nullptr ? ui::load_font_file(f->file_for(400), 13.0f, false) : nullptr;

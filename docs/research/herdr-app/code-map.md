@@ -4,22 +4,16 @@
 
 - herdr 原始碼版本：https://github.com/herdrdev/herdr-app 的 commit `321c9a8`。
 - 「AgentDesk 位置」是整理當時的檔案與行號。重構後行號會變，請用「對應的程式」欄的程式碼開頭搜尋。
-- `sol.js` 的行號原本每處多算 200 行，這份表已更正。
-- 共 1163 筆。
+- 共 872 筆。AgentDesk 98 移除時（ADR-28，2026-11-20），它專屬的 291 筆一併刪掉。
 
 | AgentDesk 位置 | 對應的程式 | 原註解 |
 |---|---|---|
 | `apps/cli/main.cpp:561` | `int update_failed(const Ctx& ctx, const std::string& message, const std::string& hint = {}` | herdr `hc update` (herdr-app src/core_bin.rs 242-265, docs/commands.md 547): agent-host to its |
 | `apps/cli/main.cpp:619` | `const auto deadline = std::chrono::steady_clock::now() + 15s;` | The new agent-host serves the pipe once the old one let go (herdr: the app reconnects |
-| `apps/desktop/CMakeLists.txt:3` | `target_compile_options(agent-ui PRIVATE /bigobj)` | app.cpp (with the Herdr 98 .inl files) passes the COFF section limit in Debug. |
-| `apps/desktop/CMakeLists.txt:8` | `add_custom_command(TARGET agent-ui POST_BUILD` | Herdr 98's fonts, icons, pictures and sounds (third_party/herdr/win98/README.agentdesk.md): win98\. |
-| `apps/desktop/CMakeLists.txt:17` | `COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:agent-ui>/win98/img/splash.png" "$<TA` | AgentDesk 98 draws its name itself (win98_kit.inl brand_*): not the pictures that say Herdr. |
 | `apps/desktop/CMakeLists.txt:19` | `COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/progra` | herdr's program table and icons (defaults/programs.json, defaults/icons): programs\. |
 | `apps/desktop/app.cpp:1` | `` | AgentDesk window contents. Feature set follows herdr's app (spaces, tabs, split panes, agent |
 | `apps/desktop/app.cpp:75` | `bool layout_only = false;` | a layout's own theme (herdr: offered only there) |
 | `apps/desktop/app.cpp:76` | `const std::array<ImU32, 16>* ansi = nullptr;` | the theme's "ansi" table (herdr themes/*.json) |
-| `apps/desktop/app.cpp:79` | `constexpr std::array<ImU32, 16> kWin98Ansi = {` | herdr themes/win98.json "ansi" (0-7, then the bright 8-15). |
-| `apps/desktop/app.cpp:177` | `{"win98",` | herdr themes/win98.json, Herdr 98's own (settings.rs 99): a theme named like a layout is that |
 | `apps/desktop/app.cpp:210` | `struct HerdrPalette {` | ------------------------------------------------------------------ herdr's themes |
 | `apps/desktop/app.cpp:211` | `struct HerdrPalette {` | The person chose to have herdr's themes beside ours (2026-11-19). herdr settings.rs: four |
 | `apps/desktop/app.cpp:214` | `struct HerdrPalette {` | colors{}; 103-113). The chrome colors come from the palette as herdr's resolve() derives them |
@@ -30,7 +24,6 @@
 | `apps/desktop/app.cpp:290` | `void add_herdr_palette(const std::string& id, const std::string& label, const HerdrPalette` | dim = muted, faint = dim, focus/info = accent; theme files' "colors" override by herdr's names. |
 | `apps/desktop/app.cpp:341` | `std::optional<std::pair<HerdrPalette, std::map<std::string, std::string>>> read_theme_file` | herdr settings.rs 103-113: a theme file. A bad file is skipped (herdr: not listed). |
 | `apps/desktop/app.cpp:403` | `void load_herdr_themes() {` | Presets, then the shipped files, then the person's (sorted by name), as herdr themes() lists |
-| `apps/desktop/app.cpp:404` | `void load_herdr_themes() {` | them (settings.rs 272-286). win98 is Herdr 98's own and already one of ours. |
 | `apps/desktop/app.cpp:425` | `std::replace(label.begin(), label.end(), '-', ' ');` | settings/main.js 367 |
 | `apps/desktop/app.cpp:430` | `std::vector<const Palette*> all_palettes() {` | Ours, then herdr's. |
 | `apps/desktop/app.cpp:480` | `const Palette* effective_palette(const std::string& appearance, const std::string& dark, c` | herdr Appearance: System follows Windows; Light and Dark use the chosen theme of that kind. A |
@@ -72,7 +65,6 @@
 | `apps/desktop/app.cpp:1415` | `bool builtin_command(std::string_view name) {` | The commands AgentDesk itself has (herdr commands::COMMANDS). |
 | `apps/desktop/app.cpp:1431` | `"app.check_updates", "app.update_core", "app.update"};` | herdr commands.rs 98, 99, 105 |
 | `apps/desktop/app.cpp:1436` | `bool known_command(std::string_view name) {` | Command names keys.json may bind (herdr validates actions and reports unknown ones). A |
-| `apps/desktop/app.cpp:1441` | `static const std::set<std::string, std::less<>> kWin98 = {` | Herdr 98's commands (herdr-app defaults/mods/win98/README.md 12-17). |
 | `apps/desktop/app.cpp:1466` | `struct GitInfo {` | herdr's spaces mod asks git for the checkout's top, its common dir (worktrees), the branch and |
 | `apps/desktop/app.cpp:1468` | `struct GitInfo {` | 60 s (spaces.js 105-147, 229-264). Here one background thread runs git for queued folders. |
 | `apps/desktop/app.cpp:1469` | `struct GitInfo {` | Like herdr's watchFolder (spaces.js 266-286) a second thread watches each local repo's git |
@@ -86,7 +78,6 @@
 | `apps/desktop/app.cpp:2079` | `static char letter_of(const std::string& xy) {` | Changes list (herdr changes/main.js): conflicts first. |
 | `apps/desktop/app.cpp:2089` | `static char file_mark_of(const std::string& xy) {` | Files tree marks (herdr files/main.js:99): added first, then U, D, M. |
 | `apps/desktop/app.cpp:2120` | `std::map<std::string, char> m;` | Git marks: keyed by path relative to `root` (normalised; herdr's string join misses on Windows). |
-| `apps/desktop/app.cpp:2540` | `std::string tab_name;` | herdr tab.new {name} (Herdr 98 names its tabs) |
 | `apps/desktop/app.cpp:2572` | `std::optional<Clock::time_point> updates_asked;` | Updates and Privacy (herdr update.rs, telemetry.rs, settings main.js 760-882). |
 | `apps/desktop/app.cpp:2573` | `std::optional<Clock::time_point> updates_asked;` | main.js 65-71 `this.asked` |
 | `apps/desktop/app.cpp:2574` | `bool show_data = false;` | main.js 870 `this.showData` |
@@ -101,8 +92,6 @@
 | `apps/desktop/app.cpp:2726` | `ImVec2 welcome_pos{-1.0f, -1.0f};` | top-left once the person dragged it (herdr: Drag to move) |
 | `apps/desktop/app.cpp:2729` | `std::map<std::string, std::string> machine_add_state;` | Add a machine (herdr machine-add): target -> "adding" or why it could not be added. |
 | `apps/desktop/app.cpp:2753` | `ui::ImageCache program_images;` | herdr's program icons (programs\icons), as textures |
-| `apps/desktop/app.cpp:2754` | `std::unique_ptr<w98state::W98> win98 = std::make_unique<w98state::W98>();` | Herdr 98 (win98_*.inl): its menus, dialogs, games and shared values. |
-| `apps/desktop/app.cpp:2756` | `bool fonts_win98 = false;` | Herdr 98's fonts are the ones in use |
 | `apps/desktop/app.cpp:2782` | `[[nodiscard]] std::map<std::string, std::string> session_cwds() {` | Folder that names an unnamed space (herdr model.rs 271-279): its first terminal's git top |
 | `apps/desktop/app.cpp:2812` | `void toast(std::string title, std::string body, std::string session, ImU32 color, int seco` | herdr toasts: 5 s, 8 s for errors and warnings. |
 | `apps/desktop/app.cpp:2816` | `toasts.push_back({std::move(title), std::move(body), std::move(session), color,` | No cap: herdr stacks every toast (window.rs 4794-4796). |
@@ -125,8 +114,6 @@
 | `apps/desktop/app.cpp:3184` | `void App::on_quit() {` | herdr main.rs 177-192 on_app_quit: telemetry's clean quit, then the waiting update goes in |
 | `apps/desktop/app.cpp:3198` | `s_->fonts = ui::load_fonts(s_->settings.font_size, 13.0f);` | herdr UI base 13, scaled by ui_scale() |
 | `apps/desktop/app.cpp:3251` | `ms = std::min<long long>(ms, 300);` | settings main.js 66: every 300 ms |
-| `apps/desktop/app.cpp:3256` | `if (s_->layout().style == "win98")` | Herdr 98's clock, carets, badges, games and screens |
-| `apps/desktop/app.cpp:3318` | `void create_session(App::State& s, const std::string& profile, const std::string& cwd,` | `args` go after the profile's own (session.create "args"; Herdr 98's Run line). |
 | `apps/desktop/app.cpp:3411` | `const auto& v = s.views_by_id[sess->id()];` | herdr window.rs 2262-2283, 2695-2719 (reconcile / checked_closed): a pane whose terminal |
 | `apps/desktop/app.cpp:3413` | `const auto& v = s.views_by_id[sess->id()];` | they empty (model.rs 403-422). Lost: the agent-host that ran it is gone. |
 | `apps/desktop/app.cpp:3441` | `continue;` | ended: never opened (herdr places live terminals only, window.rs 2277-2283) |
@@ -180,7 +167,6 @@
 | `apps/desktop/app.cpp:4491` | `const Json a = layout_args(arg, "name", "as");` | its clicks; then shown. Ours is written in herdr's format, also from an old file. |
 | `apps/desktop/app.cpp:4526` | `const std::string which = arg.empty() ? s.settings.layout : arg;` | herdr window.rs 3514-3533: only a layout herdr ships; a file of that name is set aside |
 | `apps/desktop/app.cpp:4527` | `const std::string which = arg.empty() ? s.settings.layout : arg;` | (<name>.json.old-<time>, never over an older one, window.rs 218-224) and its clicks go. |
-| `apps/desktop/app.cpp:4601` | `if (s.layout().style == "win98")` | Herdr 98's key commands (README.md 12-17), delivered to its taskbar (taskbar.js 126-176) |
 | `apps/desktop/app.cpp:4612` | `return "unknown command \"" + name + "\"";` | herdr window.rs 2975-2976. |
 | `apps/desktop/app.cpp:4618` | `void run_command(App::State& s, const std::string& cmd, bool person) {` | herdr window.rs 2931-2943: a command run for the person (a click, a key, a menu, a mod) has |
 | `apps/desktop/app.cpp:4625` | `if (const std::string name = cmd.substr(0, cmd.find(':')); person && builtin_command(name)` | herdr window.rs 2995-2997 / telemetry.rs 124: a command the person ran, by its name. |
@@ -271,15 +257,12 @@
 | `apps/desktop/app.cpp:6827` | `const std::string chord = s.keymap.chord_for("app.palette");` | workspace-status/main.js 8-15: without a binding the hint is just "commands". |
 | `apps/desktop/app.cpp:6860` | `const bool tm = s.layout().style == "terminals";` | herdr pane frame (main.json 107-131, pane.js 59-91): radius 10, 1 px border, 1 px accent |
 | `apps/desktop/app.cpp:6862` | `const bool tm = s.layout().style == "terminals";` | The Terminals layout (terminals.json 37-45): radius 12, a quiet border and focus edge, and |
-| `apps/desktop/app.cpp:6864` | `const bool tm = s.layout().style == "terminals";` | Herdr 98 (win98.json 26-58, kit.js 464-473): radius 0, a 3 px #c0c0c0 border (the same |
 | `apps/desktop/app.cpp:6893` | `const bool pane_hovered =` | herdr pane/main.js 86-90: the buttons show while the header is hovered. Pressing one |
 | `apps/desktop/app.cpp:6900` | `program_icon(dl, prog, ImVec2(hx, cy - px(7)), px(14), g_pal->dim);` | pane/main.js 76 |
 | `apps/desktop/app.cpp:6902` | `std::string title = s.pane_title(id);` | pane/main.js 61: name \|\| ((agent \|\| shell) && program.name) \|\| title \|\| program.name \|\| "shell". |
 | `apps/desktop/app.cpp:6914` | `const float tw = text_clipped(dl, s.fonts.ui_medium, fpx(12), ImVec2(hx, cy - fpx(12) * 0.` | pane/main.js 69, 78-79: the name 12 px medium, the folder 12 px dim. |
 | `apps/desktop/app.cpp:6921` | `auto hbtn = [&](const char* bid, const char* glyph, const char* cmd) {` | pane/main.js 44-56: no tooltips on these buttons. |
 | `apps/desktop/app.cpp:6949` | `{` | Grip (herdr pane_drag.rs): 28x18 in the middle of the header, two rows of three dots; |
-| `apps/desktop/app.cpp:7021` | `const ImVec2 body_min = w98p ? ImVec2(pos.x + edge + px(4), top + px(2))` | herdr main.json terminal_padding [14, 12]; the Terminals layout keeps the default [10, 6] |
-| `apps/desktop/app.cpp:7022` | `const ImVec2 body_min = w98p ? ImVec2(pos.x + edge + px(4), top + px(2))` | (settings.rs 564); Herdr 98 [4, 2] inside its 3 px border (win98.json 93-96). |
 | `apps/desktop/app.cpp:7037` | `vs.view.menu_rows = [&s, id, parent = v.parent] {` | herdr pane menu (menu/main.js 24-81): Split right, Split down, Zoom, Rename, where |
 | `apps/desktop/app.cpp:7040` | `menu_keys();` | Up/Down/Enter/Esc (menu/main.js 131-137) |
 | `apps/desktop/app.cpp:7055` | `if (pick(ui::icon::kSquare, "Zoom", "pane.zoom")) {` | menu/main.js 84: square |
@@ -303,7 +286,6 @@
 | `apps/desktop/app.cpp:8310` | `struct Named {` | palette/main.js 22-63: the named entries (command, title, group, keywords), in order. |
 | `apps/desktop/app.cpp:8369` | `if (std::string_view(n.cmd) == "app.quit")` | palette/main.js 62 |
 | `apps/desktop/app.cpp:8374` | `for (const auto& l : s.layouts) {` | palette/main.js 86-89: "Layout: <Name>", capitalised; main is "Herdr" (ours: the |
-| `apps/desktop/app.cpp:8375` | `for (const auto& l : s.layouts) {` | "workspace" layout, "AgentDesk"), terminals "Terminals", win98 "Herdr 98". |
 | `apps/desktop/app.cpp:8385` | `for (const auto& c : kCommands)` | Then every other command, in its group (herdr adds the app's other commands the same way). |
 | `apps/desktop/app.cpp:8401` | `e.score = *sc2 - 4;` | palette/main.js 179-180 |
 | `apps/desktop/app.cpp:8417` | `std::vector<const Entry*> recent;` | Recent (5 of the last 20), then the groups in herdr's order without them (:170-173). |
@@ -357,7 +339,6 @@
 | `apps/desktop/app.cpp:9794` | `void settings_row(App::State& s, const char* label, const char* note, float control_w, flo` | settings/main.js 161-176 row(): gap 16, py 12, items centred, a 1 px bottom border; the |
 | `apps/desktop/app.cpp:9840` | `constexpr float kStepperW = 28 + 54 + 28 + 2;` | settings/main.js 196-222 stepper(): one bordered group (rounded 7, raised): 28 x 28 cells |
 | `apps/desktop/app.cpp:9882` | `const std::vector<ui::FontFamily>& font_families() {` | ---- fonts (herdr: every installed family, filterable; weight; interface font) |
-| `apps/desktop/app.cpp:9903` | `void apply_terminal_font(App::State& s) {` | family's 700 face. A layout with fonts of its own (Herdr 98: win98.json "font") uses those. |
 | `apps/desktop/app.cpp:9947` | `bool font_picker(App::State& /*s*/, const char* id, std::string& family, const char* defau` | herdr font list: a filter box and up to 200 matching families. |
 | `apps/desktop/app.cpp:9991` | `bool segmented(App::State& s, const char* id, std::string& value,` | A row of choices, one selected (herdr's segment control). |
 | `apps/desktop/app.cpp:10022` | `void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 size) {` | herdr frame/settings/main.js 242-270: a small drawing of each layout in the theme's colors. |
@@ -391,9 +372,7 @@
 | `apps/desktop/app.cpp:10496` | `{` | main.js 967: "Send feedback", a settings button at the bottom of the nav; it closes |
 | `apps/desktop/app.cpp:10508` | `ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(28), px(22)));` | main.js 949-990: no title and no Esc in the body (Esc still closes); padding px 28, py 22 |
 | `apps/desktop/app.cpp:10541` | `CardFlow lf = flow();` | herdr frame/settings/main.js 272-320: cards 124 wide, p 6, rounded 10, a 2 px accent |
-| `apps/desktop/app.cpp:10561` | `if (l.style == "win98")` | herdr settings/main.js 86-99, 302-309: a layout with a "preview" picture shows it |
 | `apps/desktop/app.cpp:10567` | `std::string label = l.name == "workspace" ? std::string("AgentDesk")` | herdr LOOKS: main -> "Herdr" (ours is AgentDesk), terminals -> "Terminals", |
-| `apps/desktop/app.cpp:10568` | `std::string label = l.name == "workspace" ? std::string("AgentDesk")` | win98 -> "Herdr 98" (settings/main.js 18). |
 | `apps/desktop/app.cpp:10581` | `settings_gap(px(18));` | main.js 520 |
 | `apps/desktop/app.cpp:10587` | `settings_gap(px(12));` | main.js 523-527: the note (pt 12, pb 8, 12.5 dim), "Dark" (pb 6, 12.5 medium muted), |
 | `apps/desktop/app.cpp:10597` | `CardFlow tf = flow();` | main.js 353-405 themePicker(): cards 124 wide, gap 6, p 6, rounded 10, a 2 px |
@@ -437,7 +416,6 @@
 | `apps/desktop/app.cpp:11362` | `if (const std::string pal = s.keymap.chord_for("app.palette"); !pal.empty()) {` | welcome/main.js 416-436: first, while a key opens the palette, "One key opens |
 | `apps/desktop/app.cpp:11399` | `ImGui::Dummy(ImVec2(0, px(8)));` | herdr page 4: a line to give your agent so it learns to drive the app. |
 | `apps/desktop/app.cpp:11417` | `ImGui::Dummy(ImVec2(0, px(8)));` | herdr welcome/main.js 451-459: "More examples in Settings" (p 12, gap 10, rounded 10, |
-| `apps/desktop/app.cpp:11418` | `ImGui::Dummy(ImVec2(0, px(8)));` | raised), naming Herdr 98. |
 | `apps/desktop/app.cpp:11435` | `para("Something off or missing? Settings \xE2\x80\xBA Send feedback. We read every one.");` | welcome/main.js 461 |
 | `apps/desktop/app.cpp:11462` | `if (!typing && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ¦¦ (ImGui::IsKeyPressed(ImGuiKe` | herdr: Enter or Right goes on; on the last page only Enter finishes. |
 | `apps/desktop/app.cpp:11490` | `std::vector<std::pair<std::string, std::string>> ssh_config_hosts() {` | ------------------------------------------------------------------ add a machine (herdr machine-add) |
@@ -460,13 +438,11 @@
 | `apps/desktop/app.cpp:11924` | `const ImVec2 wp = ImGui::GetWindowPos();` | Send, and the line herdr shows when a build can't send says so. |
 | `apps/desktop/app.cpp:12093` | `bool cancel = overlay_title(s, s.confirm_title.c_str(), EscChip::kPlain);` | confirm/main.js 42 |
 | `apps/desktop/app.cpp:12107` | `const bool ok = ImGui::Button("Confirm", ImVec2(bw, px(30))) ¦¦ ImGui::IsKeyPressed(ImGuiK` | herdr confirm/main.js: Cancel and Confirm. |
-| `apps/desktop/app.cpp:12208` | `` | ------------------------------------------------------------------ Herdr 98 (herdr-app win98) |
 | `apps/desktop/app.cpp:12214` | `` | herdr window.rs 4439-4502 render_node: each shown node of the layout tree gets its rect |
 | `apps/desktop/app.cpp:12216` | `` | apply_look), and each block is drawn by the renderer its content names. herdr runs mods for |
 | `apps/desktop/app.cpp:12220` | `std::optional<ImU32> layout_color(const std::string& c) {` | A layout color: one of the theme's names (herdr themes: canvas, chrome, surface, ...) or |
 | `apps/desktop/app.cpp:12242` | `void draw_stack_tabs(App::State& s, const lay::Node& stack, const lay::Rect& r) {` | window.rs 4611-4631 builtin_tabs: `"header": {"content": "tabs"}` on a stack: its children's |
 | `apps/desktop/app.cpp:12279` | `const bool details = l.style.empty() && l.details.value_or(s.settings.details);` | AgentDesk's details pane (not herdr's): beside the panes when on. |
-| `apps/desktop/app.cpp:12350` | `w98::background(s, dl, w98::Box{a.x, a.y, b.x, b.y});` | Herdr 98's wallpaper: the root's background (a click in herdr, layout_sync.rs 324). |
 | `apps/desktop/app.cpp:12356` | `const auto c0 = layout_color(g->from);` | layout.rs 107-112: two colors at an angle; drawn top to bottom or left to right. A |
 | `apps/desktop/app.cpp:12384` | `for (const auto& sep : s.placed.separators) {` | Separators (window.rs 4633-4669): the divider line, and a drag handle where the container |
 | `apps/desktop/app.cpp:12392` | `if (row) {` | A line lw wide down the middle of the separator (window.rs 63-69 separator_line). |
@@ -475,153 +451,16 @@
 | `apps/desktop/app.cpp:12547` | `reconcile_core_update_error(s.core_update_error_dismissed, ui::updates::core());` | window.rs 4142-4147: keep a dismissed core error dismissed until it changes. |
 | `apps/desktop/app.cpp:12549` | `if (s.updates_asked) {` | settings main.js 65-71: after "Check now", follow the look, then "Up to date" for 3 s. |
 | `apps/desktop/app.cpp:12587` | `if (Clock::now() - s.observed_at >= std::chrono::seconds(10)) {` | window.rs 4155-4158: every 25 polls of 400 ms, what is open. |
-| `apps/desktop/app.cpp:12603` | `if (win98)` | kit.js 451-452: the MS-DOS font, 32 px with Large Fonts |
-| `apps/desktop/app.cpp:12605` | `if (s.fonts_win98 != win98) {` | a layout with fonts of its own (Herdr 98), or back from it |
 | `apps/desktop/app.cpp:12623` | `const auto pt = std::filesystem::last_write_time(data_dir() / L"programs.json", ec);` | herdr window.rs 982-991: programs.json is read again when it changes. |
 | `apps/desktop/app.cpp:12661` | `std::set<ImGuiKeyChord> chords;` | The layout's section ("layout:<name>") first, then global (herdr keys.rs tab()). |
 | `apps/desktop/app.cpp:12687` | `ImGui::GetWindowDrawList()->AddRectFilled(origin, ImVec2(origin.x + full.x, origin.y + ful` | The shown layout's tree (herdr main.json: the sidebar, a 1 px divider and the work column of |
-| `apps/desktop/app.cpp:12695` | `if (win98)` | its floats, windows and menus (herdr overlays) |
 | `apps/desktop/app.cpp:12727` | `if (!s.window_opened) {` | window.rs 832: the window is up. |
-| `apps/desktop/app.hpp:51` | `[[nodiscard]] bool binds_chord(int chord) const;` | A window chord keys.json binds in the shown layout or globally (Herdr 98's Ctrl+Esc). |
 | `apps/desktop/app.hpp:62` | `void on_quit();` | The loop ended (herdr main.rs 177-192 on_app_quit): telemetry's clean quit, then the |
-| `apps/desktop/main.cpp:72` | `HWND g_main_hwnd = nullptr;` | herdr's Herdr 98 binds both (mods/win98/README.md 15-16: win98.start, win98.taskman); while |
 | `apps/desktop/main.cpp:193` | `if (wparam == TRUE) {` | herdr's layout hides the system title bar and draws its own (window buttons in the |
 | `apps/desktop/main.cpp:268` | `auto* drop = reinterpret_cast<HDROP>(wparam);` | (herdr src/terminal.rs:717-723). |
 | `apps/desktop/main.cpp:393` | `{` | herdr update.rs 392-400 asks a downloaded copy `herdr-app --version` ("herdr-app 0.2.0"); |
 | `apps/desktop/main.cpp:418` | `ui::updates::leave_install_folder();` | herdr main.rs 127-132: leave the install folder, put a waiting update in place (that |
 | `apps/desktop/safe_read.hpp:69` | `struct Gradient {` | layout.rs 107-112 (libs/ui/src/layout.cpp read_background): two colors at an angle, 180 |
-| `apps/desktop/win98_chrome.inl:1` | `` | Herdr 98, part 3: the window itself (herdr-app defaults/layouts/win98.json): the desktop, the |
-| `apps/desktop/win98_chrome.inl:8` | `` | ---------------------------------------------------------------- helpers (herdr commands by id) |
-| `apps/desktop/win98_chrome.inl:58` | `void select_tab_id(App::State& s, const std::string& id) {` | herdr tab.select {id}: selects the tab and its space; a settled tab is shown again. |
-| `apps/desktop/win98_chrome.inl:69` | `void settle_tab_id(App::State& s, const std::string& id) {` | herdr tab.settle {id} (model.rs 470-484): the shown one hands over to the next unsettled tab; |
-| `apps/desktop/win98_chrome.inl:95` | `void new_tab(App::State& s, const std::string& name, int space, const std::string& profile` | herdr tab.new {name, argv, space}: a terminal in a new tab (a shell, or the program asked for). |
-| `apps/desktop/win98_chrome.inl:117` | `void new_space(App::State& s, const std::string& name, const std::string& machine) {` | herdr space.new {name, machine}. |
-| `apps/desktop/win98_chrome.inl:162` | `Dialog close_tab_ask(App::State& s, const ui::Tab& tab, int index) {` | taskbar.js 519-541. |
-| `apps/desktop/win98_chrome.inl:189` | `std::vector<Task> tasks(App::State& s) {` | dialog.js 247-251: every terminal that has not finished. |
-| `apps/desktop/win98_chrome.inl:210` | `void set_desktop(App::State& s, const std::string& c) {` | dialog.js 919-925: the desktop's color or the clouds picture. |
-| `apps/desktop/win98_chrome.inl:215` | `std::string pane_title_98(App::State& s, const std::string& id) {` | window.js 9-17: a pane's title. |
-| `apps/desktop/win98_chrome.inl:221` | `const ui::Program prog = program_of(v);` | window.js 12-13: no program, or a shell -> "DOS Prompt - <dos path>". |
-| `apps/desktop/win98_chrome.inl:308` | `float pane_border(App::State& s) {` | kit.js 464-473 (fitLayout): the pane header 18 and the border 3, in Win98 px. |
-| `apps/desktop/win98_chrome.inl:319` | `` | ---------------------------------------------------------------- the Start menu (taskbar.js 197-264) |
-| `apps/desktop/win98_chrome.inl:321` | `struct Agent98 {` | taskbar.js 15-27: the agents the Start menu offers when installed (here: a host profile). |
-| `apps/desktop/win98_chrome.inl:428` | `void toggle_start(App::State& s, std::optional<Box> bounds) {` | taskbar.js 266-274. |
-| `apps/desktop/win98_chrome.inl:440` | `` | ---------------------------------------------------------------- commands (taskbar.js 126-176) |
-| `apps/desktop/win98_chrome.inl:507` | `void boot(App::State& s, bool force) {` | taskbar.js 109-120: coming into Herdr 98: the boot screen and the welcome (at most every half |
-| `apps/desktop/win98_chrome.inl:527` | `long long app_age_seconds() {` | Seconds since agent-ui started (taskbar.js 48-59 asks ps for the app's age). |
-| `apps/desktop/win98_chrome.inl:540` | `` | ---------------------------------------------------------------- the taskbar (taskbar.js 276-516) |
-| `apps/desktop/win98_chrome.inl:667` | `void quick(App::State& s, ImDrawList* dl, const char* id, Box b,` | taskbar.js 370-398: Quick Launch: flat until hovered, then a 1 px raised bump. |
-| `apps/desktop/win98_chrome.inl:812` | `bevel(s, dl, box(ImVec2(x, cy - U(s, 10)), ImVec2(3 * o, U(s, 20))), Bevel::kBump);` | kit.js 184-186: the grip, a 1 px bump, 20 tall. |
-| `apps/desktop/win98_chrome.inl:1145` | `MenuItems mines_menu(App::State& s, bool help) {` | mines.js 125-136. |
-| `apps/desktop/win98_chrome.inl:1188` | `Box win_frame(App::State& s, ImDrawList* dl, ImVec2 at, float width, float height) {` | kit.js 295-308 win(): the frame, the title bar, the menu bar, the body. Returns the inside box. |
-| `apps/desktop/win98_chrome.inl:1193` | `void counter(App::State& s, ImDrawList* dl, ImVec2 at, int value) {` | mines.js 15-22. |
-| `apps/desktop/win98_chrome.inl:1437` | `const Json& jd = shared(s, "win98.sol.draw");` | sol.js 171-175: the options from shared; the clock runs while the window is open. |
-| `apps/desktop/win98_chrome.inl:1596` | `const Pressed tp = area("##sol-table", table);` | The pointer on the table (sol.js 184-199, 201-207). |
-| `apps/desktop/win98_chrome.inl:1663` | `ImVec2 render_sol_dialog(App::State& s, Window& win, ImDrawList* dl, ImVec2 at) {` | sol.js 145-165: Options and Select Card Back (a dialog over the window). |
-| `apps/desktop/win98_chrome.inl:1753` | `std::optional<News> clippy_news(App::State& s) {` | clippy.js 457-463: the agent that needs you (blocked), else the latest that finished, while you |
-| `apps/desktop/win98_chrome.inl:1802` | `void clippy(App::State& s, Box owner, ui::layout::Float& f) {` | owner: the node the layout floats it over; f: its floating block there (layout.rs 61-77). |
-| `apps/desktop/win98_chrome.inl:1840` | `const float m = px(ui::layout::kFloatMargin);` | win98.json 70-80: where the layout's floating block says (the left edge of the screen row, at |
-| `apps/desktop/win98_chrome.inl:1842` | `const float m = px(ui::layout::kFloatMargin);` | nearest edge and third (layout.rs 732-751), 12 px in (floats.rs 14, 78-96). |
-| `apps/desktop/win98_chrome.inl:1853` | `const bool right = place.edge != k98::Edge::kLeft;` | clippy.js 469 |
-| `apps/desktop/win98_chrome.inl:1860` | `const float ms = std::chrono::duration<float, std::milli>(Clock::now() - w.clippy.spring_s` | floats.rs 212-215: left = 1 - spring(elapsed / 360 ms), the body offset by from * left. |
-| `apps/desktop/win98_chrome.inl:1868` | `s.config.wake();` | floats.rs 326: frames while anything moves |
-| `apps/desktop/win98_chrome.inl:1931` | `if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !g_area_ho` | floats.rs 253-300: a press on it that no control takes drags it (from 4 px); dropped, it |
-| `apps/desktop/win98_chrome.inl:1941` | `if (!w.clippy.moving && std::max(std::abs(mouse.x - w.clippy.down.x),` | floats.rs 261-262: the larger of the two distances, from 4 px. |
-| `apps/desktop/win98_chrome.inl:1952` | `save_layout_state(s.layout());` | floats.rs 288-297 + layout_sync.rs FloatState |
-| `apps/desktop/win98_chrome.inl:1953` | `const auto next = k98::float_home(owner.x0, owner.y0, owner.w(), owner.h(), cw, ch, to, m)` | floats.rs 288-297: spring from where it was let go to its new home. |
-| `apps/desktop/win98_chrome.inl:1968` | `void sync_games(App::State& s) {` | taskbar.js 181-193: one window per open (or minimized) game. |
-| `apps/desktop/win98_chrome.inl:2020` | `w.sol->animating = false;` | sol.js 174: stop() |
-| `apps/desktop/win98_chrome.inl:2033` | `const std::string dim = name + "dim";` | herdr dialog overlays dim the window and keep clicks beside them. |
-| `apps/desktop/win98_chrome.inl:2135` | `void preview(App::State& s, ImDrawList* dl, ImVec2 a, ImVec2 size, float rounding, ImU32 b` | settings/main.js 302-309: the layout's preview picture (win98.json "preview": |
-| `apps/desktop/win98_chrome.inl:2154` | `void background(App::State& s, ImDrawList* dl, Box b) {` | covering it (dialog.js 919-925). |
-| `apps/desktop/win98_chrome.inl:2179` | `w.was_shown = true;` | taskbar.js 68-107: a new taskbar: the Start menu closed, the boot (always when the app |
-| `apps/desktop/win98_chrome.inl:2191` | `void fit(App::State& s, ui::layout::Node& root) {` | kit.js 441-479 fitLayout: the bars in Win98 pixels (n * scale / zoom layout px, which the zoom |
-| `apps/desktop/win98_chrome.inl:2192` | `void fit(App::State& s, ui::layout::Node& root) {` | makes n * scale screen px), whole on screen as before. Clicks, not edits (layout_sync.rs 324). |
-| `apps/desktop/win98_chrome.inl:2232` | `void hidden(App::State& s) {` | A layout switch closes windows and menus (herdr.d.ts 405). |
-| `apps/desktop/win98_dialogs.inl:1` | `` | Herdr 98, part 2: the dialogs (herdr-app defaults/mods/win98/dialog.js, commit 321c9a8). |
-| `apps/desktop/win98_dialogs.inl:24` | `std::string kind_title(const std::string& kind) {` | dialog.js 26-38. |
-| `apps/desktop/win98_dialogs.inl:41` | `struct Btn {` | dialog.js 263-273: 75 x 23 buttons in a row, gap 6, at the end or in the middle. Returns the |
-| `apps/desktop/win98_dialogs.inl:72` | `void input(App::State& s, ImDrawList* dl, Box b, const Dialog& d) {` | dialog.js 275-285: the text box: the text (selected while fresh) and a blinking caret. |
-| `apps/desktop/win98_dialogs.inl:92` | `bool radio(App::State& s, ImDrawList* dl, const char* id, float x, float y, const std::str` | dialog.js 287-299: a radio button and its label. |
-| `apps/desktop/win98_dialogs.inl:103` | `bool check(App::State& s, ImDrawList* dl, const char* id, float x, float y, const std::str` | dialog.js 301-316: a check box (a 13 px field) and its label. |
-| `apps/desktop/win98_dialogs.inl:121` | `void pick_machine(App::State& s, Dialog& d, int dir) {` | dialog.js 185-188. |
-| `apps/desktop/win98_dialogs.inl:132` | `void run_it(App::State& s, Window& w, Dialog& d) {` | dialog.js 221-229: a command line in a new tab, then the shell stays (herdr: sh -c "<cmd>; |
-| `apps/desktop/win98_dialogs.inl:159` | `void shutdown_choice(App::State& s, Window& w, Dialog& d) {` | dialog.js 231-245. |
-| `apps/desktop/win98_dialogs.inl:181` | `void end_task(App::State& s, Dialog& d) {` | dialog.js 253-259. |
-| `apps/desktop/win98_dialogs.inl:191` | `void ok(App::State& s, Window& w, Dialog& d) {` | dialog.js 190-219. |
-| `apps/desktop/win98_dialogs.inl:228` | `void dialog_keys(App::State& s, Window& w, Dialog& d) {` | dialog.js 154-183: the keys of the dialog that has the keyboard. |
-| `apps/desktop/win98_dialogs.inl:329` | `float render_prompt(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {` | dialog.js 333-360. |
-| `apps/desktop/win98_dialogs.inl:371` | `float render_confirm(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {` | dialog.js 362-386 (confirm and message). |
-| `apps/desktop/win98_dialogs.inl:397` | `float render_run(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {` | dialog.js 388-423. |
-| `apps/desktop/win98_dialogs.inl:444` | `float render_shutdown(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {` | dialog.js 425-449. |
-| `apps/desktop/win98_dialogs.inl:473` | `float render_logoff(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {` | dialog.js 451-457. |
-| `apps/desktop/win98_dialogs.inl:489` | `float render_about(App::State& s, Window& w, Dialog& /*d*/, ImDrawList* dl, Box b) {` | dialog.js 459-493. |
-| `apps/desktop/win98_dialogs.inl:529` | `float render_taskman(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {` | dialog.js 495-542. |
-| `apps/desktop/win98_dialogs.inl:592` | `float render_display(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {` | dialog.js 544-653. |
-| `apps/desktop/win98_dialogs.inl:725` | `float render_datetime(App::State& s, Window& w, Dialog& /*d*/, ImDrawList* dl, Box b) {` | dialog.js 655-709 and 927-958. |
-| `apps/desktop/win98_dialogs.inl:796` | `struct ExItem {` | dialog.js 711-755: an Explorer-ish window: icons in a 200 px field, a status bar. |
-| `apps/desktop/win98_dialogs.inl:864` | `float render_mycomputer(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {` | dialog.js 757-767. |
-| `apps/desktop/win98_dialogs.inl:888` | `float render_network(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {` | dialog.js 769-780. |
-| `apps/desktop/win98_dialogs.inl:911` | `float render_bin(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {` | dialog.js 871-876. |
-| `apps/desktop/win98_dialogs.inl:920` | `float render_welcome(App::State& s, Window& w, Dialog& d, ImDrawList* dl, Box b) {` | dialog.js 782-869. |
-| `apps/desktop/win98_dialogs.inl:1043` | `void screen_timers(App::State& s, Window& w, Dialog& d) {` | dialog.js 81-150: the full-window boot, shut down and restart screens. |
-| `apps/desktop/win98_dialogs.inl:1098` | `ImVec2 render_dialog(App::State& s, Window& w, ImDrawList* dl, ImVec2 at) {` | dialog.js 878-916: a dialog's frame (kit.js win: title bar, help unless Explorer-ish, close) and |
-| `apps/desktop/win98_kit.inl:1` | `` | Herdr 98, part 1: the drawing kit, the shared values, the popup menus and the overlay windows. |
-| `apps/desktop/win98_kit.inl:2` | `` | Ported from herdr-app defaults/mods/win98 (commit 321c9a8, Apache-2.0): kit.js, menu.js; herdr's |
-| `apps/desktop/win98_kit.inl:3` | `` | overlays (herdr.d.ts 395-425). Included by app.cpp inside its anonymous namespace, after |
-| `apps/desktop/win98_kit.inl:6` | `` | Pixels: kit.js 4-6 draws in whole Win98 pixels, u(n) = n * scale (Small Fonts 1, Large 2) at |
-| `apps/desktop/win98_kit.inl:7` | `` | the display's scale; herdr's zoom does not change them. Layout px (padding, gaps) are px(). |
-| `apps/desktop/win98_kit.inl:70` | `` | ---------------------------------------------------------------- shared (herdr shared(), persisted) |
-| `apps/desktop/win98_kit.inl:109` | `int scale(App::State& s) {` | kit.js 40-43. |
-| `apps/desktop/win98_kit.inl:115` | `float K(App::State& s) {` | kit.js 45-51: one Win98 pixel on screen. |
-| `apps/desktop/win98_kit.inl:133` | `std::string app_state(App::State& s, const std::string& name) {` | kit.js 417-427: which game windows are open: {mines: "open" \| "min", sol: ...}. |
-| `apps/desktop/win98_kit.inl:150` | `` | ---------------------------------------------------------------- sounds (kit.js 404-413) |
-| `apps/desktop/win98_kit.inl:164` | `void sfx(App::State& s, const std::string& name) {` | Plays a Herdr 98 sound unless sounds are off (settings, or the speaker in the tray). |
-| `apps/desktop/win98_kit.inl:193` | `if (const auto* f = find_family("Arial"))` | mines.js 157: the numbers in Arial bold. |
-| `apps/desktop/win98_kit.inl:207` | `float terminal_font_size(App::State& s) {` | kit.js 451-452, at Herdr's zoom (the terminal font size at zoom 1). |
-| `apps/desktop/win98_kit.inl:217` | `` | ---------------------------------------------------------------- text (kit.js 55-80) |
-| `apps/desktop/win98_kit.inl:234` | `float label(App::State& s, ImDrawList* dl, float x, float top, const std::string& text, Im` | noAccess (kit.js 56-71). Returns its width. |
-| `apps/desktop/win98_kit.inl:280` | `std::vector<std::string> wrap(App::State& s, const std::string& text, float width, bool bo` | The text's lines (dialog.js 40-44: one per "\n", an empty one keeps its height), wrapped at |
-| `apps/desktop/win98_kit.inl:345` | `` | ---------------------------------------------------------------- bevels (kit.js 82-137) |
-| `apps/desktop/win98_kit.inl:384` | `void etch(App::State& s, ImDrawList* dl, float x, float y, float len, bool vertical) {` | kit.js 176-181: an etched line, 2 px. |
-| `apps/desktop/win98_kit.inl:396` | `void gradient(ImDrawList* dl, Box b, ImU32 from, ImU32 to, bool down = false) {` | kit.js 192-195: a left-to-right gradient (angle 90), or top to bottom (180). |
-| `apps/desktop/win98_kit.inl:404` | `void dither(App::State& s, ImDrawList* dl, Box b) {` | kit.js 197-200: a 1 px dither (Win98's checked buttons): white on every other Win98 pixel. |
-| `apps/desktop/win98_kit.inl:416` | `` | ---------------------------------------------------------------- icons (kit.js 202-225) |
-| `apps/desktop/win98_kit.inl:456` | `void brand_header(App::State& s, ImDrawList* dl, Box b) {` | The About box's picture (art/generate.ts 120: white to #a4d2ee, the name at 32). |
-| `apps/desktop/win98_kit.inl:475` | `void program_icon(App::State& s, ImDrawList* dl, const ui::Program& p, float size, ImVec2 ` | kit.js 208-225 programIcon: from the app's program table (herdr programs.json, programs_of in |
-| `apps/desktop/win98_kit.inl:493` | `` | ---------------------------------------------------------------- buttons (kit.js 139-174) |
-| `apps/desktop/win98_kit.inl:554` | `if (p.held && !o.toggled && !o.disabled)` | kit.js 118: the face moves 1 px down and right |
-| `apps/desktop/win98_kit.inl:562` | `Pressed text_button(App::State& s, ImDrawList* dl, const char* id, Box b, const std::strin` | A push button with a label, centered (kit.js 150-151). |
-| `apps/desktop/win98_kit.inl:572` | `bool control(App::State& s, ImDrawList* dl, const char* id, const std::string& kind, ImVec` | kit.js 229-239: a title bar's little button, 16 x 14, its glyph 8 x 7. |
-| `apps/desktop/win98_kit.inl:592` | `` | ---------------------------------------------------------------- title bars (kit.js 241-289) |
-| `apps/desktop/win98_kit.inl:646` | `Box field(App::State& s, ImDrawList* dl, Box b, float pad_y = 2, float pad_x = 3, ImU32 bg` | kit.js 310-318: a sunken white field and a status bar panel. |
-| `apps/desktop/win98_kit.inl:655` | `` | ---------------------------------------------------------------- menus (menu.js, kit.js 322-371) |
-| `apps/desktop/win98_kit.inl:664` | `int open_menu(App::State& s, MenuItems items, std::optional<ImVec2> at, bool start = false` | kit.js 356-371: opens a popup menu at `at` (the pointer when not given), or above a box (the |
-| `apps/desktop/win98_kit.inl:690` | `if (m.parents.empty())` | menu.js 237: a top menu starts the list over. |
-| `apps/desktop/win98_kit.inl:704` | `void close_tree(App::State& s, int id) {` | menu.js 216-223: closes a menu and every menu opened from it. |
-| `apps/desktop/win98_kit.inl:721` | `void close_all_menus(App::State& s) {` | menu.js 261-268: a choice closes the whole chain. |
-| `apps/desktop/win98_kit.inl:731` | `void open_sub(App::State& s, int menu_id, int i, std::optional<Box> row) {` | menu.js 277-290: a submenu to the right of its row (at the pointer when opened by a key). |
-| `apps/desktop/win98_kit.inl:760` | `void choose(App::State& s, const MenuItem& it) {` | menu.js 270-275. |
-| `apps/desktop/win98_kit.inl:770` | `void escape_menu(App::State& s, int menu_id) {` | menu.js 245-251: Escape (and Left) closes this menu and what hangs off it. |
-| `apps/desktop/win98_kit.inl:781` | `void move_menu(Menu& m, int d) {` | menu.js 292-301: the next row that is not a separator. |
-| `apps/desktop/win98_kit.inl:795` | `void menu_keys(App::State& s, int menu_id) {` | menu.js 303-336: the keys of the menu opened last. |
-| `apps/desktop/win98_kit.inl:841` | `void menu_row(App::State& s, ImDrawList* dl, int menu_id, int i, Box r, bool start) {` | menu.js 338-386: one row. Start menu rows are 34 px with 32 px icons. |
-| `apps/desktop/win98_kit.inl:914` | `void raise(const std::string& name) {` | Puts a Herdr 98 window above the others, unless one of AgentDesk's own dialogs (an ImGui popup: |
-| `apps/desktop/win98_kit.inl:922` | `void keyboard_back(App::State& s) {` | themselves, dialog.js 50-51), else back to the terminal. |
-| `apps/desktop/win98_kit.inl:937` | `void draw_menus(App::State& s) {` | menu.js 388-426: every open menu, the last one opened on top with the keyboard. |
-| `apps/desktop/win98_kit.inl:990` | `if (id == last && w.menu_focus != id) {` | menu.js 229-230: a menu takes the keyboard when it opens. |
-| `apps/desktop/win98_kit.inl:1078` | `void open_dialog(App::State& s, Dialog d) {` | kit.js 375-386: a dialog, a window dragged by its title, its width by kind. |
-| `apps/desktop/win98_kit.inl:1087` | `if (d.value)` | dialog.js 52-64: the text box starts with the value (Run: the last line run); the sounds. |
-| `apps/desktop/win98_kit.inl:1099` | `if (d.kind == "screen" && d.mode == "boot") {` | dialog.js 86-88: straight to "Starting" |
-| `apps/desktop/win98_state.hpp:2` | `` | Herdr 98's state in agent-ui (herdr-app defaults/mods/win98, commit 321c9a8): the open menus, |
-| `apps/desktop/win98_state.hpp:3` | `` | dialogs and game windows that herdr opens as overlays, the shared values the mod keeps |
-| `apps/desktop/win98_state.hpp:4` | `` | (herdr's shared(), persisted: <data>\win98.json), and the games. Drawn by win98.inl. |
-| `apps/desktop/win98_state.hpp:23` | `struct MenuItem {` | kit.js 350-355: a menu item. `act` is what perform() does (kit.js 388-400). |
-| `apps/desktop/win98_state.hpp:72` | `std::string input;` | state (dialog.js 47-75) |
-| `apps/desktop/win98_state.hpp:84` | `struct Window {` | An overlay window: a dialog, a game or the Solitaire options (herdr openOverlay kind "window", |
-| `apps/desktop/win98_state.hpp:106` | `bool pressing = false;` | A drag of the float (herdr floats.rs 253-300): where it was pressed, where in it, moving. |
-| `apps/desktop/win98_state.hpp:111` | `std::optional<ImVec2> spring_from;` | floats.rs 64-69 FloatAnim: its offset from home when dropped, easing to zero. |
-| `apps/desktop/win98_state.hpp:128` | `std::string sol_menu;` | sol.js 180: the Solitaire menu opened last |
-| `apps/desktop/win98_state.hpp:154` | `ImFont* arial = nullptr;` | Mines numbers (mines.js 157: Arial bold) |
 | `apps/host/main.cpp:84` | `if (version) {` | Like agent-ui --version (herdr update.rs 392-400): on the stdout it was given. |
 | `libs/host/include/agentdesk/host/git_tools.hpp:15` | `std::string error;` | stderr, kept apart for messages (herdr worktree/main.js git()) |
 | `libs/host/include/agentdesk/host/git_tools.hpp:20` | `inline constexpr std::size_t kMaxToolOutput = 64u * 1024u * 1024u;` | Most bytes kept of each stream: no cap in practice (herdr reads all), but memory stays bounded. |
@@ -671,9 +510,7 @@
 | `libs/ui/include/agentdesk/ui/fonts.hpp:91` | `inline constexpr const char* kEdit = "\xEE\xA9\xB3";` | U+EA73 codicon edit (herdr lucide square-pen) |
 | `libs/ui/include/agentdesk/ui/fonts.hpp:93` | `inline constexpr const char* kSquare = "\xEE\xA9\xB2";` | U+EA72 codicon primitive-square (herdr square) |
 | `libs/ui/include/agentdesk/ui/host_client.hpp:37` | `std::vector<std::string> program_argv;` | its command line as words (herdr resolves by it) |
-| `libs/ui/include/agentdesk/ui/image_cache.hpp:3` | `` | decoded once (Windows Imaging Component). Herdr 98 draws its icons, cards and pictures this way |
 | `libs/ui/include/agentdesk/ui/image_cache.hpp:4` | `` | (herdr renders the same files with its own SVG and image support). The textures go through |
-| `libs/ui/include/agentdesk/ui/imgui_adapter.hpp:35` | `void bring_to_front(const char* window_name);` | Puts a window above the others in drawing order (Herdr 98: the window pressed last is on top). |
 | `libs/ui/include/agentdesk/ui/input_mapping.hpp:69` | `std::string selection_text(const std::vector<LineCells>& lines, CellPos a, CellPos b);` | (CellPos::row indexes `lines`). As herdr copies (src/vt.rs:1158-1163, Ghostty's formatter with |
 | `libs/ui/include/agentdesk/ui/input_mapping.hpp:77` | `int selection_scroll_lines(float y, float cell_h, int rows);` | Lines to scroll while a selection drag is held past the edge (herdr src/terminal.rs:1280-1288): |
 | `libs/ui/include/agentdesk/ui/input_mapping.hpp:82` | `std::optional<std::string> quote_paths(const std::vector<std::string>& paths);` | trailing space, never Enter (herdr src/terminal/drag_paths.rs quote_paths, Windows branch). |
@@ -709,7 +546,6 @@
 | `libs/ui/include/agentdesk/ui/layout.hpp:172` | `std::optional<Node> remove(std::string_view id);` | layout.rs 585-670: tree edits. |
 | `libs/ui/include/agentdesk/ui/layout.hpp:183` | `std::optional<Node> parse(const Json& j, std::string* error = nullptr);` | Reads a layout as herdr's serde types do: the same keys and defaults; unknown keys are left |
 | `libs/ui/include/agentdesk/ui/layout.hpp:188` | `std::string text_of(const Node& n);` | layout_sync.rs 289-313: as the file holds it: pretty, whole numbers without ".0" (keys in |
-| `libs/ui/include/agentdesk/ui/layout.hpp:194` | `std::vector<std::string> builtin_names();` | herdr window.rs 160-166: main, terminals and win98 (defaults/layouts, kept verbatim in |
 | `libs/ui/include/agentdesk/ui/layout.hpp:195` | `std::vector<std::string> builtin_names();` | third_party/herdr/layouts). AgentDesk names main "workspace", as its settings always have. |
 | `libs/ui/include/agentdesk/ui/layout.hpp:199` | `Node builtin(std::string_view name);` | window.rs 180-182: a layout as shipped (main for names herdr doesn't ship). |
 | `libs/ui/include/agentdesk/ui/layout.hpp:219` | `const Line* node_border(const Node& n, bool focused);` | pane_size.rs 7-37. |
@@ -805,62 +641,6 @@
 | `libs/ui/include/agentdesk/ui/updates.hpp:127` | `bool run_core_update(const std::vector<std::wstring>& extra, std::string* now, std::string` | core_bin.rs 247-265: runs `agentctl update --json [extra]`. Ok: what agent-host is now |
 | `libs/ui/include/agentdesk/ui/updates.hpp:131` | `struct CoreStageRequest {` | What `agentctl update` (herdr: `hc update`) does before it asks the running agent-host to |
 | `libs/ui/include/agentdesk/ui/updates.hpp:136` | `std::optional<std::string> at_least;` | `--version X` (core_bin.rs 246) |
-| `libs/ui/include/agentdesk/ui/win98.hpp:2` | `` | Herdr 98 (herdr-app defaults/mods/win98, commit 321c9a8), the parts with no drawing in them: |
-| `libs/ui/include/agentdesk/ui/win98.hpp:3` | `` | the kit's pixel math and tables (kit.js), the menu metrics (kit.js 322-344), DOS paths and |
-| `libs/ui/include/agentdesk/ui/win98.hpp:4` | `` | clock texts (kit.js 431-437, taskbar.js 36-46, dialog.js 655-691), and the rules of the two |
-| `libs/ui/include/agentdesk/ui/win98.hpp:20` | `namespace color {` | ---------------------------------------------------------------- kit.js 12-32: the colors |
-| `libs/ui/include/agentdesk/ui/win98.hpp:44` | `enum class Bevel { kRaised, kPressed, kWindow, kField, kWell, kBump, kDent, kThin, kFlat }` | ---------------------------------------------------------------- kit.js 84-95: the bevels |
-| `libs/ui/include/agentdesk/ui/win98.hpp:53` | `struct Unit {` | kit.js 40-51: n Win98 pixels are n * k pixels on screen; k is the scale (1 Small Fonts, 2 Large |
-| `libs/ui/include/agentdesk/ui/win98.hpp:54` | `struct Unit {` | Fonts). herdr divides by its zoom to get layout px, which its zoom multiplies back: the pixels |
-| `libs/ui/include/agentdesk/ui/win98.hpp:63` | `inline constexpr float kTaskbarPx = 28.0f;` | kit.js 441-479 (fitLayout): the layout's bars in Win98 pixels. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:68` | `float terminal_font_px(int scale, float zoom);` | The MS-DOS font: Large Fonts, a crisp 32 px (16 Win98 px); Small, 16 px at Herdr's zoom. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:71` | `int access_index(std::string_view label);` | ---------------------------------------------------------------- text (kit.js 55-75) |
-| `libs/ui/include/agentdesk/ui/win98.hpp:72` | `int access_index(std::string_view label);` | Index of the access key ("&File" -> 1, the F), or -1. kit.js 58: an "&" that is not last. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:74` | `std::string plain(std::string_view label);` | kit.js 73-75: the first "&x" becomes "x". |
-| `libs/ui/include/agentdesk/ui/win98.hpp:76` | `bool access_matches(std::string_view label, char ch);` | menu.js 326-327: the item whose label holds "&" + ch (lowercase). |
-| `libs/ui/include/agentdesk/ui/win98.hpp:79` | `struct MenuMetrics {` | ---------------------------------------------------------------- menus (kit.js 322-344) |
-| `libs/ui/include/agentdesk/ui/win98.hpp:98` | `using Edge = layout::Edge;` | herdr src/layout.rs 33-59, 732-751 and src/window/floats.rs 78-96: a floating block (Clippy) |
-| `libs/ui/include/agentdesk/ui/win98.hpp:109` | `float spring(float t);` | herdr floats.rs 71-75: ease out with a small overshoot, so the snap feels like a spring |
-| `libs/ui/include/agentdesk/ui/win98.hpp:110` | `float spring(float t);` | (t in 0..1; 0 at the drop, 1 home). A dropped float springs home over kSnapMs (floats.rs 17). |
-| `libs/ui/include/agentdesk/ui/win98.hpp:113` | `inline constexpr float kDragStart = 4.0f;` | floats.rs 16: a press moves it from this far |
-| `libs/ui/include/agentdesk/ui/win98.hpp:121` | `float dialog_width(std::string_view kind);` | kit.js 373: each dialog's width in Win98 px (340 when not listed). |
-| `libs/ui/include/agentdesk/ui/win98.hpp:125` | `std::string dos_path(std::string_view path, std::string_view home);` | kit.js 431-437, for Windows paths: under the home folder "C:\My Documents\...", else the path |
-| `libs/ui/include/agentdesk/ui/win98.hpp:128` | `std::string user_name(std::string_view home);` | taskbar.js 61-65: the home folder's last part, capitalised ("User" without one). |
-| `libs/ui/include/agentdesk/ui/win98.hpp:130` | `std::string run_name(std::string_view command);` | dialog.js 227: the program's name for a Run line: its first word, after the last "/". |
-| `libs/ui/include/agentdesk/ui/win98.hpp:132` | `std::vector<std::string> run_history(std::vector<std::string> history, const std::string& ` | dialog.js 224: the Run history: this command first, no repeats, at most 12. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:135` | `struct DateTime {` | ---------------------------------------------------------------- time (taskbar.js 36-46) |
-| `libs/ui/include/agentdesk/ui/win98.hpp:151` | `std::string time_zone_text(const DateTime& d);` | dialog.js 688-691: "UTC+08:00" |
-| `libs/ui/include/agentdesk/ui/win98.hpp:152` | `std::vector<std::array<int, 7>> calendar(int year, int month);` | dialog.js 656-666: the month's weeks, Sunday first; 0 is an empty cell. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:154` | `struct ClockDot {` | dialog.js 927-958: the clock face. Each dot: left, top (Win98 px in the 96 px face), size, |
-| `libs/ui/include/agentdesk/ui/win98.hpp:186` | `static std::optional<std::array<int, 3>> level(std::string_view name);` | mines.js 6: {cols, rows, mines}; nullopt for an unknown level. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:189` | `void reset();` | mines.js 34-42 |
-| `libs/ui/include/agentdesk/ui/win98.hpp:191` | `std::string reveal(int i, long long now_ms);` | mines.js 71-104: the first reveal lays the mines away from i and its neighbours and starts |
-| `libs/ui/include/agentdesk/ui/win98.hpp:194` | `std::string chord(int i, long long now_ms);` | mines.js 106-112: a number with as many flags around it reveals its other neighbours. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:196` | `void mark(int i);` | mines.js 173: right-click cycles none, flag, (?) on a closed cell while the game runs. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:198` | `bool tick(long long now_ms);` | mines.js 64-68: once a second; stops at 999. Returns true when the shown time changed. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:200` | `void request(const std::string& cmd);` | mines.js 114-123: a menu command. "best" is the caller's (a message box). |
-| `libs/ui/include/agentdesk/ui/win98.hpp:202` | `[[nodiscard]] int mines_left() const;` | mines.js 186: the counter at the left. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:204` | `[[nodiscard]] std::string face() const;` | mines.js 185: the face: "dead", "cool", "ooh" (a cell held) or "smile". |
-| `libs/ui/include/agentdesk/ui/win98.hpp:206` | `[[nodiscard]] std::string best_text() const;` | mines.js 122: the Best Times text. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:220` | `int held = -1;` | the cell pressed and not released (mines.js 40) |
-| `libs/ui/include/agentdesk/ui/win98.hpp:236` | `std::string counter_chars(int value);` | mines.js 8-21: the seven-segment counter. The characters ("-" then two digits below zero, |
-| `libs/ui/include/agentdesk/ui/win98.hpp:240` | `const std::array<std::array<int, 4>, 7>& segment_rects();` | mines.js 9: each segment's x, y, w, h in the 11 x 23 digit (a..g). |
-| `libs/ui/include/agentdesk/ui/win98.hpp:242` | `std::uint32_t mines_number_color(int n);` | mines.js 7: the number colors 1..8 (index 0 is the face color). |
-| `libs/ui/include/agentdesk/ui/win98.hpp:248` | `static constexpr int kW = 596, kH = 355, kCW = 71, kCH = 96;` | sol.js 6 |
-| `libs/ui/include/agentdesk/ui/win98.hpp:279` | `static int rank(int c) { return c % 13 + 1; }` | sol.js 7-9 |
-| `libs/ui/include/agentdesk/ui/win98.hpp:283` | `void deal();` | sol.js 223-234 |
-| `libs/ui/include/agentdesk/ui/win98.hpp:284` | `[[nodiscard]] bool valid_pick(const Loc& loc) const;` | sol.js 51-59 |
-| `libs/ui/include/agentdesk/ui/win98.hpp:285` | `bool move(const Loc& from, const Loc& to);` | sol.js 60-75. True when it moved; "tada" goes to `sound` on a win. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:287` | `void foundation(const Loc& loc);` | sol.js 76-79: a double-click sends it home |
-| `libs/ui/include/agentdesk/ui/win98.hpp:288` | `void stock();` | sol.js 80-88 |
-| `libs/ui/include/agentdesk/ui/win98.hpp:289` | `enum class Down { kNothing, kMoved, kTurned, kPick, kUnpick };` | sol.js 89-100, the part that is not about the pointer: a face-down card at the end of a |
-| `libs/ui/include/agentdesk/ui/win98.hpp:293` | `[[nodiscard]] static std::optional<Loc> target(float x, float y);` | sol.js 105-109 |
-| `libs/ui/include/agentdesk/ui/win98.hpp:294` | `void tick_second();` | sol.js 42-46 |
-| `libs/ui/include/agentdesk/ui/win98.hpp:295` | `bool animate();` | sol.js 113-127: one 33 ms frame of the bouncing cards; false when it ended. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:297` | `void command(const std::string& cmd);` | sol.js 132-140 (deal, undo, autowin) |
-| `libs/ui/include/agentdesk/ui/win98.hpp:298` | `[[nodiscard]] std::vector<int> cards(const Loc& loc) const;` | sol.js 50 |
-| `libs/ui/include/agentdesk/ui/win98.hpp:300` | `[[nodiscard]] float tab_step(int i) const;` | sol.js 220: the step between face-up cards of a column. |
-| `libs/ui/include/agentdesk/ui/win98.hpp:307` | `bool running = false;` | the clock runs (sol.js 41) |
 | `libs/ui/include/agentdesk/ui/workspace.hpp:7` | `` | -> Node  (split tree like herdr's layout.rs: a row or column holds any number of |
 | `libs/ui/include/agentdesk/ui/workspace.hpp:41` | `std::vector<std::string> focus_history;` | panes focused before, oldest first (herdr Tab::focus) |
 | `libs/ui/include/agentdesk/ui/workspace.hpp:42` | `bool settled = false;` | herdr tab.settle: put away (not in the tab bar), still running |
@@ -871,7 +651,6 @@
 | `libs/ui/include/agentdesk/ui/workspace.hpp:99` | `void assign_colors(const std::map<std::string, std::string>* session_top = nullptr);` | (herdr spaces.js 526). |
 | `libs/ui/include/agentdesk/ui/workspace.hpp:102` | `bool reorder_spaces(const std::vector<int>& order);` | active (herdr spaces.js 316-334: space.move so the model follows the drawn tree). |
 | `libs/ui/include/agentdesk/ui/workspace.hpp:113` | `bool settle_tab(int space, int tab, bool keep_shown = false);` | herdr tab.settle: hides a tab from the bar until it is shown or needs you. The last tab |
-| `libs/ui/include/agentdesk/ui/workspace.hpp:115` | `bool settle_tab(int space, int tab, bool keep_shown = false);` | settled and stays shown (herdr model.rs 470-484; Herdr 98 minimizes the last window too). |
 | `libs/ui/include/agentdesk/ui/workspace.hpp:128` | `void toggle_zoom(const std::string& pane = {});` | herdr pane.zoom {pane}: zooms and focuses it |
 | `libs/ui/include/agentdesk/ui/workspace.hpp:131` | `[[nodiscard]] std::string space_title(int index,` | herdr model.rs 271-279: its name; else its first terminal's checkout top (a worktree's own |
 | `libs/ui/include/agentdesk/ui/workspace.hpp:164` | `enum class Attention { kNone, kIdle, kWorking, kDone, kBlocked };` | ---- attention (herdr-style: "done" = finished while you were not looking) |
@@ -889,7 +668,6 @@
 | `libs/ui/src/host_client.cpp:500` | `const bool took_over = std::find(hc.host_succeeds.begin(), hc.host_succeeds.end(), instanc` | over in a self-update (design doc 7.4 OQ-09; herdr hc.rs 26-28: "cores restart and |
 | `libs/ui/src/keymap.cpp:121` | `constexpr std::pair<const char*, const char*> kGlobal[] = {` | herdr's defaults/keys.json for Windows (spec-settings-fonts.md 3.2), plus ctrl-1..9 / alt-1..9. |
 | `libs/ui/src/keymap.cpp:171` | `{"ctrl-v", "terminal.paste_image"},` | herdr terminal.paste_image: on Windows the clipboard text, else Ctrl+V for the program. |
-| `libs/ui/src/keymap.cpp:182` | `constexpr std::pair<const char*, const char*> kWin98[] = {` | herdr-app defaults/mods/win98/README.md 12-13: keys.json section "layout:win98", |
 | `libs/ui/src/keymap.cpp:231` | `std::string migrate(std::string a) {` | herdr keys.rs 132-149: names from older releases. |
 | `libs/ui/src/keymap.cpp:294` | `continue;` | herdr: skipped in global |
 | `libs/ui/src/keymap.cpp:310` | `std::vector<Keymap::Binding> Keymap::listing(const nlohmann::json& file) {` | herdr-app src/keys.rs 89-109 (listing): the file's sections as written (sorted maps), the |
@@ -997,58 +775,6 @@
 | `libs/ui/src/updates.cpp:812` | `core.error = error;` | herdr: tracing::warn!("herdr-core update: {e}") |
 | `libs/ui/src/updates.cpp:827` | `std::vector<std::wstring> args = {L"update", L"--json"};` | core_bin.rs 247-265: `hc update --json [--version X]`, stdin closed. |
 | `libs/ui/src/updates.cpp:928` | `s.error = "no release server";` | update.rs 9-11, 122-129: a build from source looks for no updates without a server. |
-| `libs/ui/src/win98.cpp:1` | `` | Herdr 98's rules and numbers, ported from herdr-app defaults/mods/win98 (commit 321c9a8, |
-| `libs/ui/src/win98.cpp:46` | `std::vector<BevelLayer> bevel_layers(Bevel kind) {` | kit.js 84-95. |
-| `libs/ui/src/win98.cpp:72` | `int scale_of(int shared_scale) {` | kit.js 40-43. |
-| `libs/ui/src/win98.cpp:77` | `float terminal_font_px(int scale, float zoom) {` | kit.js 451-452: scale 2 gives want(16) (16 * 2 / zoom layout px, 32 px on screen); scale 1 |
-| `libs/ui/src/win98.cpp:83` | `int access_index(std::string_view label) {` | kit.js 57-58. |
-| `libs/ui/src/win98.cpp:91` | `std::string plain(std::string_view label) {` | kit.js 73-75: String.replace(/&(.)/, "$1"), the first one only. |
-| `libs/ui/src/win98.cpp:100` | `bool access_matches(std::string_view label, char ch) {` | menu.js 326-327. |
-| `libs/ui/src/win98.cpp:109` | `MenuSize menu_size(const std::vector<MenuRowText>& items, bool start) {` | kit.js 326-344. |
-| `libs/ui/src/win98.cpp:131` | `float spring(float t) {` | herdr src/layout.rs 732-751. |
-| `libs/ui/src/win98.cpp:159` | `std::array<float, 2> float_home(float ox, float oy, float w, float h, float bw, float bh, ` | herdr src/window/floats.rs 78-96. |
-| `libs/ui/src/win98.cpp:182` | `FloatPlace parse_place(std::string_view edge, std::string_view align) {` | layout.rs 36-59: the defaults are right and center. |
-| `libs/ui/src/win98.cpp:193` | `float dialog_width(std::string_view kind) {` | kit.js 373. |
-| `libs/ui/src/win98.cpp:203` | `std::string dos_path(std::string_view path, std::string_view home) {` | kit.js 431-437. herdr's paths start with "/" (no drive); a Windows path that has a drive keeps |
-| `libs/ui/src/win98.cpp:204` | `std::string dos_path(std::string_view path, std::string_view home) {` | it, one that does not gets herdr's "C:". |
-| `libs/ui/src/win98.cpp:234` | `std::string user_name(std::string_view home) {` | taskbar.js 61-65. |
-| `libs/ui/src/win98.cpp:255` | `std::string run_name(std::string_view command) {` | dialog.js 227: cmd.split(/\s+/)[0].split("/").pop(); "\" is a separator here too. |
-| `libs/ui/src/win98.cpp:268` | `std::vector<std::string> run_history(std::vector<std::string> history, const std::string& ` | dialog.js 224. |
-| `libs/ui/src/win98.cpp:281` | `std::string clock_text(const DateTime& d) {` | taskbar.js 36-42. |
-| `libs/ui/src/win98.cpp:296` | `std::string long_date(const DateTime& d) {` | taskbar.js 44-46 (en-US long date). |
-| `libs/ui/src/win98.cpp:304` | `std::string time_text(const DateTime& d) {` | dialog.js 687: toLocaleTimeString("en-US"). |
-| `libs/ui/src/win98.cpp:311` | `std::string time_zone_text(const DateTime& d) {` | dialog.js 688-691. |
-| `libs/ui/src/win98.cpp:318` | `std::vector<std::array<int, 7>> calendar(int year, int month) {` | dialog.js 656-666. |
-| `libs/ui/src/win98.cpp:346` | `std::vector<ClockDot> clock_face(const DateTime& d) {` | dialog.js 927-958. |
-| `libs/ui/src/win98.cpp:377` | `if (!level(options_.level))` | mines.js 27 |
-| `libs/ui/src/win98.cpp:382` | `std::optional<std::array<int, 3>> Mines::level(std::string_view name) {` | mines.js 6. |
-| `libs/ui/src/win98.cpp:393` | `void Mines::reset() {` | mines.js 34-42. |
-| `libs/ui/src/win98.cpp:407` | `std::vector<int> Mines::neighbors(int i) const {` | mines.js 44-51. |
-| `libs/ui/src/win98.cpp:418` | `void Mines::start(int i, long long now_ms) {` | mines.js 53-69. |
-| `libs/ui/src/win98.cpp:444` | `std::string Mines::reveal(int i, long long now_ms) {` | mines.js 71-104. |
-| `libs/ui/src/win98.cpp:493` | `std::string Mines::chord(int i, long long now_ms) {` | mines.js 106-112. |
-| `libs/ui/src/win98.cpp:512` | `void Mines::mark(int i) {` | mines.js 173. |
-| `libs/ui/src/win98.cpp:521` | `bool Mines::tick(long long now_ms) {` | mines.js 64-68. |
-| `libs/ui/src/win98.cpp:532` | `void Mines::request(const std::string& cmd) {` | mines.js 114-123. |
-| `libs/ui/src/win98.cpp:560` | `std::string Mines::face() const {` | mines.js 185. |
-| `libs/ui/src/win98.cpp:569` | `std::string Mines::best_text() const {` | mines.js 122. |
-| `libs/ui/src/win98.cpp:585` | `std::string counter_chars(int value) {` | mines.js 16. |
-| `libs/ui/src/win98.cpp:592` | `std::array<bool, 7> segments_lit(char ch) {` | mines.js 8, 18. |
-| `libs/ui/src/win98.cpp:630` | `void Solitaire::deal() {` | sol.js 223-234 (with stop(), 235-238). |
-| `libs/ui/src/win98.cpp:667` | `std::vector<int> Solitaire::cards(const Loc& loc) const {` | sol.js 50. |
-| `libs/ui/src/win98.cpp:683` | `bool Solitaire::valid_pick(const Loc& loc) const {` | sol.js 51-59. |
-| `libs/ui/src/win98.cpp:702` | `void Solitaire::save() {` | sol.js 48. |
-| `libs/ui/src/win98.cpp:708` | `void Solitaire::begin() {` | sol.js 39-47: the clock starts (the caller ticks it every second). |
-| `libs/ui/src/win98.cpp:715` | `void Solitaire::tick_second() {` | sol.js 42-46. |
-| `libs/ui/src/win98.cpp:722` | `bool Solitaire::move(const Loc& from, const Loc& to) {` | sol.js 60-75. |
-| `libs/ui/src/win98.cpp:771` | `void Solitaire::foundation(const Loc& loc) {` | sol.js 76-79. |
-| `libs/ui/src/win98.cpp:780` | `void Solitaire::stock() {` | sol.js 80-88. |
-| `libs/ui/src/win98.cpp:803` | `Solitaire::Down Solitaire::down(const Loc& loc) {` | sol.js 89-100. |
-| `libs/ui/src/win98.cpp:831` | `std::optional<Solitaire::Loc> Solitaire::target(float x, float y) {` | sol.js 105-109. |
-| `libs/ui/src/win98.cpp:846` | `void Solitaire::victory() {` | sol.js 110-112. |
-| `libs/ui/src/win98.cpp:859` | `bool Solitaire::animate() {` | sol.js 113-127. |
-| `libs/ui/src/win98.cpp:891` | `void Solitaire::command(const std::string& cmd) {` | sol.js 132-140 (the commands that change the game). |
-| `libs/ui/src/win98.cpp:918` | `float Solitaire::tab_step(int i) const {` | sol.js 219-220. |
 | `libs/ui/src/workspace.cpp:66` | `bool remove_leaf(Node& n, const std::string& s) {` | Removes leaf `s`. herdr layout.rs: its share goes back to the siblings in proportion, and a |
 | `libs/ui/src/workspace.cpp:297` | `std::string folder_of(const std::string& cwd) {` | herdr model.rs 635-647 (folder_name): the last folder; nothing or the home folder reads "~". |
 | `libs/ui/src/workspace.cpp:421` | `int index = -1;` | herdr layout.rs 598-629: when the target's container already runs along that axis, the new |
@@ -1068,7 +794,6 @@
 | `libs/ui/src/workspace.cpp:1094` | `std::set<std::string> mains;` | spaces.js 298-315: mains are repos with a main checkout; a worktree of one goes under the |
 | `libs/ui/src/workspace.cpp:1126` | `namespace {` | ------------------------------------------------------------------ agents list (herdr agents.js) |
 | `libs/ui/src/workspace.cpp:1145` | `bool title_start(char32_t c) {` | \p{L}, \p{N}, \p{Ps} or \p{Pi}: what a title may start with (agents.js 31). An approximation by |
-| `tools/package/package.cpp:93` | `dk::copy_tree(bin / L"win98", stage / L"win98");` | Herdr 98 (herdr-app defaults/mods/win98): fonts, icons, images, sounds, the layout file. |
 | `tools/package/package.cpp:95` | `dk::copy_tree(bin / L"programs", stage / L"programs");` | herdr's program table and icons (defaults/programs.json, defaults/icons). |
 | `tools/package/package.cpp:97` | `dk::copy_tree(bin / L"themes", stage / L"themes");` | herdr defaults/themes (atom-one-dark) |
 | `tests/fixtures/fake_agent_ui.cpp:1` | `` | A stand-in agent-ui.exe for the update tests (herdr update.rs 729-753 writes a shell script |
@@ -1143,23 +868,6 @@
 | `tests/unit/updates_test.cpp:108` | `TEST(Updates, OnlyTheZipFolderIsAnInstall) {` | update.rs 34-45: only a folder from the zip (it holds THIRD_PARTY_NOTICES.md) is an install. |
 | `tests/unit/vt_engine_test.cpp:246` | `EXPECT_EQ(e.take_pty_input(), "a\rb\rc");` | herdr src/vt.rs:1631: line breaks are Enter |
 | `tests/unit/vt_engine_test.cpp:270` | `TEST(VtEngine, Win32InputModeEncodesModifiedEnterAndEscape) {` | herdr src/win32_keys.rs: once ConPTY asks for win32-input-mode (even split across writes), |
-| `tests/unit/vt_engine_test.cpp:400` | `TEST(VtEngine, CellsRememberWhichOfTheSixteenAnsiColoursTheyUse) {` | A theme's own 16 ANSI colours (herdr themes "ansi", Herdr 98) need the index, not just the RGB. |
-| `tests/unit/win98_test.cpp:1` | `` | Herdr 98's rules (herdr-app defaults/mods/win98: kit.js, taskbar.js, dialog.js, mines.js, |
-| `tests/unit/win98_test.cpp:36` | `TEST(Win98Kit, BevelLayersFromOutsideIn) {` | kit.js 84-95. |
-| `tests/unit/win98_test.cpp:51` | `TEST(Win98Kit, PixelsAndScale) {` | kit.js 40-51, 451-452. |
-| `tests/unit/win98_test.cpp:64` | `TEST(Win98Kit, AccessKeys) {` | kit.js 55-75, menu.js 326-327. |
-| `tests/unit/win98_test.cpp:76` | `TEST(Win98Kit, MenuSize) {` | kit.js 326-344. |
-| `tests/unit/win98_test.cpp:91` | `TEST(Win98Kit, PathsAndNames) {` | kit.js 431-437, taskbar.js 61-65, dialog.js 224-227. |
-| `tests/unit/win98_test.cpp:111` | `TEST(Win98Kit, ClockTexts) {` | taskbar.js 36-46, dialog.js 655-691. |
-| `tests/unit/win98_test.cpp:142` | `TEST(Win98Kit, ClockFaceTicks) {` | dialog.js 940-946: twelve 4 px ticks on a radius of 40 around (48, 48), navy every third. |
-| `tests/unit/win98_test.cpp:155` | `TEST(Win98Mines, Counter) {` | mines.js 8-21. |
-| `tests/unit/win98_test.cpp:172` | `TEST(Win98Mines, FirstRevealIsSafeAndStartsTheClock) {` | mines.js 6, 34-69: the first click is never a mine, nor next to one. |
-| `tests/unit/win98_test.cpp:244` | `TEST(Win98Mines, ChordAndRequests) {` | mines.js 106-123. |
-| `tests/unit/win98_test.cpp:279` | `TEST(Win98Solitaire, DealSevenColumns) {` | sol.js 223-234. |
-| `tests/unit/win98_test.cpp:295` | `TEST(Win98Solitaire, RulesAndScoring) {` | sol.js 51-88. |
-| `tests/unit/win98_test.cpp:342` | `TEST(Win98Solitaire, TargetsAndVictory) {` | sol.js 105-109, 113-127, 139. |
-| `tests/unit/win98_test.cpp:367` | `TEST(Win98Float, SnapsToTheNearestEdgeAndThird) {` | herdr src/layout.rs 759-765 (its own test) and src/window/floats.rs 418-421. |
-| `tests/unit/win98_test.cpp:385` | `TEST(Win98Float, TheSpringOvershootsThenSettles) {` | herdr floats.rs 410-415. |
 | `tests/unit/workspace_test.cpp:98` | `TEST(Workspace, ZoomTogglesAndMovesWithFocus) {` | herdr model.rs 131-133: focusing another pane of a zoomed tab moves the zoom to it. |
 | `tests/unit/workspace_test.cpp:225` | `auto bad = k.apply({{"global", {{"ctrl-shift-t", nullptr}, {"??x", "a"}}}});` | A file with a problem installs nothing (herdr keys.rs): the defaults stay. |
 | `tests/unit/workspace_test.cpp:236` | `TEST(Keymap, HerdrSectionsObjectsAndValidation) {` | herdr keys.json forms: layout sections win over global, "terminal" gives the key to the |
