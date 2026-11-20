@@ -80,9 +80,10 @@ ui::telemetry::Config telemetry_config(App::State& s) {
         c.shipped_themes.emplace_back(p.id);
     for (const auto& [name, pal] : preset_palettes())
         c.shipped_themes.emplace_back(std::string(kPresetPrefix) + name);
-    c.shipped_themes.emplace_back("atom-one-dark");  // the shipped theme files
-    c.shipped_themes.emplace_back("mac-dusk");
-    c.shipped_themes.emplace_back("mac-dawn");
+    // The shipped theme files (third_party/herdr/themes and libs/ui/themes).
+    for (const char* id : {"atom-one-dark", "mac-dusk", "mac-dawn", "phosphor-green", "phosphor-amber",
+                           "phosphor-paper", "cockpit-night", "cockpit-day"})
+        c.shipped_themes.emplace_back(id);
     c.mod_kinds = mod_kinds;
     // keys.json differs from the shipped one.
     c.keys_custom = [] {
@@ -384,8 +385,8 @@ long long App::next_wakeup_ms() const {
     if (focus_animating(*s_))
         ms = std::min<long long>(ms, 16);  // the edge glow, the header fading
     if (s_->mission.animating && !s_->settings.focus_on)
-        ms = std::min<long long>(ms, 100);  // a tile's lines held back, skeleton bars breathing
-    if (s_->layout().style == "mac") {  // the menu bar clock turns over on the minute
+        ms = std::min<long long>(ms, 100);            // a tile's lines held back, skeleton bars breathing
+    if (ui::styles::has_clock(s_->layout().style)) {  // a bar's clock turns over on the minute
         const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
                                   std::chrono::system_clock::now().time_since_epoch())
                                   .count();

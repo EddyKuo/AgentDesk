@@ -11,6 +11,7 @@
 
 #include <imgui.h>
 
+#include "agentdesk/ui/classic_layout.hpp"
 #include "agentdesk/ui/fonts.hpp"
 #include "agentdesk/ui/input_mapping.hpp"
 #include "agentdesk/ui/keymap.hpp"
@@ -29,6 +30,8 @@ struct TerminalTheme {
     ImU32 scrollbar = IM_COL32(120, 120, 135, 120);
     // A theme's own 16 ANSI colours (its "ansi" list); null: the standard ones.
     const std::array<ImU32, 16>* ansi = nullptr;
+    // Every colour put on one ramp (the Classic layout's monochrome terminal); none: as they are.
+    std::optional<classic::MonoRamp> mono;
 };
 
 // Most history lines a view fetches for scrolling and search (paged, 200 per request).

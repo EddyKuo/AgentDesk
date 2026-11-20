@@ -30,7 +30,9 @@ bool is_builtin_command(std::string_view name) {
         "timeline.range",
         // Theme features: appearance by schedule, suggested themes, tint by agent state, the editor.
         "appearance", "appearance.toggle", "theme.suggested", "theme.ambient", "theme.new", "theme.edit",
-        "theme.folder", "theme.delete"};
+        "theme.folder", "theme.delete",
+        // the style layouts (Tiling, Cockpit, Classic)
+        "tiling.resize_mode", "tiling.gaps", "cockpit.reset_today", "classic.menu", "classic.effects"};
     // clang-format on
     return kNames.contains(name);
 }

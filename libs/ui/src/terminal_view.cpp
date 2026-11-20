@@ -55,8 +55,34 @@ CellColors colors_of(const terminal::Cell& cell, const TerminalTheme& theme) {
     };
     CellColors out{pick(cell.default_fg, cell.fg_ansi, cell.fg, theme.default_fg),
                    pick(cell.default_bg, cell.bg_ansi, cell.bg, theme.default_bg)};
-    if (cell.attrs & terminal::kAttrReverse)
+    const bool reverse = (cell.attrs & terminal::kAttrReverse) != 0;
+    if (theme.mono) {
+        // Monochrome: mapping is not cheap and a screen uses few colour pairs, so pairs are
+        // remembered (a small direct-mapped table, cleared when the ramp changes).
+        struct Slot {
+            std::uint64_t key = 0;
+            bool used = false;
+            CellColors out{};
+        };
+        static std::array<Slot, 512> cache;
+        static classic::MonoRamp cached_for;
+        if (!(cached_for == *theme.mono)) {
+            cache = {};
+            cached_for = *theme.mono;
+        }
+        const std::uint64_t key = (static_cast<std::uint64_t>(out.fg) << 32) ^ out.bg ^
+                                  (static_cast<std::uint64_t>(cell.default_fg) << 63) ^
+                                  (static_cast<std::uint64_t>(cell.default_bg) << 62) ^
+                                  (static_cast<std::uint64_t>(reverse) << 61);
+        Slot& slot = cache[static_cast<std::size_t>((key ^ (key >> 29) ^ (key >> 47)) % cache.size())];
+        if (!slot.used || slot.key != key) {
+            const auto p = classic::mono_cell(out.fg, out.bg, cell.default_fg, cell.default_bg, reverse, *theme.mono);
+            slot = {key, true, {p.fg, p.bg}};
+        }
+        out = slot.out;
+    } else if (reverse) {
         std::swap(out.fg, out.bg);
+    }
     if (cell.attrs & terminal::kAttrConceal)
         out.fg = out.bg;
     return out;

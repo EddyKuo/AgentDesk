@@ -226,15 +226,18 @@ TEST(Layout, MistakesSayWhatAndWhere) {
 
 // The shipped layouts parse, name every node, and match the layout files they are built from.
 TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
-    for (const auto& name : builtin_names()) {
+    // Every layout to pick, and Focus mode's tree (built in but not listed).
+    auto names = builtin_names();
+    names.emplace_back("focus");
+    for (const auto& name : names) {
         std::string error;
         const auto n = parse_text(builtin_text(name), &error);
         ASSERT_TRUE(n.has_value()) << name << ": " << error;
         for (const Node* x : n->walk())
             EXPECT_FALSE(x->id.empty()) << name;
-        // herdr-app's files are kept in third_party; AgentDesk's own (mac, mission, review) beside
-        // the engine.
-        const bool own = name == "mac" || name == "mission" || name == "review";
+        // herdr-app's files are kept in third_party; AgentDesk's own (mac, focus, mission, review and the
+        // style layouts) beside the engine.
+        const bool own = name != "workspace" && name != "terminals";
         const std::string dir = own ? AGENTDESK_OWN_LAYOUTS_DIR : AGENTDESK_PRESET_LAYOUTS_DIR;
         std::ifstream in(dir + "/" + std::string(builtin_file_name(name)) + ".json", std::ios::binary);
         std::stringstream ss;
@@ -247,8 +250,8 @@ TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
     EXPECT_EQ(main.find("sidebar")->size, Span::pixels(268));
     EXPECT_TRUE(main.find("panel")->hidden);
     EXPECT_EQ(main.find("panel-body")->active, "files");
-    EXPECT_EQ(builtin_names(),
-              (std::vector<std::string>{"workspace", "terminals", "mac", "mission", "review"}));
+    EXPECT_EQ(builtin_names(), (std::vector<std::string>{"workspace", "terminals", "mac", "mission", "review",
+                                                         "tiling", "cockpit", "classic"}));
     EXPECT_EQ(builtin("nope"), main);
     EXPECT_EQ(builtin("win98"), main);  // a name no longer built in falls back to the workspace
 }

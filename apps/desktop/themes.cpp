@@ -322,6 +322,10 @@ std::string theme_id(std::string id) {
     const auto dash = id.find('-');
     if (dash == std::string::npos || id.starts_with(kPresetPrefix))
         return id;
+    // A theme file of that very name (phosphor-paper) is that theme, not an old preset spelling.
+    for (const Palette* p : all_palettes())
+        if (id == p->id)
+            return id;
     for (const auto& [name, pal] : preset_palettes())
         if (id.compare(dash + 1, std::string::npos, name) == 0)
             return std::string(kPresetPrefix) + name;

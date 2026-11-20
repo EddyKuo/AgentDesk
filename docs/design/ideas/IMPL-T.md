@@ -106,3 +106,18 @@ Taipei solstice values are checked against the spec's NOAA figures (05:05/18:47,
 4. Deleting a user theme that shadowed a shipped one of the same name hides both until restart.
 5. Spec T2 acceptance "NOAA ±3 min" relies on the spec's reference values; a manual check against NOAA's online calculator is still advisable.
 6. "Use my location once" (WinRT) not built; ask the user whether to add the dependency.
+
+## Merge notes
+
+Merged into `feature/ideas-merge-tb` (from `feature/ideas`, which already had A1–A4), then B1–B3 merged on top. What changed for the T items:
+
+1. **One theme folder.** AgentDesk's own theme files now all live in `libs/ui/themes/` (beside `libs/ui/layouts/`): `mac-dusk.json` and `mac-dawn.json` moved there from `assets/themes/`, next to B's `phosphor-green`, `phosphor-amber`, `phosphor-paper`, `cockpit-night`, `cockpit-day`. `assets/` is gone. `apps/desktop/CMakeLists.txt` has one copy rule (`libs/ui/themes` → `themes\`), and the unit tests' `AGENTDESK_OWN_THEMES_DIR` points at the new folder. Telemetry's shipped theme list names all eight files. B's five files gained a `"name"` ("Phosphor Green", "Cockpit Night", …) so their cards and the suggestion row show proper names.
+2. **`themes.cpp`.** T's structure stays (`OwnedPalette`, `fill_palette`, `load_theme_files`, `reload_theme`, `apply_style` / `apply_style_colors`, derivation in `libs/ui` `theme_file`). B's rewrite of `add_preset_palette` was dropped: `colors.info` already works through `ui::theme::derive`. B's `theme_id` fix is kept: an id that names a loaded theme exactly (`phosphor-paper`) is that theme, not an old spelling of preset `paper`.
+3. **Suggested themes never change the look.** B's automatic write of a style layout's themes on first show (`style_frame_upkeep`, `StyleUi::themed`, `ui::styles::suggested_themes`) is removed. Classic (Phosphor Green / Phosphor Paper) and Cockpit (Cockpit Night / Cockpit Day) are registered in T4's built-in table (`ui::theme::builtin_suggestion`), so they appear as the "Made for …" row with **Use** and as stars on the cards, exactly like Mac's Dusk / Dawn. Phosphor Amber ships as an extra theme, not as part of a pair. Tiling, Mission Control and Review have no suggestion.
+4. **Layout cards.** T's rule (each card drawn in the theme that layout shows with, `layout_palette`) wraps `layout_preview`, which first asks B's `style_layout_preview` (Tiling, Cockpit, Classic) and otherwise draws the built-in previews (workspace, Terminals, Mac, Mission Control, Review). All eight cards render.
+5. **Frame order.** `App::frame()` calls only `update_palette()` (T); B's upkeep call before the palette is gone with the auto-apply.
+6. **Lists.** `kCommands`, `command_names.cpp`, Settings fields, `settings_store.cpp` keys, CMake sources and test lists are the union of A, T and B. `next_wakeup_ms()` keeps every wake-up (Timeline, Focus, Mission, a style bar's clock via `ui::styles::has_clock`, the ambient fade). `--report` keeps `ambient_k`.
+7. **Screenshot input.** One parser in `frame.cpp`: A's `key:` with modifiers and F1–F12, T's `wheel:N`; `AGENTDESK_NOW` and `--layout` / `--appearance` work as before.
+8. **New test:** `ThemeFile.SuggestedThemeFilesShip` (every suggested theme that is not a built-in palette or preset is a shipped file that parses, dark first, light second); `ThemeFile.BuiltinSuggestions` covers Classic, Cockpit and Tiling (none).
+
+After both merges: 420 tests in the Debug build, all passing.

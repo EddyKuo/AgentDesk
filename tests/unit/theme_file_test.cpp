@@ -141,7 +141,28 @@ TEST(ThemeFile, BuiltinSuggestions) {
               (std::pair<std::string, std::string>{"midnight", "paper"}));
     EXPECT_EQ(th::builtin_suggestion("terminals"),
               (std::pair<std::string, std::string>{"preset-graphite", "preset-paper"}));
+    EXPECT_EQ(th::builtin_suggestion("classic"),
+              (std::pair<std::string, std::string>{"phosphor-green", "phosphor-paper"}));
+    EXPECT_EQ(th::builtin_suggestion("cockpit"),
+              (std::pair<std::string, std::string>{"cockpit-night", "cockpit-day"}));
+    EXPECT_FALSE(th::builtin_suggestion("tiling"));
     EXPECT_FALSE(th::builtin_suggestion("mine"));
+}
+
+// Every suggested theme that is not one of AgentDesk's palettes or a preset ships as a file that
+// parses, dark first and light second.
+TEST(ThemeFile, SuggestedThemeFilesShip) {
+    for (const char* layout : {"workspace", "terminals", "mac", "classic", "cockpit"}) {
+        const auto pair = th::builtin_suggestion(layout);
+        ASSERT_TRUE(pair) << layout;
+        for (const auto& [id, light] : {std::pair{pair->first, false}, std::pair{pair->second, true}}) {
+            if (id == "midnight" || id == "paper" || id.starts_with("preset-"))
+                continue;
+            const auto t = th::parse(read_file(std::string(AGENTDESK_OWN_THEMES_DIR) + "/" + id + ".json"));
+            ASSERT_TRUE(t) << layout << ": " << id;
+            EXPECT_EQ(th::derive(*t).light, light) << id;
+        }
+    }
 }
 
 // AgentDesk's theme files: text at AA (4.5:1) or better on every background, status colours and

@@ -149,10 +149,14 @@ void draw_toasts(App::State& s) {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     const float pill = draw_update_pill(s);
     float y = vp->WorkPos.y + vp->WorkSize.y - px(16) - pill;
-    // The Mac layout keeps its Dock at the bottom: notes drop in under the menu bar, top right.
-    const bool top = s.layout().style == "mac" && !s.settings.focus_on;
+    // Each style says where notes go: the Mac layout keeps its Dock at the bottom, so they drop in
+    // under the menu bar, top right; Classic and Cockpit keep their status line or log clear.
+    const ui::styles::ToastArea area = style_toast_area(s);
+    const bool top = area.top;
     if (top)
-        y = vp->WorkPos.y + px(28) + px(10);
+        y = vp->WorkPos.y + px(area.offset);
+    else
+        y -= px(area.offset);
     const float w = px(340);
     int n = 0;
     // In the order opened: the oldest at the bottom (at the top under the menu bar), newer ones

@@ -1,0 +1,24 @@
+{
+  "name": "Phosphor Paper",
+  "background": "#F4F5EC",
+  "foreground": "#21402A",
+  "selection": "#BFD6C2",
+  "cursor": "#0F5A2A",
+  "ansi": [
+    "#17301F", "#3E6E4A", "#2F6A3F", "#55703A", "#2A5236", "#456B50", "#3A6A55", "#8FA393",
+    "#4D6652", "#4F8460", "#3E8452", "#6A8A47", "#3E6A4C", "#5A8466", "#4B8470", "#C5D2C6"
+  ],
+  "colors": {
+    "canvas": "#EDEFE4",
+    "chrome": "#E4E7D8",
+    "surface": "#F4F5EC",
+    "border": "#A9B5A4",
+    "foreground": "#1E3A26",
+    "muted": "#4D6652",
+    "dim": "#87998A",
+    "accent": "#0F5A2A",
+    "working": "#2E6B3E",
+    "blocked": "#0B3D1C",
+    "done": "#1F5530"
+  }
+}

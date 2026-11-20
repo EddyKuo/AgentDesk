@@ -40,24 +40,8 @@ void derive_layout(LayoutSpec& l) {
         l.suggested = std::pair{st->value("dark", std::string()), st->value("light", std::string())};
     else
         l.suggested = ui::theme::builtin_suggestion(l.name);
-    l.style.clear();
-    // "", "terminals", "mac", "focus" (Focus mode's tree), "mission" or "review".
-    for (const lay::Node* n : t.walk()) {
-        const std::string m = n->mod();
-        if (m == "mac-menubar" || m == "mac-dock" || m == "mac-window-title")  // wins over the rest
-            l.style = "mac";
-        else if (m == "terminals-bar" && l.style.empty())
-            l.style = "terminals";
-        else if (m == "focus-strip" && l.style.empty())
-            l.style = "focus";
-        else if ((m == "mission-bar" || m == "mission-wall") && l.style.empty())
-            l.style = "mission";
-        else if (m.rfind("review-", 0) == 0 && l.style.empty())
-            l.style = "review";
-        if (n->is_block() && n->content.type == lay::Content::Type::kTab && n->content.pane &&
-            n->content.pane->header && n->content.pane->header->mod() == "terminals-pane" && l.style.empty())
-            l.style = "terminals";
-    }
+    // The mod names its blocks and pane headers use pick the renderers (ui::styles' table).
+    l.style = ui::styles::style_of_tree(t);
     // Font size: on the path from the root to the first shown panes' block, the deepest node that
     // sets one wins.
     l.font_size.reset();
@@ -207,7 +191,8 @@ std::vector<LayoutSpec> load_layouts(const Settings& st) {
     std::sort(files.begin(), files.end());
     for (const auto& f : files) {
         LayoutSpec l = read_layout_file(f);
-        const auto it = std::find_if(list.begin(), list.end(), [&](const LayoutSpec& x) { return x.name == l.name; });
+        const auto it =
+            std::find_if(list.begin(), list.end(), [&](const LayoutSpec& x) { return x.name == l.name; });
         if (it != list.end()) {
             l.builtin = it->builtin;
             *it = std::move(l);
@@ -267,7 +252,8 @@ void write_example_mods() {
             continue;  // a folder of the person's own with that name
         std::filesystem::create_directories(to, ec);
         for (const wchar_t* f : {L"mod.dll", L"mod.json"})
-            std::filesystem::copy_file(e.path() / f, to / f, std::filesystem::copy_options::overwrite_existing, ec);
+            std::filesystem::copy_file(e.path() / f, to / f,
+                                       std::filesystem::copy_options::overwrite_existing, ec);
         if (!std::filesystem::exists(to / L"settings.json", ec) &&
             std::filesystem::is_regular_file(e.path() / L"settings.json", ec))
             std::filesystem::copy_file(e.path() / L"settings.json", to / L"settings.json", ec);

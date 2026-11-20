@@ -62,6 +62,7 @@
 #include "agentdesk/ui/theme_file.hpp"
 #include "agentdesk/ui/updates.hpp"
 #include "agentdesk/ui/workspace.hpp"
+#include "style_layouts.hpp"
 
 namespace agentdesk::desktop {
 // detail stands where app.cpp's anonymous namespace was: its names are visible unqualified
@@ -217,6 +218,7 @@ struct Settings {
     // Tint by agent state (ambient.cpp): "off" or "subtle"; also a cool tint for finished agents.
     std::string ambient = "off";
     bool ambient_done = false;
+    StyleSettings styles;  // Tiling, Cockpit and Classic keys (style_layouts.hpp)
 };
 // %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk; created when missing.
 std::filesystem::path data_dir();
@@ -390,6 +392,13 @@ inline constexpr CommandInfo kCommands[] = {
     {"theme.new", "New theme..."},
     {"theme.edit", "Edit current theme..."},
     {"theme.folder", "Open the themes folder"},
+    // the style layouts
+    {"pane.split:auto", "Split along the longer side"},
+    {"tiling.resize_mode", "Tiling: resize panes with the keyboard"},
+    {"tiling.gaps", "Tiling: gaps off / on"},
+    {"cockpit.reset_today", "Cockpit: set Done today back to 0"},
+    {"classic.menu", "Classic: open the menu bar"},
+    {"classic.effects", "Classic: screen effects off / light / full"},
 };
 bool known_command(std::string_view name);
 
@@ -953,6 +962,7 @@ struct App::State {
         std::string selected;
         bool focus_list = false;
     } timeline;
+    StyleUi styles;  // Tiling, Cockpit and Classic (style_layouts.hpp)
 
     // ---------------------------------------------------------------- helpers
     // The UI document (spaces, tabs, panes) changed: persist() sends it to the host soon.
@@ -1241,7 +1251,9 @@ void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::
 void draw_status_bar(App::State& s, ImVec2 pos, float width, float height);
 
 // ------------------------------------------------------------ panes.cpp
-void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected);std::string panel_folder(App::State& s, std::string* machine = nullptr);
+// `frame`: the layout's pane frame for these panes (null: the style's defaults).
+void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected, const lay::PaneFrame* frame = nullptr);
+std::string panel_folder(App::State& s, std::string* machine = nullptr);
 ImU32 mark_color(char m);
 void panel_header(App::State& s, ImDrawList* dl, ImVec2 a, float w, const char* title, const std::string& right,
                   bool back, bool* back_clicked);

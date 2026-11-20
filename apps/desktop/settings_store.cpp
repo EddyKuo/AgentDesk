@@ -189,6 +189,7 @@ Settings load_settings_unchecked() {
     if (s.timeline_range != "15m" && s.timeline_range != "4h" && s.timeline_range != "24h")
         s.timeline_range = "1h";
     s.timeline_since_left = j.value("timeline_since_left", true);
+    read_style_settings(j, s.styles);
     for (const auto& m : j.value("machines", Json::array())) {
         if (m.is_object() && !m.value("name", "").empty() && !m.value("target", "").empty())
             s.machines.push_back({m.value("name", ""), m.value("target", ""), m.value("ctl", "")});
@@ -232,7 +233,7 @@ std::string read_text_file(const std::filesystem::path& p, bool* ok) {
 void save_settings(const Settings& s) {
     const auto path = data_dir() / L"ui.json";
     const auto tmp = std::filesystem::path(path).concat(L".tmp");
-    const Json ours = Json{
+    Json ours = Json{
             {"schema_version", 1},
             {"close_notice_shown", s.close_notice_shown},
             {"last_cwd", s.last_cwd},
@@ -307,6 +308,7 @@ void save_settings(const Settings& s) {
                      list.push_back({{"name", m.name}, {"target", m.target}, {"ctl", m.ctl}});
                  return list;
              }()}};
+    write_style_settings(ours, s.styles);
     for (int attempt = 0; attempt < 3; ++attempt) {
         std::error_code ec;
         const bool exists = std::filesystem::exists(path, ec);

@@ -186,17 +186,25 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
      "f"},
 };
 
-// Defaults that apply only while one layout shows ("layout:<name>" sections): the Review layout's
-// F8 / Shift+F8 move between changed files; elsewhere F8 still reaches the terminal.
+// Defaults that apply only while one layout shows ("layout:<name>" sections). None of them is bound
+// in "global" or "terminal": the Review layout's F8 / Shift+F8 move between changed files (elsewhere
+// F8 still reaches the terminal); Tiling's Alt keys; Classic's F10 menu bar.
 struct LayoutDefault {
     const char* section;
     const char* chord;
     const char* command;
 };
+// clang-format off
 constexpr LayoutDefault kLayoutDefaults[] = {
     {"layout:review", "f8", "review.next_file"},
     {"layout:review", "shift-f8", "review.prev_file"},
+    {"layout:tiling", "alt-r", "tiling.resize_mode"},
+    {"layout:tiling", "alt-shift-enter", "pane.split:auto"},
+    {"layout:tiling", "alt-shift-q", "pane.close"},
+    {"layout:tiling", "alt-shift-g", "tiling.gaps"},
+    {"layout:classic", "f10", "classic.menu"},
 };
+// clang-format on
 
 // Calls f(section, chord text, command) for every default binding, in install order.
 template <class F>

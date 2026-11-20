@@ -2,6 +2,8 @@ agentdesk_executable(agent-ui WIN32
     main.cpp
     app.cpp
     chrome.cpp
+    classic_layout.cpp
+    cockpit_layout.cpp
     code_preview.cpp
     commands.cpp
     files_changes.cpp
@@ -23,8 +25,10 @@ agentdesk_executable(agent-ui WIN32
     side_panels.cpp
     sidebar.cpp
     state_card.cpp
+    style_layouts.cpp
     tab_bar.cpp
     terminals_layout.cpp
+    tiling_layout.cpp
     timeline.cpp
     themes.cpp
     appearance.cpp
@@ -35,7 +39,6 @@ agentdesk_executable(agent-ui WIN32
     welcome.cpp
     worktrees.cpp
     focus_mode.cpp
-    state_card.cpp
     mission_layout.cpp
     agent-ui.manifest)
 target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc d3d11 dxgi dwmapi shcore dbghelp winmm imm32 shell32 nlohmann_json::nlohmann_json)
@@ -51,8 +54,8 @@ add_custom_command(TARGET agent-ui POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:agent-ui>/fonts/README.agentdesk.md"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/programs" "$<TARGET_FILE_DIR:agent-ui>/programs"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/themes" "$<TARGET_FILE_DIR:agent-ui>/themes"
-    # AgentDesk's own theme files (mac-dusk and mac-dawn, made for the Mac layout).
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/assets/themes" "$<TARGET_FILE_DIR:agent-ui>/themes")
+    # AgentDesk's own theme files (the layouts' suggested themes), MIT like the rest.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/libs/ui/themes" "$<TARGET_FILE_DIR:agent-ui>/themes")
 # Last: a running agent-host holds its exe and conpty.dll open, and a failed copy stops the steps
 # after it.
 add_custom_command(TARGET agent-ui POST_BUILD
