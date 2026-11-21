@@ -74,10 +74,8 @@ void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& ca
         return;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 end(pos.x + size.x, pos.y + size.y);
-    if (card.framed) {
-        dl->AddRectFilled(pos, end, g_pal->card, px(12));
-        dl->AddRect(pos, end, g_pal->border, px(12));
-    }
+    if (card.framed)
+        tok::card(dl, pos, end, tok::radius_panel());
     const float wrap = std::max(px(80), std::min(size.x - px(48), px(560)));
     const float ts = fpx(card.title_size);
     const float hs = fpx(13);
@@ -86,8 +84,9 @@ void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& ca
 
     // Measure first so the whole card sits a little above the middle.
     const float spinner_h = card.kind == CardKind::kLoading ? px(22) : 0.0f;
+    const float art_h = card.art != tok::Art::kNone ? tok::art_height() + tok::gap_l() : 0.0f;
     const float title_h = centred_lines(nullptr, s.fonts.ui_bold, ts, card.title, cx, 0, wrap, 0);
-    float total = spinner_h + title_h;
+    float total = spinner_h + art_h + title_h;
     for (const std::string* line : {&card.hint, &card.detail})
         if (!line->empty())
             total += px(6) + centred_lines(nullptr, s.fonts.ui, hs, *line, cx, 0, wrap, 0);
@@ -97,6 +96,10 @@ void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& ca
         total += px(16) + fpx(12.5f);
     float y = pos.y + std::max(px(12), (size.y - total) * 0.42f);
 
+    if (art_h > 0) {
+        tok::draw_art(dl, card.art, ImVec2(cx, y + tok::art_height() * 0.5f), tok::art_height());
+        y += art_h;
+    }
     if (card.kind == CardKind::kLoading) {
         const float t = static_cast<float>(ImGui::GetTime());
         const float a0 = t * (2.0f * 3.14159265f / 0.9f);
@@ -130,6 +133,19 @@ void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& ca
         if (clicked && card.on_link)
             card.on_link();
     }
+}
+
+void draw_empty_state(App::State& s, ImVec2 pos, ImVec2 size, tok::Art art, const std::string& title,
+                      const std::string& hint, const std::string& button, const std::string& command) {
+    StateCard card;
+    card.kind = CardKind::kEmpty;
+    card.art = art;
+    card.title = title;
+    card.hint = hint;
+    card.title_size = ui::tokens::kTitle.size;
+    if (!button.empty())
+        card.buttons.push_back({button, command, nullptr});
+    draw_state_card(s, pos, size, card);
 }
 
 void draw_skeleton_rows(ImDrawList* dl, ImVec2 pos, float w, std::initializer_list<float> widths, float row_h,

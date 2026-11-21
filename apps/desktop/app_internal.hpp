@@ -65,6 +65,7 @@
 #include "agentdesk/ui/window_buttons.hpp"
 #include "agentdesk/ui/layout_tips.hpp"
 #include "style_layouts.hpp"
+#include "ui_tokens.hpp"
 
 namespace agentdesk::desktop {
 // detail stands where app.cpp's anonymous namespace was: its names are visible unqualified
@@ -1380,11 +1381,18 @@ struct StateCard {
     std::vector<Button> buttons;
     float title_size = 18.0f;  // design px
     bool framed = false;
+    // A small drawing above the title (empty states; ui_tokens.hpp).
+    tok::Art art = tok::Art::kNone;
     // A text link under the buttons (accent colour, underlined while hovered).
     std::string link;
     std::function<void()> on_link;
 };
 void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& card);
+// The shared empty state: a drawing, one line (`title`), an optional quieter hint and an optional
+// accent button running `command`. Built on draw_state_card, so it lays out like the others.
+void draw_empty_state(App::State& s, ImVec2 pos, ImVec2 size, tok::Art art, const std::string& title,
+                      const std::string& hint = {}, const std::string& button = {},
+                      const std::string& command = {});
 // A button label followed by the command's key ("New terminal   Ctrl+Shift+T"), when it has one.
 std::string with_chord(const App::State& s, const std::string& label, const char* command);
 // Grey bars standing in for text that is not there yet, `row_h` apart, each `bar_h` high and the
@@ -1484,7 +1492,7 @@ AmbientResult ambient_palette(App::State& s, const Palette* base, bool paused);
 bool ambient_moving();
 double ambient_strength();  // 0..1, for --report
 bool look_ambient(App::State& s);  // its Settings rows
-// Windows' "Animation effects" is off (checked at most every 2 s).
+// Windows' "Animation effects" is off (ui_tokens.cpp: tok::reduce_motion, read at most every 2 s).
 bool motion_reduced();
 // theme_commands.cpp: appearance:*, appearance.toggle and theme.* (nullopt: not one of them,
 // else "" when it ran or why it failed).

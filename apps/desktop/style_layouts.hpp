@@ -76,9 +76,8 @@ std::optional<ImU32> layout_color(const std::string& c);
 // scale with the zoom and land on whole pixels.
 float line_px(float w);
 
-// Windows' high contrast is on; Windows animates controls (both read once a second).
+// Windows' high contrast is on (ui_tokens.cpp, read at most every 2 s).
 bool system_high_contrast();
-bool system_animations();
 
 // The keys bound to `command`, as shown in menus: the shown layout's keys.json section first,
 // then the global and terminal ones.

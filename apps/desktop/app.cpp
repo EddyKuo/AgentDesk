@@ -392,6 +392,7 @@ long long App::next_wakeup_ms() const {
                                   .count();
         ms = std::min<long long>(ms, ui::mac::ms_to_next_minute(now % 60000) + 5);
     }
+    ms = std::min<long long>(ms, tok::wakeup_ms());  // an eased transition is under way
     if (ambient_moving())
         ms = std::min<long long>(ms, 33);  // the tint by agent state fades at about 30 frames a second
     return ms;

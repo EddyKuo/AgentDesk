@@ -616,6 +616,7 @@ void App::frame() {
     ImGui::End();
     draw_dialogs(s);
     update_window_title(s);
+    tok::end_frame();
     persist(s);
     if (!s.window_opened) {  // the window is up: counted once for usage data
         s.window_opened = true;

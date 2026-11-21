@@ -62,39 +62,6 @@ void write_style_settings(nlohmann::json& j, const StyleSettings& in) {
     j["classic_mono_terminal"] = in.classic_mono_terminal;
 }
 
-namespace {
-// Windows' accessibility settings, read at most once a second.
-struct SystemLook {
-    bool high_contrast = false;
-    bool animations = true;
-    Clock::time_point read{};
-};
-
-const SystemLook& system_look() {
-    static SystemLook l;
-    const auto now = Clock::now();
-    if (l.read == Clock::time_point{} || now - l.read >= std::chrono::seconds(1)) {
-        l.read = now;
-        HIGHCONTRASTW hc{};
-        hc.cbSize = sizeof(hc);
-        l.high_contrast = ::SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) != FALSE &&
-                          (hc.dwFlags & HCF_HIGHCONTRASTON) != 0;
-        BOOL anim = TRUE;
-        l.animations =
-            ::SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &anim, 0) == FALSE || anim != FALSE;
-    }
-    return l;
-}
-}  // namespace
-
-bool system_high_contrast() {
-    return system_look().high_contrast;
-}
-
-bool system_animations() {
-    return system_look().animations;
-}
-
 std::string style_chord_for(const App::State& s, const std::string& command) {
     for (const auto& [chord, cmd] : s.keymap.layout_map())
         if (cmd == command)

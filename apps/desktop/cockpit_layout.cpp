@@ -454,7 +454,7 @@ void draw_cockpit_gauges(App::State& s, ImVec2 pos, float w, float h) {
     const float dt = ImGui::GetIO().DeltaTime;
     bool moving = false;
     for (int i = 0; i < 3; ++i) {
-        if (!ck_ui.shown_set || !system_animations())
+        if (!ck_ui.shown_set || motion_reduced())
             ck_ui.shown[i] = target[i];
         else
             ck_ui.shown[i] = ui::chrome_common::approach(ck_ui.shown[i], target[i], dt);

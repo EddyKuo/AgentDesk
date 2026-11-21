@@ -22,31 +22,7 @@ ImU32 with_rgb(ImU32 old, std::uint32_t rgb) {
     return IM_COL32((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, (old >> 24) & 255);
 }
 
-// Windows' contrast themes: the tint stays off (checked at most every 2 s).
-bool windows_high_contrast() {
-    static auto checked = Clock::time_point{};
-    static bool on = false;
-    if (Clock::now() - checked > std::chrono::seconds(2)) {
-        checked = Clock::now();
-        HIGHCONTRASTW hc{sizeof hc};
-        on = ::SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof hc, &hc, 0) != FALSE &&
-             (hc.dwFlags & HCF_HIGHCONTRASTON) != 0;
-    }
-    return on;
-}
 }  // namespace
-
-bool motion_reduced() {
-    static auto checked = Clock::time_point{};
-    static bool reduced = false;
-    if (Clock::now() - checked > std::chrono::seconds(2)) {
-        checked = Clock::now();
-        BOOL animate = TRUE;  // Settings > Accessibility > Visual effects > Animation effects
-        reduced =
-            ::SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animate, 0) != FALSE && animate == FALSE;
-    }
-    return reduced;
-}
 
 AmbientResult ambient_palette(App::State& s, const Palette* base, bool paused) {
     const auto now = Clock::now();
@@ -54,7 +30,7 @@ AmbientResult ambient_palette(App::State& s, const Palette* base, bool paused) {
         g_last_frame != Clock::time_point{} && now - g_last_frame > std::chrono::milliseconds(500);
     g_last_frame = now;
     double target = 0;
-    if (s.settings.ambient == "subtle" && !paused && !windows_high_contrast()) {
+    if (s.settings.ambient == "subtle" && !paused && !system_high_contrast()) {
         // The most urgent state over every session, other machines' included; a machine that
         // dropped its connection reports its sessions as lost, which do not count.
         Attention top = Attention::kNone;
