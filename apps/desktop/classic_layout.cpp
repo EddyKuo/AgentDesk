@@ -180,8 +180,9 @@ int put_mark(ImDrawList* dl, const Chrome& c, float x0, float y, int col, Attent
 
 menus::MenuContext classic_menu_context(App::State& s) {
     menus::MenuContext ctx;
-    for (const auto& l : s.layouts)
-        ctx.layouts.emplace_back(l.name, ui::styles::display_name(l.name));
+    for (const auto& l : s.layouts)  // fun layouts only when listed (the shown one always is)
+        if (ui::styles::is_listed(l.name, s.settings.styles.fun_layouts, s.layout().name))
+            ctx.layouts.emplace_back(l.name, ui::styles::display_name(l.name));
     ctx.layout = s.layout().name;
     if (ui::Space* sp = s.ws.active(); sp != nullptr) {
         ctx.space = s.ws.active_space;

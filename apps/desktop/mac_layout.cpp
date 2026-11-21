@@ -100,8 +100,9 @@ void empty_desktop(App::State& s, ImDrawList* dl, ImVec2 a, ImVec2 b) {
 // ------------------------------------------------------------------ menu bar
 mac::MenuContext menu_context(App::State& s) {
     mac::MenuContext c;
-    for (const auto& l : s.layouts)
-        c.layouts.emplace_back(l.name, layout_display_name(l.name));
+    for (const auto& l : s.layouts)  // fun layouts only when listed (Settings > Look > Fun layouts)
+        if (ui::styles::is_listed(l.name, s.settings.styles.fun_layouts, s.layout().name))
+            c.layouts.emplace_back(l.name, layout_display_name(l.name));
     c.layout = s.layout().name;
     c.fill = s.mac.fill;
     if (ui::Space* sp = s.ws.active(); sp != nullptr) {
