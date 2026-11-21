@@ -10,7 +10,7 @@ AgentDesk 是 Windows 11 x64 的 AI coding agent 工作台：在可分割的終�
 
 ## 畫面
 
-執行 `agent-ui.exe`。它會在背景啟動 `agent-host.exe`，所有工作都跑在 host 裡。視窗沒有系統標題列。左上角三顆鈕依序是關閉、最小化、縮放（最大化），顏色跟著主題：關閉偏紅、最小化偏黃、縮放偏綠，色調取自主題的「需要你」「工作中」「完成」顏色，並保證在底色上看得清楚。滑鼠移上去會顯示符號，視窗不在前景時三顆都變灰；Cockpit 版面畫成外框圓環，Tiling 版面畫成小方塊，Classic 版面是文字按鈕。想用 Windows 式的按鈕，到「設定 > Look > Window buttons」選 Windows，按鈕就會回到分頁列右端。拖曳分頁列或左上的品牌列可以移動視窗，雙擊切換最大化，也能用 Windows 的貼齊功能。
+執行 `agent-ui.exe`。它會在背景啟動 `agent-host.exe`，所有工作都跑在 host 裡。視窗沒有系統標題列。左上角三顆鈕依序是關閉、最小化、縮放（最大化），顏色跟著主題：關閉偏紅、最小化偏黃、縮放偏綠，色調取自主題的「需要你」「工作中」「完成」顏色，並保證在底色上看得清楚。滑鼠移上去會顯示符號，視窗不在前景時三顆都變灰；Terminals 版面打開直角時畫成小方塊，Classic 版面是文字按鈕。想用 Windows 式的按鈕，到「設定 > Look > Window buttons」選 Windows，按鈕就會回到分頁列右端。拖曳分頁列或左上的品牌列可以移動視窗，雙擊切換最大化，也能用 Windows 的貼齊功能。
 
 視窗會記住上次的位置、大小，以及是否最大化，下次開啟時回到原處；那台螢幕不在了，就以同樣大小開在滑鼠所在的螢幕中間。第一次開啟時，大小依螢幕決定：約為 1280×820 乘上 Windows 的縮放比例與 AgentDesk 的縮放（設定裡的 zoom），並保持在螢幕可用範圍的一半到九成之間。所以 Full HD 100% 和 4K 150% 開出來的視窗，看起來的比例差不多。想重新套用預設大小，關掉 AgentDesk 後刪除 `window.json`。
 
@@ -22,11 +22,11 @@ AgentDesk 是 Windows 11 x64 的 AI coding agent 工作台：在可分割的終�
 - **Files／Changes**：右側面板，跟著目前面板 shell 所在的資料夾。Files 是可展開的檔案樹，檔名旁有 git 狀態字母，點檔案可唯讀預覽。Changes 列出所有未提交的檔案與 +／− 行數，點檔案看差異，下方可輸入訊息 commit（會先 `git add -A`）。開關狀態依 space 記住。
 - **狀態列**：機器、目前分支、Agent 數量與需要你的數量，點右側的快捷鍵提示可以開命令面板。
 
-**Done** 的意思是「在你沒看的時候完成了」，看過之後變回 Idle。「看過」指那個終端機真的畫在畫面上：Mission Control 的小格子、專注模式藏起來的面板都不算。沒有可信的狀態來源時，AgentDesk 不會自己猜狀態。
+**Done** 的意思是「在你沒看的時候完成了」，看過之後變回 Idle。「看過」指那個終端機真的畫在畫面上：Stage 底片條的縮圖、Inbox 卡片上的畫面預覽、Garden 的小動物、專注模式藏起來的面板都不算。沒有可信的狀態來源時，AgentDesk 不會自己猜狀態。
 
 ## 通知
 
-Agent 需要你時一定會播放提示音；你沒在看的 Agent 完成時也會。你沒在看那個 Agent 時，右下角會出現通知（5 秒，錯誤 8 秒），點一下就跳到那個 Agent。內建兩段提示音，可在「設定 > Alerts」關閉、試聽，或在 `ui.json` 的 `sound_done`／`sound_blocked` 改成自己的 MP3。
+Agent 需要你時一定會播放提示音；你沒在看的 Agent 完成時也會。你沒在看那個 Agent 時，右下角會出現通知（5 秒，錯誤 8 秒），點一下就跳到那個 Agent。通知從右邊滑進來，左邊的色條代表狀態（紅色需要你、綠色完成）。AgentDesk Mac 版面的通知在右上角，Stage 在頂端列下面。Windows 的「動畫效果」關掉時，AgentDesk 所有的淡入、滑入與顏色漸變都直接顯示結果。內建兩段提示音，可在「設定 > Alerts」關閉、試聽，或在 `ui.json` 的 `sound_done`／`sound_blocked` 改成自己的 MP3。
 
 程式剛啟動就以錯誤結束時，通知會附上結束碼和最後幾行輸出。
 
@@ -66,7 +66,9 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 | Ctrl+Shift+F | 在終端機裡搜尋 |
 | Ctrl+Shift+B | 隱藏或顯示側欄（在沒有側欄的 terminals 版面，切回 AgentDesk 版面） |
 | Ctrl+Shift+L | 切換版面 |
-| Ctrl+Shift+M | 進出 Mission Control 監看牆 |
+| Ctrl+Shift+M | 進出 Stage 主舞台 |
+| Ctrl+Shift+I | 進出 Inbox 收件匣 |
+| Ctrl+Shift+2 | 進出 Pair 並排比較 |
 | Ctrl+Shift+. | 進出專注模式 |
 | Ctrl+Shift+R | 進出 Review 審查台 |
 | Ctrl+Shift+H | 開關時間軸（Timeline） |
@@ -77,12 +79,17 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 
 | 版面 | 快捷鍵 | 動作 |
 |---|---|---|
+| Stage | Alt+Left／Alt+Right | 上一個／下一個 Agent 換上舞台（其他版面是移到左右的面板） |
 | Review | F8／Shift+F8 | 下一個／上一個改動的檔案 |
-| AgentDesk Tiling | Alt+R | 調整大小模式 |
-| AgentDesk Tiling | Alt+Shift+Enter | 往面板較長的一邊分割 |
-| AgentDesk Tiling | Alt+Shift+Q | 關閉面板 |
-| AgentDesk Tiling | Alt+Shift+G | 開關面板間距 |
+| Pair | Alt+P | 游標移到共用輸入列 |
+| Pair | Alt+Shift+S | 左右交換 |
+| Terminals | Alt+R | 調整大小模式 |
+| Terminals | Alt+Shift+Enter | 往面板較長的一邊分割 |
+| Terminals | Alt+Shift+Q | 關閉面板 |
+| Terminals | Alt+Shift+G | 開關面板間距 |
 | AgentDesk Classic | F10 | 打開選單列 |
+
+Garden 沒有預設按鍵；想要的話，在 keys.json 綁 `garden.toggle`。Inbox 佇列被點選時的方向鍵、Enter、R、1～9、S 見「Inbox」一節。
 
 這些按鍵由 AgentDesk 使用，不會送進終端機裡的程式。要改鍵位，在「設定 > Look」按「Edit keys.json」，例如：
 
@@ -162,33 +169,108 @@ agentctl report "found 3 problems: ..."
 
 ## 版面
 
-Ctrl+Shift+L、命令面板或「設定 > Look」切換：
+Ctrl+Shift+L、命令面板或「設定 > Look」切換。設定 › Look 列出七個版面，Ctrl+Shift+L 依序輪替：AgentDesk、Terminals、Stage、Inbox、Review、Pair、AgentDesk Mac。另外有兩個好玩的版面（AgentDesk Classic、Garden），見下方「好玩的版面」。
 
 - **workspace**（設定裡顯示為 AgentDesk）：預設，側欄＋分頁＋分割面板＋右側面板。
-- **terminals**：沒有側欄與狀態列的版面。上方列最左邊是側欄按鈕（點了切回有側欄的 AgentDesk 版面，Ctrl+Shift+B 也可以），接著是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是設定（齒輪，可在這裡切回 AgentDesk 版面）、命令面板與新分頁按鈕，滑鼠停在按鈕上會顯示名稱與快捷鍵。面板標題列的按鈕一直顯示。
+- **terminals**：沒有側欄與狀態列的版面，可以改成直角、調整間距，並用鍵盤調整面板大小，見下方「Terminals」。上方列最左邊是側欄按鈕（點了切回有側欄的 AgentDesk 版面，Ctrl+Shift+B 也可以），接著是目前的 space，點一下開啟 Ctrl+Shift+K 的選單；每個分頁顯示程式圖示、狀態與資料夾；右邊是設定（齒輪，可在這裡切回 AgentDesk 版面）、命令面板與新分頁按鈕，滑鼠停在按鈕上會顯示名稱與快捷鍵。面板標題列的按鈕一直顯示。
 - **mac**（設定裡顯示為 AgentDesk Mac）：Mac 風格的版面，畫法與配色都是 AgentDesk 自己的。最上面是選單列：圓形視窗按鈕、AgentDesk 標誌（點了開 AgentDesk 選單：What's new、設定、檢查更新、隱藏、關閉視窗），以及 File、Edit、View、Window、Help 五個選單，選單打開時把滑鼠移到另一個標題就換成那個選單；右邊是需要你與執行中的 Agent 數量（點一下跳到第一個需要你的 Agent）和時鐘。中間是桌布，目前的分頁放在一個浮動視窗裡，視窗標題列左邊三顆小圓鈕：紅色與黃色把這個分頁收進 Dock（程式繼續跑），綠色讓視窗填滿桌面，再按一次恢復。最下面是 Dock：每個 space 一個頭像（目前的 space 下面有一個點），接著是目前 space 的分頁（顯示程式圖示，有程式在跑的下面有點，右上角標出需要你、完成或執行中，收起來的分頁顏色變淡），最後是新增與設定。滑鼠移過 Dock 圖塊會放大並顯示名稱；右鍵分頁圖塊有改名、新分頁、關閉。這個版面的通知出現在右上角、選單列下方。Ctrl+Shift+B 會切到有側欄的 AgentDesk 版面。
-- **mission**（Mission Control）：所有 Agent 排成一面牆，見下方「監看牆」。
+- **stage**（Stage）：一個 Agent 在大的主舞台上，其他 Agent 在下方排成即時縮圖，見下方「主舞台」。
+- **inbox**（Inbox）：需要你的 Agent 排成一列卡片，不用切過去就能回答，見下方「收件匣」。
 - **review**（Review）：左邊是終端機，右邊是改動與 diff，見下方「審查台」。
-- **tiling**（AgentDesk Tiling）、**cockpit**（AgentDesk Cockpit）、**classic**（AgentDesk Classic）：只換外觀與操作方式的風格版面，見下方「風格版面」。
+- **pair**（Pair）：兩個 Agent 左右並排，同一個任務交給兩邊比一比，見下方「並排比較」。
+- **classic**（AgentDesk Classic）、**garden**（Garden）：好玩的版面，見下方「好玩的版面」。
 
 另外有一個任何版面都能用的專注模式（Ctrl+Shift+.），和隨時能打開的時間軸（Ctrl+Shift+H）。
 
+以前用 Mission Control 的人，開啟後會直接換成 Stage，原本的篩選設定也會帶過來；用 AgentDesk Tiling 的人會換成 Terminals 並打開直角；AgentDesk Cockpit 已經拿掉，原本用它的人會回到 AgentDesk 版面。
+
 **第一次使用提示**：每個版面（和專注模式）第一次出現時，畫面中央會跳出一張提示卡，說明這個版面適合做什麼，並列出幾個常用操作與快捷鍵（依你的 keys.json 顯示）。按「Got it」、Esc 或點卡片外面就關閉，之後不會再自己出現；按「Don't show tips」則所有版面都不再跳卡。想再看一次，從命令面板執行「Tips for this layout」，或用 Mac、Classic 版面的 Help 選單，或設定 › Look 的「Layout tips」列；那一列的開關也能重新打開提示。
 
-### 監看牆（Mission Control）
+### Terminals
 
-同時跑好幾個 Agent 時，按 **Ctrl+Shift+M**（或在 設定 › Look 選「Mission Control」）。所有 Agent 排成格子，每格是程式、名稱、狀態、最後幾行輸出與 Agent 回報的訊息。需要你的格子有紅框，排在最前面。
+只有終端機，分頁在頂端一條列上。設定 › Look 選到 Terminals 時可以調整：
 
-- 上方的「Needs you」「Working」「Done」計數點一下，只看那一種；右邊的 All／Active 切換是否只看忙碌中的 Agent。
-- 點一格，就以一般面板開啟那個 Agent，可以直接打字。按「← Wall」或 Ctrl+Shift+M 回到牆面；在牆面再按一次 Ctrl+Shift+M，回到原本的版面。
-- 在牆面上可以用方向鍵選格子、Enter 開啟，或直接按 1～9 開啟第幾格。
-- Esc 不會離開牆面，它照常送給終端機（Claude Code 用 Esc 中斷 Agent）。
-- 右鍵格子可以開啟、偷看（peek）、重新命名或關閉面板。
-- 子 Agent 預設不另外成格，父 Agent 的格子會寫「+N sub-agents」，點了用 peek 視窗查看。
+- **Square corners**：面板改成直角，像平鋪式視窗管理員。左上角的視窗按鈕也會變成小方塊。
+- **Gaps**：面板之間與視窗邊緣的間距（0～24 px），開關也可以按 Alt+Shift+G。關掉時面板彼此相貼，共用一條邊線。
 
-只看牆面不算「看過」：完成的 Agent 會一直標示完成，直到你點開它。
+Terminals 另有幾個鍵盤操作：Alt+R 進入調整大小模式（H、J、K、L 或方向鍵每次 40 px，加 Shift 每次 10 px，Esc 或 Enter 結束，模式中按鍵不會送進終端機，面板區下方會出現提示卡）；Alt+Shift+Enter 往面板較長的那一邊分割；Alt+Shift+Q 關閉面板。shell 的 Alt+R（readline 還原整行）在這個版面會被攔下，不想要的話可以在 keys.json 的 `layout:terminals` 區段改掉。
 
-要讓子 Agent 或沒有狀態回報的終端機也各成一格，可以在 `ui.json` 把 `mission_sub_agents` 或 `mission_shells` 設成 `true`。
+### 主舞台（Stage）
+
+Stage 把一個 Agent 放在大大的主舞台上，可以直接在裡面打字；其他 Agent 在下方的底片條排成一排即時縮圖，每張都看得到程式、名稱、狀態和畫面最後幾行。按 **Ctrl+Shift+M** 切換到 Stage，再按一次回到原本的版面。
+
+- 點縮圖就把它換上舞台，原本台上的 Agent 回到底片條。也可以按 Alt+Left／Alt+Right 換到上一個／下一個 Agent；頂端列右邊的「←」按鈕會換回剛才那一個。
+- 需要你的 Agent 縮圖會發光，並排到最前面（等最久的在前），同時照常播放提示音。其他縮圖維持固定的順序，不會跟著狀態跳來跳去。
+- 底片條上方的 All／Needs you／Working 可以篩選縮圖，S／M／L 調整縮圖大小。視窗太矮時會自動用小一號的縮圖，讓舞台保持夠大。縮圖太多時用滑鼠滾輪左右捲動，或點兩端的箭頭。
+- 在縮圖上按右鍵可以放上舞台、偷看（peek）、重新命名或關閉。
+- 子 Agent 沒有自己的縮圖，父 Agent 的縮圖會顯示數量。
+- Esc 照常送給終端機（Claude Code 用 Esc 中斷 Agent），不會離開 Stage。
+- 設定 › Look 選到 Stage 時，可以讓一般終端機也有縮圖（Plain terminals），也可以打開「Switch to an agent that needs you」：有 Agent 需要你時自己換上台。這個選項預設關閉；打開後，你正在打字、有選單開著，或台上的 Agent 也在等你時，都不會自動換台。
+
+只看縮圖不算「看過」：完成的 Agent 會一直標示完成，直到你把它放上舞台。
+
+### 收件匣（Inbox）
+
+同時跑好幾個 Agent 時，最花時間的是搞清楚「誰在等我、要我做什麼」。Inbox 把需要你的 Agent 排成一列卡片，按 **Ctrl+Shift+I** 打開，再按一次回到原本的版面。也可以在設定 › Look 選「Inbox」。
+
+每張卡片寫著 Agent 的名稱、在哪個 space 和分支、資料夾改了幾個檔案、等了多久，以及 Agent 自己在回報裡說它要什麼；下面是它畫面最後幾行，方便你判斷。最新開始等的排最前面，上方的「Newest／Oldest」可以改成等最久的排最前面。
+
+處理方式：
+
+- **快速回答**：卡片左下的按鈕，例如 Claude Code 權限提示的 Yes／No。按下去就把對應的按鍵送進那個終端機。
+- **回覆**：在卡片下方的欄位打字，Enter 送出（會自動補一個 Enter）。送出後卡片會顯示「✓ Sent」。
+- **Open**：在右邊的面板打開那個 Agent，直接操作它的終端機。
+- **Snooze**：先收起來。Agent 換了問題，或離開等待後又回來，卡片會再出現。上方的「N snoozed」可以讓它們全部回來。重開 AgentDesk 後，收起來的卡片都會回來。
+
+卡片下面的「DONE」區是你還沒看過的已完成 Agent，可以 Open，也可以按 Dismiss 標成看過。全部處理完會出現「Inbox zero」。
+
+鍵盤：先點一下左邊的佇列，↑／↓（或 K／J）選卡片，Enter 打開，R 回覆，1～9 按快速回答，S 延後（在完成列上是 Dismiss），D 或 Delete 標成看過。這些鍵只在佇列被點選時有效，點一下右邊的終端機就回到一般打字，不會被攔下。
+
+卡片上顯示的「Agent 要什麼」只來自 Agent 自己的狀態回報（Claude Code 的 OSC 7501 或 `agentctl report-state --message`）。沒有回報訊息時，卡片會說明請看下面的畫面；AgentDesk 不會從畫面文字猜狀態。
+
+**設定快速回答**：在 `ui.json` 加上 `inbox_answers`，依程式（programs.json 的名稱，例如 `claude`、`codex`）列出按鈕的文字和要送出的按鍵。例如：
+
+```json
+"inbox_answers": {
+  "claude": [
+    { "label": "Yes", "send": "1", "kinds": ["permission"] },
+    { "label": "No", "send": "\u001b", "kinds": ["permission"] }
+  ],
+  "my-agent": [
+    { "label": "Continue", "send": "", "enter": true }
+  ],
+  "*": []
+}
+```
+
+- `send`：原封不動送進終端機的按鍵。控制鍵用 JSON 的跳脫寫法，例如 `\u001b` 是 Esc。
+- `enter`：送完再補一個 Enter。`send` 和 `enter` 至少要有一個。
+- `kinds`：只在這幾種回報出現（`permission` 權限、`question` 問題、`auth` 登入）；沒寫就都會出現。
+- `label`：按鈕上的字，最多 40 bytes；沒寫就用送出的內容命名。
+- 每個程式最多 9 個按鈕（對應 1～9 鍵）。`"*"` 代表其他所有程式；寫成空陣列代表不要按鈕。
+- 存檔後，Inbox 開著時幾秒內就會生效，不用重開。AgentDesk 存設定時不會改動你寫的 `inbox_answers`。格式不對的項目會被略過。
+
+AgentDesk 只為兩個程式附了預設，而且只用在權限提示：Claude Code 是 Yes＝`1`、No＝Esc，Codex 是 Yes＝`y`、No＝Esc。這兩組是依官方文件與提示畫面推得的，**還沒用真的 CLI 驗證過**，第一次用時請看一下終端機確認按鍵有效；CLI 改了提示格式時，請在 `inbox_answers` 覆寫。
+
+### 並排比較（Pair）
+
+**Pair** 把兩個 Agent 左右並排，下方一個共用的輸入列，可以把同一個任務同時交給兩邊，例如 Claude Code 和 Codex，或同一個 Agent 開兩次，看誰先做完、做得比較好。按 **Ctrl+Shift+2** 切到 Pair，再按一次回到原本的版面；Ctrl+Shift+L 也會輪到它。
+
+第一次打開 Pair 時會看到設定卡：
+
+- 左右各挑一個程式。
+- **Separate worktrees**（預設打開）：目前的資料夾是 git 儲存庫時，兩邊各自在一個新的 worktree 裡工作（`pair/` 開頭的新分支），不會改到同一份檔案。未提交的變更不會帶過去。資料夾不是 git 儲存庫時，兩邊只能在同一個資料夾裡工作，卡片上會提醒你。
+- 按 **Start pair**。已經有兩個 Agent 在跑時，也可以按 **Pair two open agents** 直接把它們配成一對。
+
+配好之後：
+
+- 兩邊都是一般的終端機，可以直接點進去打字。
+- 在下方的輸入列打字（點它或按 Alt+P），按 Enter 送給兩邊；**Left only**、**Right only** 只送一邊。點終端機或按 Esc 就回到終端機。
+- 每一邊的標題列會顯示這一輪花了多久，以及那個資料夾改了幾個檔案、增減幾行。
+- 一邊先做完時，它的面板頂端會出現一條終點線。兩邊都做完後，上方的結果條會告訴你誰先完成、快了多少，並可以 **Review** 任一邊的 diff（看完按 Ctrl+Shift+R 回到 Pair），或按 **Keep** 標記你要留下的那一邊（只是標記，不會動到 git）。
+- 上方列的交換按鈕（Alt+Shift+S）把左右對調；面板標題列的 **Change** 可以換成另一個正在跑的 Agent；**Close pair** 解除配對，兩個終端機照常在「Pair」分頁裡繼續跑。
+
+誰先完成只依 Agent 自己回報的狀態判斷，不會從畫面文字猜。Pair 建立的 worktree 不會自動刪除，用完請用「Remove worktree」清掉。輸入列送出的方式是先貼上文字再按 Enter，真的 Claude Code 與 Codex 上的效果還沒實測，若 Agent 沒有開始做，請直接在它的終端機按一次 Enter。Ctrl+Shift+2 被 AgentDesk 拿來切換 Pair，終端機裡的程式收不到這組鍵；需要的話在 keys.json 改掉。
 
 ### 專注模式（Focus）
 
@@ -212,7 +294,7 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 - 同一個資料夾有兩個以上的 Agent 在跑時，上方會出現「N agents in this repo」：清單裡是所有人的改動，分不出是誰改的。要分開，請讓每個 Agent 用自己的 worktree。
 - Agent 還在工作時也可以 commit，但會看到提醒，之後它再改的檔案會出現在下一次的清單裡。
 
-`mission.toggle` 和 `review.toggle` 只記得一層「原本的版面」：從 terminals 進 Mission Control、再進 Review，按 Ctrl+Shift+R 會回到 Mission Control，再按 Ctrl+Shift+M 則回到 AgentDesk 版面，不是 terminals。
+Ctrl+Shift+M、Ctrl+Shift+I、Ctrl+Shift+R、Ctrl+Shift+2 只記得一層「原本的版面」：從 terminals 進 Stage、再進 Review，按 Ctrl+Shift+R 會回到 Stage，再按 Ctrl+Shift+M 則回到 AgentDesk 版面，不是 terminals。
 
 ### 時間軸（Timeline）
 
@@ -226,27 +308,25 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 - 只有回報過狀態的終端機會出現，一般 shell 不會。
 - 終端機用 `agentctl timeline` 也能看同樣的紀錄（見「agentctl」）。
 
-### 風格版面
+### 好玩的版面
 
-設定 › Look 的版面卡片有三個風格版面，也可以在命令面板輸入「Layout」切換。功能和 AgentDesk 版面一樣（space、分頁、分割、命令面板、通知），只換外觀和操作方式。
+設定 › Look 的「Fun layouts」打開後，AgentDesk Classic 和 Garden 會出現在版面卡片裡，Ctrl+Shift+L 也會輪到它們。沒打開時，一樣可以從命令面板輸入「Layout: AgentDesk Classic」或「Layout: Garden」切過去。
 
-**AgentDesk Tiling**：沒有側欄和分頁卡片，頂端一條細狀態列，面板直角、彼此留間距，適合用鍵盤操作很多個面板。
+**Garden**：每個 Agent 畫成一隻小動物，住在一片小花園裡，適合開在第二台螢幕，用餘光就看得出誰在忙、誰在等你。小動物的動作只看 Agent 回報的狀態：
 
-- 狀態列由左到右：space 編號、目前 space 的分頁、目前面板、需要你（`!`）與工作中（`~`）的數量、時鐘。
-- Alt+R 進入調整大小模式：H、J、K、L 或方向鍵每次移動 40 px，加 Shift 每次 10 px，按 Esc 或 Enter 結束。模式中按鍵不會送進終端機。
-- Alt+Shift+Enter 往面板較長的那一邊分割；Alt+Shift+Q 關閉面板；Alt+Shift+G 開關間距。
-- 這幾個鍵只在 Tiling 版面有作用。shell 的 Alt+R（readline 還原整行）在這個版面會被攔下，不想要的話可以在 keys.json 的 `layout:tiling` 區段改掉。
-- 設定 › Look 可以調整間距、面板標題列（自動、一律顯示、不顯示）與「滑鼠停留就聚焦」。
+- 沿著小路跳步：工作中。
+- 面向你揮手、頭上有紅色「!」：需要你。
+- 開心跳一下、冒出閃光，然後坐下：完成。
+- 閉眼睡覺、飄著「z z」：閒置。
+- 半透明、安靜坐著：沒有狀態。
 
-**AgentDesk Cockpit**：左邊三個儀表（工作中、需要你、今天完成），右邊 Agent 清單，下方狀態變化紀錄，中間照常是目前分頁的面板。
+每隻小動物的顏色是它所在 space 的顏色，耳朵、尾巴這些小地方依 Agent 而不同，同一個 Agent 每次都長一樣。子 Agent 是旁邊比較小的那隻，超過兩隻時會顯示「+n」。上方列有需要你、工作中、完成的數量。
 
-- 點「NEEDS YOU」儀表跳到第一個需要你的 Agent；點清單或紀錄的一列跳到那個 Agent，清單右鍵可以 Peek 或放進面板。
-- 「今天完成」從本地時間午夜起算，只計 AgentDesk 看得到的完成；AgentDesk 關著時完成的，會在重開時算進去。命令面板的「Cockpit: set Done today back to 0」可以手動歸零。
-- 紀錄只保留最近 200 筆，不存檔。
-- 視窗太窄時會先藏 Agent 清單、再藏紀錄；太矮時儀表改成橫條。
-- 背景格線與柔光可以在設定 › Look 的「Glow and grid」關掉。
+滑鼠停在小動物上會看到程式、狀態、持續多久和最後一則訊息。點一下會回到原本的版面並切到那個 Agent；右鍵可以 Peek、重新命名或關閉面板。要回花園，按上方列最右邊的按鈕，或在命令面板輸入「Layout: Garden」；想要快速鍵的話，在 keys.json 綁 `garden.toggle`。
 
-**AgentDesk Classic**：整個視窗用字元畫成單色終端機的樣子，選單、分頁、框線和狀態全是文字。
+深色主題是夜晚的花園，淺色主題是白天。視窗不在前景時動畫會放慢、降低更新頻率；Windows 的「動畫效果」關掉時，小動物都停在定格姿勢。
+
+**AgentDesk Classic**：整個視窗用字元畫成單色終端機的樣子，選單、分頁、框線和狀態全是文字。功能和 AgentDesk 版面一樣（space、分頁、分割、命令面板、通知）。
 
 - F10 打開選單列，左右鍵換選單、上下鍵選列、Enter 執行、Esc 關閉。這個鍵只在 Classic 版面有作用；全螢幕終端程式若用 F10，可以在 keys.json 的 `layout:classic` 區段改成別的鍵。
 - Ctrl+Shift+B 開關文字側欄。
@@ -254,7 +334,7 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 - 設定 › Look 的「Screen effects」：Off、Light（掃描線與暗角，預設）、Full（再加文字微光）。淺色主題與 Windows 高對比時一律不畫特效。
 - 「Monochrome terminal」會把終端機的顏色轉成主題的單色色階。要看彩色 diff 時請關掉。
 
-Cockpit 與 Classic 附有為它們設計的主題（Cockpit Night／Cockpit Day、Phosphor Green／Phosphor Paper，另外還有 Phosphor Amber），設定 › Look 會出現建議列，按 Use 才會套用（見「主題」）。
+Classic 附有為它設計的主題（Phosphor Green／Phosphor Paper，另外還有 Phosphor Amber），設定 › Look 會出現建議列，按 Use 才會套用（見「主題」）。
 
 ### 自訂版面
 
@@ -270,7 +350,7 @@ Cockpit 與 Classic 附有為它們設計的主題（Cockpit Night／Cockpit Day
 
 Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy。每次修改都立即生效並儲存，沒有儲存鈕。
 
-- **Look**：版面與主題卡片（我們的 Midnight、Ember、Moss、Paper，加上 graphite、ink、moss、paper、atom one dark，以及隨附的 Dusk、Dawn、Cockpit Night、Cockpit Day、Phosphor Green、Phosphor Amber、Phosphor Paper；把同樣格式的主題檔放進 `%LOCALAPPDATA%\AgentDesk\themes\` 也會列出來，每個版面各自記住深色與淺色主題。排程、變色、建議主題與主題編輯器見下方「主題」）；整體縮放、介面文字大小（預設 15 px，覺得太小可以調大）、終端機字型與大小、行高、字寬、捲動速度；新終端機用的 shell、放開滑鼠就複製、keys.json、worktree 資料夾。
+- **Look**：版面與主題卡片（我們的 Midnight、Ember、Moss、Paper，加上 graphite、ink、moss、paper、atom one dark，以及隨附的 Dusk、Dawn、Phosphor Green、Phosphor Amber、Phosphor Paper；把同樣格式的主題檔放進 `%LOCALAPPDATA%\AgentDesk\themes\` 也會列出來，每個版面各自記住深色與淺色主題。排程、變色、建議主題與主題編輯器見下方「主題」）；「Fun layouts」開關（見「好玩的版面」）；選到 Terminals、Stage、Classic 時，各自多出幾列選項；整體縮放、介面文字大小（預設 15 px，覺得太小可以調大）、終端機字型與大小、行高、字寬、捲動速度；新終端機用的 shell、放開滑鼠就複製、keys.json、worktree 資料夾。
 - **Machines**：遠端機器清單與「Add a machine…」。
 - **Alerts**：提示音開關與試聽、右下角通知開關，以及專注模式的提醒方式（In focus mode：Edge、Edge + sound、Usual）。
 - **Mods**：啟用或停用 mod、看錯誤、重新載入。
@@ -294,7 +374,7 @@ Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy
 
 ### 版面的建議主題
 
-有些版面附了配好的深淺主題：AgentDesk Mac 配 Dusk 與 Dawn，Cockpit 配 Cockpit Night 與 Cockpit Day，Classic 配 Phosphor Green 與 Phosphor Paper。如果你現在用的不是那一組，設定 › Look › Theme 會出現一列「Made for …」，按 **Use** 才會換。AgentDesk 不會自己改你的主題。建議的主題卡右上角有一顆小星星。
+有些版面附了配好的深淺主題：AgentDesk Mac 配 Dusk 與 Dawn，Classic 配 Phosphor Green 與 Phosphor Paper。原本選了 Cockpit Night 或 Cockpit Day 的人，會回到預設主題。如果你現在用的不是那一組，設定 › Look › Theme 會出現一列「Made for …」，按 **Use** 才會換。AgentDesk 不會自己改你的主題。建議的主題卡右上角有一顆小星星。
 
 ### 跟著 Agent 狀態變色
 

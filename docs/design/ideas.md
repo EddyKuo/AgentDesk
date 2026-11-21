@@ -1,12 +1,12 @@
 # AgentDesk 版面與主題構想
 
-日期：2026-11-20（第二輪構想 2026-11-21）｜狀態：A1～A4、B1～B3、T2～T5 已實作（見設計文件 ADR-32～ADR-35），T1 尚未；第二輪構想（版面收斂、C1～C4、美化）尚未排入，見文末
+日期：2026-11-20（第二輪構想 2026-11-21）｜狀態：A1～A4、B1～B3、T2～T5 已實作（見設計文件 ADR-32～ADR-35），T1 仍延後；第二輪構想（版面收斂、美化、C1～C4）也已全部實作（設計文件 v2.27、ADR-37～ADR-41），見文末
 
 > 2026-11-20 更新：使用者選定 A1～A4、B1～B3、T2～T5，都已實作並寫進設計文件 v2.24（2.9～2.12、ADR-32 Mission Control 與 Focus、ADR-33 Review 與 Timeline、ADR-34 風格版面、ADR-35 主題）與 PRD v3.4.0（FR-40～FR-50）。實際做法以 `ideas/IMPL-A12.md`、`IMPL-A34.md`、`IMPL-B.md`、`IMPL-T.md` 為準，和下方構想或規格不同的地方記在那裡。T1（高對比與色盲友善）使用者決定延後。下方內容保留當初的構想原文。
 
 這份文件收集版面與主題的發想，給挑選、排工作時參考。要做哪一項由使用者決定，再寫進設計文件（`docs/design/AgentDesk_Design.md`）與 PRD，照一般流程開發。
 
-構想當時已有的版面：AgentDesk（workspace）、Terminals、AgentDesk Mac（ADR-31）。主題：AgentDesk 自己的四套，加上 herdr 的 graphite、ink、moss、paper、atom-one-dark，以及使用者放進 `themes\` 的主題檔。現在內建版面共 8 個，見設計文件 2.4。
+構想當時已有的版面：AgentDesk（workspace）、Terminals、AgentDesk Mac（ADR-31）。主題：AgentDesk 自己的四套，加上 herdr 的 graphite、ink、moss、paper、atom-one-dark，以及使用者放進 `themes\` 的主題檔。第二輪之後內建版面共 9 個（7 個列出、2 個好玩的），見設計文件 2.4。
 
 ## 設計規格
 
@@ -129,7 +129,19 @@
 
 ## 第二輪構想（2026-11-21）
 
-使用者試用第一輪實作後的意見：後來實作的幾種版面還要再美化，而且很多版面不實用；要以「實用、好看又有趣」為目標重新想版面。以下是評估與提案，**尚未排入**，等使用者決定。
+使用者試用第一輪實作後的意見：後來實作的幾種版面還要再美化，而且很多版面不實用；要以「實用、好看又有趣」為目標重新想版面。以下是評估與提案。
+
+> 2026-11-21 更新：使用者看過後說「全部都做」，依下方的建議執行，**都已實作**並寫進設計文件 v2.27 與 PRD v4.0.0（FR-52～FR-57）：
+>
+> | 項目 | 結果 |
+> |---|---|
+> | 美化與收斂 | 共用設計規則與整體美化（設計文件 2.13）；Tiling 併進 Terminals、拿掉 Cockpit、Classic 改為好玩的版面（2.11）。ADR-37，實作紀錄 `ideas/IMPL-round2-base.md` |
+> | C2 Stage | 取代 Mission Control（2.9）。ADR-38，`ideas/IMPL-round2-stage.md` |
+> | C1 Inbox | 2.14。ADR-39，`ideas/IMPL-round2-inbox.md` |
+> | C3 Pair | 2.15。ADR-40，`ideas/IMPL-round2-pair.md` |
+> | C4 Garden | 好玩的版面（2.16）。ADR-41，`ideas/IMPL-round2-garden.md` |
+>
+> 和下方構想不同的地方以 IMPL 紀錄為準，主要有：Inbox 卡片上沒有固定的「同意／拒絕」，改成可設定的快速回答（`inbox_answers`，Claude Code 與 Codex 的預設待用真的 CLI 驗證）；Garden 點一下是回到原本的版面並聚焦，不在花園裡滑出面板；Pair 的切換鍵是 Ctrl+Shift+2，Garden 沒有預設按鍵。T1 高對比與色盲友善仍延後。下方內容保留當初的構想原文。
 
 ### 現有版面評估
 
@@ -196,3 +208,5 @@
 - 是否拿掉 Cockpit、合併 Tiling、把 Classic 改為彩蛋。這三個都是第一輪才依使用者要求做的，要使用者同意才動。
 - 是否用 Stage 取代 Mission Control，或兩者並存。
 - C1～C4 要做哪幾項、順序為何。
+
+使用者的決定（2026-11-21）：「全部都做」，依建議執行。拿掉 Cockpit、Tiling 併進 Terminals、Classic 改為好玩的版面（Fun layouts，預設不列出）；Stage 取代 Mission Control，不並存；C1～C4 全做（ADR-37～ADR-41）。

@@ -1,10 +1,10 @@
 # AgentDesk：Windows AI Agent 工作台
 
-產品需求與系統設計文件 v2.26  
-日期：2026-11-20｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；版面與主題構想 A1～A4、B1～B3、T2～T5 已實作（2.9～2.12、ADR-32～ADR-35），T1 尚未；還沒做的人工驗收見 5.4、5.7  
+產品需求與系統設計文件 v2.27  
+日期：2026-11-21｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；第一輪版面與主題構想已實作（2.9～2.12、ADR-32～ADR-35），第二輪的版面收斂、共用設計規則、Stage、Inbox、Pair、Garden 也已實作（2.9、2.11、2.13～2.16、ADR-37～ADR-41），T1 尚未；還沒做的人工驗收見 5.4、5.7  
 技術基線：C++20、Windows 11 x64、Dear ImGui（FreeType 繪字）、Win32、DirectX 11、隨附 ConPTY
 
-> 產品名稱定為 AgentDesk，本身以 MIT License 釋出。介面與行為依 herdr-app 原始碼複刻（ADR-15），程式全部用 C++ 重寫，不宣稱與 herdr 的協定或程式相容；程式裡不出現 herdr 的名稱（ADR-21），本文件提到 herdr 是因為它是參考產品。第 1 章保留 MVP 時的需求，MVP 之後加上的功能主要寫在 2.4～2.12、3.7.2～3.7.3 與第 4 章；實機驗證結果見各 Sprint 的 TestReport（`contracts/inbox/TestReport_sprint*.md`）。
+> 產品名稱定為 AgentDesk，本身以 MIT License 釋出。介面與行為依 herdr-app 原始碼複刻（ADR-15），程式全部用 C++ 重寫，不宣稱與 herdr 的協定或程式相容；程式裡不出現 herdr 的名稱（ADR-21），本文件提到 herdr 是因為它是參考產品。第 1 章保留 MVP 時的需求，MVP 之後加上的功能主要寫在 2.4～2.16、3.7.2～3.7.3 與第 4 章；實機驗證結果見各 Sprint 的 TestReport（`contracts/inbox/TestReport_sprint*.md`）。
 
 ### 版本紀錄
 
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.27 | 2026-11-21 | 依使用者核准的第二輪構想（「全部都做」）實作：ADR-37 共用設計規則（間距、圓角、字級、陰影、動畫與減少動畫、空白狀態插圖）與整體美化，Tiling 併入 Terminals（直角、間距、調整大小模式；存檔的 `tiling` 轉成 terminals），拿掉 Cockpit（存檔的 `cockpit` 轉成 workspace），Classic 與 Garden 改為好玩的版面（`fun_layouts`，預設關）；ADR-38 Stage 取代 Mission Control（存檔的 `mission` 轉成 stage，Ctrl+Shift+M 切換 Stage）；ADR-39 Inbox（Ctrl+Shift+I，可設定的快速回答 `inbox_answers`）；ADR-40 Pair（Ctrl+Shift+2）；ADR-41 Garden。內建版面共 9 個（7 個列出、2 個好玩的）；存 `ui.json` 時刪掉 `tiling_*`、`cockpit_*`、`mission_*`。2.4、2.9、2.11 改寫，新增 2.13～2.16；2.10、2.12、3.9、3.10、4.1、4.4、7.1、7.3、7.5 更新。Debug 測試 477 個 |
 | 2.26 | 2026-11-21 | 7.5 加上第二輪構想的位置（ideas.md 文末：現有版面評估、收斂提議、C1 Inbox／C2 Stage／C3 Pair／C4 Garden、美化規則），尚未排入 |
 | 2.25 | 2026-11-20 | ADR-36：視窗按鈕顏色跟著主題、各版面依風格畫法不同；每個版面與專注模式第一次出現時的提示卡（`layout.tips`、`tips`、`tips_seen`） |
 | 2.24 | 2026-11-20 | 依使用者選定的構想實作：ADR-32 Mission Control（`mission`）與 Focus 模式、ADR-33 Review（`review`）與 Timeline（host 狀態歷史、`session.timeline`、`session.state` 的 `at`、`agentctl timeline`）、ADR-34 風格版面 AgentDesk Tiling／Cockpit／Classic（`tiling`、`cockpit`、`classic`）與 mod → style 對照表、ADR-35 依時間切換外觀、跟著 Agent 狀態變色、版面的建議主題（只建議，不自動套用）、主題編輯器，以及共用的色彩計算；主題檔集中到 `libs/ui/themes`。內建版面共 8 個。「看過」改為以畫面上實際畫出的終端機判斷。新增 2.9～2.12；2.4、2.8、3.7.3、3.8、3.9、3.10、4.1、4.4、7.1、7.5 更新。T1（高對比與色盲友善）使用者決定延後 |
@@ -63,7 +64,7 @@
 
 設計原則：UI 與執行核心分離；由背景程序擁有 ConPTY 與終端機狀態；重用 VT 解析核心，自製 ImGui renderer；使用本機 Named Pipe；保留 Agent 原有的權限確認行為。
 
-MVP 不建立 HTTP backend、Docker、資料庫、遠端控制或自動多 Agent 排程平台，先完成「兩個 Agent 能正常互動、UI 關閉後持續執行、重新連線還原目前畫面」。MVP 之後加上的遠端機器（ssh）、mod、線上更新與 agent-host 交接見 2.4～2.8，之後的版面與主題見 2.9～2.12；HTTP backend、Docker、資料庫與自動排程至今都沒有做。
+MVP 不建立 HTTP backend、Docker、資料庫、遠端控制或自動多 Agent 排程平台，先完成「兩個 Agent 能正常互動、UI 關閉後持續執行、重新連線還原目前畫面」。MVP 之後加上的遠端機器（ssh）、mod、線上更新與 agent-host 交接見 2.4～2.8，之後的版面與主題見 2.9～2.16；HTTP backend、Docker、資料庫與自動排程至今都沒有做。
 
 ## 1. 產品需求（PRD）
 
@@ -194,20 +195,25 @@ VT Engine 需要回覆的終端機查詢由 host 處理，UI 不連線時仍可�
 
 ### 2.4 版面與版面引擎（ADR-15、ADR-18）
 
-內建八個版面，依 `builtin_names()` 的順序：
+內建九個版面，依 `builtin_names()` 的順序。前七個是一般版面，後兩個是好玩的版面（Fun layouts，2.11）：
 
 | 名稱 | 顯示名稱 | 說明 |
 |---|---|---|
 | `workspace` | AgentDesk | herdr 的 main，預設 |
-| `terminals` | Terminals | herdr 的 terminals |
-| `mac` | AgentDesk Mac | 2.8、ADR-31 |
-| `mission` | Mission Control | 監看牆，2.9、ADR-32 |
+| `terminals` | Terminals | herdr 的 terminals；可選直角、間距與鍵盤調整大小（2.11、ADR-37） |
+| `stage` | Stage | 主舞台加底片條，2.9、ADR-38 |
+| `inbox` | Inbox | 需要你的 Agent 收件匣，2.14、ADR-39 |
 | `review` | Review | 審查台，2.10、ADR-33 |
-| `tiling` | AgentDesk Tiling | 平鋪式，2.11、ADR-34 |
-| `cockpit` | AgentDesk Cockpit | 儀表板，2.11、ADR-34 |
-| `classic` | AgentDesk Classic | 字元畫的單色終端機，2.11、ADR-34 |
+| `pair` | Pair | 兩個 Agent 並排比較，2.15、ADR-40 |
+| `mac` | AgentDesk Mac | 2.8、ADR-31 |
+| `classic` | AgentDesk Classic | 好玩的版面：字元畫的單色終端機，2.11、ADR-34 |
+| `garden` | Garden | 好玩的版面：每個 Agent 是一隻小動物，2.16、ADR-41 |
 
-herdr-app 的 `main.json`、`terminals.json` 原檔放在 `third_party/herdr/layouts`；其餘是我們的檔案，放在 `libs/ui/layouts`，全部在建置時編進程式。另外有一棵不列出的內建樹 `focus`（`libs/ui/layouts/focus.json`）：它不在 `builtin_names()` 裡，`layout.switch` 不會切到它，只由 Focus 模式使用（2.9）。原本的 AgentDesk 98 已移除（ADR-28）；`ui.json` 存的版面名稱找不到時，顯示第一個版面。
+Ctrl+Shift+L 依這個順序輪替。`ui.json` 的 `fun_layouts` 關著（預設）時，Classic 與 Garden 不出現在設定 › Look 的版面卡片、Mac 與 Classic 的 View 選單，Ctrl+Shift+L 也跳過它們；正在用的版面一律保留自己的卡片，`layout:classic`、`layout:garden` 隨時可用（`ui::styles::is_fun_layout`、`is_listed`、`next_listed`）。
+
+第二輪拿掉的內建版面由 `ui::styles::replacement_for()` 換成新的版面，`settings_store.cpp` 讀 `layout` 與 `layout_return` 時都會查：`tiling` → `terminals`（同時打開直角）、`cockpit` → `workspace`、`mission` → `stage`（ADR-37、ADR-38）。轉換發生在讀設定時，所以使用者自己放的同名版面檔（`layouts\tiling.json`、`layouts\mission.json`）照樣載入、可以手動切回，但它們用到的 `tiling-*`、`mission-*` mod 已沒有畫面，會顯示空白區塊。
+
+herdr-app 的 `main.json`、`terminals.json` 原檔放在 `third_party/herdr/layouts`；其餘是我們的檔案，放在 `libs/ui/layouts`，全部在建置時編進程式。另外有一棵不列出的內建樹 `focus`（`libs/ui/layouts/focus.json`）：它不在 `builtin_names()` 裡，`layout.switch` 不會切到它，只由 Focus 模式使用（2.9）。原本的 AgentDesk 98 已移除（ADR-28）；`ui.json` 存的版面名稱找不到、也沒有替代版面時，顯示第一個版面。
 
 - 版面模型在 `libs/ui`（`layout.hpp`）：節點樹由 block、row、column、stack、floating 組成，JSON 的鍵與預設值都照 herdr。大小計算、分隔線拖曳、浮動區塊的吸附與位置也照 herdr，herdr 的 layout.rs、layout_sync.rs 與拖曳測試已移植成單元測試。
 - 側欄、分頁列、窗格、右側面板、狀態列的位置都由目前版面的樹決定。每個區塊依它寫的 mod 名稱交給對應的 C++ 繪製函式；寫的是 C++ DLL mod 的名稱時，畫那個 mod 的面板。
@@ -220,17 +226,18 @@ herdr-app 的 `main.json`、`terminals.json` 原檔放在 `third_party/herdr/lay
   | `mac` | `mac-menubar`、`mac-window-title`、`mac-dock` |
   | `terminals` | `terminals-bar`、`terminals-pane` |
   | `focus` | `focus-strip` |
-  | `mission` | `mission-bar`、`mission-wall` |
+  | `stage` | `stage-bar`、`stage-strip`、`stage-empty` |
+  | `inbox` | `inbox-bar`、`inbox-queue` |
   | `review` | `review-head`、`review-changes`、`review-commit` |
-  | `tiling` | `tiling-bar`、`tiling-pane` |
-  | `cockpit` | `cockpit-header`、`cockpit-gauges`、`cockpit-roster`、`cockpit-log` |
+  | `pair` | `pair-bar`、`pair-stage`、`pair-prompt` |
   | `classic` | `classic-menubar`、`classic-tabs`、`classic-status`、`classic-sidebar`、`classic-pane` |
+  | `garden` | `garden-bar`、`garden-scene` |
 
-  tiling、cockpit、classic 的繪製由 `apps/desktop/style_layouts.cpp` 集中分派（區塊、調整過的樹、背景、最上層、每幀維護）。
+  Terminals 的選項、Stage、Pair、Classic、Garden 的繪製由 `apps/desktop/style_layouts.cpp` 集中分派（區塊、調整過的樹、背景、最上層、每幀維護、設定列與版面卡片的預覽）。
 
   面板讀版面 pane 的 `radius`、`border`、`focus`、`header.height`、`gap`（`ui::styles::pane_look`，各 style 有預設）；通知位置由 `ui::styles::toast_area` 決定。既有三個版面改走這張表後，截圖逐像素相同（只差時鐘）。
-- 每個版面各自記住一組深色與淺色主題（`ui.json` 的 `layout_themes`）。主題有我們的四套，加上 herdr 的 graphite、ink、moss、paper、atom-one-dark，AgentDesk 隨附的主題檔（`libs/ui/themes`，建置時複製到執行檔旁的 `themes\`：`mac-dusk`、`mac-dawn`、`cockpit-night`、`cockpit-day`、`phosphor-green`、`phosphor-amber`、`phosphor-paper`），以及使用者放進資料夾 `themes\` 或用主題編輯器存的主題檔；介面顏色照 herdr 的 resolve() 從主題推算（推算移到 `libs/ui` 的 `theme_file`，數值不變）。主題檔可選填 `name`（卡片顯示的名稱）與 `colors.info`（預設等於 accent）。
-- 版面檔可選填 `suggested_themes: {"dark": id, "light": id}`，是為這個版面配好的一組主題；沒寫時查內建表（workspace → midnight／paper、terminals → preset-graphite／preset-paper、mac → mac-dusk／mac-dawn、cockpit → cockpit-night／cockpit-day、classic → phosphor-green／phosphor-paper；tiling、mission、review 沒有）。建議只出現在設定頁，**不會自動套用**（2.12、ADR-35）。
+- 每個版面各自記住一組深色與淺色主題（`ui.json` 的 `layout_themes`）。主題有我們的四套，加上 herdr 的 graphite、ink、moss、paper、atom-one-dark，AgentDesk 隨附的主題檔（`libs/ui/themes`，建置時複製到執行檔旁的 `themes\`：`mac-dusk`、`mac-dawn`、`phosphor-green`、`phosphor-amber`、`phosphor-paper`；`cockpit-night`、`cockpit-day` 隨 Cockpit 拿掉，選了它們的人載入時退回預設主題），以及使用者放進資料夾 `themes\` 或用主題編輯器存的主題檔；介面顏色照 herdr 的 resolve() 從主題推算（推算移到 `libs/ui` 的 `theme_file`，數值不變）。主題檔可選填 `name`（卡片顯示的名稱）與 `colors.info`（預設等於 accent）。
+- 版面檔可選填 `suggested_themes: {"dark": id, "light": id}`，是為這個版面配好的一組主題；沒寫時查內建表（workspace → midnight／paper、terminals → preset-graphite／preset-paper、mac → mac-dusk／mac-dawn、classic → phosphor-green／phosphor-paper；stage、inbox、review、pair、garden 沒有）。建議只出現在設定頁，**不會自動套用**（2.12、ADR-35）。
 - 還沒做的部分：版面裡的 terminal 與 agent 區塊不畫（終端機只在分頁裡）；`layout.set` 與「把 mod 停靠到版面」；背景圖片；`shadow`、`window_drag`、`titlebar`、`traffic_lights`、`peek` 只讀不用；版面指定 AgentDesk 沒有的主題時不套用。AgentDesk 自己的 Details 面板不屬於 herdr，仍貼在窗格右邊。
 
 ### 2.5 Mod（ADR-17）
@@ -294,26 +301,33 @@ sequenceDiagram
 - Dock：底部置中、圓角 18 的半透明膠囊，44 px 圖塊、間距 10 px。每個 space 一個彩色字母頭像（目前的 space 下面有點，有需要你或完成的分頁時右上角有標記），分隔線，目前 space 的分頁（焦點面板的程式圖示，用程式表的底色與前景色；有程式在跑下面有點；右上角標記需要你、完成或執行中；收起的分頁變淡），分隔線，最後是「+」（開新增選單）與齒輪（設定）。滑鼠指到的圖塊放大到 1.25 倍、左右鄰居 1.1 倍，逐幀平滑過渡，上方顯示名稱泡泡；點 space 切換、點分頁顯示它（收起的會回來），右鍵分頁圖塊是分頁列同樣的選單。圖塊太多放不下時整個 Dock 等比縮小。
 - 通知在這個版面改到右上角、選單列下方；Ctrl+Shift+B 照 ADR-27 切到有側欄的版面。主題跟其他版面一樣各自記住深淺兩套（預設沿用 Midnight 與 Paper）；為這個版面配的 Dusk／Dawn（`mac-dusk`、`mac-dawn`）只在設定頁建議，按 Use 才換（2.12）。設定 › Look 的版面卡片畫出選單列、桌布、視窗與 Dock 的縮圖。
 
-### 2.9 Mission Control 與 Focus 模式（ADR-32）
+### 2.9 Stage 與 Focus 模式（ADR-38、ADR-32）
 
-設計規格在 `docs/design/ideas/A-usage-layouts.md`，實作與差異在 `docs/design/ideas/IMPL-A12.md`。
+Stage 的構想是 `docs/design/ideas.md` 第二輪的 C2，實作與差異在 `docs/design/ideas/IMPL-round2-stage.md`；Focus 的規格在 `docs/design/ideas/A-usage-layouts.md`，實作在 `IMPL-A12.md`。第一輪的 Mission Control（版面 `mission`，ADR-32）已由 Stage 取代（ADR-38）。
 
-**Mission Control（版面 `mission`）**：所有 Agent 排成一面牆，一次看全部。
+**Stage（版面 `stage`）**：一個 Agent 在大的主舞台上，可以直接操作；其他 Agent 在下方的底片條排成即時縮圖，像視訊會議的排版。
 
-- 版面檔 `libs/ui/layouts/mission.json`：42 px 的 `mission-bar`、stack `wall-body`（`wall`／`main`）、28 px 狀態列。繪製在 `apps/desktop/mission_layout.cpp`，純邏輯在 `libs/ui` 的 `mission`。
-- 牆面格數依 `wall_grid`（1、2、2×2、3×2、3×3、4×3，之後固定四欄；每格至少 240×150，窄時減欄，放不下就捲動，一格滾輪捲一列），只畫看得到的格子。排序（`wall_order`）：需要你、完成、工作中、閒置、其他，同段依側欄的 `priority_before`；連不上的機器的 Agent 排最後。子 Agent 預設併進父 Agent（頁尾「+N sub-agents」開 peek），`mission_sub_agents` 為 true 時各自成格。
-- 每格：程式圖示、名稱、「space · 工作」、狀態與變動距今多久；內容是畫面最後幾行（`screen_tail`：略過空白列與只有框線字元的列，保留顏色，最多 12 行）；頁尾是 OSC 7501 的訊息，沒有就寫 blocked 的種類。需要你的格子有 2 px `needs_you` 框與光暈。只有快照的 `seq`／`generation` 變了才重算，每格最多每 250 ms 一次；不建 `TerminalView`、不改尺寸、不搶控制權，也不多送 IPC。
-- 互動：點一格執行 `mission.expand:<id>`（切到那個分頁、面板取得鍵盤，stack 改顯示 `main`）；牆面上方向鍵、Home、End 選格，Enter 開啟，1～9 開第 N 格（這幾個鍵不在 keys.json）。Ctrl+Shift+M（`mission.toggle`）：從別的版面進牆面、從展開的 Agent 回牆面、從牆面回到原本的版面（`layout_return`）。**Esc 不使用**（使用者決定），照常送給終端機，因為 Claude Code 用 Esc 中斷 Agent。上方計數膠囊點了只看那種狀態（`mission.filter`），All／Active 切換存在 `mission_filter`。
-- 空、載入、錯誤狀態用共用的狀態卡（`apps/desktop/state_card.cpp`）。`mission_shells` 為 true 時，沒有狀態回報的終端機也成格。stack 的選擇不存進 `.state`，每次進入都先顯示牆面。
+- 版面檔 `libs/ui/layouts/stage.json`：`bar`（42 px 的 `stage-bar`）、stack `stage-body`（`stage` 分頁區塊、`empty`）、`strip`（`stage-strip`）。繪製在 `apps/desktop/stage_layout.cpp`，純邏輯在 `libs/ui` 的 `stage`（`strip_order`、`lineup`、篩選、大小與 `fit_size`、`step`、換台紀錄 `History`、`auto_switch_target`、水平捲動、柔光 `glow_level`）。
+- **主舞台**：一般的分頁面板（`lone` 的 tab 區塊），完全可以打字。台上的 Agent 就是目前聚焦的終端機，所以任何換焦點的方式（點縮圖、Alt+方向鍵、點通知、命令面板）都會換台。
+- **頂端列**：「Stage」、台上 Agent 的程式圖示、名稱、space 與細節、狀態標記，需要你時再加它回報的訊息（紅字）；右邊是「←」（`stage.back`，換回剛才那一個）與共用的新增、設定、回到原本版面三顆按鈕（`layout_bar_buttons`）。
+- **底片條**：上面一列是「Agents N」、篩選 All／Needs you N／Working N（`stage_filter`）與大小 S／M／L（`stage_size`，160×96、224×136、304×184 設計 px）；下面是每個 Agent 一張縮圖，台上的那個不在條裡。條的高度超過視窗 40% 時自動改用小一號，條上標的是實際的大小。超出寬度時滾輪水平捲動，兩端有淡出邊緣與箭頭按鈕。`stage_shells` 為 true 時一般終端機也有縮圖。
+- **縮圖**：`tok::card` 卡片。標頭是狀態圈（工作中是慢慢轉的四分之三圈）、程式圖示、名稱與多久前變化或「Needs you」；中間是畫面最後幾行（共用的 `screen_tail_of()` 快取，`App::State::screen_tails`，用縮小的等寬字畫，每張最多每秒重讀 4 次）；M、L 多一行頁尾（訊息，或 space 與子 Agent 數）。不建 `TerminalView`、不改尺寸、不搶控制權，也不多送 IPC。機器連不上時變暗並寫「Machine offline」。子 Agent 沒有自己的縮圖，只顯示數量。
+- **需要你**：縮圖外圍發出 `needs_you` 色的柔光並排到最前面（等最久的在前）；柔光呼吸 3 次（每次 1.6 秒）後停在固定亮度，減少動畫時直接固定，高對比時只留邊框。其他縮圖維持第一次看到的先後順序，不跟側欄依狀態排，以免一直換位置。
+- **換台**：點縮圖、`stage.show:<id>`，或在 Stage 裡按 Alt+Left／Alt+Right（`stage.prev`／`stage.next`，只綁在 keys.json 的 `layout:stage`，其他版面仍是 `pane.go`）。新面板從底色淡入（260 ms），縮圖換位置時滑過去，原本台上的 Agent 回到條裡。終端機是即時的 `TerminalView`，沒有舊畫面可以疊，所以是淡入，不是交叉淡化。
+- **自動換台**（`stage_auto_switch`，預設關）：有 Agent 開始需要你時自己上台；最近 4 秒內有按鍵或點擊、有選單或對話框開著，或台上的 Agent 也在等你時不換。
+- Ctrl+Shift+M（`stage.toggle`）：從別的版面切到 Stage，再按一次回到原本的版面（`layout_return`）。Esc 照常送給終端機（ADR-32 的決定不變）。舊命令仍然有效：`mission.toggle` 切換 Stage、`mission.expand:<id>` 把那個 Agent 放上台、`mission.filter:<f>` 設定篩選（`blocked` 讀成 `needs_you`）；`mission.wall` 已拿掉。
+- 空白狀態：完全沒有東西可上台時，整個舞台用 `draw_empty_state`（「Nothing on stage yet」與開始程式的按鈕），底片條隱藏；條裡沒有縮圖時用單行版 `draw_empty_row`（還沒有 Agent、所有 Agent 都在台上、篩選後沒有東西並附「Show all」）。沒有 agent-host 時沿用載入中與錯誤卡。通知從頂端列下面出現（`toast_area("stage")`），因為下方是底片條；Stage 沒有狀態列。
+- 設定 › Look 選到 Stage 時多三列：縮圖大小、Plain terminals、Switch to an agent that needs you。
+- 從 Mission Control 留下的共用邏輯：`ui::mission` 的 `screen_tail`、`wall_order`、`filter_matches`、`clean_message` 等（Garden 也用 `clean_message`）。`mission.json` 與 `mission_layout.cpp` 已刪除。
 
 **Focus 模式**：任何版面都能切換的模式，畫面只剩一個終端機。
 
 - `focus.toggle`（Ctrl+Shift+.）、`focus.on`、`focus.off`。開啟時以不列出的內建樹 `focus.json` 取代目前版面，保留目前版面的主題、字級與 keys.json 區段；顯示目前分頁的焦點面板（沒有就是放大中的，再沒有就第一個），`Tab::zoomed` 與分割樹不動，關掉就回到原本的分割。狀態存在 `ui.json` 的 `focus_on`，重開後仍在 Focus。
 - 底部 22 px 的列：左邊程式與「名稱 · space」，中間其他 Agent 的狀態點（需要你、完成為實心，工作中是空心圈，閒置是小灰點，Unknown 不畫；子 Agent 不另外畫點，父 Agent 的點顯示整棵樹最緊急的狀態），放不下時「+N」；點一個點跳到那個 Agent 並留在 Focus。右邊是「Exit focus」與快捷鍵。滑鼠在終端機上緣停 300 ms，面板標題列浮在終端機上方出現（不推擠終端機，尺寸不變）。
 - 提醒（`focus_alerts`，視窗在前景時才適用）：`edge_sound`（預設）視窗內緣亮一下並播放提示音、不跳通知；`edge` 只亮邊緣；`normal` 照平常。預設 `edge_sound` 是使用者的決定，讓 4.1「需要你時一定播放提示音」仍然成立。視窗在背景時照平常提醒。設定 › Alerts 有「In focus mode」一列。
-- Focus 開著時 Tiling、Cockpit、Classic 的外框、背景與鍵盤攔截都不作用；`mission.toggle`、`review.toggle` 會先離開 Focus 再切版面。
+- Focus 開著時風格版面（例如 Classic）的外框、背景與鍵盤攔截都不作用，也不能開調整大小模式；`stage.toggle`、`inbox.toggle`、`review.toggle`、`pair.toggle`、`garden.toggle` 都走共用的 `toggle_layout`，會先離開 Focus 再切版面。
 
-**限制**：Release 下 12 個 `vt_probe flood` 的每幀時間還沒量；連不上 host 的畫面沒有截圖；實際 Claude Code 在格子與 Focus 裡的顯示與 Esc、Ctrl+C 要人工確認。
+**限制**：Stage 的 L 縮圖只在單元測試確認過（截圖環境的視窗太矮，都退成 M）；很多 Agent 同時工作時縮圖的 CPU 用量沒有量；自動換台的「正在打字」不分按鍵是否打在終端機裡。Focus：Release 下的每幀時間還沒量；實際 Claude Code 在 Focus 裡的顯示與 Esc、Ctrl+C 要人工確認。
 
 ### 2.10 Review 與 Timeline（ADR-33）
 
@@ -323,7 +337,7 @@ sequenceDiagram
 
 - 版面檔 `libs/ui/layouts/review.json`，繪製在 `apps/desktop/review_layout.cpp`，純邏輯在 `libs/ui` 的 `review`。三個區塊：`review-head`（42 px：‹ › 換 Agent、名稱與狀態、分支、重新整理；同一個 checkout 有兩個以上執行中的 Agent 時顯示「N agents in this repo」）、`review-changes`（右欄 ≥ 760 設計 px 時左右排，否則上下排；diff 用 JetBrains Mono 12、行高 17，超過 1,500 列截斷）、`review-commit`（88 px 的訊息框與 Commit 鈕；Agent 還在工作時提示檔案可能再變）。
 - 資料沿用 `SidePanels` 的 Changes（兩邊選中的檔案一致），畫法是 Review 自己的。跟隨規則：焦點是 Agent 時跟著它；焦點移到一般 shell 時，`review_follow` 為 `agent`（預設）保留上一個 Agent，`focused` 跟著 shell。Agent 從 Working 變成其他狀態時立刻重讀，不等 10 秒。
-- `review.toggle`（Ctrl+Shift+R）切進來、再按一次回原本的版面（和 Mission Control 共用 `toggle_layout` 與 `layout_return`）；`review.next_file`／`review.prev_file` 是 F8／Shift+F8，只綁在 keys.json 的 `layout:review` 區段，頭尾會繞回；`review.refresh` 沒有預設鍵。
+- `review.toggle`（Ctrl+Shift+R）切進來、再按一次回原本的版面（和 Stage、Inbox、Pair、Garden 共用 `toggle_layout` 與 `layout_return`）；`review.next_file`／`review.prev_file` 是 F8／Shift+F8，只綁在 keys.json 的 `layout:review` 區段，頭尾會繞回；`review.refresh` 沒有預設鍵。
 - 左右欄最小寬度是 300／320（規格的 420 在 700 設計 px 寬的視窗會切掉右欄）。
 
 **Timeline**：每個 Agent 一列的橫向時間軸，看離開期間誰在工作、誰在等你、誰做完了。
@@ -336,34 +350,31 @@ sequenceDiagram
 - **CLI**：`agentctl timeline [<session>] [--since 15m|1h|4h|24h] [--json]`（3.8）。
 - **限制**：tooltip 不顯示狀態來源（host 沒記來源）；Ctrl+滾輪只在四個範圍之間切換；「Since you left」底色與新 UI 對舊 agent-host 執行檔的實測要人工確認。
 
-### 2.11 風格版面：AgentDesk Tiling、Cockpit、Classic（ADR-34）
+### 2.11 Terminals 的選項與好玩的版面（ADR-37、ADR-34）
 
-設計規格在 `docs/design/ideas/B-style-layouts.md`，實作與差異在 `docs/design/ideas/IMPL-B.md`。三個版面的功能和 AgentDesk 版面相同（space、分頁、分割、命令面板、通知），只換外觀與操作方式；顏色都從主題推算，沒有寫死色碼。純邏輯在 `libs/ui` 的 `tiling_layout`、`cockpit`、`classic_layout`，繪製在 `apps/desktop` 的 `tiling_layout.cpp`、`cockpit_layout.cpp`、`classic_layout.cpp`，由 `style_layouts.cpp` 分派。
+第一輪的三個風格版面（設計規格 `docs/design/ideas/B-style-layouts.md`，實作 `IMPL-B.md`）在第二輪依使用者同意收斂（ADR-37，實作 `IMPL-round2-base.md`）：AgentDesk Tiling 併進 Terminals 成為選項，AgentDesk Cockpit 拿掉，AgentDesk Classic 改為好玩的版面。Garden（2.16）也是好玩的版面。顏色都從主題推算，沒有寫死色碼。
 
-**AgentDesk Tiling（`tiling`）**：沒有側欄與分頁卡片，頂端 26 px 狀態列，面板直角、留間距，以鍵盤為主。
+**Terminals 的選項**（原本的 Tiling）：純邏輯在 `libs/ui` 的 `ui::terminals`（`terminals_options`，由原本的 `tiling_layout` 改寫），繪製在 `apps/desktop/terminals_options.cpp`。
 
-- 狀態列：space 編號方塊（需要你填 `needs_you` 並加 `!`，超過 9 個顯示 `+n`）、目前 space 的分頁（`編號:名稱`，目前的加 `*`）、目前面板（程式 · 資料夾 (分支)）、`!n ~n` 計數、時鐘。空間不夠時依序讓位：其他分頁縮成編號、藏時鐘、截斷分頁。
-- 面板：1 px 框，聚焦 2 px accent，未聚焦又需要你時 2 px `needs_you`；兩個面板以上才畫 18 px 標題列（`tiling_titles`）。
-- 按鍵（keys.json 的 `layout:tiling` 區段）：Alt+R 調整大小模式（`tiling.resize_mode`：H/J/K/L 或方向鍵每次 40 px，加 Shift 10 px；Esc、Enter、點任何地方或視窗失去焦點就離開；模式中按鍵不送進終端機）、Alt+Shift+Enter 往較長的一邊分割（`pane.split:auto`，所有版面都可用）、Alt+Shift+Q 關閉面板、Alt+Shift+G 開關間距（`tiling.gaps`）。shell 的 Alt+R 在這個版面會被攔下，可在 keys.json 改掉。
-- 設定 › Look 選到 Tiling 時多三列：Gaps（`tiling_gaps`，0～24，預設 8；`tiling_gaps_on`）、Pane titles（`tiling_titles`：auto／always／never）、Focus follows mouse（`tiling_focus_follows_mouse`）。
+- 設定 › Look 選到 Terminals 時多兩列：Square corners（`terminals_square`，直角面板；左上角三顆視窗按鈕也改成小方塊）與 Gaps（`terminals_gaps_on` 加 `terminals_gaps` 0～24 px，預設 8）。預設值（圓角、間距 8）時樹完全不改，畫面和原本逐像素相同。間距 g 套在面板之間，視窗邊緣與上方列的間距是 round(0.75 × g)。關掉間距時面板彼此相貼、貼齊視窗邊，相鄰面板共用一條 1 px 邊線，聚焦的面板最後再補畫邊框。
+- 按鍵（keys.json 的 `layout:terminals` 區段，原本在 `layout:tiling`）：Alt+R 調整大小模式（`terminals.resize_mode`：H/J/K/L 或方向鍵每次 40 px，加 Shift 10 px，Esc／Enter 結束；模式中按鍵不送進終端機）、Alt+Shift+Enter 往較長的一邊分割（`pane.split:auto`，所有版面都可用）、Alt+Shift+Q 關閉面板、Alt+Shift+G 開關間距（`terminals.gaps`）。另有 `terminals.corners`。shell 的 Alt+R 在這個版面會被攔下，可在 keys.json 改掉。
+- 調整大小模式在任何版面都能用命令開啟（Focus 除外），只有 Terminals 預設綁了 Alt+R。提示改成浮在面板區下方的小卡，面板到底時卡片邊框閃一下 `needs_you` 色。
+- 舊名稱 `tiling.resize_mode`、`tiling.gaps` 仍是已知命令。存檔的 `"layout": "tiling"` 開成 Terminals 並打開直角；沒有新鍵時沿用舊的 `tiling_gaps`、`tiling_gaps_on`。Tiling 的頂端狀態列、Pane titles 與 Focus follows mouse 沒有搬過來（Terminals 有自己的 38 px 面板標題列；使用者同意併入的只有直角、間距與按鍵）。
 
-**AgentDesk Cockpit（`cockpit`）**：左邊三個儀表（工作中、需要你、今天完成），右邊 Agent 清單，下方狀態變化紀錄，中間是目前分頁。
+**拿掉 Cockpit**：刪除 `cockpit_layout.cpp`、`ui::cockpit`、`cockpit.json`、`cockpit-night`／`cockpit-day` 主題、測試、設定列、建議主題、提示卡、`cockpit.reset_today` 與視窗按鈕的圓環畫法。存檔的 `"layout": "cockpit"` 改開 AgentDesk。每個 Agent 最後一次狀態改變的時間改成中性的 `StyleUi::changes` 留下（Classic、Inbox、Stage 在用）；狀態變化紀錄與「今天完成」沒有留。
 
-- 儀表是 240° 弧與指針，數值緩動；Windows 關閉動畫時直接跳到新值。左欄矮於 560 設計 px 改成橫條。點「NEEDS YOU」跳到第一個需要你的 Agent。
-- AGENTS 清單：點了 `agent.focus`，右鍵 Peek 與 Keep in a pane。LOG：`HH:MM:SS  space/程式  舊 → 新`，最多 200 筆，不存檔。
-- 今天完成：每個 tick 比對狀態，從 working 變成 done 或 idle 就加一，存在 `ui.json` 的 `cockpit_done_today`（`{"date", "count"}`），本地時間換日時歸零；`cockpit.reset_today` 手動歸零。AgentDesk 關著時完成的，重開時才算進去（近似值）。
-- 背景 24 px 格線與區塊柔光（`cockpit_effects`：full／off）；淺色主題不畫柔光，Windows 高對比時都不畫。窗寬小於 1000 設計 px 先藏清單，小於 820 再藏 LOG。
+**Fun layouts**：設定 › Look 的「Fun layouts」開關（`fun_layouts`，預設 false）。關著時 Classic 與 Garden 不出現在版面卡片、Mac 與 Classic 的 View 選單，也不在 Ctrl+Shift+L 的輪替裡；正在使用的版面保留自己的卡片。命令面板的「Layout: AgentDesk Classic」「Layout: Garden」與 `layout:classic`、`layout:garden` 一律可用。
 
-**AgentDesk Classic（`classic`）**：整個視窗用字元畫成單色終端機的樣子。
+**AgentDesk Classic（`classic`，好玩的版面）**：整個視窗用字元畫成單色終端機的樣子。外觀沒有改（加陰影或圓角會破壞字元畫的風格），只改了列在哪裡；提示卡多一條說明它是好玩的版面。純邏輯在 `libs/ui` 的 `classic_layout`，繪製在 `apps/desktop/classic_layout.cpp`。
 
 - 字元格用 `s.fonts.mono`（預設隨附的 JetBrains Mono），14 設計 px，格高 20；框線等字元畫成填滿格子的形狀。選單列（AGENTDESK、File、Edit、View、Window、Help，每列都是現有命令）、分頁列、狀態列（`─[ NEED YOU n ]─[ WORKING n ]─…`）、文字側欄（預設隱藏，Ctrl+Shift+B 開關）、字元框面板（聚焦雙線）。
 - 狀態一律有字元，不只靠顏色：`[!]` 需要你、`[~]` 工作中、`[+]` 完成、`[.]` 閒置、`[?]` 未知。
 - F10 打開選單列（`classic.menu`，keys.json 的 `layout:classic` 區段）；其他版面沒有綁 F10，照常送給程式。`TerminalView` 的通則是：沒有修飾鍵的 F1～F12 在 keys.json（含版面區段）有綁定時交給視窗，沒綁定的照舊送給程式。
 - 單色終端機（`classic_mono_terminal`，預設開）：非預設的顏色（含 ANSI 16 色）映到主題的單色色階，前景與背景亮度差太小時把前景推開；預設前景與背景保持原值。特效（`classic_effects`：light 預設、off、full；`classic.effects` 循環切換）是靜態掃描線與暗角，full 再加文字微光；淺色主題與 Windows 高對比時不畫。
 
-**共用規則**：`ui::styles::effects_allowed` 在設定為 off、淺色主題或 Windows 高對比時回 false；系統的高對比與動畫設定每秒讀一次。為 Cockpit 與 Classic 配的主題（`cockpit-night`／`cockpit-day`、`phosphor-green`／`phosphor-paper`，另附 `phosphor-amber`）只在設定頁建議，不自動套用（2.12）。
+**共用規則**：`ui::styles::effects_allowed` 在設定為 off、淺色主題或 Windows 高對比時回 false；系統的高對比與動畫設定改由共用的 `tok::reduce_motion()`、`system_high_contrast()` 讀（2.13）。為 Classic 配的主題（`phosphor-green`／`phosphor-paper`，另附 `phosphor-amber`）只在設定頁建議，不自動套用（2.12）。
 
-**限制**：Release 下 Classic 的每幀時間與輸入延遲還沒量；Windows 高對比、關閉動畫、Focus follows mouse、`window_buttons` 為 windows 時的三個版面、非整數縮放下的框線與掃描線只有單元測試，沒有截圖。
+**限制**：Release 下 Classic 的每幀時間與輸入延遲還沒量；Windows 高對比、關閉動畫、`window_buttons` 為 windows 時的 Terminals 直角、非整數縮放下的框線與掃描線只有單元測試，沒有截圖。
 
 ### 2.12 主題：依時間切換、跟著狀態變色、建議主題、主題編輯器（ADR-35）
 
@@ -386,7 +397,7 @@ sequenceDiagram
 **建議主題（T4）**：版面的 `suggested_themes` 或內建表（2.4）提供一組深淺主題。
 
 - 設定 › Look › Theme 出現一列「Made for …」與 **Use** 按鈕（`theme.suggested`，寫進 `layout_themes[<版面>]`），建議的主題卡右上角有星號。版面目前的主題已經是建議值、版面檔寫死 `theme`，或建議的主題不存在時，這列不出現。
-- **絕不自動套用**（使用者決定）：不論既有或新的版面，外觀只在使用者按 Use 時改變。B 組原本「第一次顯示時寫入建議主題」的做法已拿掉。
+- **絕不自動套用**（使用者決定）：不論既有或新的版面，外觀只在使用者按 Use 時改變。B 組原本「第一次顯示時寫入建議主題」的做法已拿掉。第二輪的 Stage、Inbox、Pair、Garden 沒有建議主題。
 - 新增 `mac-dusk`（Dusk）與 `mac-dawn`（Dawn），顏色是我們自己的，通過完整的對比與色覺檢查。設定頁的版面卡片用該版面實際的主題畫。
 
 **主題編輯器（T5）**：`apps/desktop/theme_editor.cpp` 的對話框（880×620 設計 px）。
@@ -395,6 +406,79 @@ sequenceDiagram
 - 左邊列出 Base、Interface、Status 與 16 個終端機顏色，每列有色塊、hex 欄位、對它常用背景的對比與 `auto`（推算值，不寫進檔案）或復原鈕。右邊是範例（可模擬三種色覺，只影響範例）與 Checks（`palette_problems()`）。整個視窗即時預覽；Cancel 回到原本的主題。
 - 存檔到資料夾 `themes\<名稱>.json`（寫暫存檔再 `MoveFileExW` 替換），`colors` 只寫有改的值，未知的鍵保留；存完立刻套用。名稱規則擋掉空白、超過 64 字、Windows 不允許的字元與保留名稱、內建主題 id 與 preset 的結尾。對比低可以存，只有終端機文字低於 3:1 時多問一次。刪除是改名成 `<名稱>.json.old-<時間>`，用到它的設定改回預設。
 - 沒有獨立的「Save as…」：改 Name 再存就寫成新檔。同時開著的其他 AgentDesk 視窗要重開才會讀到新存的主題。
+
+### 2.13 共用設計規則與整體美化（ADR-37）
+
+第一輪後加的版面由不同的 agent 分頭實作，風格不一致。第二輪先定一套共用規則，再套到所有畫面；實作與截圖在 `docs/design/ideas/IMPL-round2-base.md`。純數值與運算在 `libs/ui` 的 `design_tokens`（`ui::tokens::`，有單元測試），換成螢幕像素、字型與繪圖的部分在 `apps/desktop/ui_tokens.hpp`／`.cpp`（`tok::`，由 `app_internal.hpp` 引入）。新畫面直接用這些，不再自己寫像素數字。
+
+| 類別 | 值 |
+|---|---|
+| 間距 | 4 px 一格：4、8、12、16、24、32（`kSpaceXs`～`kSpaceXxl`，`tok::sp(n)`、`gap_xs()`～`gap_xl()`） |
+| 圓角 | 6（晶片、按鈕、清單列、輸入框）、10（卡片、選單、通知）、12（對話框、大面板） |
+| 線 | 1 個裝置像素的分隔線，落在整數像素上（`hline()`、`vline()`） |
+| 字級 | Title 15 px Semibold、行高 20；Body 13 px Regular、行高 18；Caption 11.5 px Medium、行高 16（Geist） |
+| 顏色 | `hover_fill`、`selected_fill`（accent 12%／16%）、`selected_edge`、`focus_ring`（對底色至少 3:1）、`divider`，全部從目前的色票算，換主題、淺色、環境色調都跟著走 |
+| 陰影 | `elevation(surface, 1)`：卡片、通知、選單；`elevation(surface, 2)`：對話框。深色主題另有頂邊高光；Windows 高對比時不畫陰影與高光 |
+| 動畫 | 120 ms（hover、小的顏色變化）、180 ms（淡入淡出、滑入、狀態點換色）、260 ms（較大的面板），滑入距離 8 px，三次曲線 `ease_out`／`ease_in_out` |
+
+- **減少動畫**：`tok::reduce_motion()` 在 Windows「動畫效果」關掉時為 true（最多每 2 秒讀一次 `SPI_GETCLIENTAREAANIMATION`），`tok::fade`、`appear`、`cross_fade` 這時直接跳到結果。第一次呼叫直接給目前的值，所以一開畫面不會全部在動。動畫進行中才呼叫 `tok::keep_animating()`，主迴圈的 `next_wakeup_ms()` 在動畫期間每 16 ms 醒一次，結束就回到原本的節奏。
+- **陰影**：`tok::card()` 一次畫陰影、底色、1 px 邊框與高光；`tok::window_shadow()` 給已經有底色的 ImGui 視窗。最上層的 modal 對話框由 `frame.cpp` 透過 `ui::adapter::topmost_modal()` 統一加 level 2 陰影。陰影是多圈半透明線條模擬的，淺色主題在 modal 的暗化底下幾乎看不到，這是刻意的低調。
+- **空白狀態**：`StateCard::art`（`kTerminal`、`kChanges`、`kSearch`、`kAgents`、`kAllDone`、`kFiles`）在標題上方畫 64 px 的小插圖；`draw_empty_state()` 是插圖、一句話與一個可選的按鈕；窄的側邊面板用 48 px 插圖加一行字（`panel_empty()`）；放不下直式排法的地方用單行版 `draw_empty_row()`（Stage 的底片條）。插圖是 AgentDesk 自己畫的簡單圖形，顏色取自色票。
+- **美化範圍**：通知（圓角 10、level 1 陰影、左側 3 px 狀態色條、從右側滑入 16 px 並淡入）、所有 modal 與右鍵選單的陰影、Mac 下拉選單淡入、側欄／命令面板／Changes／Review 的選取列改用 `tok::selected`、狀態標記換色時淡入、沒有分頁與 Files／Changes／Review／Focus／Timeline 的空白狀態。設定對話框、提示卡、Classic、Focus 底列、Mac 的選單列與 Dock、分頁列的版面沒有改。
+- 每個 Agent 最後一次狀態改變的時間（`StyleUi::changes`，steady ms）每個 tick 更新，和顯示哪個版面無關，Inbox 的完成區與 Stage 的縮圖都讀它。
+
+**限制**：Windows 關閉動畫效果、高對比、125%／150% 縮放下的陰影與 1 px 線只有程式與單元測試，沒有截圖。右鍵選單只加了陰影、沒有淡入（ImGui 的右鍵選單由呼叫端自己結束，要淡入得改所有呼叫端）。
+
+### 2.14 Inbox（ADR-39）
+
+構想是 `docs/design/ideas.md` 第二輪的 C1，實作與差異在 `docs/design/ideas/IMPL-round2-inbox.md`。同時跑好幾個 Agent 時，最花時間的是搞清楚「誰在等我、要我做什麼」；Inbox 把需要你的 Agent 排成一列卡片，不用切過去就能回答。
+
+- 版面檔 `libs/ui/layouts/inbox.json`：42 px 的 `inbox-bar`、左邊的佇列 `inbox-queue`（寬度可拖拉，360～720 px）、右邊照常顯示目前分頁的面板區。繪製在 `apps/desktop/inbox_layout.cpp`，純邏輯在 `libs/ui` 的 `inbox`。
+- Ctrl+Shift+I（`inbox.toggle`）：從其他版面切過來，再按一次回到原本的版面（共用 `toggle_layout`）。
+- **上方列**：「Inbox」、「N need you」與「N done」兩顆小藥丸，有卡片被延後時再加「N snoozed」文字按鈕（按下去全部重新顯示）；右邊是「Newest | Oldest」排序（`inbox_order`）與共用的三顆按鈕。
+- **需要你的卡片**：每個 Blocked 的 Agent 一張，預設最新開始等的在前。內容：程式圖示與名稱、問題種類（Permission／Question／Sign-in）、等了多久（超過 10 分鐘改用 `needs_you` 色）；一行 space · 分頁或 Agent 標題 · 分支 · 「N files changed」；Agent 結構化回報的訊息（OSC 7501 的 `msg` 或 `agentctl report-state --message`，最多三行，沒有時顯示淡色提示）；畫面最後四行的預覽（共用的 `screen_tail_of()`，只用來看，狀態一律不從畫面文字判斷，ADR-09）；按鈕列是快速回答（1～9 小鍵帽）、Snooze 與 Open，沒有快速回答時改放「Reply (R)」。選取中的卡片多一列回覆欄位：Enter 送出文字（貼上後補一個 Enter），無法輸入（別的視窗控制、機器連不上）時停用並說明原因。送出後到 Agent 換狀態前顯示「✓ Sent」（6 秒內淡出）。
+- **等了多久**優先用側欄記在 `ui.json` 的 `agents_changed`（重開 agent-ui 後仍正確），沒有時才退回 `StyleUi::changes`。**變更檔案數**用 `GitCache::with_changes()` 與 `GitInfo::changed_files`（和 Pair 同一套；`git status --porcelain=v1 -z --untracked-files=all`），只有需要你的卡片會要求計數。
+- **完成區**（DONE）：上次看過之後完成的 Agent（AttentionTracker 的 Done），一列 56 px，Dismiss（等於 `attention.seen`）與 Open（切過去，也算看過）。只有完成時，最上面放一張「Nothing needs you」小橫幅。
+- **Inbox zero**：佇列空了時畫 AgentDesk 自己的插圖（空收件盤、打勾的圓與散開的火花，約 1.1 秒、只播一次），加上「Inbox zero」與摘要（例如「3 agents working, 2 idle」）。減少動畫時直接顯示最後一格。
+- **動畫**：卡片從右邊滑入 16 px 並淡入（180 ms）；離開時往左滑 24 px 並淡出（260 ms），其他卡片緩動補位。聲音規則沒有改：需要你一律響。
+- **鍵盤**：只有佇列握有鍵盤時才生效（點一下佇列，或剛切進 Inbox）；點終端機就回到一般打字。↑／↓（K／J）、Home／End 移動選取（需要你的卡片與完成列是同一串），Enter 開啟，R 回覆，1～9 快速回答，S Snooze（完成列是 Dismiss），D／Delete Dismiss。這些鍵不在 keys.json；有元件在用鍵盤、有彈出視窗或按著 Ctrl／Alt／Win 時佇列不處理。
+- **Snooze**：卡片先收起來，直到 Agent 離開等待後又回來，或換了一個問題（訊息或種類變了，`ui::inbox::still_snoozed`）。只存在記憶體，重開 agent-ui 就清掉，以免「等一下再處理」的事留到下次被忘記。
+- **快速回答**（`inbox_answers`，只讀不寫，保留使用者寫的內容）：依程式（programs.json 的 key）列出按鈕，每項 `label`（最多 40 bytes）、`send`（原封不動寫進終端機的位元組，和 keys.json 的 `send:` 走同一條路）、`enter`（再補一個 `\r`）、`kinds`（`permission`、`question`、`auth`；沒寫就都出現）。每個程式最多 9 個。查找順序：使用者寫的同名程式 → 隨附的預設 → 使用者寫的 `"*"`；空陣列等於關掉按鈕。格式不對的項目跳過，原因記在 `Settings::inbox_answer_errors`。Inbox 開著時最多 2 秒內重讀。
+- **隨附的預設**只給 permission 回報：Claude Code 是 Yes `1`／No Esc，Codex 是 Yes `y`／No Esc（`libs/ui/src/inbox.cpp` 的 `default_answers()`）。這是依官方文件與提示畫面的描述推得的，**還沒用真的 CLI 驗證**；其他程式沒有預設。
+- 命令：`inbox.toggle`、`inbox.open[:<id>]`、`inbox.snooze[:<id>]`、`inbox.unsnooze`、`inbox.dismiss[:<id>]`、`inbox.reply[:<id>]`、`inbox.answer:<n>[:<id>]`、`inbox.order:newest|oldest`；沒有 id 時作用在選取的卡片。切進 Inbox 時用 `ui::adapter::clear_keyboard()` 讓佇列先拿到鍵盤。
+
+**限制**：預設快速回答待真的 Claude Code 與 Codex 驗證（數字鍵或 `y` 是否不需要 Enter、Esc 是否等於拒絕、提示改版後是否還對）；`inbox_answers` 的錯誤還沒顯示在畫面上；變更檔案數跟著 git cache 的更新時機，可能慢一點；Agent 第一次出現時就是 done，或從 idle 直接跳到 done，不會算成沒看過的完成（AttentionTracker 原本的規則）；關閉動畫、高對比、125%／150% 縮放與遠端斷線時的卡片沒有截圖。
+
+### 2.15 Pair（ADR-40）
+
+構想是 `docs/design/ideas.md` 第二輪的 C3，實作與差異在 `docs/design/ideas/IMPL-round2-pair.md`。兩個 Agent 左右並排，下方一個共用輸入列，可以把同一個任務同時交給兩邊，比誰先做完、做得比較好。
+
+- 版面檔 `libs/ui/layouts/pair.json`：42 px 的 `pair-bar`、中間的 `pair-stage`、60 px 的共用輸入列 `pair-prompt`、最底下一般的狀態列。繪製在 `apps/desktop/pair_layout.cpp`，純邏輯在 `libs/ui` 的 `pair`。一般版面，Ctrl+Shift+L 會輪到它；Ctrl+Shift+2（`pair.toggle`）切過來，再按一次回到原本的版面。
+- **設定卡**（還沒有 pair 時）：左右兩個程式選擇框（agent-host 的 profile 清單，預設左 Claude Code、右 Codex；沒有 Codex 時兩邊都是 Claude Code），「Separate worktrees」開關預設打開。目前資料夾是 git 儲存庫時，每一邊在 `pair/` 開頭的新分支上有自己的 checkout（`worktree.add`，和「New git worktree」同一個 RPC 與存放位置），未提交的變更留在原地；關掉或不是 git 儲存庫時顯示黃色警告：兩邊會在同一個資料夾裡改檔案。「Start pair」用 `session.create` 開兩個 session（「<profile> (A)」「(B)」），放進目前 space 一個名為「Pair」的新分頁，左右分割。已有兩個以上 Agent 時多一個「Pair two open agents」。
+- **並排**：兩個一般的終端機面板，各有 40 px 的標題列（A／B 圓標、程式圖示、名稱、狀態，空間夠時再加「Finished first」或「Won」、「Kept」、這一輪的時間、變更檔案數與 +／- 行數、「Change」）。名稱至少保留 150 px，其餘依重要性省略。
+- **共用輸入列**：平常不搶鍵盤，點它或按 Alt+P（`pair.prompt`）才拿到游標，點終端機或按 Esc 還回去；有鍵盤時面板的焦點框會暗下來。Enter 或「Send to both」把文字送給兩邊（貼上後補一個 Enter，和 mod 的 `send` 同一條路）並開始新的一輪；「Left only」「Right only」只送一邊。
+- **上方列**：「Pair」、A vs B、交換左右（Alt+Shift+S，`pair.swap`）、「Close pair」（只解除配對，兩個終端機照常在分頁裡跑）與共用的三顆按鈕。「Change」列出其他執行中的終端機，選到另一邊正在用的就是交換。一邊的終端機結束時，那一半改成空白狀態卡。
+- **比賽**：只看結構化的 agent 狀態（ADR-09）。一輪從送出提示時開始算；沒經過輸入列時，從第一次回報 Working 開始（host 的 `state_at_ms`）。回報過 Working 之後回報 Done 才算完成，Blocked 仍算在跑，完成後又回報 Working 就重新計時。比的是各自的用時，不是完成的時刻。一邊先完成時，它的面板頂端由左往右畫出棋盤格終點線（約 600 ms，減少動畫時直接顯示）。兩邊都完成後出現結果條：「<名稱> finished first, 12s ahead」（相差不到 1 秒是「A dead heat」）、兩邊的時間與變更數、「Review」（切到 Review 看那一邊的 diff，Ctrl+Shift+R 回 Pair）與「Keep」（只在畫面上標記，不做任何 git 操作）。
+- **變更數**：`GitCache::with_changes(dir, machine)` 讓被問到的資料夾在背景一併數未提交的變更（`git status --porcelain=v1 -z --untracked-files=all` 數檔案、`git diff HEAD --numstat -z` 加總行數；未追蹤的文字檔在這台電腦上數行數，最多 200 個、每個 1 MiB 以內）。任一邊狀態改變時，以及有一邊在 Working 的期間每 3 秒，重新查一次。
+- `ui.json` 的 `pair`：`{"left_profile", "right_profile", "worktrees", "left", "right"}`，`left`／`right` 是目前這一對的 session id，重開視窗時接回來，終端機已不在就清掉。
+- 命令：`pair.toggle`、`pair.start[:<左>,<右>|:existing]`、`pair.send:both|left|right[:<文字>]`、`pair.prompt`、`pair.swap`、`pair.repair:<side>[:<session id>]`、`pair.close`、`pair.keep:<side>`、`pair.review:<side>`、`pair.dismiss`。Alt+P、Alt+Shift+S 只綁在 keys.json 的 `layout:pair`，其他版面照常送給程式。Ctrl+Shift+2 在每個區段的預設裡都沒有人用，代價是終端機收不到 Ctrl+Shift+2（有些程式當成 Ctrl+@），可在 keys.json 改掉。
+- 在遠端機器上配對時，用目前 space 所在的機器開 session 與 worktree；未追蹤檔案的行數只在這台電腦數。
+
+**限制**：貼上後補 Enter 的送法還沒用真的 Claude Code 與 Codex 實測（bracketed paste 之後接 Enter 的行為），要人工驗收；Pair 開的 worktree 不會自動移除，要自己用「Remove worktree」清掉；直接在終端機裡打字時，計時從第一次回報 Working 開始，會比按下 Enter 晚一點；關閉動畫時的終點線、遠端的 pair、一邊結束時的空白卡、Change 選單沒有截圖。
+
+### 2.16 Garden（ADR-41）
+
+構想是 `docs/design/ideas.md` 第二輪的 C4，實作與差異在 `docs/design/ideas/IMPL-round2-garden.md`。每個 Agent 是一隻 AgentDesk 自己畫的小動物，適合開在第二台螢幕，用餘光就看得出誰在忙、誰在等你。好玩的版面（2.11），沒有預設按鍵。
+
+- 版面檔 `libs/ui/layouts/garden.json`：42 px 的 `garden-bar` 與 `garden-scene`。繪製在 `apps/desktop/garden_layout.cpp`，純邏輯在 `libs/ui` 的 `garden`（外觀、狀態對姿勢、姿勢內插、排列、畫格頻率）。
+- **場景**：全部用 ImDrawList 的圓、橢圓、貝茲曲線與圓角矩形畫，沒有圖片，也沒有借用現成角色。深色主題是夜晚（漸層天空、閃爍的星星、月亮），淺色主題是白天（太陽、慢慢飄的雲）；山丘接到草地，草地顏色取自色票的 done 混進背景色，小花與草叢位置固定。上方列的底色接著天空，有「需要你／工作中／完成」三個計數（只算 Agent 本身，和側欄一致），右邊是新增、設定、回到原本版面三顆按鈕。
+- **小動物**：同一種身體造型，差異由 session id 的 FNV-1a 雜湊決定（同一個 id 永遠長一樣）：顏色是所在 space 的頭像色稍作調整，耳朵四選一、尾巴三選一，身體寬度與動作相位也不同。
+- **姿勢只看結構化狀態**（ADR-09）：Working 沿虛線小路小跳步；Blocked 面向你揮手、頭上一個 `needs_you` 色的「!」；Done 在看到它變成 Done 的 1.8 秒內開心彈跳並冒出閃光，之後坐下（剛打開 Garden 時已經是 Done 的直接坐著）；Idle 睡覺、飄著「z z」；Unknown 半透明安靜坐著。換姿勢時用 420 ms 的 ease-in-out 逐項內插。
+- **實用的部分**：每隻下方有名字與 space；滑鼠停留浮出卡片（程式、space、狀態與持續多久、最後一則訊息，用 `ui::mission::clean_message` 清理）；點一下回到原本的版面並聚焦那個 Agent，跳一則通知說明怎麼回來（沒有面板的子 Agent 改開 peek，花園留著）；右鍵有 Open、Peek、Rename、Close pane。Agent 依建立時間排成交錯的幾列（不依急迫程度，以免狀態一變整群換位置），欄數 1～6，20 隻也放得下；子 Agent 以小一號的身形站在父 Agent 旁，超過兩隻顯示「+n」。沒有 Agent 時草地中間立一塊木牌與「Start a program…」按鈕；agent-host 沒在跑時用共用的狀態卡。
+- **效能**：視窗在前景、有東西在動時約每秒 30 格；只有睡覺的 Agent 時每秒 10 格；視窗不在前景時每秒 4 格，動作時鐘放慢成 0.4 倍；全部靜止時不要求畫格。`tok::reduce_motion()` 時完全靜止，每個姿勢畫成定格。Garden 顯示時不因為有 Working 的 Agent 而每 50 ms 喚醒（`garden_wakeup_ms()`）。熱路徑不配置記憶體：名單、名字、位置每 200 ms 或場地大小改變時才重建。
+- 命令：`garden.toggle`（命令面板的「Garden: your agents as little creatures」）、`garden.open:<id>`。沒有預設按鍵，想要的話在 keys.json 綁 `garden.toggle`；`ui.json` 沒有新鍵。
+
+**限制**：主迴圈每次醒來畫兩格（既有行為），Garden 把時間對齊到時間格讓兩格相同，但 GPU 仍畫兩次；關閉動畫、高對比、125%／150% 縮放沒有截圖。
 
 ## 3. 技術詳細設計（SD）
 
@@ -662,20 +746,25 @@ v2.1 起支援子 Agent 協作（ADR-13）：在 session 內執行 `agentctl run
 
 資料根目錄為 %LOCALAPPDATA%\AgentDesk（`--data-dir` 或 `AGENTDESK_DATA_DIR` 可覆寫，3.7.1）。host 持有 profiles.json、sessions.json、ui-state.json（space、分頁與分割，3.7.2）與 host.log；UI 持有 ui.json（設定、機器、啟用的 mod、各版面的主題、最近用過的命令）、keys.json（錯誤寫在 keys.error）、layouts\（含 `.state\`）、themes\、mods\、programs.json（覆蓋隨附程式表，錯誤寫在 programs.error）、feedback\、使用統計的報告與 ui-crash.txt。UI 不使用 imgui.ini（版面在 host 的 ui.state 與版面檔）。host 的檔案與 ui.json 帶 schema_version=1。JSON 設定檔以寫暫存檔再替換的方式保存，保留一份上一版備份；備份也不能用時，損毀檔改名為 `*.corrupt-<時間>` 保留，並以預設值啟動。
 
-v2.24 新增的 `ui.json` 鍵（值不合法時用預設值）：
+v2.24 之後新增的 `ui.json` 鍵（值不合法時用預設值）：
 
 | 鍵 | 預設 | 用途 |
 |---|---|---|
-| `layout_return` | `""` | `mission.toggle`、`review.toggle` 記住的原版面（只記一層） |
+| `layout_return` | `""` | `stage.toggle`、`inbox.toggle`、`review.toggle`、`pair.toggle`、`garden.toggle` 記住的原版面（只記一層） |
 | `focus_on`、`focus_alerts` | `false`、`"edge_sound"` | Focus 模式；`focus_alerts` 可為 `edge_sound`、`edge`、`normal`（2.9） |
-| `mission_filter`、`mission_sub_agents`、`mission_shells` | `"all"`、`false`、`false` | Mission Control 的篩選、子 Agent 與 shell 各自成格 |
+| `stage_filter`、`stage_size`、`stage_shells`、`stage_auto_switch` | `"all"`、`"m"`、`false`、`false` | Stage 的篩選（`all`、`needs_you`、`working`）、縮圖大小（`s`、`m`、`l`）、一般終端機也有縮圖、自動換台（v2.27，2.9）。沒有新鍵時從舊的 `mission_filter`、`mission_shells` 讀 |
 | `review_follow` | `"agent"` | `agent` 或 `focused`（2.10） |
 | `timeline_range`、`timeline_since_left` | `"1h"`、`true` | Timeline 的範圍與離開期間的底色 |
-| `tiling_gaps`、`tiling_gaps_on`、`tiling_titles`、`tiling_focus_follows_mouse` | `8`、`true`、`"auto"`、`false` | AgentDesk Tiling（2.11） |
-| `cockpit_effects`、`cockpit_done_today` | `"full"`、— | AgentDesk Cockpit 的特效與今天完成數 `{"date", "count"}` |
+| `terminals_square`、`terminals_gaps`、`terminals_gaps_on` | `false`、`8`、`true` | Terminals 的直角與間距（v2.27，2.11）。沒有新鍵時從舊的 `tiling_gaps`、`tiling_gaps_on` 讀 |
+| `fun_layouts` | `false` | 是否把 Classic 與 Garden 列在版面清單（v2.27，2.11） |
 | `classic_effects`、`classic_mono_terminal` | `"light"`、`true` | AgentDesk Classic 的特效與單色終端機 |
+| `inbox_order` | `"newest"` | Inbox 的排序，可改 `"oldest"`（v2.27，2.14） |
+| `inbox_answers` | 隨附預設 | Inbox 的快速回答，依程式列出 `{label, send, enter, kinds}`；AgentDesk 只讀不寫（v2.27，2.14） |
+| `pair` | — | `{"left_profile", "right_profile", "worktrees"（預設 true）, "left", "right"}`（v2.27，2.15） |
 | `appearance`、`appearance_schedule` | — | `appearance` 多了 `"schedule"`；排程內容見 2.12 |
 | `ambient`、`ambient_done` | `"off"`、`false` | 跟著 Agent 狀態變色 |
+
+v2.27 起不再寫入的鍵：`tiling_gaps`、`tiling_gaps_on`、`tiling_titles`、`tiling_focus_follows_mouse`、`cockpit_effects`、`cockpit_done_today`、`mission_filter`、`mission_sub_agents`、`mission_shells`。存 `ui.json` 時，`ui::styles::drop_obsolete_settings()` 在合併完檔案內容後刪掉所有 `tiling_*`、`cockpit_*`、`mission_*` 開頭的鍵。
 
 主題編輯器存的檔案放在資料夾 `themes\`（和手寫的主題檔相同格式）；版面檔多了選填的 `suggested_themes`，主題檔多了選填的 `name` 與 `colors.info`。`--report` 多了 `layout`、`focus_on`、`ambient_k`。
 
@@ -691,7 +780,7 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 
 | 路徑 | 內容 |
 |---|---|
-| apps/desktop | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列、崩潰記錄），`app.cpp` 是 `App` 的建構與對外介面。介面依功能分檔：`themes`、`settings_store`（ui.json）、`layouts`、`programs`、`commands`（命令表與執行）、`sessions`、`git_cache`、`side_panels`、`chrome`、`sidebar`、`tab_bar`、`terminals_layout`、`mac_layout`（AgentDesk Mac 版面）、`mission_layout`（Mission Control）、`focus_mode`（Focus 模式）、`review_layout`（Review）、`timeline`（Timeline 浮層與區塊）、`state_card`（空、載入、錯誤狀態卡）、`style_layouts`（風格版面的分派）與 `tiling_layout`、`cockpit_layout`、`classic_layout`、`appearance`（依時間切換）、`ambient`（跟著狀態變色）、`theme_suggest`（建議主題）、`theme_commands`、`theme_editor`（主題編輯器）、`panes`、`code_preview`、`files_changes`、`overlays`（命令面板、picker、說明）、`notices`、`notes`、`worktrees`、`settings_dialog`、`settings_pages`、`welcome`、`machine_add`、`frame`（版面繪製與每幀流程）。共用宣告在 `app_internal.hpp`（`detail` 命名空間）、`overlay_kit.hpp` |
+| apps/desktop | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列、崩潰記錄），`app.cpp` 是 `App` 的建構與對外介面。介面依功能分檔：`themes`、`settings_store`（ui.json）、`layouts`、`programs`、`commands`（命令表與執行）、`sessions`、`git_cache`、`side_panels`、`chrome`、`sidebar`、`tab_bar`、`terminals_layout`、`terminals_options`（Terminals 的直角、間距與調整大小模式）、`mac_layout`（AgentDesk Mac 版面）、`stage_layout`（Stage）、`inbox_layout`（Inbox）、`pair_layout`（Pair）、`garden_layout`（Garden）、`focus_mode`（Focus 模式）、`review_layout`（Review）、`timeline`（Timeline 浮層與區塊）、`state_card`（空、載入、錯誤狀態卡、單行空白狀態、版面頂端列共用的按鈕）、`ui_tokens`（共用設計規則的螢幕端：間距、字級、陰影、動畫、空白狀態插圖）、`layout_tips`（第一次使用提示）、`style_layouts`（風格版面的分派）與 `classic_layout`、`appearance`（依時間切換）、`ambient`（跟著狀態變色）、`theme_suggest`（建議主題）、`theme_commands`、`theme_editor`（主題編輯器）、`panes`、`code_preview`、`files_changes`、`overlays`（命令面板、picker、說明）、`notices`、`notes`、`worktrees`、`settings_dialog`、`settings_pages`、`welcome`、`machine_add`、`frame`（版面繪製與每幀流程）。共用宣告在 `app_internal.hpp`（`detail` 命名空間）、`overlay_kit.hpp` |
 | apps/host | `agent-host.exe`：背景程序入口、單例 mutex、`--takeover` 交接入口 |
 | apps/cli | `agentctl.exe`：指令解析、JSON 輸出、`hook`、`bridge`、`update` |
 | libs/platform/windows | `PtyProcess`（ConPTY＋Job＋reader 執行緒）、ConPTY 載入、argv quoting、脫離 Job 的背景啟動、程序樹、RAII handle |
@@ -699,11 +788,11 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 | libs/protocol | IPC 分幀（4-byte LE＋UTF-8 JSON）、訊息封包、錯誤碼、畫面編碼 |
 | libs/ipc | Named Pipe 伺服器與客戶端、啟動或連上 host |
 | libs/host | `Session` actor、`SessionManager`（協定方法）、狀態、狀態歷史（`state_timeline`，2.10）、持久化、git 工具、換版交接（`handover.cpp`） |
-| libs/ui | `TerminalView`、`Workspace`（space／分頁／分割樹、注意力）、版面引擎（`layout`，AgentDesk 自己的版面檔在 `layouts/`：mac、mission、review、tiling、cockpit、classic 與不列出的 focus）、mod → style 對照表（`layout_styles`）、AgentDesk Mac 的規則（`mac_layout`）、各版面的純邏輯（`mission`、`focus_mode`、`review`、`timeline`、`tiling_layout`、`cockpit`、`classic_layout`）、色彩計算（`color_math`）、主題檔讀寫與介面色推算（`theme_file`，AgentDesk 隨附的主題檔在 `themes/`）、排程（`schedule`）、變色淡入淡出（`ambient`）、命令名稱表（`command_names`）、`Keymap`、ModHost（`mods`）、程式表（`programs`）、sprites、字型、連結、剪貼簿、`git_info`、`HostClient`、遠端畫面、更新（`updates`）、使用統計（`telemetry`）；只有 `imgui_adapter.cpp` 碰 `imgui_internal.h` |
+| libs/ui | `TerminalView`、`Workspace`（space／分頁／分割樹、注意力）、版面引擎（`layout`，AgentDesk 自己的版面檔在 `layouts/`：stage、inbox、review、pair、mac、classic、garden 與不列出的 focus）、mod → style 對照表與好玩版面、替代版面的規則（`layout_styles`）、AgentDesk Mac 的規則（`mac_layout`）、各版面的純邏輯（`terminals_options`、`stage`、`inbox`、`pair`、`garden`、`mission`（Stage、Garden 共用的畫面末行與訊息清理）、`focus_mode`、`review`、`timeline`、`classic_layout`）、共用設計規則的數值（`design_tokens`）、提示卡（`layout_tips`）、色彩計算（`color_math`）、主題檔讀寫與介面色推算（`theme_file`，AgentDesk 隨附的主題檔在 `themes/`）、排程（`schedule`）、變色淡入淡出（`ambient`）、命令名稱表（`command_names`）、`Keymap`、ModHost（`mods`）、程式表（`programs`）、sprites、字型、連結、剪貼簿、`git_info`、`HostClient`、遠端畫面、更新（`updates`）、使用統計（`telemetry`）；只有 `imgui_adapter.cpp` 碰 `imgui_internal.h` |
 | libs/modapi | mod 介面：純 C 的 `mod_api.h`、header-only 的 `mod_sdk.hpp`，以及隨 zip 附上的 SDK 建置檔 |
 | mods | 三個範例 mod（tab-timer、ntfy-notify、agent-summary），各自編成 `mods\<名稱>\mod.dll` |
 | tools | 開發與量測工具，不出貨：`pty_run`、`session_bench`、`vt_probe`、`soak`、`qa`（QA-05、QA-07、QA-10、`screenshot_ui`、`smoke_zip`）、`fetch_conpty`、`make_fixtures`、`package`（發布用 `agentdesk_package.exe`）、`devkit` |
-| tests/unit、tests/integration/windows、tests/fixtures | GoogleTest：協定、VT、版面（含 `Mission`、`FocusMode`、`Review`、`Timeline`、`StateTimeline`、`LayoutStyles`、`TilingLayout`、`Cockpit`、`ClassicLayout`）、色彩與主題（`ColorMath`、`PaletteCheck`、`AmbientTint`、`AmbientFade`、`Schedule`、`ThemeFile`、`ThemeCommands`）、sprites、更新、使用統計、Windows 實機測試；v2.24 時 Debug 共 420 個；fixture 是原始位元組檔 |
+| tests/unit、tests/integration/windows、tests/fixtures | GoogleTest：協定、VT、版面（含 `Mission`、`Stage`、`Inbox`、`Pair`、`PairRace`、`Garden`、`FocusMode`、`Review`、`Timeline`、`StateTimeline`、`LayoutStyles`、`LayoutTips`、`TerminalsOptions`、`ClassicLayout`）、設計規則（`DesignTokens`）、色彩與主題（`ColorMath`、`PaletteCheck`、`AmbientTint`、`AmbientFade`、`Schedule`、`ThemeFile`、`ThemeCommands`）、sprites、更新、使用統計、Windows 實機測試；v2.24 時 Debug 共 420 個，v2.27 共 477 個；fixture 是原始位元組檔 |
 | third_party | libvterm 0.3.3（加了換版用的狀態存取，ADR-19）、隨附 ConPTY 的授權與 NOTICE、字型、herdr 的授權與素材（版面、主題、程式表與圖示、提示音） |
 | docs | 設計文件、使用說明、研究筆記、POC 報告、整合說明 |
 
@@ -730,26 +819,31 @@ AgentDesk Mac 版面（2.8）用選單列、浮動視窗與 Dock 取代側欄、
 
 terminals 版面沒有側欄與狀態列，分頁列最左邊是「顯示側欄」按鈕（切回 AgentDesk 版面，ADR-27），接著是目前的 space（點一下開 picker），右邊是設定、命令面板與新分頁三個按鈕（滑鼠停在上面會顯示名稱與快捷鍵；設定按鈕是 AgentDesk 加的，ADR-25），面板標題列的按鈕一直顯示。
 
-Mission Control、Review、AgentDesk Tiling、Cockpit、Classic 與 Focus 模式見 2.9～2.11。它們新增的按鍵：
+Stage、Review、Inbox、Pair、Terminals 的選項、Classic、Garden、共用設計規則與 Focus 模式見 2.9～2.16。它們新增的按鍵：
 
 | 按鍵 | 命令 | 範圍 |
 |---|---|---|
-| Ctrl+Shift+M | `mission.toggle` | 全域 |
+| Ctrl+Shift+M | `stage.toggle` | 全域（v2.27 起取代 `mission.toggle`） |
+| Ctrl+Shift+I | `inbox.toggle` | 全域 |
+| Ctrl+Shift+2 | `pair.toggle` | 全域 |
 | Ctrl+Shift+. | `focus.toggle` | 全域 |
 | Ctrl+Shift+R | `review.toggle` | 全域 |
 | Ctrl+Shift+H | `timeline.toggle` | 全域 |
+| Alt+Left／Alt+Right | `stage.prev`／`stage.next` | 只在 `layout:stage`（其他版面仍是 `pane.go`） |
 | F8／Shift+F8 | `review.next_file`／`review.prev_file` | 只在 `layout:review` |
-| Alt+R | `tiling.resize_mode` | 只在 `layout:tiling` |
-| Alt+Shift+Enter | `pane.split:auto` | 只在 `layout:tiling` |
-| Alt+Shift+Q | `pane.close` | 只在 `layout:tiling` |
-| Alt+Shift+G | `tiling.gaps` | 只在 `layout:tiling` |
+| Alt+P | `pair.prompt` | 只在 `layout:pair` |
+| Alt+Shift+S | `pair.swap` | 只在 `layout:pair` |
+| Alt+R | `terminals.resize_mode` | 只在 `layout:terminals` |
+| Alt+Shift+Enter | `pane.split:auto` | 只在 `layout:terminals` |
+| Alt+Shift+Q | `pane.close` | 只在 `layout:terminals` |
+| Alt+Shift+G | `terminals.gaps` | 只在 `layout:terminals` |
 | F10 | `classic.menu` | 只在 `layout:classic` |
 
-另外，Mission Control 牆面上的方向鍵、Home、End、Enter、1～9，以及 Timeline 浮層裡的 1～4、←→、↑↓、End、Enter、Esc 只在那個畫面有作用，不在 keys.json。全域快捷鍵延後一幀執行，避免切版面後新版面的終端機又收到同一個按鍵。
+Garden 沒有預設按鍵（`garden.toggle` 可以自己綁）。另外，Inbox 佇列握有鍵盤時的 ↑↓、K／J、Home、End、Enter、R、1～9、S、D、Delete，調整大小模式裡的 H／J／K／L、方向鍵、Esc、Enter，以及 Timeline 浮層裡的 1～4、←→、↑↓、End、Enter、Esc 只在那個畫面有作用，不在 keys.json。全域快捷鍵延後一幀執行，避免切版面後新版面的終端機又收到同一個按鍵。
 
 狀態用文字與圖示搭配顏色，不能只靠顏色。Unknown 使用中性標示，Blocked（畫面上是 Needs you）才提示需要處理。根程序已退出但子程序仍存在時，明確顯示「正在清理子程序」。
 
-**注意力與通知**：Done 的意思是「沒在看的時候完成」，看過之後顯示 Idle（屬於 UI，不回寫 host）；分頁與 space 顯示其中最緊急的狀態。v2.24 起「看過」以畫面上實際畫出的終端機判斷：`draw_pane` 記下畫出的 session（`drawn_sessions`），畫完後成為 `visible_sessions`，`update_attention` 用這組判斷，不再用目前分頁。workspace、terminals、mac 畫的就是目前分頁的面板，行為不變；Mission Control 的格子、Focus 藏起來的面板，以及沒有分頁區塊的版面，不會清掉 Done。需要你時一定播放提示音，沒在看的 Agent 完成時也會；error 視同需要你。Focus 模式下依 `focus_alerts`，預設 `edge_sound` 仍會播放提示音，只是不跳通知（2.9）。沒在看那個 Agent 時，右下角跳出通知（AgentDesk Mac 版面在右上角、選單列下方；5 秒，錯誤 8 秒），點一下跳到該面板。提示音可在設定 › Alerts 關閉或換成自己的 MP3（`ui.json` 的 `sound_done`、`sound_blocked`）。
+**注意力與通知**：Done 的意思是「沒在看的時候完成」，看過之後顯示 Idle（屬於 UI，不回寫 host）；分頁與 space 顯示其中最緊急的狀態。v2.24 起「看過」以畫面上實際畫出的終端機判斷：`draw_pane` 記下畫出的 session（`drawn_sessions`），畫完後成為 `visible_sessions`，`update_attention` 用這組判斷，不再用目前分頁。workspace、terminals、mac 畫的就是目前分頁的面板，行為不變；Stage 的縮圖、Inbox 卡片上的畫面預覽、Garden 的小動物、Focus 藏起來的面板，以及沒有分頁區塊的版面，不會清掉 Done（Stage 的主舞台、Inbox 右邊的面板與 Pair 的兩個面板是一般面板，照常算看過）。需要你時一定播放提示音，沒在看的 Agent 完成時也會；error 視同需要你。Focus 模式下依 `focus_alerts`，預設 `edge_sound` 仍會播放提示音，只是不跳通知（2.9）。沒在看那個 Agent 時，右下角跳出通知（AgentDesk Mac 版面在右上角、選單列下方，Stage 在頂端列下方，Pair 避開輸入列；5 秒，錯誤 8 秒），點一下跳到該面板。提示音可在設定 › Alerts 關閉或換成自己的 MP3（`ui.json` 的 `sound_done`、`sound_blocked`）。
 
 ### 4.2 新增工作
 
@@ -784,7 +878,7 @@ Mission Control、Review、AgentDesk Tiling、Cockpit、Classic 與 Focus 模式
 - **設定**（Ctrl+,）：Look（版面與主題卡片、縮放、介面文字大小預設 15 px、終端機字型與字級、新終端機的 shell、放開即複製、keys.json、worktree 資料夾）、Machines、Alerts、Mods、Updates、Privacy（2.7），修改立即生效。左下的「Send feedback」只能複製或存檔，AgentDesk 不會自己送出。
 - **歡迎頁**：第一次啟動時開啟，共 4 頁（大小與主題、加入遠端機器、選擇要顯示的面板、常用按鍵）；之後可從命令面板的「Welcome」再打開。更新後第一次啟動顯示一次 What's new。
 - 這些按鍵由 AgentDesk 使用，不送進終端機；其他按鍵（含 Shift+Enter、Ctrl+Enter、Esc）原樣送給程式。沒有修飾鍵的 F1～F12 只有在 keys.json（含 `layout:<名稱>` 區段）有綁定時才交給 AgentDesk，沒綁定的照舊送給程式；預設只有 F2、Review 的 F8 與 Classic 的 F10。
-- v2.24 的設定：Look › Theme 多了 Appearance 的 Schedule、Tint by agent state、建議主題列與主題編輯器（2.12）；選到 Tiling、Classic 時多出各自的選項（2.11）；Alerts 多了「In focus mode」（2.9）。
+- v2.24 的設定：Look › Theme 多了 Appearance 的 Schedule、Tint by agent state、建議主題列與主題編輯器（2.12）；選到 Classic 時多出它的選項（2.11）；Alerts 多了「In focus mode」（2.9）。v2.27：Look 多了「Fun layouts」開關；選到 Terminals 時多 Square corners 與 Gaps，選到 Stage 時多縮圖大小、Plain terminals 與 Switch to an agent that needs you（2.9、2.11）；Stage、Inbox、Pair、Garden 的版面卡片各有自己的預覽圖。
 
 ## 5. 開發計畫與 WBS
 
@@ -978,11 +1072,16 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-29 | 開放 mod 給其他人寫（2026-11-20） | 準備公開到 GitHub，讓別人也能寫 mod。四項準備：(1) 設定 › Mods 打開開關時不直接啟用，先在該列下方說明 mod 以使用者的 Windows 權限執行（能讀寫檔案、啟動程式、在終端機輸入）以及卡住時視窗會停住，按「Turn on」才啟用，每次啟用都會說明；關閉不需確認。(2) 相容性：介面新版本只在結構尾端加成員、不改不刪，AgentDesk 載入 api_version 介於 1 與自己版本之間的 mod（載入前結構清為零，舊 mod 不認得的成員是 NULL），比自己新的 mod 拒絕並在設定頁說明；`mod_sdk.hpp` 也改為只拒絕比標頭舊的 AgentDesk。目前只有版本 1，行為不變。(3) 卡住無法從程式中斷，`mod_api.h`、使用說明與開發指南寫明處理方式：終端機在 agent-host 繼續跑，結束 agent-ui、從 `mods_enabled` 拿掉 mod 再開。(4) 開發指南 `docs/mods.md`（英文）：檔案配置、建置、範例、host 與 mod 的每個呼叫、UI 執行緒規則、相容性、純 C 寫法、發布建議 |
 | ADR-30 | Mac 風格的視窗按鈕（2026-11-20） | 使用者要求換成 Mac 風格，並要求查過 UI 設計、風格可以一樣但不能抄。調查：macOS 的設計原則是標題列與工具列合一、側欄從頂端延伸到底且選取用圓角、視窗按鈕是左上三顆圓鈕並有一般、懸停、非作用中三種狀態（Apple HIG 側欄頁、WWDC25「Designing for macOS」）。AgentDesk 依 herdr 複刻，herdr 本身就照 macOS 設計，側欄、圓角與膠囊分頁已具備；差的是視窗按鈕，所以照 herdr-app 在 macOS 上的版面規則做：按鈕位置取版面的 `traffic_lights`（workspace [12, 16]、terminals [16, 18]），品牌列左側讓出 76 px，窄欄寬 76 px 且只放按鈕（展開用窄欄底部的 »），分頁列與 terminals 上方列從按鈕之後開始（分別留 12、10 px），右上角不畫 Windows 式按鈕。按鈕由 AgentDesk 自己畫，不用 Apple 的素材、字型或色碼：直徑 12、間距 8，自訂的紅、琥珀、綠，滑鼠在這組按鈕上時才顯示 ×、−、＋，視窗非作用中時改用框線色，按下時變暗；點擊區延伸到間距的一半。新設定 `window_buttons`（`mac` 預設、`windows`），設定 › Look 的「Window buttons」切換；舊的 `ui.json` 沒有這個鍵，所以一律改為 Mac 式 |
 | ADR-31 | AgentDesk Mac 版面（2026-11-20） | 使用者要把原本 AgentDesk 98 的想法改成 Mac 風格的版面。herdr-app 沒有對應的版面，所以是 AgentDesk 自己的設計，不抄 Apple：不用 Apple 的標誌、字型、SF Symbols、桌布、圖示，也不照抄 Apple 規格裡的色碼；用隨附的 Geist、Nerd Font 字形、程式表圖示、程式畫的圖形與從主題推算的顏色。組成：選單列（AgentDesk 選單與 File、Edit、View、Window、Help，每列都是現有命令；右側時鐘與 Agent 狀態）、桌布、放目前分頁的浮動視窗、spaces 與分頁的 Dock（滑鼠指到時放大）。版面檔是我們的 `libs/ui/layouts/mac.json`，由版面引擎排位置，建置時和 herdr 的兩個檔案一起編進程式。視窗標題列的紅、黃、綠圓鈕不關閉程式：紅、黃把分頁收進 Dock（`tab.settle`），綠色填滿桌面（新命令 `window.fill`）。原因：Agent 關掉就停了，一不小心按到紅鈕不該結束正在跑的工作，收起來的分頁在 Dock 上一點就回來；真的要關閉用 File › Close tab 或 Dock 右鍵選單。通知改到右上角，避免蓋住 Dock。`tab.goto` 列入已知命令（Window 選單與 Dock 用它選分頁）。2.8 |
-| ADR-32 | Mission Control 版面與 Focus 模式（2026-11-20） | 使用者從構想（7.5）選定 A1、A2。決定：(1) Mission Control 做成內建版面 `mission`，格子用快照的最後幾行畫，不開 `TerminalView`、不搶控制權、不多送 IPC；考慮過每格一個縮小的 `TerminalView`，但會改尺寸並拖慢畫面，放棄。(2) Focus 做成任何版面都能切的模式（不列出的內建樹 `focus.json`），不做成獨立版面，這樣保留原版面的主題、字級與按鍵。(3) 使用者決定：Mission Control 不用 Esc 回牆面，Ctrl+Shift+M 負責進出，Esc 照常送給終端機（Claude Code 用 Esc 中斷）。(4) 使用者決定：`focus_alerts` 預設 `edge_sound`（亮邊緣加提示音，不跳通知），規格提議的 `edge` 留作選項，所以 4.1「需要你時一定播放提示音」不變。(5) 「看過」改為以畫面上實際畫出的終端機判斷（4.1），否則牆面會誤清 Done；既有三個版面的行為不變。(6) 全域快捷鍵延後一幀執行。代價：`layout_return` 只記一層；牆面的選擇不存檔，每次進入都先看牆面；Release 效能與實際 Claude Code 的顯示待人工驗收。2.9 |
+| ADR-32 | Mission Control 版面與 Focus 模式（2026-11-20） | 使用者從構想（7.5）選定 A1、A2。決定：(1) Mission Control 做成內建版面 `mission`，格子用快照的最後幾行畫，不開 `TerminalView`、不搶控制權、不多送 IPC；考慮過每格一個縮小的 `TerminalView`，但會改尺寸並拖慢畫面，放棄。(2) Focus 做成任何版面都能切的模式（不列出的內建樹 `focus.json`），不做成獨立版面，這樣保留原版面的主題、字級與按鍵。(3) 使用者決定：Mission Control 不用 Esc 回牆面，Ctrl+Shift+M 負責進出，Esc 照常送給終端機（Claude Code 用 Esc 中斷）。(4) 使用者決定：`focus_alerts` 預設 `edge_sound`（亮邊緣加提示音，不跳通知），規格提議的 `edge` 留作選項，所以 4.1「需要你時一定播放提示音」不變。(5) 「看過」改為以畫面上實際畫出的終端機判斷（4.1），否則牆面會誤清 Done；既有三個版面的行為不變。(6) 全域快捷鍵延後一幀執行。代價：`layout_return` 只記一層；牆面的選擇不存檔，每次進入都先看牆面；Release 效能與實際 Claude Code 的顯示待人工驗收。2.9。（Mission Control 已由 ADR-38 的 Stage 取代；Focus、Esc 照常送給終端機與「看過」的規則不變） |
 | ADR-33 | Review 版面與 Timeline（2026-11-20） | 使用者選定 A3、A4。Review：內建版面 `review`，資料沿用 Changes 面板的 `SidePanels`，畫法自己做（規格的列高、字級、標記與 Changes 面板不同，硬共用會改到現有面板）；F8／Shift+F8 只綁在 `layout:review`，為此 `TerminalView` 改成有綁定的 F1～F12 交給視窗，沒綁定的照舊送給程式。Timeline：狀態歷史放在 host（UI 關著也要記），只記時間、agent_state、process_state，不記訊息或畫面，每個 session 最多 1,000 筆、24 小時；新的唯讀方法 `session.timeline` 與 `session.state` 的選填欄位 `at`，協定版本不變。考慮過由 UI 記錄歷史，但 UI 關著時就記不到，而「離開一陣子回來」正是 Timeline 的情境，所以放在擁有執行狀態的 host。使用者決定：換版交接（host.update）不搬歷史，新 host 從接手時重新記錄並標 `adopted`；另一個選項是交接時一起搬 marks，但交接的資料格式一改就要重測整個交接流程（ADR-19），所以不採用。舊 host 回「unknown method」時 UI 只標那台機器需要更新。另加 `agentctl timeline`。代價：重新啟動 host 或換版後之前的歷史就沒了；tooltip 沒有狀態來源；多個 Agent 共用 checkout 時 Review 只能提示，分不出誰改的。2.10 |
-| ADR-34 | 風格版面 AgentDesk Tiling、Cockpit、Classic（2026-11-20） | 使用者選定 B1～B3。原則同 ADR-31：可以有那個風格，但圖形、字、配色都是自己的，顏色從主題推算。做法：mod 名稱 → style 改成 `libs/ui` 的一張對照表（Mac 優先，其餘取樹中第一個），取代 `derive_layout` 的 if 串；面板讀版面的框線、圓角、標題列高度與間距。既有 workspace、terminals、mac 改動前後的截圖逐像素相同。使用者決定：Classic 的選單鍵用 F10（只綁在 `layout:classic`），因為 Ctrl+Shift+M 給了 Mission Control。Tiling 的 Alt+R 等鍵只在 `layout:tiling` 區段，shell 的 Alt+R 在那個版面會被攔下，可在 keys.json 改掉。Classic 的單色對映連 ANSI 16 色一起轉，換成彩色主題時終端機也是單色；要看彩色 diff 得關掉 Monochrome terminal。B 組原本在版面第一次顯示時自動寫入建議主題，依 ADR-35 拿掉。代價：選單程式仍在 `ui::mac`，以別名共用；Cockpit 的「今天完成」是 UI 自己數的近似值（UI 關著時完成的，重開時才算）；Release 效能與高對比、非整數縮放下的外觀待人工驗收。2.11 |
+| ADR-34 | 風格版面 AgentDesk Tiling、Cockpit、Classic（2026-11-20） | 使用者選定 B1～B3。原則同 ADR-31：可以有那個風格，但圖形、字、配色都是自己的，顏色從主題推算。做法：mod 名稱 → style 改成 `libs/ui` 的一張對照表（Mac 優先，其餘取樹中第一個），取代 `derive_layout` 的 if 串；面板讀版面的框線、圓角、標題列高度與間距。既有 workspace、terminals、mac 改動前後的截圖逐像素相同。使用者決定：Classic 的選單鍵用 F10（只綁在 `layout:classic`），因為 Ctrl+Shift+M 給了 Mission Control。Tiling 的 Alt+R 等鍵只在 `layout:tiling` 區段，shell 的 Alt+R 在那個版面會被攔下，可在 keys.json 改掉。Classic 的單色對映連 ANSI 16 色一起轉，換成彩色主題時終端機也是單色；要看彩色 diff 得關掉 Monochrome terminal。B 組原本在版面第一次顯示時自動寫入建議主題，依 ADR-35 拿掉。代價：選單程式仍在 `ui::mac`，以別名共用；Cockpit 的「今天完成」是 UI 自己數的近似值（UI 關著時完成的，重開時才算）；Release 效能與高對比、非整數縮放下的外觀待人工驗收。2.11。（ADR-37 取代了 Tiling 與 Cockpit 的部分：Tiling 併進 Terminals，Alt+R 等鍵移到 `layout:terminals`；Cockpit 拿掉；Classic 改為好玩的版面） |
 | ADR-35 | 主題：依時間切換、跟著狀態變色、建議主題、主題編輯器（2026-11-20） | 使用者選定 T2～T5，T1（高對比與色盲友善）延後。先做 `libs/ui` 共用的色彩計算（WCAG 對比、OKLab、CIEDE2000、色覺模擬），T3、T5 與之後的 T1 都用它。T2：不連網、不用 Windows 定位 API，緯度與經度手動輸入、只存一位小數；規格的「Use my location once」需要 WinRT 定位這個新依賴，沒做。T3：預設關閉，只微調底色與 accent，文字、狀態色與終端機顏色不動，並以對比保護限制強度；代價是淺色主題幾乎看不出來。T4：使用者決定建議主題**絕不自動改外觀**，只在設定頁顯示「Made for …」列與 Use 按鈕；考慮過「第一次顯示版面時直接套用」，但已升級的使用者切到 mac 會突然換配色，所以不採用，新版面（Cockpit、Classic）也一樣。T5：存成和手寫格式相同的主題檔，只寫有改的顏色、保留未知的鍵，刪除只改名不刪檔。AgentDesk 隨附的主題檔集中到 `libs/ui/themes`。代價：其他同時開著的 AgentDesk 視窗要重開才讀到新存的主題；狀態形狀（屬 T1）還沒有，編輯器的色覺提示不會建議開啟它。2.12 |
-| ADR-36 | 視窗按鈕跟著主題、第一次使用提示（2026-11-20） | 使用者試用後回報：(1) 換主題時左上角的關閉、縮小、放大鈕顏色不變，認為是 bug；(2) 不同版面看不出要怎麼用，希望第一次使用時有說明。做法：(1) 按鈕顏色由 `ui::window_buttons::derive()` 從主題推算：關閉取「需要你」色、縮放取「完成」色、最小化取暖色的「工作中」色或兩者之間的琥珀色，色相維持在紅、琥珀、綠附近，在 OKLab 調整亮度使每顆在所在的列上對比至少 3:1，三顆兩兩 CIEDE2000 至少 15，做不到就退回一般的紅、琥珀、綠；依版面風格畫成圓鈕（AgentDesk、Terminals、Mac、Mission Control、Review、Focus）、霓虹圓環（Cockpit）、小方塊（Tiling）或文字鈕（Classic），Windows 式按鈕的關閉鈕懸停色也跟著主題。(2) 每個內建版面與專注模式各有一張提示卡（用途一句、3～5 條操作，快捷鍵從 keymap 讀，沒有綁定的鍵盤操作不列），第一次出現 600 ms 後、歡迎頁結束且沒有其他彈窗時自動顯示一次；「Got it」、Enter、Esc、點外面都算看過，「Don't show tips」關掉全部；卡片開著時鍵盤不會送進終端機（`ui::adapter::release_keyboard()`）。`layout.tips[:<名稱>]` 可隨時重看（命令面板、Mac／Classic 的 Help 選單、設定 › Look 的 Layout tips 列）。新設定 `tips`（預設 true）與 `tips_seen`；舊使用者每個沒看過的版面也會看到一次。自動化執行（`--exit-after-ms`）不自動跳卡，設 `AGENTDESK_TIPS=1` 才會，所以截圖基準不變。代價：淺色主題為了對比，最小化鈕偏赭色而不是亮黃色 |
+| ADR-36 | 視窗按鈕跟著主題、第一次使用提示（2026-11-20） | 使用者試用後回報：(1) 換主題時左上角的關閉、縮小、放大鈕顏色不變，認為是 bug；(2) 不同版面看不出要怎麼用，希望第一次使用時有說明。做法：(1) 按鈕顏色由 `ui::window_buttons::derive()` 從主題推算：關閉取「需要你」色、縮放取「完成」色、最小化取暖色的「工作中」色或兩者之間的琥珀色，色相維持在紅、琥珀、綠附近，在 OKLab 調整亮度使每顆在所在的列上對比至少 3:1，三顆兩兩 CIEDE2000 至少 15，做不到就退回一般的紅、琥珀、綠；依版面風格畫成圓鈕（AgentDesk、Terminals、Mac、Mission Control、Review、Focus）、霓虹圓環（Cockpit）、小方塊（Tiling）或文字鈕（Classic），Windows 式按鈕的關閉鈕懸停色也跟著主題。(2) 每個內建版面與專注模式各有一張提示卡（用途一句、3～5 條操作，快捷鍵從 keymap 讀，沒有綁定的鍵盤操作不列），第一次出現 600 ms 後、歡迎頁結束且沒有其他彈窗時自動顯示一次；「Got it」、Enter、Esc、點外面都算看過，「Don't show tips」關掉全部；卡片開著時鍵盤不會送進終端機（`ui::adapter::release_keyboard()`）。`layout.tips[:<名稱>]` 可隨時重看（命令面板、Mac／Classic 的 Help 選單、設定 › Look 的 Layout tips 列）。新設定 `tips`（預設 true）與 `tips_seen`；舊使用者每個沒看過的版面也會看到一次。自動化執行（`--exit-after-ms`）不自動跳卡，設 `AGENTDESK_TIPS=1` 才會，所以截圖基準不變。代價：淺色主題為了對比，最小化鈕偏赭色而不是亮黃色。（ADR-37 起 Cockpit 的霓虹圓環已拿掉，小方塊改由 Terminals 打開直角時使用；Mission Control、Tiling、Cockpit 的提示卡換成 Stage、Inbox、Pair、Garden 的） |
+| ADR-37 | 第二輪第一階段：共用設計規則、版面收斂與整體美化（2026-11-21） | 使用者試用第一輪後認為後加的版面還要美化、很多不實用，要以「實用、好看又有趣」重新評估（`docs/design/ideas.md` 第二輪構想），看過評估後說「全部都做」，依建議執行，包括第一輪依使用者要求做的三個版面要不要動的問題（同意拿掉 Cockpit、合併 Tiling、Classic 改為彩蛋）。做法：(1) 共用設計規則（2.13）：`libs/ui` 的 `design_tokens` 放數值，`apps/desktop/ui_tokens` 放螢幕端；4 px 間距、三種圓角、三層字級、兩級陰影、三種動畫時間，全部遵守 Windows 的「減少動畫」，動畫期間才提高喚醒頻率；空白狀態改用自己畫的小插圖。(2) 整體美化：通知、對話框、選單、選取列、狀態標記、空白狀態依規則統一；原則是收斂，不加新裝飾，行為與尺寸邏輯不變。(3) Tiling 併進 Terminals：直角、間距（`terminals_square`、`terminals_gaps`、`terminals_gaps_on`）與 Alt+R 等鍵（`layout:terminals`）；預設值時畫面和原本逐像素相同；存檔的 `tiling` 開成 Terminals 並打開直角，`tiling.*` 舊命令仍可用。Tiling 的頂端狀態列、Pane titles、Focus follows mouse 沒有搬（Terminals 有自己的面板標題列；要加回時原本的做法在 git 歷史）。(4) 拿掉 Cockpit（程式、版面檔、兩套主題、測試、設定、提示卡、`cockpit.reset_today`）：儀表多半顯示 0 又佔掉三分之一畫面，它的用途由 Stage 與 Inbox 接手；存檔的 `cockpit` 開成 AgentDesk，選了 Cockpit 主題的人退回預設主題；「今天完成」與狀態變化紀錄沒有留，只留每個 Agent 的狀態變化時間（`StyleUi::changes`）。(5) 好玩的版面：Classic（之後加上 Garden）只有在設定 › Look 打開「Fun layouts」（`fun_layouts`，預設 false）時才列在版面卡片、View 選單與 Ctrl+Shift+L；命令面板與 `layout:<名稱>` 一律可用。(6) 存 `ui.json` 時刪掉 `tiling_*`、`cockpit_*`（合併後也刪 `mission_*`）開頭的鍵（`ui::styles::drop_obsolete_settings`）。代價：拿掉的版面若使用者自己放了同名版面檔，存檔中的名稱仍會被轉換（轉換發生在讀設定時），檔案可手動切回但會有空白區塊；陰影是線條模擬，淺色主題幾乎看不到；右鍵選單沒有淡入；關閉動畫、高對比、125%／150% 縮放下的外觀只有程式與單元測試。2.4、2.11、2.13 |
+| ADR-38 | Stage 取代 Mission Control（2026-11-21） | 第二輪評估：Mission Control 方向對，但格子大半空白、只看得到最後幾行，也沒有能好好操作的大畫面。Stage（第二輪 C2，2.9）是一個可以直接打字的主舞台加底片條即時縮圖，需要你的縮圖發光並排到前面。做法：內建版面 `stage` 取代 `mission`，存檔的 `mission`（含 `layout_return`）轉成 `stage`；Ctrl+Shift+M 改為 `stage.toggle`，`mission.toggle`、`mission.expand`、`mission.filter` 保留為別名，`mission.wall` 拿掉；`mission_filter`、`mission_shells` 讀進 `stage_filter`、`stage_shells`，`mission_sub_agents` 拿掉。沿用 Mission Control 的 `screen_tail` 與排序邏輯；畫面末行的快取移到 `App::State::screen_tails`（`screen_tail_of()`），和 Inbox 共用一份。取捨：條的順序固定（第一次看到的先後），只有「需要你」會往前跳，比跟著側欄依狀態排穩定；Ctrl+1～9 已經是 `tab.select`，所以換台用 Alt+Left／Alt+Right，只綁在 `layout:stage`；換台是新面板淡入，不是交叉淡化（終端機沒有離屏的舊畫面）；自動換台預設關，打字中、選單開著或台上的 Agent 也在等你時不換；子 Agent 只顯示數量，沒有自己的縮圖。代價：大螢幕上的 L 縮圖與 260 ms 淡入只在單元測試與放慢的建置確認過；很多 Agent 同時工作時的 CPU 用量沒有量；「正在打字」不分按鍵是否打在終端機裡。2.9 |
+| ADR-39 | Inbox：需要你的 Agent 收件匣（2026-11-21） | 第二輪 C1，評估中實用價值最高。決定：(1) 卡片上的「Agent 要什麼」只用結構化回報的訊息（OSC 7501 的 `msg`、`agentctl report-state --message`），畫面最後幾行只當參考顯示，不拿來判斷狀態（ADR-09）。(2) 規格寫卡片上有固定的「同意／拒絕」；改成可設定的快速回答（`inbox_answers`），因為不同 CLI 的按鍵不同，我們也不能親自執行它們確認。隨附預設只給 permission 回報：Claude Code 是 `1`／Esc，Codex 是 `y`／Esc，依官方文件與提示畫面的描述推得，**要用真的 CLI 驗證**（數字鍵或 `y` 是否不需要 Enter、Esc 是否等於拒絕、改版後是否還對）；其他程式沒有預設。`inbox_answers` 只讀不寫，保留使用者自己寫的內容。(3) 回覆用貼上再補 Enter（和 mod 的 `send` 同一條路），程式開了 bracketed paste 時多行文字不會打到一半送出。(4) Snooze 不存檔，重開就清掉，以免「等一下再處理」的事被忘到下次。(5) 等了多久優先用存在 `ui.json` 的 `agents_changed`，重開 agent-ui 後仍正確。(6) 佇列的按鍵只在佇列握有鍵盤時有效，點終端機就回到一般打字；Ctrl+Shift+I 在原本的 keymap 裡沒有人用。(7) 變更檔案數和 Pair 共用 `GitCache::with_changes()`。代價：預設快速回答未驗證；`inbox_answers` 的錯誤只記在設定裡，還沒顯示在畫面上；變更數跟著 git cache 的更新時機，可能慢一點；AttentionTracker 沒算成「沒看過的完成」的 Agent 不會出現在完成區。2.14 |
+| ADR-40 | Pair：兩個 Agent 並排比較（2026-11-21） | 第二輪 C3。決定：(1) 「Separate worktrees」預設打開，每一邊在 `pair/` 開頭的新分支上有自己的 checkout，沿用既有的 `worktree.add` 與 `session.create`；不是 git 儲存庫時仍可開始，但明確警告兩邊會改到同一個資料夾。(2) 「誰先完成」只看結構化的 agent 狀態（ADR-09），比的是各自的用時，分開送出時比較公平。(3) Keep 只在畫面上標記，不做任何 git 操作；Pair 開的 worktree 不自動移除，避免誤刪 Agent 的成果。(4) 送出用貼上文字再補 `\r`（和 mod 的 `send` 同一條路）。(5) 全域鍵 Ctrl+Shift+2：合併時檢查過 `global`、`terminal` 與每個 `layout:*` 區段都沒用到；代價是終端機收不到 Ctrl+Shift+2（有些程式當成 Ctrl+@），可在 keys.json 改掉。Alt+P、Alt+Shift+S 只在 `layout:pair`。代價：**貼上後補 Enter 的送法還沒用真的 Claude Code 與 Codex 實測**，要人工驗收；直接在終端機打字時計時從第一次回報 Working 開始，比按下 Enter 晚一點；worktree 要自己清；遠端機器上只有 git diff 的行數。2.15 |
+| ADR-41 | Garden：Agent 小花園（2026-11-21） | 第二輪 C4，好玩的版面。決定：(1) 小動物、場景與插圖全部用 ImDrawList 自己畫，不用圖片，也不借用現成角色；外觀由 session id 的雜湊決定，同一個 Agent 每次長一樣。(2) 姿勢只看結構化狀態（ADR-09）。(3) 點小動物是「回到原本的版面並聚焦」，不在花園裡滑出面板：塞進終端機面板會把場景切掉一半，原本的版面已經是使用者習慣的分割與分頁；會跳通知說明怎麼回來。(4) 依建立時間排，不依急迫程度排，以免狀態一變整群換位置；需要你的那隻已有紅色「!」與上方計數。(5) 看到它變成 Done 時才彈跳，剛打開時已完成的直接坐著。(6) 沒有預設按鍵，只登記為好玩的版面（`fun_layouts`），想要的人在 keys.json 綁 `garden.toggle`。(7) 效能：前景且有動作時約每秒 30 格，只有睡覺時 10 格，背景 4 格，靜止時不畫；減少動畫時全部定格；熱路徑不配置記憶體。代價：主迴圈每次醒來畫兩格（既有行為），GPU 實際畫兩次；關閉動畫、高對比、非整數縮放下的畫面沒有截圖。2.16 |
 | ADR-21 | 程式裡不出現 herdr 的名稱 | 使用者要求（2026-11-19）：執行檔、畫面與跟著發布的檔案只寫 AgentDesk。win98 版面改名 AgentDesk 98；開機、關於與開始選單側邊的「Herdr 98」圖片改由程式用像素字型畫出；Start 與 Update 圖示的 herdr 標誌換成 AgentDesk 的標誌（依 herdr art/generate.ts 的畫法重新產生）；預設主題 id 改為 `preset-<名稱>`，舊設定照樣讀得到。保留的部分：THIRD_PARTY_NOTICES 裡 herdr-app 的授權聲明（Apache-2.0 第 4 條要求）、原始碼註解裡的出處、版本庫的 `third_party/herdr/` |
 
 ### 7.2 主要風險
@@ -1027,6 +1126,9 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | style | 版面的外觀類型，由版面樹裡的 mod 名稱決定（2.4 的對照表） |
 | Focus 模式 | 任何版面都能切換、只顯示一個終端機的模式（2.9） |
 | Timeline | 依 host 記錄的狀態歷史畫出的時間軸（2.10） |
+| 好玩的版面（Fun layouts） | Classic 與 Garden；設定 › Look 打開「Fun layouts」才列在版面清單（2.11） |
+| 設計 token | 共用的間距、圓角、字級、顏色、陰影與動畫數值（`design_tokens`、`ui_tokens`，2.13） |
+| 快速回答 | Inbox 卡片上的按鈕，按下就把設定好的按鍵送進那個終端機（`inbox_answers`，2.14） |
 
 ### 7.4 待決事項
 
@@ -1036,19 +1138,31 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 
 ### 7.5 構想
 
-版面與主題的發想收在 `docs/design/ideas.md`，每一項的設計規格在 `docs/design/ideas/`（A、B、T 三份），實作紀錄在同一個資料夾的 `IMPL-A12.md`、`IMPL-A34.md`、`IMPL-B.md`、`IMPL-T.md`。v2.24 的狀態：
+版面與主題的發想收在 `docs/design/ideas.md`，每一項的設計規格在 `docs/design/ideas/`（A、B、T 三份），實作紀錄在同一個資料夾的 `IMPL-A12.md`、`IMPL-A34.md`、`IMPL-B.md`、`IMPL-T.md`。第一輪（v2.24）的狀態：
 
 | 項目 | 狀態 |
 |---|---|
-| A1 Mission Control、A2 Focus | 已實作（2.9、ADR-32） |
+| A1 Mission Control、A2 Focus | 已實作（2.9、ADR-32）；Mission Control 在第二輪由 Stage 取代（ADR-38） |
 | A3 Review、A4 Timeline | 已實作（2.10、ADR-33） |
-| B1 AgentDesk Classic、B2 AgentDesk Tiling、B3 AgentDesk Cockpit | 已實作（2.11、ADR-34） |
+| B1 AgentDesk Classic、B2 AgentDesk Tiling、B3 AgentDesk Cockpit | 已實作（2.11、ADR-34）；第二輪 Tiling 併進 Terminals、Cockpit 拿掉、Classic 改為好玩的版面（ADR-37） |
 | T2 依時間切換、T3 跟著狀態變色、T4 成套主題（只建議）、T5 主題編輯器 | 已實作（2.12、ADR-35） |
 | T1 高對比與色盲友善 | 尚未實作，使用者決定延後 |
 
 ideas.md 列的五個開工前決定：(1) A1 不用 Esc，Ctrl+Shift+M 回牆面（ADR-32）；(2) Focus 的 `focus_alerts` 預設 `edge_sound`，仍播放提示音（ADR-32）；(3) T1 高對比主題與版面指定主題的優先順序，隨 T1 延後，仍待決定；(4) 建議主題只在設定頁提示，不自動套用（ADR-35）；(5) Timeline 的歷史放在 host，換版交接不搬（ADR-33）。另外 B1 的選單鍵是 F10（ADR-34）。
 
-第二輪構想（2026-11-21）：使用者認為後來實作的版面還要美化、而且不少不實用，要以實用、好看又有趣為目標重新評估。評估與提案寫在 `docs/design/ideas.md` 文末：保留 AgentDesk、Terminals、Review、Focus、AgentDesk Mac；Tiling 併進 Terminals、拿掉 Cockpit、Classic 改為彩蛋（都待使用者同意）；新構想 C1 Inbox（收件匣，建議最先做）、C2 Stage（主舞台，取代 Mission Control）、C3 Pair（並排比較）、C4 Garden（小花園）；以及統一的美化規則。尚未排入。
+第二輪構想（2026-11-21）：使用者認為後來實作的版面還要美化、而且不少不實用，要以實用、好看又有趣為目標重新評估。評估與提案寫在 `docs/design/ideas.md` 文末，使用者看過後說「全部都做」，依建議執行，實作紀錄在 `docs/design/ideas/IMPL-round2-*.md`（base、stage、inbox、pair、garden，各有合併紀錄）。v2.27 的狀態：
+
+| 項目 | 狀態 |
+|---|---|
+| 共用設計規則與整體美化 | 已實作（2.13、ADR-37） |
+| Tiling 併進 Terminals、拿掉 Cockpit、Classic 改為好玩的版面 | 已實作（2.11、ADR-37） |
+| C2 Stage（取代 Mission Control） | 已實作（2.9、ADR-38） |
+| C1 Inbox | 已實作（2.14、ADR-39） |
+| C3 Pair | 已實作（2.15、ADR-40） |
+| C4 Garden（好玩的版面） | 已實作（2.16、ADR-41） |
+| T1 高對比與色盲友善 | 仍延後 |
+
+還沒解決的事：Inbox 隨附的快速回答（Claude Code `1`／Esc、Codex `y`／Esc）與 Pair 的送法（貼上後補 Enter）都要用真的 CLI 驗證；`inbox_answers` 的錯誤還沒顯示在畫面上；Pair 開的 worktree 要不要提供一鍵清除；關閉動畫、高對比、125%／150% 縮放下的新畫面沒有截圖；T1 高對比主題與版面指定主題的優先順序隨 T1 延後。
 
 ## 8. 官方參考資料
 
