@@ -3,7 +3,6 @@ agentdesk_executable(agent-ui WIN32
     app.cpp
     chrome.cpp
     classic_layout.cpp
-    cockpit_layout.cpp
     code_preview.cpp
     commands.cpp
     files_changes.cpp
@@ -28,7 +27,7 @@ agentdesk_executable(agent-ui WIN32
     style_layouts.cpp
     tab_bar.cpp
     terminals_layout.cpp
-    tiling_layout.cpp
+    terminals_options.cpp
     timeline.cpp
     themes.cpp
     appearance.cpp

@@ -143,8 +143,7 @@ TEST(ThemeFile, BuiltinSuggestions) {
               (std::pair<std::string, std::string>{"preset-graphite", "preset-paper"}));
     EXPECT_EQ(th::builtin_suggestion("classic"),
               (std::pair<std::string, std::string>{"phosphor-green", "phosphor-paper"}));
-    EXPECT_EQ(th::builtin_suggestion("cockpit"),
-              (std::pair<std::string, std::string>{"cockpit-night", "cockpit-day"}));
+    EXPECT_FALSE(th::builtin_suggestion("cockpit"));  // removed layouts suggest nothing
     EXPECT_FALSE(th::builtin_suggestion("tiling"));
     EXPECT_FALSE(th::builtin_suggestion("mine"));
 }
@@ -152,7 +151,7 @@ TEST(ThemeFile, BuiltinSuggestions) {
 // Every suggested theme that is not one of AgentDesk's palettes or a preset ships as a file that
 // parses, dark first and light second.
 TEST(ThemeFile, SuggestedThemeFilesShip) {
-    for (const char* layout : {"workspace", "terminals", "mac", "classic", "cockpit"}) {
+    for (const char* layout : {"workspace", "terminals", "mac", "classic"}) {
         const auto pair = th::builtin_suggestion(layout);
         ASSERT_TRUE(pair) << layout;
         for (const auto& [id, light] : {std::pair{pair->first, false}, std::pair{pair->second, true}}) {

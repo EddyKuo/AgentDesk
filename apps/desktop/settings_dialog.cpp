@@ -120,6 +120,8 @@ bool draw_settings_nav(App::State& s, float h) {
 void look_layout_cards(App::State& s) {
     CardFlow lf = CardFlow::at_cursor();
     for (const auto& l : s.layouts) {
+        if (!ui::styles::is_listed(l.name, s.settings.styles.fun_layouts, s.settings.layout))
+            continue;
         const bool on = l.name == s.settings.layout;
         const float cw = px(kCardW), pad = px(kCardPad), ph = px(62), lh = line_h(12.5f);
         const float ch = pad + ph + px(6) + lh + pad;
@@ -408,11 +410,23 @@ bool look_terminals(App::State& s) {
     return changed;
 }
 
+// Fun layouts: Classic (and Garden) join the cards and the Ctrl+Shift+L cycle.
+bool look_fun_layouts_row(App::State& s) {
+    settings_row(s, "Fun layouts", "Show the playful layouts (AgentDesk Classic) with the others.", px(36),
+                 px(20));
+    const bool hit = settings_toggle("##fun-layouts", s.settings.styles.fun_layouts);
+    if (hit)
+        s.settings.styles.fun_layouts = !s.settings.styles.fun_layouts;
+    settings_row_done(s);
+    return hit;
+}
+
 bool settings_look(App::State& s) {
     settings_section(s, "Layout");
     look_layout_cards(s);
     bool changed = look_style_options(s);  // the shown style's own rows, if any
     changed |= look_tips_row(s);
+    changed |= look_fun_layouts_row(s);
     settings_gap(px(18));
     changed |= look_theme(s);
     settings_gap(px(18));

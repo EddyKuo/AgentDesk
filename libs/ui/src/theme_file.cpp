@@ -265,8 +265,6 @@ std::optional<std::pair<std::string, std::string>> builtin_suggestion(const std:
         return std::pair<std::string, std::string>{"mac-dusk", "mac-dawn"};
     if (layout == "classic")  // phosphor-amber ships too, as a third choice
         return std::pair<std::string, std::string>{"phosphor-green", "phosphor-paper"};
-    if (layout == "cockpit")
-        return std::pair<std::string, std::string>{"cockpit-night", "cockpit-day"};
     return std::nullopt;
 }
 

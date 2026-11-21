@@ -1,10 +1,11 @@
-// The Tiling layout's rules; see tiling_layout.hpp.
-#include "agentdesk/ui/tiling_layout.hpp"
+// The Terminals layout's options and keyboard tools; see terminals_options.hpp.
+#include "agentdesk/ui/terminals_options.hpp"
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 
-namespace agentdesk::ui::tiling {
+namespace agentdesk::ui::terminals {
 
 const char* split_direction(float w, float h) {
     return w > h * kWideRatio ? "right" : "down";
@@ -56,55 +57,30 @@ float clamp_gaps(float gaps) {
     return std::clamp(gaps, 0.0f, 24.0f);
 }
 
-bool apply_gaps(layout::Node& tree, float gaps, bool on) {
-    const float g = on ? clamp_gaps(gaps) : 0.0f;
+bool is_default(const Options& o) {
+    return !o.square && o.gaps_on && clamp_gaps(o.gaps) == kDefaultGaps;
+}
+
+bool apply_options(layout::Node& tree, const Options& o) {
+    const float g = o.gaps_on ? clamp_gaps(o.gaps) : 0.0f;
     for (const layout::Node* c : tree.walk()) {
         if (!c->is_block() || c->content.type != layout::Content::Type::kTab)
             continue;
         layout::Node* n = tree.find(c->id);
         if (n == nullptr)
             return false;
-        n->padding = layout::Padding{g, g, true};
         if (!n->content.pane)
             n->content.pane = layout::PaneFrame{};
         n->content.pane->gap = g;
+        if (o.square)
+            n->content.pane->radius = 0.0f;
+        // Around the bar and the panes: three quarters of the gap, on whole pixels.
+        const float pad = std::round(g * 0.75f);
+        tree.padding = layout::Padding{pad, pad, true};
+        tree.gap = g;
         return true;
     }
     return false;
 }
 
-bool show_titles(std::string_view mode, int panes) {
-    if (mode == "always")
-        return true;
-    if (mode == "never")
-        return false;
-    return panes >= 2;
-}
-
-BarFit fit_bar(const BarWidths& w, float available) {
-    BarFit f;
-    auto used = [&] {
-        return w.lead + (f.short_tabs ? w.tabs_short : w.tabs_full) + (f.title ? w.title : 0.0f) + w.counts +
-               (f.clock ? w.clock : 0.0f);
-    };
-    if (used() > available)
-        f.title = false;
-    if (used() > available)
-        f.short_tabs = true;
-    if (used() > available)
-        f.clock = false;
-    f.tabs_room = std::max(0.0f, available - (used() - (f.short_tabs ? w.tabs_short : w.tabs_full)));
-    return f;
-}
-
-SpaceChips space_chips(int count, int active) {
-    SpaceChips c;
-    for (int i = 0; i < count && i < 9; ++i)
-        c.shown.push_back(i);
-    if (active >= 9 && active < count)
-        c.shown.push_back(active);
-    c.more = count - static_cast<int>(c.shown.size());
-    return c;
-}
-
-}  // namespace agentdesk::ui::tiling
+}  // namespace agentdesk::ui::terminals

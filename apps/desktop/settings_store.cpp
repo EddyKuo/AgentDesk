@@ -190,6 +190,14 @@ Settings load_settings_unchecked() {
         s.timeline_range = "1h";
     s.timeline_since_left = j.value("timeline_since_left", true);
     read_style_settings(j, s.styles);
+    // Layouts that no longer ship: Tiling is Terminals with square corners, Cockpit the first layout.
+    if (const auto r = ui::styles::replacement_for(s.layout)) {
+        s.layout = r->layout;
+        if (r->square_corners)
+            s.styles.terminals_square = true;
+    }
+    if (const auto r = ui::styles::replacement_for(s.layout_return))
+        s.layout_return = r->layout;
     if (const auto it = j.find("tips"); it != j.end() && it->is_boolean())
         s.tips = it->get<bool>();
     if (const auto it = j.find("tips_seen"); it != j.end() && it->is_array())

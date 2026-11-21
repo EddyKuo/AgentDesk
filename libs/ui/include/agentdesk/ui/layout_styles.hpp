@@ -6,14 +6,15 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/mac_layout.hpp"
 
 namespace agentdesk::ui::styles {
 
-// The style a mod name selects ("mac", "terminals", "classic", "tiling", "cockpit", "focus",
-// "mission", "review"), or "" for a mod that selects none (workspace parts, the person's own mods).
+// The style a mod name selects ("mac", "terminals", "classic", "focus", "mission", "review"), or
+// "" for a mod that selects none (workspace parts, the person's own mods).
 std::string_view style_of_mod(std::string_view mod);
 
 // The style of a whole tree, from every block's mod and every tab block's pane header mod, in
@@ -24,6 +25,25 @@ std::string style_of_tree(const layout::Node& tree);
 // How Settings, the palette and toasts name a layout: the built-ins by their product names,
 // any other layout by its file name.
 std::string display_name(std::string_view layout);
+
+// "Fun layouts" (Settings > Look): built-in layouts kept out of the layout cards and the Ctrl+Shift+L
+// cycle unless the person turns them on. They stay reachable from the palette (layout:<name>).
+bool is_fun_layout(std::string_view layout);
+// Whether a layout shows in the cards and the cycle: every layout but the fun ones while
+// `fun_layouts` is off. The layout showing now is always listed, so it never vanishes from its own
+// card row.
+bool is_listed(std::string_view layout, bool fun_layouts, std::string_view current = {});
+// Ctrl+Shift+L: the listed layout after `current` in `names` (wrapping); `current` itself when it is
+// the only one, the first listed when `current` is not in the list.
+std::string next_listed(const std::vector<std::string>& names, std::string_view current, bool fun_layouts);
+
+// Built-in layouts that were removed: what a saved "layout" naming one opens instead. Tiling became
+// Terminals' square-corner option; Cockpit falls back to the first layout. nullopt: not removed.
+struct Replacement {
+    std::string layout;
+    bool square_corners = false;  // turn on Terminals' square corners
+};
+std::optional<Replacement> replacement_for(std::string_view removed_layout);
 
 // Styles whose chrome shows a clock (the frame loop wakes when the minute turns over).
 bool has_clock(std::string_view style);
@@ -46,8 +66,7 @@ struct ToastArea {
     bool top = false;
     float offset = 0.0f;
 };
-// `bottom_block`: design px a style keeps at the bottom that toasts must not cover (the Cockpit's
-// log, when shown).
+// `bottom_block`: design px a style keeps at the bottom that toasts must not cover.
 ToastArea toast_area(std::string_view style, float bottom_block = 0.0f);
 
 // Whether decorative screen effects may be drawn: not when the setting is "off", not on a light

@@ -24,10 +24,9 @@ TEST(LayoutStyles, ModTableNamesEveryStyleMod) {
     for (const char* m :
          {"classic-menubar", "classic-tabs", "classic-status", "classic-sidebar", "classic-pane"})
         EXPECT_EQ(style_of_mod(m), "classic") << m;
-    for (const char* m : {"tiling-bar", "tiling-pane"})
-        EXPECT_EQ(style_of_mod(m), "tiling") << m;
-    for (const char* m : {"cockpit-header", "cockpit-gauges", "cockpit-roster", "cockpit-log"})
-        EXPECT_EQ(style_of_mod(m), "cockpit") << m;
+    // The removed Tiling and Cockpit layouts' mods select nothing any more.
+    for (const char* m : {"tiling-bar", "tiling-pane", "cockpit-header", "cockpit-gauges"})
+        EXPECT_EQ(style_of_mod(m), "") << m;
     EXPECT_EQ(style_of_mod("focus-strip"), "focus");
     for (const char* m : {"mission-bar", "mission-wall"})
         EXPECT_EQ(style_of_mod(m), "mission") << m;
@@ -45,8 +44,6 @@ TEST(LayoutStyles, ShippedLayoutsKeepTheirStyles) {
     EXPECT_EQ(style_of_tree(layout::builtin("focus")), "focus");
     EXPECT_EQ(style_of_tree(layout::builtin("mission")), "mission");
     EXPECT_EQ(style_of_tree(layout::builtin("review")), "review");
-    EXPECT_EQ(style_of_tree(layout::builtin("tiling")), "tiling");
-    EXPECT_EQ(style_of_tree(layout::builtin("cockpit")), "cockpit");
     EXPECT_EQ(style_of_tree(layout::builtin("classic")), "classic");
 }
 
@@ -60,9 +57,9 @@ TEST(LayoutStyles, TreeStyleRules) {
         {"type":"block","content":{"mod":"mac-dock"}}]})")),
               "mac");
     EXPECT_EQ(style_of_tree(tree_of(R"({"type":"column","children":[
-        {"type":"block","content":{"mod":"tiling-bar"}},
+        {"type":"block","content":{"mod":"review-head"}},
         {"type":"block","content":{"mod":"classic-status"}}]})")),
-              "tiling");
+              "review");
     EXPECT_EQ(style_of_tree(tree_of(R"({"type":"column","children":[
         {"type":"block","content":{"mod":"spaces"}}]})")),
               "");
@@ -75,8 +72,6 @@ TEST(LayoutStyles, DisplayNames) {
     EXPECT_EQ(display_name("mission"), "Mission Control");
     EXPECT_EQ(display_name("review"), "Review");
     EXPECT_EQ(display_name("classic"), "AgentDesk Classic");
-    EXPECT_EQ(display_name("tiling"), "AgentDesk Tiling");
-    EXPECT_EQ(display_name("cockpit"), "AgentDesk Cockpit");
     EXPECT_EQ(display_name("my-layout"), "my-layout");
 }
 
@@ -110,10 +105,7 @@ TEST(LayoutStyles, PaneLookOfShippedLayoutsIsUnchanged) {
     // No frame: each style's defaults.
     EXPECT_EQ(pane_look("", nullptr).radius, 10.0f);
     EXPECT_EQ(pane_look("terminals", nullptr).header, 38.0f);
-    EXPECT_EQ(pane_look("tiling", nullptr).radius, 0.0f);
-    EXPECT_EQ(pane_look("tiling", nullptr).focus.width, 2.0f);
     EXPECT_EQ(pane_look("classic", nullptr).header, 20.0f);
-    EXPECT_EQ(pane_look("cockpit", nullptr).radius, 4.0f);
 }
 
 TEST(LayoutStyles, PaneLookReadsTheFrame) {
@@ -139,8 +131,7 @@ TEST(LayoutStyles, ToastAreas) {
     EXPECT_FALSE(toast_area("").top);
     EXPECT_EQ(toast_area("").offset, 0.0f);
     EXPECT_EQ(toast_area("classic").offset, 22.0f);
-    EXPECT_EQ(toast_area("cockpit", 144.0f).offset, 144.0f);
-    EXPECT_EQ(toast_area("tiling").offset, 0.0f);
+    EXPECT_EQ(toast_area("", 40.0f).offset, 40.0f);
 }
 
 TEST(LayoutStyles, EffectsAllowed) {
@@ -155,4 +146,42 @@ TEST(LayoutStyles, Clocks) {
     EXPECT_TRUE(has_clock("mac"));
     EXPECT_FALSE(has_clock(""));
     EXPECT_FALSE(has_clock("terminals"));
+}
+
+// Classic (and Garden, when it ships) are fun layouts: out of the cards and the Ctrl+Shift+L cycle
+// until Settings > Look > Fun layouts is on; the layout showing always keeps its card.
+TEST(LayoutStyles, FunLayoutsStayOutOfTheListUntilTurnedOn) {
+    EXPECT_TRUE(is_fun_layout("classic"));
+    EXPECT_TRUE(is_fun_layout("garden"));
+    for (const char* l : {"workspace", "terminals", "mac", "mission", "review", "mine"})
+        EXPECT_FALSE(is_fun_layout(l)) << l;
+    EXPECT_FALSE(is_listed("classic", false));
+    EXPECT_TRUE(is_listed("classic", true));
+    EXPECT_TRUE(is_listed("classic", false, "classic"));
+    EXPECT_TRUE(is_listed("terminals", false));
+
+    const std::vector<std::string> names = {"workspace", "terminals", "mac", "mission",
+                                            "review",    "classic",   "mine"};
+    EXPECT_EQ(next_listed(names, "workspace", false), "terminals");
+    EXPECT_EQ(next_listed(names, "review", false), "mine");  // Classic is skipped
+    EXPECT_EQ(next_listed(names, "review", true), "classic");
+    EXPECT_EQ(next_listed(names, "mine", false), "workspace");  // wraps
+    EXPECT_EQ(next_listed(names, "classic", false), "mine");    // leaving the fun layout
+    EXPECT_EQ(next_listed(names, "gone", false), "workspace");  // not in the list: the first
+    EXPECT_EQ(next_listed({"classic"}, "classic", false), "classic");
+    EXPECT_EQ(next_listed({}, "x", false), "");
+}
+
+// A saved layout that no longer ships opens its replacement.
+TEST(LayoutStyles, RemovedLayoutsHaveReplacements) {
+    const auto tiling = replacement_for("tiling");
+    ASSERT_TRUE(tiling);
+    EXPECT_EQ(tiling->layout, "terminals");
+    EXPECT_TRUE(tiling->square_corners);
+    const auto cockpit = replacement_for("cockpit");
+    ASSERT_TRUE(cockpit);
+    EXPECT_EQ(cockpit->layout, "workspace");
+    EXPECT_FALSE(cockpit->square_corners);
+    for (const char* l : {"workspace", "terminals", "classic", "mission", "mine", ""})
+        EXPECT_FALSE(replacement_for(l)) << l;
 }

@@ -249,7 +249,7 @@ bool segmented(App::State& s, const char* id, std::string& value,
 // wallpaper with a menu bar, a window card and the Dock. Anything else: a plain frame with one
 // terminal.
 void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 size) {
-    if (style_layout_preview(d, name, a, size))  // Tiling, Cockpit, Classic
+    if (style_layout_preview(d, name, a, size))  // Classic
         return;
     const ImVec2 b(a.x + size.x, a.y + size.y);
     auto line = [&](float x, float y, float w, ImU32 c) {

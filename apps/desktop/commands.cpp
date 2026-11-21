@@ -1086,12 +1086,14 @@ void clone_mod(App::State& s, const std::string& arg) {
 // Switching, cloning and resetting layouts; mods.
 Outcome exec_layout_mod_command(App::State& s, const Command& c) {
     if (c.name == "layout.switch" || c.name == "layout") {
-        // `arg` names the layout; without one, the next in the list.
+        // `arg` names the layout; without one, the next listed one (fun layouts only when Settings >
+        // Look > Fun layouts is on).
         std::string next = c.arg;
         if (next.empty()) {
-            for (std::size_t i = 0; i < s.layouts.size(); ++i)
-                if (s.layouts[i].name == s.settings.layout)
-                    next = s.layouts[(i + 1) % s.layouts.size()].name;
+            std::vector<std::string> names;
+            for (const auto& l : s.layouts)
+                names.push_back(l.name);
+            next = ui::styles::next_listed(names, s.settings.layout, s.settings.styles.fun_layouts);
         }
         if (next.empty() && !s.layouts.empty())
             next = s.layouts.front().name;
@@ -1158,7 +1160,7 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         return exec_command(s, "app.picker");
     if (auto r = exec_theme_command(s, c.name, c.arg))  // appearance:*, theme.* (theme_commands.cpp)
         return *r;
-    if (auto r = exec_style_command(s, c.name, c.arg))  // Tiling, Cockpit, Classic (style_layouts.cpp)
+    if (auto r = exec_style_command(s, c.name, c.arg))  // Terminals' tools, Classic (style_layouts.cpp)
         return *r;
     for (const auto group :
          {exec_launch_command, exec_pane_command, exec_tab_space_command, exec_agent_command,

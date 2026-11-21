@@ -49,8 +49,7 @@ std::vector<Named> themes() {
                      0x818793, 0xf0a5ad, 0xbad5a2, 0xead2a1, 0xb0cbef, 0xcbb7e6, 0xa4d5db, 0xf0f0f2};
     graphite.status = std::array<th::Rgb, 3>{0xe5c07b, 0xf0705f, 0x76a8ff};
     out.push_back({"graphite", input_of(th::derive(graphite))});
-    for (const char* name : {"mac-dusk", "mac-dawn", "cockpit-night", "cockpit-day", "phosphor-green",
-                             "phosphor-amber", "phosphor-paper"}) {
+    for (const char* name : {"mac-dusk", "mac-dawn", "phosphor-green", "phosphor-amber", "phosphor-paper"}) {
         const auto t = th::parse(read_file(std::string(AGENTDESK_OWN_THEMES_DIR) + "/" + name + ".json"));
         EXPECT_TRUE(t) << name;
         if (t)
@@ -118,7 +117,7 @@ TEST(WindowButtons, FollowTheTheme) {
     EXPECT_NE(midnight.fill[0], paper.fill[0]);
     EXPECT_NE(midnight.fill[2], paper.fill[2]);
     for (const auto& [name, in] : all) {
-        if (name != "cockpit-night" && name != "midnight")
+        if (name != "midnight")
             continue;
         const wb::Colors col = wb::derive(in);
         EXPECT_LE(angle_to(c::hue_of(col.fill[0]), c::hue_of(in.blocked)), 12.0) << name;
@@ -133,7 +132,7 @@ TEST(WindowButtons, FollowTheTheme) {
 TEST(WindowButtons, MonochromeAndLightThemes) {
     for (const auto& [name, in] : themes()) {
         const wb::Colors col = wb::derive(in);
-        if (name == "paper" || name == "mac-dawn" || name == "phosphor-paper" || name == "cockpit-day")
+        if (name == "paper" || name == "mac-dawn" || name == "phosphor-paper")
             for (const auto f : col.fill)
                 EXPECT_LT(c::relative_luminance(f), c::relative_luminance(in.bar)) << name;
     }

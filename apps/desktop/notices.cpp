@@ -150,7 +150,7 @@ void draw_toasts(App::State& s) {
     const float pill = draw_update_pill(s);
     float y = vp->WorkPos.y + vp->WorkSize.y - px(16) - pill;
     // Each style says where notes go: the Mac layout keeps its Dock at the bottom, so they drop in
-    // under the menu bar, top right; Classic and Cockpit keep their status line or log clear.
+    // under the menu bar, top right; Classic keeps its status line clear.
     const ui::styles::ToastArea area = style_toast_area(s);
     const bool top = area.top;
     if (top)

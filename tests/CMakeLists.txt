@@ -37,8 +37,7 @@ agentdesk_executable(unit_tests
     unit/theme_file_test.cpp
     unit/ambient_test.cpp
     unit/layout_styles_test.cpp
-    unit/tiling_layout_test.cpp
-    unit/cockpit_test.cpp
+    unit/terminals_options_test.cpp
     unit/classic_layout_test.cpp
     unit/window_buttons_test.cpp
     unit/layout_tips_test.cpp

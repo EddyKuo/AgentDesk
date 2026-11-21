@@ -221,7 +221,7 @@ struct Settings {
     // Tint by agent state (ambient.cpp): "off" or "subtle"; also a cool tint for finished agents.
     std::string ambient = "off";
     bool ambient_done = false;
-    StyleSettings styles;  // Tiling, Cockpit and Classic keys (style_layouts.hpp)
+    StyleSettings styles;  // Terminals' options, Fun layouts and Classic keys (style_layouts.hpp)
     // First-use tips (layout_tips.cpp): on unless turned off; the cards already seen (layout names
     // and "focus").
     bool tips = true;
@@ -399,11 +399,11 @@ inline constexpr CommandInfo kCommands[] = {
     {"theme.new", "New theme..."},
     {"theme.edit", "Edit current theme..."},
     {"theme.folder", "Open the themes folder"},
-    // the style layouts
+    // layout options and keyboard tools
     {"pane.split:auto", "Split along the longer side"},
-    {"tiling.resize_mode", "Tiling: resize panes with the keyboard"},
-    {"tiling.gaps", "Tiling: gaps off / on"},
-    {"cockpit.reset_today", "Cockpit: set Done today back to 0"},
+    {"terminals.resize_mode", "Resize panes with the keyboard"},
+    {"terminals.gaps", "Terminals: gaps off / on"},
+    {"terminals.corners", "Terminals: square / round corners"},
     {"classic.menu", "Classic: open the menu bar"},
     {"classic.effects", "Classic: screen effects off / light / full"},
     {"layout.tips", "Tips for this layout"},
@@ -970,7 +970,7 @@ struct App::State {
         std::string selected;
         bool focus_list = false;
     } timeline;
-    StyleUi styles;  // Tiling, Cockpit and Classic (style_layouts.hpp)
+    StyleUi styles;  // the resize mode, agent state changes, Classic (style_layouts.hpp)
     // First-use tips (layout_tips.cpp).
     struct LayoutTips {
         std::string open_key;   // the card shown now ("" none)
@@ -1187,9 +1187,9 @@ float clear_of_traffic_lights(const App::State& s, float x, float top, float bot
 ui::window_buttons::Colors window_button_colors(ImU32 bar);
 ImU32 window_button_color(int kind, ImU32 bar);  // kind 0 close, 1 minimize, 2 zoom
 ImU32 window_button_glyph(int kind, ImU32 bar);
-// How a layout draws its window buttons: round (most), outlined rings (Cockpit), flat squares
-// (Tiling).
-enum class WindowButtonLook { kRound, kRing, kSquare };
+// How a layout draws its window buttons: round (most), small flat squares (Terminals with square
+// corners).
+enum class WindowButtonLook { kRound, kSquare };
 // One window button (kind 0 close with a cross, 1 minimize with a bar, 2 zoom with a plus) of radius
 // `r` centred on `c`, in the theme's colours for `bar` (0: the chrome); the window buttons and the
 // Mac layout's inner window draw theirs with it.

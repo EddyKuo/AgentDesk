@@ -761,8 +761,8 @@ void draw_classic_sidebar(App::State& s, ImVec2 pos, float w, float h) {
         const auto loc = s.ws.find(id);
         std::string who = loc.space >= 0 ? s.ws.space_title(loc.space, cwds) : std::string();
         who += (who.empty() ? "" : "/") + program_of(s.views_by_id[id]).name;
-        std::string when;  // since its state last changed (tracked every tick, cockpit_tick)
-        if (const auto ch = s.styles.cockpit.changed_at.find(id); ch != s.styles.cockpit.changed_at.end()) {
+        std::string when;  // since its state last changed (tracked every tick, track_state_changes)
+        if (const auto ch = s.styles.changes.changed_at.find(id); ch != s.styles.changes.changed_at.end()) {
             const long long m = std::max(0LL, now_ms_steady() - ch->second) / 60000;
             when = m < 60 ? std::to_string(m) + "m" : std::to_string(m / 60) + "h";
         }

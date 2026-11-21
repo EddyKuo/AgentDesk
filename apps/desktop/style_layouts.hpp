@@ -1,8 +1,8 @@
 #pragma once
-// The style layouts (Tiling, Cockpit, Classic) as agent-ui's shared files see them: their ui.json
-// settings, their per-window state, and the hooks frame.cpp, panes.cpp, notices.cpp, commands.cpp
-// and the settings pages call. Each style draws in its own file (tiling_layout.cpp,
-// cockpit_layout.cpp, classic_layout.cpp); style_layouts.cpp dispatches to them.
+// The layouts' style options as agent-ui's shared files see them: their ui.json settings, their
+// per-window state, and the hooks frame.cpp, panes.cpp, notices.cpp, commands.cpp and the settings
+// pages call. Terminals' options and resize mode are in terminals_options.cpp, Classic draws in
+// classic_layout.cpp; style_layouts.cpp dispatches to them.
 #include <chrono>
 #include <map>
 #include <optional>
@@ -12,7 +12,6 @@
 #include <imgui.h>
 #include <nlohmann/json.hpp>
 
-#include "agentdesk/ui/cockpit.hpp"
 #include "agentdesk/ui/host_client.hpp"
 #include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/layout_styles.hpp"
@@ -24,14 +23,12 @@ namespace agentdesk::desktop {
 
 // The styles' keys in ui.json (all optional; defaults as below).
 struct StyleSettings {
-    // Tiling
-    float tiling_gaps = 8.0f;            // window edge to panes and between panes, design px 0..24
-    bool tiling_gaps_on = true;          // tiling.gaps turns them off and on
-    std::string tiling_titles = "auto";  // pane title rows: auto (2+ panes), always, never
-    bool tiling_focus_follows_mouse = false;
-    // Cockpit
-    std::string cockpit_effects = "full";  // "full" (grid and glow) or "off"
-    ui::cockpit::DoneToday cockpit_done;   // cockpit_done_today: {"date", "count"}
+    // Terminals (once the Tiling layout): straight pane corners, the gaps and their toggle.
+    bool terminals_square = false;
+    float terminals_gaps = 8.0f;    // window edge to panes and between panes, design px 0..24
+    bool terminals_gaps_on = true;  // terminals.gaps turns them off and on
+    // Settings > Look > Fun layouts: Classic (and Garden) in the layout cards and the cycle.
+    bool fun_layouts = false;
     // Classic
     std::string classic_effects = "light";  // "off", "light" (scan lines, vignette), "full" (+ glow)
     bool classic_mono_terminal = true;      // terminal colours put on the theme's one-colour ramp
@@ -39,23 +36,20 @@ struct StyleSettings {
 
 // What the styles remember between frames (one window).
 struct StyleUi {
-    struct Tiling {
-        bool resizing = false;    // the keyboard resize mode is on
+    // The keyboard resize mode (any layout but Focus; Terminals binds Alt+R to it).
+    struct Resize {
+        bool on = false;
         bool popup_open = false;  // its keyboard-holding popup is open
-        ImVec2 hint_min{};        // where the bar drew the mode's hint (the popup sits on it)
+        ImVec2 hint_min{};        // where its hint was drawn (the popup sits on it)
         ImVec2 hint_size{};
         std::chrono::steady_clock::time_point flash_until{};  // a resize that could not move
-        std::string hover_pane;  // focus follows mouse: the pane under the pointer, since when
-        std::chrono::steady_clock::time_point hover_since{};
-    } tiling;
-    struct Cockpit {
-        // Each agent's last state and when it changed (steady ms), and its first sighting.
+    } resize;
+    // Each running agent's last state and when it last changed (steady ms), checked every tick
+    // whatever layout shows. Classic's agent list shows "3m"; Inbox and Stage can use it too.
+    struct Changes {
         std::map<std::string, ui::Attention> last;
         std::map<std::string, long long> changed_at;
-        ui::cockpit::EventLog log;
-        float shown[3] = {0, 0, 0};  // the gauges' eased values: working, needs you, done today
-        bool shown_set = false;
-    } cockpit;
+    } changes;
     struct Classic {
         int menu = -1;                // the open menu (index among the shown titles), -1: none
         int open_request = -1;        // classic.menu asked for this one, opened on the next draw
@@ -123,30 +117,17 @@ bool look_style_options(App::State& s);
 // pane.resize:<dir>:<px>). nullopt: not one of them; "" ran; else why it failed.
 std::optional<std::string> exec_style_command(App::State& s, const std::string& name, const std::string& arg);
 
-// ------------------------------------------------------------ tiling_layout.cpp
-void draw_tiling_bar(App::State& s, ImVec2 pos, float w, float h);
-StyledPane draw_tiling_pane(App::State& s, const std::string& id, const ui::SessionView& v, ImVec2 pos,
-                            ImVec2 max, const ui::styles::PaneLook& look, bool focused, bool connected);
-bool draw_tiling_no_tab(App::State& s, ImDrawList* dl, ImVec2 pos, ImVec2 size);
-void draw_tiling_overlay(App::State& s);
-std::optional<ui::layout::Node> tiling_layout_tree(const App::State& s, const ui::layout::Node& tree);
-void tiling_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
-bool look_tiling_options(App::State& s);
-std::optional<std::string> exec_tiling_command(App::State& s, const std::string& name);
-
-// ------------------------------------------------------------ cockpit_layout.cpp
-void draw_cockpit_header(App::State& s, ImVec2 pos, float w, float h);
-void draw_cockpit_gauges(App::State& s, ImVec2 pos, float w, float h);
-void draw_cockpit_roster(App::State& s, ImVec2 pos, float w, float h);
-void draw_cockpit_log(App::State& s, ImVec2 pos, float w, float h);
-void draw_cockpit_backdrop(App::State& s);
-void draw_cockpit_overlay(App::State& s);
-std::optional<ui::layout::Node> cockpit_layout_tree(const App::State& s, const ui::layout::Node& tree);
-void cockpit_tick(App::State& s);
-float cockpit_toast_offset(const App::State& s);
-void cockpit_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
-bool look_cockpit_options(App::State& s);
-std::optional<std::string> exec_cockpit_command(App::State& s, const std::string& name);
+// ------------------------------------------------------------ terminals_options.cpp
+// The resize mode's hint and keyboard (drawn over everything).
+void draw_resize_mode(App::State& s);
+// Terminals' options put on its tree (nullopt: as the file has it).
+std::optional<ui::layout::Node> terminals_layout_tree(const App::State& s, const ui::layout::Node& tree);
+// Terminals with the gaps off: neighbouring panes share one edge line.
+bool terminals_gapless(const App::State& s);
+bool look_terminals_options(App::State& s);
+std::optional<std::string> exec_terminals_command(App::State& s, const std::string& name);
+// Keeps StyleUi::changes up to date (every tick).
+void track_state_changes(App::State& s);
 
 // ------------------------------------------------------------ classic_layout.cpp
 void draw_classic_menubar(App::State& s, ImVec2 pos, float w, float h);

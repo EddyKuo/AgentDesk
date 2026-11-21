@@ -13,7 +13,7 @@ namespace {
 // - default: radius 10, a 1 px border (the accent when focused), a 30 px header;
 // - Terminals: radius 12, a quiet border and focus edge (its own colours), its own 38 px header;
 // - Focus mode: no frame, the default header only while the pointer rests at the top;
-// - Tiling, Classic and Cockpit: drawn by their own files (draw_styled_pane).
+// - Classic: drawn by its own file (draw_styled_pane).
 enum class PaneStyle : std::uint8_t { kDefault, kTerminals, kFocus, kStyled };
 
 PaneStyle pane_style(App::State& s) {
@@ -524,8 +524,26 @@ void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected, const la
         return;
     }
     s.pane_rects = ui::layout_tree(tab->root, area, gap);
-    for (const auto& [id, r] : s.pane_rects)
-        draw_pane(s, id, r, connected, look);
+    // Terminals without gaps: each pane reaches one pixel into its right and lower neighbour, so
+    // two neighbours share one edge line instead of drawing two; the focused pane's edge goes on
+    // top afterwards.
+    const bool shared_edges = terminals_gapless(s);
+    for (const auto& [id, r] : s.pane_rects) {
+        ui::Rect d = r;
+        if (shared_edges) {
+            if (d.x + d.w < area.x + area.w - 0.5f)
+                d.w += 1.0f;
+            if (d.y + d.h < area.y + area.h - 0.5f)
+                d.h += 1.0f;
+        }
+        draw_pane(s, id, d, connected, look);
+    }
+    if (shared_edges)
+        if (const auto it = s.pane_rects.find(s.ws.focused_session()); it != s.pane_rects.end()) {
+            const ui::Rect& r = it->second;
+            dl->AddRect(ImVec2(r.x, r.y), ImVec2(r.x + r.w, r.y + r.h), terminals_look().pane_focus,
+                        px(look.radius));
+        }
     if (!s.drag_pane.empty())
         handle_pane_drag(s);
     draw_dividers(dl, *tab, area, gap);

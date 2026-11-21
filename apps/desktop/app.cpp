@@ -81,8 +81,8 @@ ui::telemetry::Config telemetry_config(App::State& s) {
     for (const auto& [name, pal] : preset_palettes())
         c.shipped_themes.emplace_back(std::string(kPresetPrefix) + name);
     // The shipped theme files (third_party/herdr/themes and libs/ui/themes).
-    for (const char* id : {"atom-one-dark", "mac-dusk", "mac-dawn", "phosphor-green", "phosphor-amber",
-                           "phosphor-paper", "cockpit-night", "cockpit-day"})
+    for (const char* id :
+         {"atom-one-dark", "mac-dusk", "mac-dawn", "phosphor-green", "phosphor-amber", "phosphor-paper"})
         c.shipped_themes.emplace_back(id);
     c.mod_kinds = mod_kinds;
     // keys.json differs from the shipped one.

@@ -349,7 +349,7 @@ void window_drag_area(App::State& s, ImVec2 a, ImVec2 b) {
 // Close, minimize and zoom as three buttons, left to right, at the layout's traffic_lights point:
 // 12 px buttons 8 px apart in colours worked out from the theme (libs/ui window_buttons). The
 // glyphs show only while the pointer is over the group, and an inactive window mutes them. Most
-// layouts draw them round; Cockpit as outlined rings, Tiling as small flat squares.
+// layouts draw them round; Terminals with square corners as small flat squares.
 namespace {
 constexpr float kLightSize = 12.0f;
 constexpr float kLightGap = 8.0f;
@@ -373,10 +373,7 @@ ImVec2 traffic_lights_point(const App::State& s) {
 WindowButtonLook light_look(const App::State& s) {
     if (s.settings.focus_on)
         return WindowButtonLook::kRound;
-    const std::string& st = s.layout().style;
-    if (st == "cockpit")
-        return WindowButtonLook::kRing;
-    if (st == "tiling")
+    if (s.layout().style == "terminals" && s.settings.styles.terminals_square)
         return WindowButtonLook::kSquare;
     return WindowButtonLook::kRound;
 }
@@ -451,32 +448,15 @@ void paint_round_button(ImDrawList* dl, ImVec2 c, float r, int kind, bool lit, b
     ImU32 fill = lit ? col_of(colors.fill[ki]) : col_of(colors.muted);
     if (held)
         fill = mix(fill, IM_COL32(0, 0, 0, 255), 0.18f);
-    ImU32 ink = col_of(colors.glyph[ki], 225);
-    // Glyph half-length: smaller inside a ring or a square, so it clears the edge.
-    const float g = r * (look == WindowButtonLook::kRound  ? 0.5f
-                         : look == WindowButtonLook::kRing ? 0.34f
-                                                           : 0.4f);
-    float thick = std::max(1.0f, r * 0.22f);
+    const ImU32 ink = col_of(colors.glyph[ki], 225);
+    // Glyph half-length: smaller inside a square, so it clears the edge.
+    const float g = r * (look == WindowButtonLook::kRound ? 0.5f : 0.4f);
+    const float thick = std::max(1.0f, r * 0.22f);
     switch (look) {
         case WindowButtonLook::kRound:
             dl->AddCircleFilled(c, r, fill, 24);
             dl->AddCircle(c, r - 0.5f, mix(fill, IM_COL32(0, 0, 0, 255), 0.22f), 24, 1.0f);
             break;
-        case WindowButtonLook::kRing: {
-            // A neon ring: a soft halo, the ring, and a faint fill that brightens under the pointer.
-            const float w = std::max(1.0f, std::round(r * 0.26f));
-            if (lit) {
-                if (!g_pal->light)  // a glow reads as a smudge on a light theme
-                    dl->AddCircle(c, r + w * 0.4f, alpha(fill, 0x2c), 24, w * 2.0f);
-                dl->AddCircleFilled(c, r - w, alpha(fill, glyph ? 0x50 : 0x1a), 24);
-            } else {
-                fill = alpha(g_pal->focus, 0x66);  // an inactive window: the cockpit's line colour, faint
-            }
-            dl->AddCircle(c, r - w * 0.5f, fill, 24, w);
-            ink = lit ? mix(fill, g_pal->text, 0.25f) : fill;
-            thick = std::max(1.0f, r * 0.2f);
-            break;
-        }
         case WindowButtonLook::kSquare: {
             const float h = std::round(r * 0.84f);
             dl->AddRectFilled(ImVec2(c.x - h, c.y - h), ImVec2(c.x + h, c.y + h), fill,

@@ -117,7 +117,7 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
     } else if (m == "files" || m == "changes") {
         draw_side_panel(s, pos, size);
     } else if (draw_style_block(s, n, pos, size)) {
-        // a Tiling, Cockpit or Classic block
+        // a Classic block
     } else if (m == "mac-menubar") {
         draw_mac_menubar(s, pos, size.x, size.y);
     } else if (m == "mac-window-title") {
@@ -221,7 +221,7 @@ void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
     sync_panel(s, l);
     // The Mac layout places an adjusted copy while its window fills the desktop or has no tab;
     // clicks still go to the layout's own tree (the ids are the same).
-    // The other styles may adjust the tree the same way (Tiling's gaps, Cockpit's narrow window).
+    // The other styles may adjust the tree the same way (Terminals' gaps and corners).
     const std::optional<lay::Node> mac =
         l.style == "mac" ? mac_layout_tree(s, l.tree) : style_layout_tree(s, l.tree);
     const lay::Node& tree = mac ? *mac : l.tree;

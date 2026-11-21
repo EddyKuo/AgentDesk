@@ -13,7 +13,7 @@ struct ModStyle {
 
 // Every mod name a style's renderer draws, and the style it selects.
 // clang-format off
-constexpr std::array<ModStyle, 22> kModStyles{{
+constexpr std::array<ModStyle, 16> kModStyles{{
     {"mac-menubar", "mac"},
     {"mac-dock", "mac"},
     {"mac-window-title", "mac"},
@@ -24,12 +24,6 @@ constexpr std::array<ModStyle, 22> kModStyles{{
     {"classic-status", "classic"},
     {"classic-sidebar", "classic"},
     {"classic-pane", "classic"},
-    {"tiling-bar", "tiling"},
-    {"tiling-pane", "tiling"},
-    {"cockpit-header", "cockpit"},
-    {"cockpit-gauges", "cockpit"},
-    {"cockpit-roster", "cockpit"},
-    {"cockpit-log", "cockpit"},
     {"focus-strip", "focus"},  // Focus mode's tree
     {"mission-bar", "mission"},
     {"mission-wall", "mission"},
@@ -43,14 +37,15 @@ struct Named {
     std::string_view layout;
     std::string_view shown;
 };
-constexpr std::array<Named, 8> kNames{{{"workspace", "AgentDesk"},
+constexpr std::array<Named, 6> kNames{{{"workspace", "AgentDesk"},
                                        {"terminals", "Terminals"},
                                        {"mac", "AgentDesk Mac"},
                                        {"mission", "Mission Control"},
                                        {"review", "Review"},
-                                       {"classic", "AgentDesk Classic"},
-                                       {"tiling", "AgentDesk Tiling"},
-                                       {"cockpit", "AgentDesk Cockpit"}}};
+                                       {"classic", "AgentDesk Classic"}}};
+
+// The fun layouts (Garden joins Classic when it ships).
+constexpr std::array<std::string_view, 2> kFunLayouts{{"classic", "garden"}};
 }  // namespace
 
 std::string_view style_of_mod(std::string_view mod) {
@@ -82,8 +77,48 @@ std::string display_name(std::string_view layout) {
     return std::string(layout);
 }
 
+bool is_fun_layout(std::string_view layout) {
+    for (const auto f : kFunLayouts)
+        if (f == layout)
+            return true;
+    return false;
+}
+
+bool is_listed(std::string_view layout, bool fun_layouts, std::string_view current) {
+    return fun_layouts || layout == current || !is_fun_layout(layout);
+}
+
+std::string next_listed(const std::vector<std::string>& names, std::string_view current, bool fun_layouts) {
+    const auto n = names.size();
+    std::size_t at = n;
+    for (std::size_t i = 0; i < n; ++i)
+        if (names[i] == current)
+            at = i;
+    if (at == n) {
+        for (const auto& name : names)
+            if (is_listed(name, fun_layouts))
+                return name;
+        return names.empty() ? std::string() : names.front();
+    }
+    for (std::size_t k = 1; k <= n; ++k) {
+        const std::string& cand = names[(at + k) % n];
+        // The current one only counts as listed for its own card, not for the cycle.
+        if (is_listed(cand, fun_layouts))
+            return cand;
+    }
+    return std::string(current);
+}
+
+std::optional<Replacement> replacement_for(std::string_view removed_layout) {
+    if (removed_layout == "tiling")
+        return Replacement{"terminals", true};
+    if (removed_layout == "cockpit")
+        return Replacement{"workspace", false};
+    return std::nullopt;
+}
+
 bool has_clock(std::string_view style) {
-    return style == "mac" || style == "classic" || style == "tiling" || style == "cockpit";
+    return style == "mac" || style == "classic";
 }
 
 PaneLook pane_look(std::string_view style, const layout::PaneFrame* frame) {
@@ -91,15 +126,9 @@ PaneLook pane_look(std::string_view style, const layout::PaneFrame* frame) {
     if (style == "terminals") {
         l.radius = 12.0f;
         l.header = 38.0f;
-    } else if (style == "tiling") {
-        l.radius = 0.0f;
-        l.focus = {2.0f, "accent"};
-        l.header = 18.0f;
     } else if (style == "classic") {
         l.radius = 0.0f;
         l.header = 20.0f;
-    } else if (style == "cockpit") {
-        l.radius = 4.0f;
     }
     if (frame == nullptr)
         return l;
@@ -121,9 +150,7 @@ ToastArea toast_area(std::string_view style, float bottom_block) {
         return {true, 28.0f + 10.0f};  // under the menu bar
     if (style == "classic")
         return {false, 22.0f};  // over the status line
-    if (style == "cockpit")
-        return {false, bottom_block};
-    return {};
+    return {false, bottom_block};
 }
 
 bool effects_allowed(std::string_view setting, bool light_theme, bool high_contrast) {
