@@ -19,7 +19,7 @@
 // shown as that machine (pipe: target); --mods enables mods (example mods are copied on first run).
 // The PowerShell spellings (-Out, -WaitSeconds ...) are accepted too. agent-ui writes its
 // --report next to the PNG (same name, .json). Environment: SHOT_CTL_HOST (start the host with
-// agentctl first), SHOT_EXTRA ("profile:name,..." sessions created before the UI starts),
+// agentctl first), SHOT_EXTRA ("profile:name[:subfolder],..." sessions created before the UI starts),
 // SHOT_DEBUG (also save the first session's last lines and host.log next to the PNG),
 // SHOT_APPEARANCE ("light" or "dark" instead of the system's).
 #include <windows.h>
@@ -281,6 +281,23 @@ Json shot_profiles() {
                             {"executable", ps},
                             {"args", {"-NoLogo", "-NoProfile", "-NoExit", "-Command", script}}});
     }
+    // "state-cleared": reported working once, then cleared its status (an agent shown as Unknown,
+    // with its last state kept: Garden's faded creature).
+    profiles.push_back({{"id", "state-cleared"},
+                        {"name", "state cleared"},
+                        {"executable", ps},
+                        {"args",
+                         {"-NoLogo", "-NoProfile", "-NoExit", "-Command",
+                          "[Console]::Write([char]27 + ']7501;state=working' + [char]7); Start-Sleep -Milliseconds 300; "
+                          "[Console]::Write([char]27 + ']7501;state=clear' + [char]7)"}}});
+    // "state-done-later": working at first, done 5 s later (a Done the UI sees happen).
+    profiles.push_back({{"id", "state-done-later"},
+                        {"name", "state done later"},
+                        {"executable", ps},
+                        {"args",
+                         {"-NoLogo", "-NoProfile", "-NoExit", "-Command",
+                          "[Console]::Write([char]27 + ']7501;state=working' + [char]7); Start-Sleep -Seconds 5; "
+                          "[Console]::Write([char]27 + ']7501;state=done' + [char]7)"}}});
     // "state-later": working at first, blocked 10 s later (an agent that needs you while the UI is
     // up: Focus's edge glow, Stage's glow and ordering).
     profiles.push_back({{"id", "state-later"},
@@ -350,11 +367,20 @@ Json start_remote_host(const fs::path& ctl, const fs::path& data, const fs::path
 void prepare_host_from_env(const fs::path& ctl, const std::wstring& pipe, const std::wstring& cwd) {
     if (env(L"SHOT_CTL_HOST"))
         dk::run(ctl, {L"--pipe", pipe, L"list"});
-    if (const auto extra = env(L"SHOT_EXTRA")) {  // "profile:name,profile:name"
+    // "profile:name,profile:name"; "profile:name:folder" starts that one in a subfolder of the cwd
+    // (made if missing), so it lands in a space of its own.
+    if (const auto extra = env(L"SHOT_EXTRA")) {
         for (const auto& e : split(*extra, L',')) {
             const auto pn = split(e, L':');
-            if (pn.size() >= 2)
-                dk::run(ctl, {L"--pipe", pipe, L"run", L"--profile", pn[0], L"--name", pn[1], L"--cwd", cwd});
+            if (pn.size() < 2)
+                continue;
+            std::wstring at = cwd;
+            if (pn.size() >= 3) {
+                fs::path sub = fs::path(cwd) / pn[2];
+                fs::create_directories(sub);
+                at = sub.native();
+            }
+            dk::run(ctl, {L"--pipe", pipe, L"run", L"--profile", pn[0], L"--name", pn[1], L"--cwd", at});
         }
     }
 }

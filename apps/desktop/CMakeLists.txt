@@ -41,6 +41,7 @@ agentdesk_executable(agent-ui WIN32
     focus_mode.cpp
     stage_layout.cpp
     inbox_layout.cpp
+    garden_layout.cpp
     layout_tips.cpp
     ui_tokens.cpp
     agent-ui.manifest)

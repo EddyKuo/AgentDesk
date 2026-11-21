@@ -13,7 +13,7 @@ struct ModStyle {
 
 // Every mod name a style's renderer draws, and the style it selects.
 // clang-format off
-constexpr std::array<ModStyle, 22> kModStyles{{
+constexpr std::array<ModStyle, 24> kModStyles{{
     {"mac-menubar", "mac"},
     {"mac-dock", "mac"},
     {"mac-window-title", "mac"},
@@ -36,6 +36,8 @@ constexpr std::array<ModStyle, 22> kModStyles{{
     {"pair-bar", "pair"},
     {"pair-stage", "pair"},
     {"pair-prompt", "pair"},
+    {"garden-bar", "garden"},
+    {"garden-scene", "garden"},
 }};
 // clang-format on
 
@@ -43,16 +45,17 @@ struct Named {
     std::string_view layout;
     std::string_view shown;
 };
-constexpr std::array<Named, 8> kNames{{{"workspace", "AgentDesk"},
+constexpr std::array<Named, 9> kNames{{{"workspace", "AgentDesk"},
                                        {"terminals", "Terminals"},
                                        {"mac", "AgentDesk Mac"},
                                        {"stage", "Stage"},
                                        {"inbox", "Inbox"},
                                        {"review", "Review"},
                                        {"pair", "Pair"},
-                                       {"classic", "AgentDesk Classic"}}};
+                                       {"classic", "AgentDesk Classic"},
+                                       {"garden", "Garden"}}};
 
-// The fun layouts (Garden joins Classic when it ships).
+// The fun layouts.
 constexpr std::array<std::string_view, 2> kFunLayouts{{"classic", "garden"}};
 }  // namespace
 

@@ -43,6 +43,7 @@ agentdesk_library(agentdesk_ui
     src/window_buttons.cpp
     src/layout_tips.cpp
     src/design_tokens.cpp
+    src/garden.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/layout_defaults.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -52,7 +53,7 @@ target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agent
 
 # The shipped layout files (kept verbatim), compiled in as text for layout::builtin_text as
 # kPresetMain, kPresetTerminals (herdr-app's, third_party/herdr/layouts) and kPresetMac, kPresetFocus,
-# kPresetStage, kPresetInbox, kPresetReview, kPresetPair, kPresetClassic (AgentDesk's own,
+# kPresetStage, kPresetInbox, kPresetReview, kPresetPair, kPresetClassic, kPresetGarden (AgentDesk's own,
 # layouts/ here).
 set(_layout_defaults "")
 foreach(_file
@@ -64,7 +65,8 @@ foreach(_file
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/review.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/inbox.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/pair.json"
-        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/classic.json")
+        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/classic.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/garden.json")
     get_filename_component(_name "${_file}" NAME_WE)
     file(READ "${_file}" _text)
     string(SUBSTRING "${_name}" 0 1 _first)

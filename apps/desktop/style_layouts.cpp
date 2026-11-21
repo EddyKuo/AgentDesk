@@ -127,6 +127,10 @@ bool draw_style_block(App::State& s, const lay::Node& n, ImVec2 pos, ImVec2 size
         draw_classic_status(s, pos, size.x, size.y);
     else if (m == "classic-sidebar")
         draw_classic_sidebar(s, pos, size.x, size.y);
+    else if (m == "garden-bar")
+        draw_garden_bar(s, pos, size.x, size.y);
+    else if (m == "garden-scene")
+        draw_garden_scene(s, pos, size);
     else
         return false;
     return true;
@@ -170,6 +174,8 @@ bool style_layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVe
         classic_layout_preview(d, a, size);
     else if (name == "pair")
         pair_layout_preview(d, a, size);
+    else if (name == "garden")
+        garden_layout_preview(d, a, size);
     else
         return false;
     return true;
@@ -227,6 +233,8 @@ std::optional<std::string> exec_style_command(App::State& s, const std::string& 
         return std::string();
     }
     if (auto r = exec_terminals_command(s, name))
+        return r;
+    if (auto r = exec_garden_command(s, name, arg))
         return r;
     return exec_classic_command(s, name);
 }

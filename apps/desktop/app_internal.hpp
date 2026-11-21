@@ -401,6 +401,7 @@ inline constexpr CommandInfo kCommands[] = {
     {"inbox.order:newest", "Inbox: newest waiting first"},
     {"inbox.order:oldest", "Inbox: longest waiting first"},
     {"inbox.unsnooze", "Inbox: show snoozed cards again"},
+    {"garden.toggle", "Garden: your agents as little creatures"},
     {"review.toggle", "Review: show the agent's changes beside it (again: back)"},
     {"pair.toggle", "Pair: two agents side by side, one prompt for both (again: back)"},
     {"pair.swap", "Pair: swap the left and right agents"},

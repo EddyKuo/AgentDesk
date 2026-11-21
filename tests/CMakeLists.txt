@@ -31,6 +31,7 @@ agentdesk_executable(unit_tests
     unit/mission_test.cpp
     unit/stage_test.cpp
     unit/inbox_test.cpp
+    unit/garden_test.cpp
     unit/review_test.cpp
     unit/pair_test.cpp
     unit/timeline_test.cpp

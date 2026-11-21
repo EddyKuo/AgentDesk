@@ -35,6 +35,8 @@ TEST(LayoutStyles, ModTableNamesEveryStyleMod) {
         EXPECT_EQ(style_of_mod(m), "") << m;
     for (const char* m : {"review-head", "review-changes", "review-commit"})
         EXPECT_EQ(style_of_mod(m), "review") << m;
+    for (const char* m : {"garden-bar", "garden-scene"})
+        EXPECT_EQ(style_of_mod(m), "garden") << m;
     for (const char* m : {"", "tabs", "spaces", "agents", "workspace-chrome", "files", "my-own-mod"})
         EXPECT_EQ(style_of_mod(m), "") << m;
 }
@@ -48,6 +50,7 @@ TEST(LayoutStyles, ShippedLayoutsKeepTheirStyles) {
     EXPECT_EQ(style_of_tree(layout::builtin("stage")), "stage");
     EXPECT_EQ(style_of_tree(layout::builtin("review")), "review");
     EXPECT_EQ(style_of_tree(layout::builtin("classic")), "classic");
+    EXPECT_EQ(style_of_tree(layout::builtin("garden")), "garden");
 }
 
 // A pane header mod picks a style too; Mac wins over the rest; otherwise the first one found.
@@ -75,6 +78,7 @@ TEST(LayoutStyles, DisplayNames) {
     EXPECT_EQ(display_name("stage"), "Stage");
     EXPECT_EQ(display_name("review"), "Review");
     EXPECT_EQ(display_name("classic"), "AgentDesk Classic");
+    EXPECT_EQ(display_name("garden"), "Garden");
     EXPECT_EQ(display_name("my-layout"), "my-layout");
 }
 
@@ -154,23 +158,26 @@ TEST(LayoutStyles, Clocks) {
     EXPECT_FALSE(has_clock("terminals"));
 }
 
-// Classic (and Garden, when it ships) are fun layouts: out of the cards and the Ctrl+Shift+L cycle
+// Classic and Garden are fun layouts: out of the cards and the Ctrl+Shift+L cycle
 // until Settings > Look > Fun layouts is on; the layout showing always keeps its card.
 TEST(LayoutStyles, FunLayoutsStayOutOfTheListUntilTurnedOn) {
     EXPECT_TRUE(is_fun_layout("classic"));
     EXPECT_TRUE(is_fun_layout("garden"));
-    for (const char* l : {"workspace", "terminals", "mac", "stage", "review", "mine"})
+    for (const char* l : {"workspace", "terminals", "stage", "inbox", "review", "pair", "mac", "mine"})
         EXPECT_FALSE(is_fun_layout(l)) << l;
     EXPECT_FALSE(is_listed("classic", false));
     EXPECT_TRUE(is_listed("classic", true));
     EXPECT_TRUE(is_listed("classic", false, "classic"));
     EXPECT_TRUE(is_listed("terminals", false));
 
-    const std::vector<std::string> names = {"workspace", "terminals", "mac", "stage",
-                                            "review",    "classic",   "mine"};
+    const std::vector<std::string> names = {"workspace", "terminals", "stage", "inbox",  "review",
+                                            "pair",      "mac",       "classic", "garden", "mine"};
     EXPECT_EQ(next_listed(names, "workspace", false), "terminals");
-    EXPECT_EQ(next_listed(names, "review", false), "mine");  // Classic is skipped
-    EXPECT_EQ(next_listed(names, "review", true), "classic");
+    EXPECT_EQ(next_listed(names, "review", false), "pair");
+    EXPECT_EQ(next_listed(names, "mac", false), "mine");  // Classic and Garden are skipped
+    EXPECT_EQ(next_listed(names, "mac", true), "classic");
+    EXPECT_EQ(next_listed(names, "classic", true), "garden");
+    EXPECT_EQ(next_listed(names, "garden", false), "mine");  // leaving Garden
     EXPECT_EQ(next_listed(names, "mine", false), "workspace");  // wraps
     EXPECT_EQ(next_listed(names, "classic", false), "mine");    // leaving the fun layout
     EXPECT_EQ(next_listed(names, "gone", false), "workspace");  // not in the list: the first
