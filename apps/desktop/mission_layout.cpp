@@ -368,6 +368,7 @@ bool draw_wall_state(App::State& s, ImVec2 pos, ImVec2 size, const Wall& w, std:
         StateCard card;
         card.framed = true;
         card.title = "No agents running";
+        card.art = tok::Art::kAgents;
         card.hint = "Start Claude Code or Codex in a terminal and it shows up here.";
         card.buttons = {{with_chord(s, "Start a program...", "agent.new"), "agent.new"},
                         {with_chord(s, "New terminal", "tab.new"), "tab.new"}};
@@ -387,6 +388,7 @@ bool draw_wall_state(App::State& s, ImVec2 pos, ImVec2 size, const Wall& w, std:
                      : f == "working" ? "Nothing is working"
                      : f == "done"    ? "Nothing has finished"
                                       : "Nothing is going on";
+        card.art = f == "blocked" ? tok::Art::kAllDone : tok::Art::kAgents;
         card.hint = std::to_string(w.tiles.size()) + (w.tiles.size() == 1 ? " agent is" : " agents are") +
                     " hidden by the filter.";
         card.link = "Show all";

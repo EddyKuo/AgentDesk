@@ -384,37 +384,26 @@ void draw_focus_pane(App::State& s, const std::string& id, ui::Rect r, bool conn
     ImGui::PopID();
 }
 
-// No tab open: a card that says how to start, with New terminal and Start a program buttons.
+// No tab open: a card that says how to start, with New terminal and Start a program buttons (the
+// shared empty state with its small terminal drawing); a spinner while agent-host connects.
 void draw_no_tab(App::State& s, ImDrawList* dl, ImVec2 pos, ImVec2 size, bool connected) {
-    dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), g_pal->card, px(12));
-    dl->AddRect(pos, ImVec2(pos.x + size.x, pos.y + size.y), g_pal->border, px(12));
-    const float fs = ImGui::GetFontSize();
-    const char* title = connected ? "Open a terminal" : "Connecting to agent-host...";
-    const ImVec2 tsz = s.fonts.ui_bold->CalcTextSizeA(fs * 1.4f, FLT_MAX, 0, title);
-    const float cx = pos.x + size.x * 0.5f;
-    const float cy = pos.y + size.y * 0.4f;
-    dl->AddText(s.fonts.ui_bold, fs * 1.4f, ImVec2(cx - tsz.x * 0.5f, cy - tsz.y), g_pal->text, title);
-    const char* hint =
-        "cd to your project, then run claude or codex. It keeps running after you close this window.";
-    const ImVec2 hsz = ImGui::CalcTextSize(hint);
-    dl->AddText(s.fonts.ui, fs, ImVec2(cx - hsz.x * 0.5f, cy + px(10)), g_pal->dim, hint);
-    if (!connected)
-        return;
-    const std::string label = "New terminal   " + s.keymap.chord_for("tab.new");
-    const std::string other = "Start a program...   " + s.keymap.chord_for("agent.new");
-    const float bw = ImGui::CalcTextSize(label.c_str()).x + px(36);
-    const float ow = ImGui::CalcTextSize(other.c_str()).x + px(36);
-    const float total = bw + px(10) + ow;
-    ImGui::SetCursorScreenPos(ImVec2(cx - total * 0.5f, cy + px(44)));
-    ImGui::PushStyleColor(ImGuiCol_Button, v4(g_pal->focus));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, v4(alpha(g_pal->focus, 220)));
-    ImGui::PushStyleColor(ImGuiCol_Text, v4(IM_COL32(255, 255, 255, 255)));
-    if (ImGui::Button(label.c_str(), ImVec2(bw, px(36))))
-        run_command(s, "tab.new");
-    ImGui::PopStyleColor(3);
-    ImGui::SameLine(0, px(10));
-    if (ImGui::Button(other.c_str(), ImVec2(ow, px(36))))
-        run_command(s, "agent.new");
+    (void)dl;
+    StateCard card;
+    card.framed = true;
+    card.title_size = ui::tokens::kTitle.size + 3.0f;
+    if (!connected) {
+        card.kind = CardKind::kLoading;
+        card.title = "Connecting to agent-host...";
+        card.hint = "Your terminals keep running while it starts.";
+    } else {
+        card.art = tok::Art::kTerminal;
+        card.title = "Open a terminal";
+        card.hint =
+            "cd to your project, then run claude or codex. It keeps running after you close this window.";
+        card.buttons.push_back({with_chord(s, "New terminal", "tab.new"), "tab.new", nullptr});
+        card.buttons.push_back({with_chord(s, "Start a program...", "agent.new"), "agent.new", nullptr});
+    }
+    draw_state_card(s, pos, size, card);
 }
 
 // Pane drag: once the pointer has moved 4 px, the pane under it is the target. Its outer 25 %

@@ -126,6 +126,29 @@ void card(ImDrawList* dl, ImVec2 a, ImVec2 b, float radius, int level, ImU32 fil
     }
 }
 
+void window_shadow(ImDrawList* dl, ImVec2 a, ImVec2 b, float radius, int level) {
+    const t::Elevation e = t::elevation(surface(g_pal->bg), level);
+    if (e.shadow_alpha <= 0 || high_contrast())
+        return;
+    dl->PushClipRectFullScreen();
+    // Rings of about 2 px, each stroked inside its own outline (ImGui strokes rectangles inward),
+    // so ring i covers [i, i + 1] steps outside the edge and none reaches into the window. No
+    // downward offset here: an offset ring would cross the window's top edge.
+    const float spread = px(e.shadow_spread);
+    const int steps = std::clamp(static_cast<int>(spread / 2.0f), 4, 12);
+    const float ring = spread / static_cast<float>(steps);
+    for (int i = 0; i < steps; ++i) {
+        const float k = (static_cast<float>(i) + 0.5f) / static_cast<float>(steps);
+        const float grow = ring * static_cast<float>(i + 1);
+        const int al = static_cast<int>(static_cast<float>(e.shadow_alpha) * 0.8f * (1.0f - k) * (1.0f - k));
+        if (al <= 0)
+            continue;
+        dl->AddRect(ImVec2(a.x - grow, a.y - grow), ImVec2(b.x + grow, b.y + grow), with_rgb(e.shadow, al),
+                    radius + grow, 0, ring);
+    }
+    dl->PopClipRect();
+}
+
 // ---------------------------------------------------------------- motion
 namespace {
 struct AccessReads {
@@ -152,7 +175,8 @@ const AccessReads& access() {
 
 struct Fade {
     t::Tween tween;
-    int used = 0;  // frame last asked for
+    int used = 0;           // frame last asked for
+    double tween_last = 0;  // appear(): when it was last asked for (ms)
 };
 struct ColorFade {
     ImU32 from = 0, to = 0;
@@ -160,6 +184,7 @@ struct ColorFade {
     int used = 0;
 };
 std::unordered_map<ImGuiID, Fade> g_fades;
+std::unordered_map<ImGuiID, Fade> g_appears;
 std::unordered_map<ImGuiID, ColorFade> g_colors;
 double g_animate_until = 0;
 
@@ -199,6 +224,27 @@ float fade(ImGuiID id, bool on, double duration_ms) {
     return v;
 }
 
+float appear(ImGuiID id, double duration_ms, double forget_ms) {
+    const double now = now_ms();
+    auto [it, fresh] = g_appears.try_emplace(id);
+    Fade& f = it->second;
+    const bool restart = fresh || (now - f.tween_last > forget_ms);
+    f.used = frame_no();
+    f.tween_last = now;
+    if (restart) {
+        f.tween = t::Tween{};
+        f.tween.update(0.0f, now);
+    }
+    const float v = f.tween.update(1.0f, now, duration_ms, reduce_motion());
+    if (f.tween.moving(now))
+        keep_animating();
+    return v;
+}
+
+void forget(ImGuiID id) {
+    g_appears.erase(id);
+}
+
 ImU32 cross_fade(ImGuiID id, ImU32 target, double duration_ms) {
     auto [it, fresh] = g_colors.try_emplace(id);
     ColorFade& c = it->second;
@@ -228,6 +274,7 @@ void end_frame() {
     if (now % 600 != 0)
         return;
     std::erase_if(g_fades, [&](const auto& kv) { return now - kv.second.used > 600; });
+    std::erase_if(g_appears, [&](const auto& kv) { return now - kv.second.used > 600; });
     std::erase_if(g_colors, [&](const auto& kv) { return now - kv.second.used > 600; });
 }
 
@@ -279,13 +326,14 @@ void draw_art(ImDrawList* dl, Art art, ImVec2 c, float side) {
         }
         case Art::kAgents: {  // three small round faces, one waving a dot of colour
             for (int i = 0; i < 3; ++i) {
-                const float x = 16.0f + 16.0f * static_cast<float>(i);
-                dl->AddCircleFilled(P(x, 34), 7 * u, fill);
-                dl->AddCircle(P(x, 34), 7 * u, line, 0, w);
-                dl->AddLine(P(x - 3, 44), P(x + 3, 44), line, w);
+                const float x = 13.0f + 19.0f * static_cast<float>(i);
+                dl->AddCircleFilled(P(x, 36), 9 * u, fill);
+                dl->AddCircle(P(x, 36), 9 * u, line, 0, w);
+                dl->AddCircleFilled(P(x - 3, 35), 1.3f * u, line);  // eyes
+                dl->AddCircleFilled(P(x + 3, 35), 1.3f * u, line);
             }
-            dl->AddCircleFilled(P(48, 22), 2.5f * u, acc);
-            dl->AddCircleFilled(P(16, 22), 2.5f * u, g_pal->done);
+            dl->AddCircleFilled(P(51, 21), 2.5f * u, acc);  // one of them has something to say
+            dl->AddCircleFilled(P(13, 21), 2.5f * u, g_pal->done);
             break;
         }
         case Art::kAllDone: {  // a circle with a check

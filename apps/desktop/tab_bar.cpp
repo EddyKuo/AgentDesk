@@ -329,8 +329,10 @@ void draw_tab(App::State& s, ImDrawList* dl, ui::Space& sp, const TabItem& it, I
         status_mark(s, dl, cx - px(1), cy, att, true);
         cx += px(12) + px(7);
     } else if (att == Attention::kBlocked || att == Attention::kDone) {
-        dl->AddCircleFilled(ImVec2(cx + px(3), cy), px(3),
-                            att == Attention::kBlocked ? g_pal->needs_you : g_pal->done);
+        // The dot eases from its last colour to the new one.
+        const ImU32 dot = tok::cross_fade(ImGui::GetID("##tab-dot"),
+                                          att == Attention::kBlocked ? g_pal->needs_you : g_pal->done);
+        dl->AddCircleFilled(ImVec2(cx + px(3), cy), px(3), dot);
         cx += px(12) + px(7);
     }
     if (active) {

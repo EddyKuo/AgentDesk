@@ -242,6 +242,7 @@ void draw_focus_empty(App::State& s, ImDrawList* dl, ImVec2 pos, ImVec2 size, bo
     dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), g_pal->term_bg);
     StateCard card;
     card.title = "No terminal to focus";
+    card.art = tok::Art::kTerminal;
     card.hint = "Open one here, or pick another agent from the dots below.";
     card.buttons = {{with_chord(s, "New terminal", "tab.new"), "tab.new"},
                     {with_chord(s, "Start a program...", "agent.new"), "agent.new"}};

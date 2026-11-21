@@ -96,8 +96,8 @@ int card_body(App::State& s, const ui::tips::Card& card) {
     // A small label over the title says what this is.
     {
         const ImVec2 p = ImGui::GetCursorScreenPos();
-        dl->AddText(s.fonts.ui_bold, fpx(11), p, g_pal->focus, "LAYOUT TIPS");
-        ImGui::Dummy(ImVec2(w, line_h(11) + px(4)));
+        tok::text(s, dl, ui::tokens::kCaption, p, g_pal->focus, "LAYOUT TIPS");
+        ImGui::Dummy(ImVec2(w, px(ui::tokens::kCaption.line) + tok::gap_xs()));
     }
     int result = overlay_title(s, card.title.c_str(), EscChip::kButton, 18.0f) ? 1 : 0;
     {
@@ -117,7 +117,7 @@ int card_body(App::State& s, const ui::tips::Card& card) {
     // Footer: "Don't show tips" on the left, "Got it" on the right.
     ImGui::Dummy(ImVec2(w, px(8)));
     const ImVec2 f = ImGui::GetCursorScreenPos();
-    dl->AddLine(ImVec2(f.x, f.y), ImVec2(f.x + w, f.y), g_pal->border);
+    tok::hline(dl, f.x, f.x + w, f.y, g_pal->border);  // a crisp 1 px line
     const float bh = px(32);
     const float by = f.y + px(14);
     const char* ok = "Got it";

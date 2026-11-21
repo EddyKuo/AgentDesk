@@ -64,6 +64,17 @@ void release_keyboard() {
         ImGui::ClearActiveID();
 }
 
+bool topmost_modal(WindowBox& out) {
+    ImGuiWindow* w = ImGui::GetTopMostAndVisiblePopupModal();
+    if (w == nullptr || w->Hidden || w->SkipItems || w->DrawList == nullptr)
+        return false;
+    out.min = w->Pos;
+    out.max = ImVec2(w->Pos.x + w->Size.x, w->Pos.y + w->Size.y);
+    out.rounding = w->WindowRounding;
+    out.draw_list = w->DrawList;
+    return true;
+}
+
 void disable_nav_windowing() {
     ImGuiContext& g = *ImGui::GetCurrentContext();
     g.ConfigNavWindowingKeyNext = 0;

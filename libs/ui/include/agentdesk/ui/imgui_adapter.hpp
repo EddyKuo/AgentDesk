@@ -28,6 +28,16 @@ bool key_pressed_owned(ImGuiKey key, const char* str_id);
 // holds it (a terminal grid stays active through a modal otherwise, and would see its keys).
 void release_keyboard();
 
+// The modal dialog on top this frame (after the dialogs are drawn): its rectangle, corner radius
+// and draw list, so its elevation can be drawn around it. False when no modal is open.
+struct WindowBox {
+    ImVec2 min{};
+    ImVec2 max{};
+    float rounding = 0.0f;
+    ImDrawList* draw_list = nullptr;
+};
+bool topmost_modal(WindowBox& out);
+
 // Turns off ImGui's Ctrl+Tab window switcher: AgentDesk uses Ctrl+Tab to switch tabs.
 void disable_nav_windowing();
 

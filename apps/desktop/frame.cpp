@@ -615,6 +615,9 @@ void App::frame() {
     draw_focus_glow(s);
     ImGui::End();
     draw_dialogs(s);
+    // The dialog on top is raised like the other floating surfaces (drawn outside its edges only).
+    if (ui::adapter::WindowBox box; ui::adapter::topmost_modal(box))
+        tok::window_shadow(box.draw_list, box.min, box.max, box.rounding, 2);
     update_window_title(s);
     tok::end_frame();
     persist(s);

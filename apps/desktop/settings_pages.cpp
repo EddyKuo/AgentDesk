@@ -232,7 +232,7 @@ bool segmented(App::State& s, const char* id, std::string& value,
         const bool hov = ImGui::IsItemHovered();
         if (on || hov)
             dl->AddRectFilled(ImVec2(x, a.y + px(2)), ImVec2(x + bw, a.y + px(2) + bh),
-                              on ? g_pal->selected : g_pal->hover, px(6));
+                              on ? tok::selected(g_pal->card) : g_pal->hover, px(6));
         text_centered(dl, s.fonts.ui, fpx(12), ImVec2(x, a.y + px(2)), ImVec2(bw, bh),
                       on ? g_pal->text : g_pal->dim, label);
         x += bw;

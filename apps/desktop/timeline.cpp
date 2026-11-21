@@ -566,7 +566,8 @@ BodyResult draw_body(App::State& s, ImVec2 a, ImVec2 size, bool header, bool& cl
                })) {
         StateCard card;
         card.title = "No agent activity in the last " + range_words(s.settings.timeline_range);
-        card.title_size = 15.0f;
+        card.title_size = ui::tokens::kTitle.size;
+        card.art = tok::Art::kAgents;
         card.hint = "Agents report their state through OSC 7501 or agentctl report-state.";
         if (s.settings.timeline_range != "24h")
             card.buttons = {{"Show 24h", "timeline.range:24h"}};

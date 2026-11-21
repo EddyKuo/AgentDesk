@@ -55,7 +55,8 @@ void terminals_tile(App::State& s, ImDrawList* dl, ImVec2 a, const std::string& 
     if (att != Attention::kNone && att != Attention::kIdle) {
         const ImVec2 c(a.x + side + px(4) - px(5.5f), a.y - px(4) + px(5.5f));
         dl->AddCircleFilled(c, px(5.5f), l.tray);  // the 2 px border in the tray's colour
-        dl->AddCircleFilled(c, px(3.5f), attention_color(att));
+        dl->AddCircleFilled(c, px(3.5f),
+                            tok::cross_fade(ImGui::GetID(("##tile-dot" + id).c_str()), attention_color(att)));
     }
 }
 

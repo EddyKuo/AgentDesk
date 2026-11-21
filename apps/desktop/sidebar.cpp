@@ -350,7 +350,7 @@ float draw_rail_space(SpaceList& L, int ri, int i, ImVec2 a0) {
         s.focus_view(s.ws.focused_session());
     }
     if (active)
-        d->AddRectFilled(c, ImVec2(c.x + cw, c.y + ch), g_pal->selected, px(6));
+        d->AddRectFilled(c, ImVec2(c.x + cw, c.y + ch), tok::selected(g_pal->sidebar), px(6));
     else if (ImGui::IsItemHovered())
         d->AddRectFilled(c, ImVec2(c.x + cw, c.y + ch), g_pal->hover, px(6));
     const std::string num = std::to_string(i + 1);
@@ -462,7 +462,7 @@ float draw_space_row(SpaceList& L, int ri, const SpaceRow& row, ImVec2 a) {
     }
     const bool dragged = s.drag_space == i && ImGui::IsMouseDragging(ImGuiMouseButton_Left, px(4));
     if (active)
-        d->AddRectFilled(a, b, g_pal->selected, px(8));
+        d->AddRectFilled(a, b, tok::selected(g_pal->sidebar), px(8));
     else if (hov)
         d->AddRectFilled(a, b, g_pal->hover, px(8));
     const ImU32 fade = dragged ? 128u : 255u;
@@ -1011,7 +1011,7 @@ void draw_rail_agent_row(AgentRows& R, const std::string& id, int index) {
         s.focus(id);
     const bool hov = ImGui::IsItemHovered();
     if (focused)
-        d->AddRectFilled(a, ImVec2(a.x + rw, a.y + rh), g_pal->selected, px(6));
+        d->AddRectFilled(a, ImVec2(a.x + rw, a.y + rh), tok::selected(g_pal->sidebar), px(6));
     else if (hov)
         d->AddRectFilled(a, ImVec2(a.x + rw, a.y + rh), g_pal->hover, px(6));
     const float cell = a.x + rw - px(2) - px(14);
@@ -1156,7 +1156,7 @@ void draw_agent_row(AgentRows& R, const std::string& id, const std::vector<ui::T
     const bool clicked = ImGui::InvisibleButton("##agent", ImVec2(R.rw, rh));
     const bool hov = ImGui::IsItemHovered();
     if (focused)
-        d->AddRectFilled(a, b, g_pal->selected, px(8));
+        d->AddRectFilled(a, b, tok::selected(g_pal->sidebar), px(8));
     else if (hov)
         d->AddRectFilled(a, b, g_pal->hover, px(8));
     const float cy = a.y + rh * 0.5f;

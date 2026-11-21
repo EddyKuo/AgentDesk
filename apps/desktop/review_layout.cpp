@@ -274,7 +274,7 @@ void draw_change_list(App::State& s, const SidePanels& p, ImVec2 at, ImVec2 size
             ImGui::SetScrollHereY(0.5f);
         const ImVec2 b(a.x + rw, a.y + rh);
         if (sel) {
-            d->AddRectFilled(a, b, g_pal->selected);
+            d->AddRectFilled(a, b, tok::selected(g_pal->bg));
             d->AddRectFilled(a, ImVec2(a.x + px(2), b.y), g_pal->focus);
         } else if (hov) {
             d->AddRectFilled(a, b, g_pal->hover);
@@ -339,13 +339,13 @@ void draw_diff_view(App::State& s, const SidePanels& p, ImVec2 at, ImVec2 size) 
     const float hh = px(30);
     const float cy = at.y + hh * 0.5f;
     if (p.changes.empty() && !p.repo_top.empty() && !p.changes_loading && p.changes_error.empty()) {
-        // Nothing changed: a faint check in the middle, no file title.
-        const float mx = at.x + size.x * 0.5f;
-        const float my = at.y + size.y * 0.42f;
-        draw_icon(s, dl, ui::icon::kCheck, fpx(28), ImVec2(mx, my - px(14)), alpha(g_pal->done, 0x90));
-        const char* t = "Nothing to review";
-        const ImVec2 tz = s.fonts.ui_medium->CalcTextSizeA(fpx(13), FLT_MAX, 0, t);
-        dl->AddText(s.fonts.ui_medium, fpx(13), ImVec2(mx - tz.x * 0.5f, my + px(10)), g_pal->dim, t);
+        // Nothing changed: the "all done" drawing and one line, no file title.
+        StateCard card;
+        card.art = tok::Art::kAllDone;
+        card.title = "Nothing to review";
+        card.title_size = ui::tokens::kTitle.size;
+        card.hint = "The working tree matches the last commit.";
+        draw_state_card(s, at, size, card);
         return;
     }
     dl->AddLine(ImVec2(at.x, at.y + hh), ImVec2(at.x + size.x, at.y + hh), g_pal->border);
@@ -456,7 +456,8 @@ void draw_changes(App::State& s, ImVec2 pos, ImVec2 size) {
     if (cwd.empty()) {
         StateCard card;
         card.title = "Select an agent to review its changes";
-        card.title_size = 14.0f;
+        card.title_size = ui::tokens::kTitle.size;
+        card.art = tok::Art::kChanges;
         card.hint = "Review follows the focused agent and shows the uncommitted changes in its folder.";
         card.buttons = {{"Go to\xE2\x80\xA6", "app.picker"}};
         draw_state_card(s, pos, size, card);
@@ -475,7 +476,8 @@ void draw_changes(App::State& s, ImVec2 pos, ImVec2 size) {
             lock.unlock();
             StateCard card;
             card.title = "Not a git repository";
-            card.title_size = 14.0f;
+            card.title_size = ui::tokens::kTitle.size;
+            card.art = tok::Art::kFiles;
             card.hint = display_path(cwd);
             draw_state_card(s, pos, size, card);
             ImGui::EndChild();

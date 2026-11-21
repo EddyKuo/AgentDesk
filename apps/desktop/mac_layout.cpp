@@ -188,8 +188,14 @@ void draw_menu_dropdown(App::State& s) {
             cw = std::max(cw, s.fonts.ui->CalcTextSizeA(fpx(12), FLT_MAX, 0, chord.c_str()).x);
     }
     const float w = std::max(px(210), px(10) + px(18) + lw + (cw > 0 ? px(32) + cw : px(16)) + px(10));
-    ImGui::SetNextWindowPos(s.mac.menu_at[static_cast<std::size_t>(s.mac.menu)]);
+    // Fades in and settles 4 px into place each time a menu opens; switching menus fades the new one.
+    const ImGuiID fade_id = ImGui::GetID("##mac-menu-fade") + static_cast<ImGuiID>(s.mac.menu);
+    const float k = tok::appear(fade_id, ui::tokens::kFastMs);
+    ImVec2 at = s.mac.menu_at[static_cast<std::size_t>(s.mac.menu)];
+    at.y -= (1.0f - k) * px(4);
+    ImGui::SetNextWindowPos(at);
     ImGui::SetNextWindowSize(ImVec2(w + px(10), 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, k);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(px(5), px(5)));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, px(8));
@@ -207,10 +213,15 @@ void draw_menu_dropdown(App::State& s) {
             next = (s.mac.menu + 1) % mac::kMenuCount;
         for (std::size_t i = 0; i < items.size(); ++i)
             menu_row_mac(s, items[i], static_cast<int>(i), w);
+        const ImVec2 wp = ImGui::GetWindowPos();
+        const ImVec2 ws = ImGui::GetWindowSize();
+        tok::window_shadow(ImGui::GetWindowDrawList(), wp, ImVec2(wp.x + ws.x, wp.y + ws.y), px(8), 1);
         ImGui::EndPopup();
+    } else {
+        tok::forget(fade_id);
     }
     ImGui::PopStyleColor(2);
-    ImGui::PopStyleVar(4);
+    ImGui::PopStyleVar(5);
     if (next >= 0)
         open_menu(s, next);
 }

@@ -196,8 +196,14 @@ bool begin_menu(const char* id) {
     ImGui::SetNextWindowSizeConstraints(ImVec2(px(200), 0), ImVec2(FLT_MAX, FLT_MAX));
     const bool open = ImGui::BeginPopupContextItem(id);
     ImGui::PopStyleVar(2);
-    if (open)
+    if (open) {
         menu_keys();
+        // Raised like the other floating surfaces (the size is last frame's; it settles at once).
+        const ImVec2 wp = ImGui::GetWindowPos();
+        const ImVec2 ws = ImGui::GetWindowSize();
+        tok::window_shadow(ImGui::GetWindowDrawList(), wp, ImVec2(wp.x + ws.x, wp.y + ws.y),
+                           ImGui::GetStyle().PopupRounding, 1);
+    }
     return open;
 }
 
@@ -280,6 +286,22 @@ void menu_separator() {
 // dot, an idle ring. Draws with its left edge at `x`, vertically centred on `cy`, and returns the
 // width used; with `measure` it only returns the width.
 float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a, bool compact, bool measure) {
+    // A mark that has just changed fades in (tokens: normal duration), keyed by the row's ID scope
+    // and the state, so a new state eases in instead of jumping.
+    static bool fading = false;
+    if (!measure && !fading && a != Attention::kNone) {
+        static constexpr const char* kIds[] = {"##mk-none", "##mk-idle", "##mk-work", "##mk-done",
+                                               "##mk-block"};
+        const auto i = static_cast<std::size_t>(std::clamp(static_cast<int>(a), 0, 4));
+        const float k = tok::appear(ImGui::GetID(kIds[i]), ui::tokens::kNormalMs);
+        if (k < 1.0f) {
+            float w = 0;
+            fading = true;
+            with_alpha(dl, k, [&] { w = status_mark(s, dl, x, cy, a, compact, false); });
+            fading = false;
+            return w;
+        }
+    }
     switch (a) {
         case Attention::kWorking: {
             const float r = px(5);

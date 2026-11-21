@@ -63,6 +63,9 @@ void vline(ImDrawList* dl, float x, float y0, float y1, ImU32 col);
 void shadow(ImDrawList* dl, ImVec2 a, ImVec2 b, float radius, int level = 1, ImU32 bg = 0);
 // A whole raised card: shadow, fill, 1 px border and top highlight. `fill` 0: the palette's card.
 void card(ImDrawList* dl, ImVec2 a, ImVec2 b, float radius, int level = 1, ImU32 fill = 0, ImU32 border = 0);
+// The same shadow for an ImGui window that already drew its own background: drawn only outside
+// [a, b] (stroked rings), so it can be added from inside the window after its contents.
+void window_shadow(ImDrawList* dl, ImVec2 a, ImVec2 b, float radius, int level = 2);
 
 // ---------------------------------------------------------------- motion
 // Windows' "Animation effects" is off (Settings > Accessibility > Visual effects); read at most
@@ -74,6 +77,11 @@ double now_ms();
 // An eased 0..1 for `id` that moves toward 1 while `on`, else toward 0. Starts at the first value
 // asked for (nothing animates on the first frame).
 float fade(ImGuiID id, bool on, double duration_ms = t::kNormalMs);
+// 0 -> 1 the first time `id` is asked for (an element appearing: a toast, a menu, a card), then 1.
+// Asking again after a pause of `forget_ms` without a call starts it over.
+float appear(ImGuiID id, double duration_ms = t::kNormalMs, double forget_ms = 250.0);
+// The element went away: the next appear() for `id` starts from 0 again.
+void forget(ImGuiID id);
 // `target` reached by easing from the colour shown for `id` before (state dots, badges).
 ImU32 cross_fade(ImGuiID id, ImU32 target, double duration_ms = t::kNormalMs);
 // A transition drew a frame that is not its last: the frame loop wakes again soon.
