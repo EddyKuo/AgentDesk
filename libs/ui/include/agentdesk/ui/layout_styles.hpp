@@ -13,7 +13,7 @@
 
 namespace agentdesk::ui::styles {
 
-// The style a mod name selects ("mac", "terminals", "classic", "focus", "mission", "review"), or
+// The style a mod name selects ("mac", "terminals", "classic", "focus", "stage", "review"), or
 // "" for a mod that selects none (workspace parts, the person's own mods).
 std::string_view style_of_mod(std::string_view mod);
 
@@ -38,7 +38,7 @@ bool is_listed(std::string_view layout, bool fun_layouts, std::string_view curre
 std::string next_listed(const std::vector<std::string>& names, std::string_view current, bool fun_layouts);
 
 // Built-in layouts that were removed: what a saved "layout" naming one opens instead. Tiling became
-// Terminals' square-corner option; Cockpit falls back to the first layout. nullopt: not removed.
+// Terminals' square-corner option; Cockpit falls back to the first layout; Mission Control opens Stage. nullopt: not removed.
 struct Replacement {
     std::string layout;
     bool square_corners = false;  // turn on Terminals' square corners

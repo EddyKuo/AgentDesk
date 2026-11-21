@@ -1,12 +1,9 @@
-// Tests for Mission Control's rules: the wall's grid, the tile order, the filter, the screen's last
-// lines for a tile, keyboard moves, message cleaning, and the shipped layout and its commands.
+// Tests for the rules Mission Control left behind (Stage and other views use them): a wall's grid,
+// the tile order, the filter, the screen's last lines for a thumbnail, keyboard moves on a grid and
+// message cleaning. Stage's own rules and Mission Control's retirement are in stage_test.cpp.
 #include "agentdesk/ui/mission.hpp"
 
 #include <gtest/gtest.h>
-
-#include "agentdesk/ui/command_names.hpp"
-#include "agentdesk/ui/keymap.hpp"
-#include "agentdesk/ui/layout.hpp"
 
 using namespace agentdesk;
 using namespace agentdesk::ui;
@@ -209,27 +206,4 @@ TEST(Mission, CleanMessageMakesOneSafeLine) {
               "bad\xEF\xBF\xBD"
               "byte");
     EXPECT_EQ(clean_message(""), "");
-}
-
-// The shipped layout: a bar, the wall-body stack (the wall first, then the expanded tab) and the
-// status bar; Mission Control is in the layout list.
-TEST(Mission, ShippedLayoutHasBarWallAndMain) {
-    const layout::Node n = layout::builtin("mission");
-    EXPECT_EQ(n.find("bar")->mod(), "mission-bar");
-    const layout::Node* stack = n.find("wall-body");
-    ASSERT_NE(stack, nullptr);
-    EXPECT_EQ(stack->kind, layout::Kind::kStack);
-    EXPECT_EQ(stack->active_child()->id, "wall");
-    EXPECT_EQ(n.find("wall")->mod(), "mission-wall");
-    EXPECT_EQ(n.find("main")->content.type, layout::Content::Type::kTab);
-    EXPECT_FALSE(stack->header.has_value());  // no tab strip over the stack
-    const auto names = layout::builtin_names();
-    EXPECT_NE(std::find(names.begin(), names.end(), "mission"), names.end());
-}
-
-// Every mission.* command is known; Ctrl+Shift+M toggles.
-TEST(Mission, CommandsAreKnownAndBound) {
-    for (const char* c : {"mission.toggle", "mission.expand", "mission.wall", "mission.filter"})
-        EXPECT_TRUE(is_builtin_command(c)) << c;
-    EXPECT_EQ(Keymap::defaults().chord_for("mission.toggle"), "Ctrl+Shift+M");
 }

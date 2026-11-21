@@ -164,7 +164,7 @@ constexpr std::pair<const char*, const char*> kGlobal[] = {
     {"f2", "tab.rename"},
     {"shift-f2", "space.rename"},
     {"ctrl-shift-.", "focus.toggle"},
-    {"ctrl-shift-m", "mission.toggle"},
+    {"ctrl-shift-m", "stage.toggle"},
     {"ctrl-shift-r", "review.toggle"},
     {"ctrl-shift-h", "timeline.toggle"},
 };
@@ -189,7 +189,8 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
 // Defaults that apply only while one layout shows ("layout:<name>" sections). None of them is bound
 // in "global" or "terminal": the Review layout's F8 / Shift+F8 move between changed files (elsewhere
 // F8 still reaches the terminal); Terminals' Alt keys (resize mode, split, close, gaps); Classic's F10 menu
-// bar.
+// bar; Stage's Alt+Left / Alt+Right put the previous / next agent on stage (it shows one pane, so
+// moving between panes has nothing to do there).
 struct LayoutDefault {
     const char* section;
     const char* chord;
@@ -204,6 +205,8 @@ constexpr LayoutDefault kLayoutDefaults[] = {
     {"layout:terminals", "alt-shift-q", "pane.close"},
     {"layout:terminals", "alt-shift-g", "terminals.gaps"},
     {"layout:classic", "f10", "classic.menu"},
+    {"layout:stage", "alt-left", "stage.prev"},
+    {"layout:stage", "alt-right", "stage.next"},
 };
 // clang-format on
 

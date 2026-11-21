@@ -133,6 +133,8 @@ bool draw_style_block(App::State& s, const lay::Node& n, ImVec2 pos, ImVec2 size
 std::optional<lay::Node> style_layout_tree(const App::State& s, const lay::Node& tree) {
     if (style_of(s) == "terminals")
         return terminals_layout_tree(s, tree);
+    if (style_of(s) == "stage")
+        return stage_layout_tree(s, tree);
     return std::nullopt;
 }
 
@@ -143,6 +145,7 @@ void draw_style_backdrop(App::State& s, const lay::Node& tree) {
 
 void draw_style_overlay(App::State& s) {
     draw_resize_mode(s);  // any layout; ends itself in Focus or when the window loses focus
+    draw_stage_overlay(s);  // the stage fading in after a swap
     if (style_of(s) == "classic")
         draw_classic_overlay(s);
 }
@@ -169,13 +172,15 @@ bool style_layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVe
 
 bool look_style_options(App::State& s) {
     const std::string& st = s.layout().style;  // the layout picked, also under Focus mode
-    if (st != "terminals" && st != "classic")
+    if (st != "terminals" && st != "classic" && st != "stage")
         return false;
     settings_gap(px(14));
     settings_wrapped(s, ui::styles::display_name(s.layout().name).c_str(), g_pal->dim, 12.5f, 12.5f * 1.3f,
                      s.fonts.ui_medium);
     if (st == "terminals")
         return look_terminals_options(s);
+    if (st == "stage")
+        return look_stage_options(s);
     return look_classic_options(s);
 }
 

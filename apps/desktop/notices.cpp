@@ -211,10 +211,8 @@ void draw_toasts(App::State& s) {
                          wp.x + w - tok::gap_l() - tx);
         }
         if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-            if (!t.session.empty() && s.layout().style == "mission" && !s.settings.focus_on)
-                run_command(s, "mission.expand:" + t.session);  // Mission Control: open its tile
-            else if (!t.session.empty())
-                s.focus(t.session);
+            if (!t.session.empty())
+                s.focus(t.session);  // in Stage: that agent takes the stage
             it->until = now;  // dismiss
         }
         ImGui::End();

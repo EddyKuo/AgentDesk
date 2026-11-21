@@ -368,7 +368,7 @@ void report_failed_start(App::State& s, const std::string& id, const ui::Session
 // Feeds every agent's state to the attention tracker (alerts for new needs-you / done), reports
 // terminals that failed to start, and marks what the person is looking at as seen: the panes the
 // last frame really drew (State::visible_sessions), so a layout without the active tab's panes, a
-// Mission Control tile or the panes Focus hides do not count as looked at.
+// Stage thumbnail or the panes Focus hides do not count as looked at.
 void update_attention(App::State& s) {
     const std::set<std::string>& visible = s.visible_sessions;
     for (const auto& [id, v] : s.views_by_id) {

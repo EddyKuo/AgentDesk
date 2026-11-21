@@ -1,7 +1,8 @@
 #pragma once
-// Mission Control's rules, without drawing: how many columns and rows the wall of agent tiles
-// takes, which agents get a tile and in what order, the filter, the last lines of a terminal's
-// screen for a tile's body, moving the keyboard selection, and cleaning an agent's message.
+// Rules first written for Mission Control (since replaced by Stage), without drawing, kept for the
+// views that show agents side by side: a wall's grid, which agents get a tile and in what order,
+// the filters, the last lines of a terminal's screen for a thumbnail (display only), moving a
+// keyboard selection on a grid, and cleaning an agent's message.
 
 #include <cstdint>
 #include <string>

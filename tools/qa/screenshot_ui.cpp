@@ -247,7 +247,7 @@ Json shot_profiles() {
                std::string("[Console]::Write([char]27 + ']7501;state=") + st + "' + [char]7)"}}});
     }
     // "state-later": working at first, blocked 10 s later (an agent that needs you while the UI is
-    // up: Focus's edge glow, Mission Control's ordering).
+    // up: Focus's edge glow, Stage's glow and ordering).
     profiles.push_back({{"id", "state-later"},
                         {"name", "state later"},
                         {"executable", ps},
