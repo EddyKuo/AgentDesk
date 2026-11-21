@@ -54,6 +54,7 @@
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/mac_layout.hpp"
+#include "agentdesk/ui/inbox.hpp"
 #include "agentdesk/ui/mission.hpp"
 #include "agentdesk/ui/mods.hpp"
 #include "agentdesk/ui/stage.hpp"
@@ -211,6 +212,11 @@ struct Settings {
     std::string stage_size = "m";
     bool stage_shells = false;
     bool stage_auto_switch = false;
+    // Inbox (inbox_layout.cpp): the card order ("newest" or "oldest") and the person's quick
+    // answers per program (ui.json inbox_answers, only read: the file keeps what the person wrote).
+    std::string inbox_order = "newest";
+    ui::inbox::AnswerTable inbox_answers;
+    std::vector<std::string> inbox_answer_errors;
     // The layout a toggle (stage.toggle, review.toggle) came from, to go back to on the second
     // press (toggle_layout).
     std::string layout_return;
@@ -389,6 +395,10 @@ inline constexpr CommandInfo kCommands[] = {
     {"stage.size:l", "Stage: large thumbnails"},
     {"stage.auto_switch", "Stage: let an agent that needs you take the stage (on / off)"},
     {"stage.shells", "Stage: thumbnails for plain terminals too (on / off)"},
+    {"inbox.toggle", "Inbox: every agent waiting for you, with its question (again: back)"},
+    {"inbox.order:newest", "Inbox: newest waiting first"},
+    {"inbox.order:oldest", "Inbox: longest waiting first"},
+    {"inbox.unsnooze", "Inbox: show snoozed cards again"},
     {"review.toggle", "Review: show the agent's changes beside it (again: back)"},
     {"review.next_file", "Review: next changed file"},
     {"review.prev_file", "Review: previous changed file"},
@@ -446,6 +456,7 @@ struct GitInfo {
     std::string branch;      // "HEAD" when detached
     int ahead = 0;
     int behind = 0;
+    int changed = -1;  // uncommitted files in the checkout (git status, untracked included); -1 unknown
 };
 
 class GitCache {
@@ -923,8 +934,9 @@ struct App::State {
         int glow_peak = 0;
         ui::focus::HeaderReveal header;
     } focus_mode;
-    // A terminal's last screen lines for a thumbnail (Stage's filmstrip; screen_tail_of), worked
-    // out again only when its screen changed and at most 4 times a second. Display only.
+    // A terminal's last screen lines for a thumbnail or card (Stage's filmstrip, Inbox's cards;
+    // screen_tail_of), worked out again only when its screen changed and at most 4 times a second.
+    // Display only.
     struct ScreenTail {
         std::uint64_t seq = 0;
         std::uint64_t generation = 0;
@@ -934,7 +946,7 @@ struct App::State {
         std::vector<ui::mission::TailLine> tail;
     };
     std::map<std::string, ScreenTail> screen_tails;
-    bool tails_pending = false;  // last frame: a thumbnail waits for its next refresh
+    bool tails_pending = false;  // this frame: a tail waits for its next refresh (cleared in App::frame)
     // Stage (stage_layout.cpp): what was on stage, the order agents were first seen in (the strip's
     // stable order), who needed the person last frame (to spot a new one), the strip's scroll and
     // each thumbnail's eased position, the swap fade and the last key or click.
@@ -963,6 +975,41 @@ struct App::State {
         int blocked = 0, working = 0;         // counts for the filter buttons (without the stage)
         bool animating = false;
     } stage;
+    // The Inbox layout (inbox_layout.cpp): the selected card, the queue's scroll and whether it
+    // holds the keyboard, the reply being typed, snoozed cards, each card's eased position and
+    // cards on their way out. Their screen lines come from the shared cache (screen_tail_of).
+    struct InboxState {
+        std::string selected;
+        int selected_at = -1;          // its place last frame (the next card takes it when it goes)
+        std::map<std::string, double> sent;  // an answer or reply went out (tok::now_ms()): "Sent"
+        float scroll = 0;
+        bool queue_focus = false;      // the queue's keys apply (it was clicked, or Inbox just opened)
+        bool take_keyboard = false;    // next frame: take the keyboard from a terminal for the queue
+        bool reply_focus_next = false; // next frame: put the caret in the selected card's reply
+        bool reply_active = false;     // the reply field holds the keyboard (last frame)
+        std::string reply_for;         // whose card the reply text belongs to
+        char reply[1024] = {};
+        std::map<std::string, ui::inbox::Snooze> snoozed;
+        std::map<std::string, float> top;  // each card's eased top, relative to the list
+        // A card that went away (answered, snoozed, dismissed): drawn sliding out for a moment.
+        struct Ghost {
+            std::string id;
+            std::string title;
+            std::string line;
+            ui::Program program;
+            bool done = false;
+            float top = 0;
+            float h = 0;
+            double since = 0;  // tok::now_ms() when it left
+        };
+        std::vector<Ghost> leaving;
+        std::map<std::string, Ghost> shown;  // last frame's cards, to make ghosts from
+        bool animating = false;   // a card's lines held back: come back soon
+        int drawn_frame = -10;    // the ImGui frame that last drew the queue (a gap: just shown)
+        double zero_since = -1;   // when the queue last became empty (the Inbox zero animation)
+        Clock::time_point answers_checked{};
+        std::filesystem::file_time_type answers_mtime{};
+    } inbox;
     // The Review layout (review_layout.cpp): whose changes show, and that agent's state last frame
     // (a turn ending, Working to anything else, reads the changes again).
     struct ReviewState {
@@ -1480,6 +1527,16 @@ void draw_stage_overlay(App::State& s);
 const App::State::ScreenTail& screen_tail_of(App::State& s, const std::string& id, int lines);
 // Stage's rows in Settings > Look.
 bool look_stage_options(App::State& s);
+
+// ------------------------------------------------------------ inbox_layout.cpp
+// Inbox: every agent that needs you as a card (its question, quick answers, a reply field), the
+// ones that finished below; the "main" block beside the queue shows the agent opened from it.
+void draw_inbox_bar(App::State& s, ImVec2 pos, float w, float h);
+void draw_inbox_queue(App::State& s, ImVec2 pos, ImVec2 size);
+// The inbox.* commands; nullopt when `name` is not one.
+std::optional<std::string> inbox_command(App::State& s, const std::string& name, const std::string& arg);
+// Switching to the Inbox: the queue takes the keyboard.
+void inbox_entered(App::State& s);
 
 // ------------------------------------------------------------ welcome.cpp
 void draw_welcome(App::State& s);

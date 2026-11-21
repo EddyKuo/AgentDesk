@@ -128,6 +128,10 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_focus_strip(s, pos, size.x, size.y);
     } else if (draw_stage_block(s, m, pos, size)) {
         // stage-bar, stage-strip, stage-empty (stage_layout.cpp)
+    } else if (m == "inbox-bar") {
+        draw_inbox_bar(s, pos, size.x, size.y);
+    } else if (m == "inbox-queue") {
+        draw_inbox_queue(s, pos, size);
     } else if (draw_review_block(s, m, pos, size)) {
         // review-head, review-changes, review-commit (review_layout.cpp)
     } else if (draw_timeline_block(s, m, pos, size)) {
@@ -569,6 +573,8 @@ void App::tick() {
 
 void App::frame() {
     State& s = *s_;
+    // Set again this frame by whoever draws screen tails (Stage, Inbox) and still waits for one.
+    s.tails_pending = false;
     for (const auto& cmd : std::exchange(s.chord_commands, {}))
         run_command(s, cmd);
     g_scale = s.dpi * ui_scale(s.settings);

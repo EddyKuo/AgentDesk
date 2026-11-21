@@ -64,6 +64,11 @@ void release_keyboard() {
         ImGui::ClearActiveID();
 }
 
+void clear_keyboard() {
+    if (ImGui::GetCurrentContext()->ActiveId != 0)
+        ImGui::ClearActiveID();
+}
+
 bool topmost_modal(WindowBox& out) {
     ImGuiWindow* w = ImGui::GetTopMostAndVisiblePopupModal();
     if (w == nullptr || w->Hidden || w->SkipItems || w->DrawList == nullptr)

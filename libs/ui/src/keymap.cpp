@@ -165,6 +165,7 @@ constexpr std::pair<const char*, const char*> kGlobal[] = {
     {"shift-f2", "space.rename"},
     {"ctrl-shift-.", "focus.toggle"},
     {"ctrl-shift-m", "stage.toggle"},
+    {"ctrl-shift-i", "inbox.toggle"},
     {"ctrl-shift-r", "review.toggle"},
     {"ctrl-shift-h", "timeline.toggle"},
 };

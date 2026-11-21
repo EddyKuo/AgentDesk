@@ -27,6 +27,9 @@ bool key_pressed_owned(ImGuiKey key, const char* str_id);
 // Called inside a window (a modal): takes the keyboard away from an item of another window that
 // holds it (a terminal grid stays active through a modal otherwise, and would see its keys).
 void release_keyboard();
+// Takes the keyboard away from whatever item holds it (a terminal grid in the same window too):
+// a view that owns its own keys (the Inbox queue) starts with nothing holding them.
+void clear_keyboard();
 
 // The modal dialog on top this frame (after the dialogs are drawn): its rectangle, corner radius
 // and draw list, so its elevation can be drawn around it. False when no modal is open.

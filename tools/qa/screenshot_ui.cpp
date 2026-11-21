@@ -246,6 +246,40 @@ Json shot_profiles() {
               {"-NoLogo", "-NoProfile", "-NoExit", "-Command",
                std::string("[Console]::Write([char]27 + ']7501;state=") + st + "' + [char]7)"}}});
     }
+    // Shells that need the person and say why, the way an agent's report does (app, kind and a
+    // base64 message), after printing a few lines of their own (the Inbox's cards and previews):
+    // "ask-claude" and "ask-codex" report as those programs, "ask-question" as a plain shell.
+    struct Ask {
+        const char* id;
+        const char* app;
+        const char* kind;
+        const char* message;
+        const char* screen;  // lines, '|' between them
+    };
+    for (const Ask& a :
+         {Ask{"ask-claude", "claude", "permission",
+              "Run npm test in web/? It starts the unit tests and writes coverage to web/coverage.",
+              "Updated web/src/login.ts (+42 -7)|Bash: npm test|  Run the unit tests for the web app|"
+              "Allow this command?  1 yes   2 no"},
+          Ask{"ask-codex", "codex", "permission", "Allow git push origin feature/login?",
+              "Committed 3 files on feature/login|$ git push origin feature/login|"
+              "Approve?  y yes   n no"},
+          Ask{"ask-question", "", "question",
+              "Which database should the migration run against: staging or the local copy?",
+              "Wrote migrations/0042_add_sessions.sql|The migration is ready to run.|"
+              "Waiting for an answer..."}}) {
+        // A short prompt: the folder's path stays off the screen (and the screenshots).
+        std::string script = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; function prompt { '> ' }; ";
+        for (const auto& line : split(dk::wide(a.screen), L'|'))
+            script += "'" + dk::u8(line) + "'; ";
+        script += std::string("$m = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('") + a.message +
+                  "')); [Console]::Write([char]27 + ']7501;state=blocked:kind=" + a.kind +
+                  (*a.app != 0 ? std::string(":app=") + a.app : std::string()) + ":msg=' + $m + [char]7)";
+        profiles.push_back({{"id", a.id},
+                            {"name", std::string(a.id).substr(4)},
+                            {"executable", ps},
+                            {"args", {"-NoLogo", "-NoProfile", "-NoExit", "-Command", script}}});
+    }
     // "state-later": working at first, blocked 10 s later (an agent that needs you while the UI is
     // up: Focus's edge glow, Stage's glow and ordering).
     profiles.push_back({{"id", "state-later"},

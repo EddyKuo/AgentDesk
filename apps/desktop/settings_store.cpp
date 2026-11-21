@@ -184,6 +184,9 @@ Settings load_settings_unchecked() {
     s.stage_size = std::string(ui::stage::size_name(ui::stage::parse_size(j.value("stage_size", std::string("m")))));
     s.stage_shells = j.value("stage_shells", j.value("mission_shells", false));
     s.stage_auto_switch = j.value("stage_auto_switch", false);
+    s.inbox_order = ui::inbox::order_name(j.value("inbox_order", std::string("newest")));
+    if (const auto it = j.find("inbox_answers"); it != j.end())
+        s.inbox_answers = ui::inbox::parse_answers(*it, &s.inbox_answer_errors);
     read_lists(j, s);
     s.layout = j.value("layout", s.layout);
     s.layout_return = j.value("layout_return", "");
@@ -310,6 +313,7 @@ void save_settings(const Settings& s) {
             {"stage_size", s.stage_size},
             {"stage_shells", s.stage_shells},
             {"stage_auto_switch", s.stage_auto_switch},
+            {"inbox_order", s.inbox_order},
             {"folded_machines", s.folded_machines},
             {"panels", s.panels},
             {"agents_changed", s.agents_changed},

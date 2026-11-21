@@ -772,7 +772,6 @@ const App::State::ScreenTail& screen_tail_of(App::State& s, const std::string& i
 bool draw_stage_block(App::State& s, const std::string& mod, ImVec2 pos, ImVec2 size) {
     if (mod == "stage-bar") {
         s.stage.animating = false;
-        s.tails_pending = false;
         draw_stage_bar(s, pos, size.x, size.y);
     } else if (mod == "stage-strip") {
         draw_stage_strip(s, pos, size);

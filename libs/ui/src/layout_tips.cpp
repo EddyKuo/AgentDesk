@@ -59,6 +59,16 @@ Card make(std::string_view k) {
                   "(never while you type)",
                   "stage.auto_switch"),
             key("Back to your layout", "stage.toggle")};
+    } else if (k == "inbox") {
+        c.purpose = "Every agent that is waiting for you, as a card: what it asks, how long it has waited, "
+                    "and the answer right there.";
+        c.tips = {
+            mouse("With the queue clicked, Up / Down pick a card and Enter opens it beside; a click on a "
+                  "terminal types there as usual"),
+            mouse("R types a reply (Enter sends it); 1-9 press the card's quick answers"),
+            mouse("S snoozes a card until the agent asks something new; Dismiss clears a finished one"),
+            mouse("Each program's quick answers can be changed: inbox_answers in ui.json"),
+            key("Back to the layout you came from", "inbox.toggle")};
     } else if (k == "review") {
         c.purpose = "The agent's terminal on the left, its uncommitted changes and diff on the right.";
         c.tips = {key("Next / previous changed file", "review.next_file", "review.prev_file"),
@@ -94,7 +104,7 @@ Card make(std::string_view k) {
 }  // namespace
 
 const std::vector<std::string>& card_keys() {
-    static const std::vector<std::string> k = {"workspace", "terminals",           "mac", "stage", "review",
+    static const std::vector<std::string> k = {"workspace", "terminals", "stage", "inbox", "review", "mac",
                                                "classic",   std::string(kFocusKey)};
     return k;
 }

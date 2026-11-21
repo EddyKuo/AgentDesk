@@ -29,6 +29,9 @@ bool is_builtin_command(std::string_view name) {
         // filters the strip)
         "stage.toggle", "stage.show", "stage.next", "stage.prev", "stage.back", "stage.filter", "stage.size",
         "stage.auto_switch", "stage.shells", "mission.toggle", "mission.expand", "mission.filter",
+        // Inbox layout
+        "inbox.toggle", "inbox.open", "inbox.snooze", "inbox.unsnooze", "inbox.dismiss", "inbox.answer",
+        "inbox.reply", "inbox.order",
         // Review layout, Timeline overlay
         "review.toggle", "review.next_file", "review.prev_file", "review.refresh", "timeline.toggle",
         "timeline.range",

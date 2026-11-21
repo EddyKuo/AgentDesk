@@ -29,6 +29,7 @@ agentdesk_library(agentdesk_ui
     src/focus_mode.cpp
     src/mission.cpp
     src/stage.cpp
+    src/inbox.cpp
     src/review.cpp
     src/timeline.cpp
     src/color_math.cpp
@@ -60,6 +61,7 @@ foreach(_file
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/focus.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/stage.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/review.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/inbox.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/classic.json")
     get_filename_component(_name "${_file}" NAME_WE)
     file(READ "${_file}" _text)
