@@ -25,10 +25,10 @@ std::string command_name(const std::string& command) {
 // sentence and three to five tips.
 TEST(LayoutTips, EveryLayoutAndFocusHasACard) {
     const auto& keys = tips::card_keys();
-    for (const char* k : {"workspace", "terminals", "mac", "mission", "review", "classic", "focus"})
+    for (const char* k : {"workspace", "terminals", "mac", "stage", "review", "classic", "focus"})
         EXPECT_NE(std::find(keys.begin(), keys.end(), k), keys.end()) << k;
     // Removed layouts have no card any more.
-    for (const char* k : {"tiling", "cockpit"}) {
+    for (const char* k : {"tiling", "cockpit", "mission"}) {
         EXPECT_EQ(std::find(keys.begin(), keys.end(), k), keys.end()) << k;
         EXPECT_FALSE(tips::card(k)) << k;
     }
@@ -97,7 +97,8 @@ TEST(LayoutTips, ResolveTakesKeysFromTheKeymap) {
 // Which card goes with what is shown.
 TEST(LayoutTips, CardKeyForTheShownLayout) {
     EXPECT_EQ(tips::card_key("workspace", "", false), "workspace");
-    EXPECT_EQ(tips::card_key("mission", "mission", false), "mission");
+    EXPECT_EQ(tips::card_key("stage", "stage", false), "stage");
+    EXPECT_EQ(tips::card_key("stage-copy", "stage", false), "stage");
     EXPECT_EQ(tips::card_key("mac", "mac", true), "focus");
     EXPECT_EQ(tips::card_key("mac-copy", "mac", false), "mac");  // a copy of a built-in style
     EXPECT_EQ(tips::card_key("wall", "", false), "");            // a layout of the person's own

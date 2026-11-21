@@ -28,6 +28,7 @@ agentdesk_library(agentdesk_ui
     src/mac_layout.cpp
     src/focus_mode.cpp
     src/mission.cpp
+    src/stage.cpp
     src/review.cpp
     src/timeline.cpp
     src/color_math.cpp
@@ -49,7 +50,7 @@ target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agent
 
 # The shipped layout files (kept verbatim), compiled in as text for layout::builtin_text as
 # kPresetMain, kPresetTerminals (herdr-app's, third_party/herdr/layouts) and kPresetMac, kPresetFocus,
-# kPresetMission, kPresetReview, kPresetClassic (AgentDesk's own,
+# kPresetStage, kPresetReview, kPresetClassic (AgentDesk's own,
 # layouts/ here).
 set(_layout_defaults "")
 foreach(_file
@@ -57,7 +58,7 @@ foreach(_file
         "${PROJECT_SOURCE_DIR}/third_party/herdr/layouts/terminals.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/mac.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/focus.json"
-        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/mission.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/stage.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/review.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/classic.json")
     get_filename_component(_name "${_file}" NAME_WE)

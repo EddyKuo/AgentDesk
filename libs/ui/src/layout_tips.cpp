@@ -48,15 +48,17 @@ Card make(std::string_view k) {
                         "close it"),
                   key("Go to any space, tab or agent", "app.picker"),
                   key("Back to the layout with the sidebar", "sidebar.toggle")};
-    } else if (k == "mission") {
-        c.purpose = "Every agent on one wall, so you can see at a glance who needs you.";
+    } else if (k == "stage") {
+        c.purpose = "One agent big on the stage, every other agent live in the filmstrip below.";
         c.tips = {
-            mouse("Click a tile to work in it; on the wall, 1-9 or the arrow keys and Enter open one too"),
-            key("Back to the wall; on the wall, back to your layout", "mission.toggle"),
-            mouse("Click Needs you, Working or Done at the top to show only those; Active hides idle "
-                  "agents"),
-            mouse("Right-click a tile to peek, rename or close it"),
-            mouse("Esc is not used here: it goes to the terminal, so you can still interrupt an agent")};
+            mouse("Click a thumbnail to swap it onto the stage; the one there goes back to the strip"),
+            key("Next / previous agent on the stage", "stage.next", "stage.prev"),
+            mouse("An agent that needs you glows and moves to the front; above the strip, All / Needs you "
+                  "/ Working filter it and S M L sets the thumbnail size"),
+            mouse("To let an agent that needs you take the stage by itself, turn it on in Settings > Look "
+                  "(never while you type)",
+                  "stage.auto_switch"),
+            key("Back to your layout", "stage.toggle")};
     } else if (k == "review") {
         c.purpose = "The agent's terminal on the left, its uncommitted changes and diff on the right.";
         c.tips = {key("Next / previous changed file", "review.next_file", "review.prev_file"),
@@ -92,7 +94,7 @@ Card make(std::string_view k) {
 }  // namespace
 
 const std::vector<std::string>& card_keys() {
-    static const std::vector<std::string> k = {"workspace", "terminals",           "mac", "mission", "review",
+    static const std::vector<std::string> k = {"workspace", "terminals",           "mac", "stage", "review",
                                                "classic",   std::string(kFocusKey)};
     return k;
 }

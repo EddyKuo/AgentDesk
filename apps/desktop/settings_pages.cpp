@@ -325,25 +325,35 @@ void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 siz
         d->AddRect(a, b, g_pal->border, px(6));
         return;
     }
-    if (name == "mission") {
-        // A bar over a 3 x 2 wall of tiles; the first needs you (red edge), the second is done.
+    if (name == "stage") {
+        // A bar, one big pane on the stage and a filmstrip of four thumbnails below; the first
+        // glows in the needs-you colour.
         d->AddRectFilled(a, b, g_pal->bg, px(6));
         d->AddRectFilled(a, ImVec2(b.x, a.y + px(8)), g_pal->sidebar, px(6), ImDrawFlags_RoundCornersTop);
         d->AddLine(ImVec2(a.x, a.y + px(8)), ImVec2(b.x, a.y + px(8)), g_pal->border);
-        line(a.x + px(4), a.y + px(2.5f), 16, g_pal->dim);
+        line(a.x + px(4), a.y + px(2.5f), 12, g_pal->text);
+        line(a.x + px(18), a.y + px(2.5f), 18, g_pal->dim);
+        const float strip_h = std::round(size.y * 0.3f);
+        term(ImVec2(a.x + px(5), a.y + px(11)), ImVec2(b.x - px(5), b.y - strip_h - px(2)));
+        for (int i = 0; i < 3; ++i)
+            line(a.x + px(4), a.y + px(13) + static_cast<float>(i) * px(5), i == 1 ? 34.0f : 24.0f, g_pal->faint);
+        const ImVec2 sa(a.x, b.y - strip_h);
+        d->AddRectFilled(sa, b, g_pal->sidebar, px(6), ImDrawFlags_RoundCornersBottom);
+        d->AddLine(sa, ImVec2(b.x, sa.y), g_pal->border);
         const float gap = px(3);
-        const float tw = (size.x - px(8) - gap * 2) / 3.0f;
-        const float th = (size.y - px(8) - px(8) - gap) / 2.0f;
-        for (int i = 0; i < 6; ++i) {
-            const ImVec2 p(a.x + px(4) + static_cast<float>(i % 3) * (tw + gap),
-                           a.y + px(12) + static_cast<float>(i / 3) * (th + gap));
-            const ImVec2 q(p.x + tw, p.y + th);
+        const float tw = (size.x - px(8) - gap * 3) / 4.0f;
+        for (int i = 0; i < 4; ++i) {
+            const ImVec2 p(a.x + px(4) + static_cast<float>(i) * (tw + gap), sa.y + px(4));
+            const ImVec2 q(p.x + tw, b.y - px(4));
+            if (i == 0)
+                d->AddRect(ImVec2(p.x - px(1.5f), p.y - px(1.5f)), ImVec2(q.x + px(1.5f), q.y + px(1.5f)),
+                           alpha(g_pal->needs_you, 0x50), px(3), 0, px(1.5f));
             d->AddRectFilled(p, q, g_pal->card, px(2));
-            d->AddRect(p, q, i == 0 ? g_pal->needs_you : i == 1 ? g_pal->done : g_pal->border, px(2), 0,
-                       i == 0 ? px(1.5f) : 1.0f);
-            line(p.x + px(1), p.y + px(1), 10, g_pal->faint);
-            d->AddRectFilled(ImVec2(p.x + px(3), p.y + px(7)), ImVec2(q.x - px(3), q.y - px(3)), g_pal->term_bg,
+            d->AddRect(p, q, i == 0 ? g_pal->needs_you : g_pal->border, px(2));
+            d->AddRectFilled(ImVec2(p.x + px(2), p.y + px(5)), ImVec2(q.x - px(2), q.y - px(2)), g_pal->term_bg,
                              px(1));
+            d->AddCircleFilled(ImVec2(p.x + px(3), p.y + px(2.5f)), px(1.2f),
+                               i == 0 ? g_pal->needs_you : i == 1 ? g_pal->working : g_pal->done);
         }
         d->AddRect(a, b, g_pal->border, px(6));
         return;

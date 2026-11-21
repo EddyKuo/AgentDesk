@@ -126,10 +126,8 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_mac_dock(s, pos, size.x, size.y);
     } else if (m == "focus-strip") {
         draw_focus_strip(s, pos, size.x, size.y);
-    } else if (m == "mission-bar") {
-        draw_mission_bar(s, pos, size.x, size.y);
-    } else if (m == "mission-wall") {
-        draw_mission_wall(s, pos, size);
+    } else if (draw_stage_block(s, m, pos, size)) {
+        // stage-bar, stage-strip, stage-empty (stage_layout.cpp)
     } else if (draw_review_block(s, m, pos, size)) {
         // review-head, review-changes, review-commit (review_layout.cpp)
     } else if (draw_timeline_block(s, m, pos, size)) {
@@ -443,7 +441,7 @@ void run_global_shortcuts(App::State& s) {
         chords.insert(chord);
     for (const auto& [chord, cmd] : s.keymap.layout_map())
         chords.insert(chord);
-    // Run at the start of the next frame: a command that brings up a terminal (mission.toggle back
+    // Run at the start of the next frame: a command that brings up a terminal (stage.toggle back
     // to a layout with a focused pane) must not let that terminal see the same key press again.
     for (const ImGuiKeyChord chord : chords) {
         if (ImGui::IsKeyChordPressed(chord))

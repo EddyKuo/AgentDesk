@@ -1,4 +1,4 @@
-// The empty, loading and error states every newer view shares (Focus, Mission Control, Review,
+// The empty, loading and error states every newer view shares (Focus, Stage, Review,
 // Timeline): a centred card with a title, a hint and buttons laid out like the "Open a terminal"
 // card, and the grey skeleton bars that stand in for content on the way.
 #include "app_internal.hpp"
@@ -113,7 +113,8 @@ void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& ca
         if (line->empty())
             continue;
         y += px(6);
-        y += centred_lines(dl, s.fonts.ui, hs, *line, cx, y, wrap, line == &card.detail ? detail_col : g_pal->dim);
+        y += centred_lines(dl, s.fonts.ui, hs, *line, cx, y, wrap,
+                           line == &card.detail ? detail_col : g_pal->dim);
     }
     if (!card.buttons.empty()) {
         draw_card_buttons(s, card, cx, y + px(16));
@@ -146,6 +147,69 @@ void draw_empty_state(App::State& s, ImVec2 pos, ImVec2 size, tok::Art art, cons
     if (!button.empty())
         card.buttons.push_back({button, command, nullptr});
     draw_state_card(s, pos, size, card);
+}
+
+void draw_empty_row(App::State& s, ImVec2 pos, ImVec2 size, const EmptyRow& row) {
+    if (size.x <= 0 || size.y <= 0)
+        return;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 title_size = tok::measure(s, ui::tokens::kBody, row.title.c_str());
+    const ImVec2 hint_size =
+        row.hint.empty() ? ImVec2(0, 0) : tok::measure(s, ui::tokens::kCaption, row.hint.c_str());
+    const float text_w = std::max(title_size.x, hint_size.x);
+    const float text_h = title_size.y + (row.hint.empty() ? 0.0f : tok::gap_xs() + hint_size.y);
+    const float art = std::min(px(48), size.y - tok::gap_l());
+    const bool with_art = row.art != tok::Art::kNone && art >= px(32);
+    const std::string action = !row.button.empty() ? row.button : row.link;
+    const float action_w = action.empty() ? 0.0f : ImGui::CalcTextSize(action.c_str()).x + px(28);
+    const float action_h = px(30);
+    float total =
+        (with_art ? art + tok::gap_l() : 0.0f) + text_w + (action.empty() ? 0.0f : tok::gap_xl() + action_w);
+    const bool roomy = total <= size.x - tok::gap_l() * 2;
+    if (!roomy)  // the line alone, centred
+        total = title_size.x;
+    float x = pos.x + std::max(tok::gap_l(), (size.x - total) * 0.5f);
+    const float cy = pos.y + size.y * 0.5f;
+    if (!roomy) {
+        tok::text(s, dl, ui::tokens::kBody, ImVec2(x, cy - title_size.y * 0.5f), g_pal->dim,
+                  row.title.c_str());
+        return;
+    }
+    if (with_art) {
+        tok::draw_art(dl, row.art, ImVec2(x + art * 0.5f, cy), art);
+        x += art + tok::gap_l();
+    }
+    float y = cy - text_h * 0.5f;
+    tok::text(s, dl, ui::tokens::kBody, ImVec2(x, y), g_pal->text, row.title.c_str());
+    if (!row.hint.empty())
+        tok::text(s, dl, ui::tokens::kCaption, ImVec2(x, y + title_size.y + tok::gap_xs()), g_pal->dim,
+                  row.hint.c_str());
+    x += text_w + tok::gap_xl();
+    if (action.empty())
+        return;
+    ImGui::SetCursorScreenPos(ImVec2(x, cy - action_h * 0.5f));
+    if (!row.button.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Button, v4(g_pal->focus));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, v4(alpha(g_pal->focus, 220)));
+        ImGui::PushStyleColor(ImGuiCol_Text, v4(accent_foreground()));
+        const bool clicked = ImGui::Button(row.button.c_str(), ImVec2(action_w, action_h));
+        ImGui::PopStyleColor(3);
+        if (clicked)
+            run_command(s, row.command);
+        return;
+    }
+    const ImVec2 t = ImGui::CalcTextSize(row.link.c_str());
+    const ImVec2 p(x, cy - t.y * 0.5f);
+    ImGui::SetCursorScreenPos(p);
+    const bool clicked = ImGui::InvisibleButton("##row-link", ImVec2(t.x, t.y + px(4)));
+    const bool hov = ImGui::IsItemHovered();
+    dl->AddText(p, g_pal->focus, row.link.c_str());
+    if (hov) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        dl->AddLine(ImVec2(p.x, p.y + t.y + px(1)), ImVec2(p.x + t.x, p.y + t.y + px(1)), g_pal->focus);
+    }
+    if (clicked && row.on_link)
+        row.on_link();
 }
 
 void draw_skeleton_rows(ImDrawList* dl, ImVec2 pos, float w, std::initializer_list<float> widths, float row_h,

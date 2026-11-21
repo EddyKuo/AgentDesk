@@ -13,7 +13,7 @@ struct ModStyle {
 
 // Every mod name a style's renderer draws, and the style it selects.
 // clang-format off
-constexpr std::array<ModStyle, 16> kModStyles{{
+constexpr std::array<ModStyle, 17> kModStyles{{
     {"mac-menubar", "mac"},
     {"mac-dock", "mac"},
     {"mac-window-title", "mac"},
@@ -25,8 +25,9 @@ constexpr std::array<ModStyle, 16> kModStyles{{
     {"classic-sidebar", "classic"},
     {"classic-pane", "classic"},
     {"focus-strip", "focus"},  // Focus mode's tree
-    {"mission-bar", "mission"},
-    {"mission-wall", "mission"},
+    {"stage-bar", "stage"},
+    {"stage-strip", "stage"},
+    {"stage-empty", "stage"},
     {"review-head", "review"},
     {"review-changes", "review"},
     {"review-commit", "review"},
@@ -40,7 +41,7 @@ struct Named {
 constexpr std::array<Named, 6> kNames{{{"workspace", "AgentDesk"},
                                        {"terminals", "Terminals"},
                                        {"mac", "AgentDesk Mac"},
-                                       {"mission", "Mission Control"},
+                                       {"stage", "Stage"},
                                        {"review", "Review"},
                                        {"classic", "AgentDesk Classic"}}};
 
@@ -114,6 +115,8 @@ std::optional<Replacement> replacement_for(std::string_view removed_layout) {
         return Replacement{"terminals", true};
     if (removed_layout == "cockpit")
         return Replacement{"workspace", false};
+    if (removed_layout == "mission")  // Stage took over Mission Control's job
+        return Replacement{"stage", false};
     return std::nullopt;
 }
 
@@ -150,6 +153,8 @@ ToastArea toast_area(std::string_view style, float bottom_block) {
         return {true, 28.0f + 10.0f};  // under the menu bar
     if (style == "classic")
         return {false, 22.0f};  // over the status line
+    if (style == "stage")
+        return {true, 42.0f + 8.0f};  // under the bar: the filmstrip fills the bottom
     return {false, bottom_block};
 }
 

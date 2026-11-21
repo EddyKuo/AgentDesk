@@ -23,8 +23,12 @@ bool is_builtin_command(std::string_view name) {
         "terminal.right_click", "terminal.scroll", "terminal.search", "terminal.select_all", "theme",
         "window.close", "window.fill", "window.maximize", "window.minimize", "worktree.new", "worktree.open",
         "worktree.remove", "app.quit", "overlay.close", "app.check_updates", "app.update_core", "app.update",
-        "focus.toggle", "focus.on", "focus.off", "mission.toggle", "mission.expand", "mission.wall",
-        "mission.filter",
+        "focus.toggle", "focus.on", "focus.off",
+        // Stage, and the names of Mission Control it replaced (an older keys.json keeps working:
+        // mission.toggle toggles Stage, mission.expand puts that agent on stage, mission.filter
+        // filters the strip)
+        "stage.toggle", "stage.show", "stage.next", "stage.prev", "stage.back", "stage.filter", "stage.size",
+        "stage.auto_switch", "stage.shells", "mission.toggle", "mission.expand", "mission.filter",
         // Review layout, Timeline overlay
         "review.toggle", "review.next_file", "review.prev_file", "review.refresh", "timeline.toggle",
         "timeline.range",

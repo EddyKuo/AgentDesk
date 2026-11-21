@@ -56,6 +56,7 @@
 #include "agentdesk/ui/mac_layout.hpp"
 #include "agentdesk/ui/mission.hpp"
 #include "agentdesk/ui/mods.hpp"
+#include "agentdesk/ui/stage.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
 #include "agentdesk/ui/timeline.hpp"
@@ -202,12 +203,15 @@ struct Settings {
     // while it is on ("edge", "edge_sound" or "normal").
     bool focus_on = false;
     std::string focus_alerts = "edge_sound";
-    // Mission Control (mission_layout.cpp): the last filter, and whether sub-agents and terminals
-    // without a status get tiles of their own.
-    std::string mission_filter = "all";
-    bool mission_sub_agents = false;
-    bool mission_shells = false;
-    // The layout a toggle (mission.toggle, review.toggle) came from, to go back to on the second
+    // Stage (stage_layout.cpp): the strip's filter ("all", "needs_you", "working") and thumbnail
+    // size ("s", "m", "l"), whether terminals without an agent status get thumbnails, and whether
+    // an agent that starts needing you takes the stage by itself (off: the stage never changes
+    // unless the person changes it). Read from Mission Control's keys when these are missing.
+    std::string stage_filter = "all";
+    std::string stage_size = "m";
+    bool stage_shells = false;
+    bool stage_auto_switch = false;
+    // The layout a toggle (stage.toggle, review.toggle) came from, to go back to on the second
     // press (toggle_layout).
     std::string layout_return;
     // Review: "agent" keeps showing the last agent's changes when the focus moves to a plain
@@ -373,11 +377,18 @@ inline constexpr CommandInfo kCommands[] = {
     {"mods.folder", "Open the mods folder"},
     {"app.exit_all", "Exit and stop all sessions"},
     {"focus.toggle", "Focus mode: one terminal, nothing else"},
-    {"mission.toggle", "Mission Control: every agent on one wall"},
-    {"mission.wall", "Mission Control: back to the wall"},
-    {"mission.filter:all", "Mission Control: show all agents"},
-    {"mission.filter:active", "Mission Control: show active agents"},
-    {"mission.filter:blocked", "Mission Control: show agents that need you"},
+    {"stage.toggle", "Stage: one agent big, the others live below (again: back)"},
+    {"stage.next", "Stage: next agent on stage"},
+    {"stage.prev", "Stage: previous agent on stage"},
+    {"stage.back", "Stage: swap back to the agent before"},
+    {"stage.filter:all", "Stage: show all agents in the strip"},
+    {"stage.filter:needs_you", "Stage: show agents that need you"},
+    {"stage.filter:working", "Stage: show working agents"},
+    {"stage.size:s", "Stage: small thumbnails"},
+    {"stage.size:m", "Stage: medium thumbnails"},
+    {"stage.size:l", "Stage: large thumbnails"},
+    {"stage.auto_switch", "Stage: let an agent that needs you take the stage (on / off)"},
+    {"stage.shells", "Stage: thumbnails for plain terminals too (on / off)"},
     {"review.toggle", "Review: show the agent's changes beside it (again: back)"},
     {"review.next_file", "Review: next changed file"},
     {"review.prev_file", "Review: previous changed file"},
@@ -900,7 +911,7 @@ struct App::State {
         std::map<std::string, float> scale;
     } mac;
     // The terminals this frame drew (draw_pane adds them) and the ones the last frame drew: what
-    // the person can see, for update_attention. A small Mission Control tile does not count.
+    // the person can see, for update_attention. A Stage thumbnail does not count.
     std::set<std::string> drawn_sessions;
     std::set<std::string> visible_sessions;
     // Focus mode (focus_mode.cpp; on/off is Settings::focus_on): its tree, the edge glow and the
@@ -912,24 +923,46 @@ struct App::State {
         int glow_peak = 0;
         ui::focus::HeaderReveal header;
     } focus_mode;
-    // Mission Control (mission_layout.cpp): the tile the keys move, the wall's scroll, and each
-    // tile's last lines, worked out again only when its screen changed and at most 4 times a second.
-    struct MissionState {
-        std::string selected;
+    // A terminal's last screen lines for a thumbnail (Stage's filmstrip; screen_tail_of), worked
+    // out again only when its screen changed and at most 4 times a second. Display only.
+    struct ScreenTail {
+        std::uint64_t seq = 0;
+        std::uint64_t generation = 0;
+        bool filled = false;
+        int lines = 0;
+        Clock::time_point at{};
+        std::vector<ui::mission::TailLine> tail;
+    };
+    std::map<std::string, ScreenTail> screen_tails;
+    bool tails_pending = false;  // last frame: a thumbnail waits for its next refresh
+    // Stage (stage_layout.cpp): what was on stage, the order agents were first seen in (the strip's
+    // stable order), who needed the person last frame (to spot a new one), the strip's scroll and
+    // each thumbnail's eased position, the swap fade and the last key or click.
+    struct StageState {
+        ui::stage::History history;
+        std::string shown;  // on stage last frame
+        std::map<std::string, long long> first_seen;
+        long long seen_next = 0;
+        std::map<std::string, Attention> last_att;
+        std::map<std::string, double> blocked_at;  // tok::now_ms() when it started needing you
+        std::map<std::string, ui::tokens::Tween> slot;
+        ui::tokens::Tween scroll_anim;
         float scroll = 0;
-        bool shells_shown = false;  // "show them" on the empty wall (until the layout is left)
-        bool entered = false;       // mission_entered ran since the app started
-        bool animating = false;     // last frame: a tile waits to refresh, or skeleton bars breathe
-        struct Tile {
-            std::uint64_t seq = 0;
-            std::uint64_t generation = 0;
-            bool filled = false;
-            int lines = 0;
-            Clock::time_point at{};
-            std::vector<ui::mission::TailLine> tail;
+        double swap_at = -1.0;  // tok::now_ms() of the last swap (the stage fades in)
+        double input_at = 0;    // tok::now_ms() of the last key or click
+        // This frame's model, worked out by the bar (drawn first) for the stage and the strip.
+        struct Thumb {
+            Attention att = Attention::kNone;
+            bool unreachable = false;
+            bool shell = false;  // a terminal without an agent status (stage_shells)
+            int kids = 0;        // live sub-agents
         };
-        std::map<std::string, Tile> tiles;
-    } mission;
+        std::map<std::string, Thumb> thumbs;  // every agent (and shell) that could have a thumbnail
+        std::vector<std::string> ring;        // all of them in their stable order (next / previous)
+        std::vector<std::string> order;       // the strip: filtered, left to right, without the stage
+        int blocked = 0, working = 0;         // counts for the filter buttons (without the stage)
+        bool animating = false;
+    } stage;
     // The Review layout (review_layout.cpp): whose changes show, and that agent's state last frame
     // (a turn ending, Working to anything else, reads the changes again).
     struct ReviewState {
@@ -1225,7 +1258,7 @@ bool live_agent(App::State& s, const std::string& id, const ui::SessionView& v);
 void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail);
 // The agents the sidebar lists, in its order (this also sets State::agent_order, which
 // agent.next / agent.prev follow), with each one's urgency counting its sub-agents and the live
-// sub-agents by parent. Focus's strip and Mission Control use it so their order agrees.
+// sub-agents by parent. Focus's strip and Stage use it so their agents agree.
 struct AgentRoster {
     std::vector<std::string> ids;
     std::map<std::string, int> urgency;
@@ -1361,7 +1394,7 @@ void draw_settings(App::State& s);
 void play_alert(App::State& s, bool blocked);
 
 // ------------------------------------------------------------ state_card.cpp
-// One look for the empty, loading and error states of the newer views (Focus, Mission Control,
+// One look for the empty, loading and error states of the newer views (Focus, Stage,
 // Review, Timeline): a centred title (`title_size` semibold; `needs_you` for an error; a spinner
 // above it while loading), a dim hint, an optional detail line in its own colour, buttons 36 px
 // high (the first in the accent colour, each running its command or action) and a text link.
@@ -1393,6 +1426,19 @@ void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& ca
 void draw_empty_state(App::State& s, ImVec2 pos, ImVec2 size, tok::Art art, const std::string& title,
                       const std::string& hint = {}, const std::string& button = {},
                       const std::string& command = {});
+// The same empty state laid out in one row for short areas (a strip): the drawing on the left,
+// the line and the hint beside it, then the button (or the text link), centred together. Falls
+// back to the line alone when even that does not fit.
+struct EmptyRow {
+    tok::Art art = tok::Art::kNone;
+    std::string title;
+    std::string hint;
+    std::string button;
+    std::string command;
+    std::string link;
+    std::function<void()> on_link;
+};
+void draw_empty_row(App::State& s, ImVec2 pos, ImVec2 size, const EmptyRow& row);
 // A button label followed by the command's key ("New terminal   Ctrl+Shift+T"), when it has one.
 std::string with_chord(const App::State& s, const std::string& label, const char* command);
 // Grey bars standing in for text that is not there yet, `row_h` apart, each `bar_h` high and the
@@ -1418,15 +1464,22 @@ bool focus_animating(const App::State& s);
 // Draws `fn`'s vertices at `alpha` (0..1) of their own opacity.
 void with_alpha(ImDrawList* dl, float alpha, const std::function<void()>& fn);
 
-// ------------------------------------------------------------ mission_layout.cpp
-// Mission Control: every agent as a tile on a wall; a click puts that agent in the layout's
-// "main" block (the stack "wall-body"), Ctrl+Shift+M goes back.
-void draw_mission_bar(App::State& s, ImVec2 pos, float w, float h);
-void draw_mission_wall(App::State& s, ImVec2 pos, ImVec2 size);
-// The mission.* commands; nullopt when `name` is not one.
-std::optional<std::string> mission_command(App::State& s, const std::string& name, const std::string& arg);
-// Switching to the mission layout always starts on the wall.
-void mission_entered(App::State& s);
+// ------------------------------------------------------------ stage_layout.cpp
+// Stage: one agent's pane big on the stage, every other agent as a live thumbnail in a filmstrip
+// below; a click swaps a thumbnail onto the stage. The blocks stage-bar, stage-strip, stage-empty.
+bool draw_stage_block(App::State& s, const std::string& mod, ImVec2 pos, ImVec2 size);
+// The stage.* commands (and Mission Control's names for them); nullopt when `name` is not one.
+std::optional<std::string> stage_command(App::State& s, const std::string& name, const std::string& arg);
+// The strip's height for the chosen thumbnail size and the window, and the empty stage when there
+// is nothing to show (style_layout_tree).
+std::optional<ui::layout::Node> stage_layout_tree(const App::State& s, const ui::layout::Node& tree);
+// After the panes: the stage fading in after a swap, over the pane drawn there.
+void draw_stage_overlay(App::State& s);
+// The last `lines` lines of a terminal's screen for a thumbnail (cached; display only, never read
+// for its state).
+const App::State::ScreenTail& screen_tail_of(App::State& s, const std::string& id, int lines);
+// Stage's rows in Settings > Look.
+bool look_stage_options(App::State& s);
 
 // ------------------------------------------------------------ welcome.cpp
 void draw_welcome(App::State& s);
@@ -1441,7 +1494,7 @@ void draw_exit(App::State& s);
 void draw_close_notice(App::State& s);
 
 // ------------------------------------------------------------ layouts.cpp (switching)
-// Shows the layout of `style` ("mission", "review": the built-in of that name, else the first
+// Shows the layout of `style` ("stage", "review": the built-in of that name, else the first
 // layout of that style), remembering the one shown in ui.json layout_return; when one of that
 // style already shows, goes back to the remembered one (the workspace when there is none). Leaves
 // Focus first. Returns an error, or "".

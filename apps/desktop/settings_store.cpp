@@ -178,9 +178,12 @@ Settings load_settings_unchecked() {
     s.seen_version = j.value("seen_version", "");
     s.focus_on = j.value("focus_on", false);
     s.focus_alerts = ui::focus::alerts_mode(j.value("focus_alerts", std::string("edge_sound")));
-    s.mission_filter = j.value("mission_filter", std::string("all"));
-    s.mission_sub_agents = j.value("mission_sub_agents", false);
-    s.mission_shells = j.value("mission_shells", false);
+    // Stage: its own keys, else what Mission Control (which it replaced) had saved.
+    s.stage_filter = std::string(ui::stage::filter_name(ui::stage::parse_filter(
+        j.value("stage_filter", j.value("mission_filter", std::string("all"))))));
+    s.stage_size = std::string(ui::stage::size_name(ui::stage::parse_size(j.value("stage_size", std::string("m")))));
+    s.stage_shells = j.value("stage_shells", j.value("mission_shells", false));
+    s.stage_auto_switch = j.value("stage_auto_switch", false);
     read_lists(j, s);
     s.layout = j.value("layout", s.layout);
     s.layout_return = j.value("layout_return", "");
@@ -190,7 +193,8 @@ Settings load_settings_unchecked() {
         s.timeline_range = "1h";
     s.timeline_since_left = j.value("timeline_since_left", true);
     read_style_settings(j, s.styles);
-    // Layouts that no longer ship: Tiling is Terminals with square corners, Cockpit the first layout.
+    // Layouts that no longer ship: Tiling is Terminals with square corners, Cockpit the first layout,
+    // Mission Control is Stage.
     if (const auto r = ui::styles::replacement_for(s.layout)) {
         s.layout = r->layout;
         if (r->square_corners)
@@ -302,9 +306,10 @@ void save_settings(const Settings& s) {
             {"seen_version", s.seen_version},
             {"focus_on", s.focus_on},
             {"focus_alerts", s.focus_alerts},
-            {"mission_filter", s.mission_filter},
-            {"mission_sub_agents", s.mission_sub_agents},
-            {"mission_shells", s.mission_shells},
+            {"stage_filter", s.stage_filter},
+            {"stage_size", s.stage_size},
+            {"stage_shells", s.stage_shells},
+            {"stage_auto_switch", s.stage_auto_switch},
             {"folded_machines", s.folded_machines},
             {"panels", s.panels},
             {"agents_changed", s.agents_changed},
@@ -346,6 +351,9 @@ void save_settings(const Settings& s) {
         }
         for (const auto& [k, v] : ours.items())
             doc[k] = v;
+        // Mission Control's keys: Stage took them over above.
+        for (const char* k : {"mission_filter", "mission_sub_agents", "mission_shells"})
+            doc.erase(k);
         // Telemetry off writes false; on deletes the key (on is the default).
         if (s.telemetry)
             doc.erase("telemetry");

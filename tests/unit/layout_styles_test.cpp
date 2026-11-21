@@ -28,8 +28,11 @@ TEST(LayoutStyles, ModTableNamesEveryStyleMod) {
     for (const char* m : {"tiling-bar", "tiling-pane", "cockpit-header", "cockpit-gauges"})
         EXPECT_EQ(style_of_mod(m), "") << m;
     EXPECT_EQ(style_of_mod("focus-strip"), "focus");
+    for (const char* m : {"stage-bar", "stage-strip", "stage-empty"})
+        EXPECT_EQ(style_of_mod(m), "stage") << m;
+    // Mission Control's mods went with it (Stage replaced it).
     for (const char* m : {"mission-bar", "mission-wall"})
-        EXPECT_EQ(style_of_mod(m), "mission") << m;
+        EXPECT_EQ(style_of_mod(m), "") << m;
     for (const char* m : {"review-head", "review-changes", "review-commit"})
         EXPECT_EQ(style_of_mod(m), "review") << m;
     for (const char* m : {"", "tabs", "spaces", "agents", "workspace-chrome", "files", "my-own-mod"})
@@ -42,7 +45,7 @@ TEST(LayoutStyles, ShippedLayoutsKeepTheirStyles) {
     EXPECT_EQ(style_of_tree(layout::builtin("terminals")), "terminals");
     EXPECT_EQ(style_of_tree(layout::builtin("mac")), "mac");
     EXPECT_EQ(style_of_tree(layout::builtin("focus")), "focus");
-    EXPECT_EQ(style_of_tree(layout::builtin("mission")), "mission");
+    EXPECT_EQ(style_of_tree(layout::builtin("stage")), "stage");
     EXPECT_EQ(style_of_tree(layout::builtin("review")), "review");
     EXPECT_EQ(style_of_tree(layout::builtin("classic")), "classic");
 }
@@ -69,7 +72,7 @@ TEST(LayoutStyles, DisplayNames) {
     EXPECT_EQ(display_name("workspace"), "AgentDesk");
     EXPECT_EQ(display_name("terminals"), "Terminals");
     EXPECT_EQ(display_name("mac"), "AgentDesk Mac");
-    EXPECT_EQ(display_name("mission"), "Mission Control");
+    EXPECT_EQ(display_name("stage"), "Stage");
     EXPECT_EQ(display_name("review"), "Review");
     EXPECT_EQ(display_name("classic"), "AgentDesk Classic");
     EXPECT_EQ(display_name("my-layout"), "my-layout");
@@ -131,6 +134,9 @@ TEST(LayoutStyles, ToastAreas) {
     EXPECT_FALSE(toast_area("").top);
     EXPECT_EQ(toast_area("").offset, 0.0f);
     EXPECT_EQ(toast_area("classic").offset, 22.0f);
+    // Stage's filmstrip fills the bottom: notes come in under its bar.
+    EXPECT_TRUE(toast_area("stage").top);
+    EXPECT_EQ(toast_area("stage").offset, 50.0f);
     EXPECT_EQ(toast_area("", 40.0f).offset, 40.0f);
 }
 
@@ -153,14 +159,14 @@ TEST(LayoutStyles, Clocks) {
 TEST(LayoutStyles, FunLayoutsStayOutOfTheListUntilTurnedOn) {
     EXPECT_TRUE(is_fun_layout("classic"));
     EXPECT_TRUE(is_fun_layout("garden"));
-    for (const char* l : {"workspace", "terminals", "mac", "mission", "review", "mine"})
+    for (const char* l : {"workspace", "terminals", "mac", "stage", "review", "mine"})
         EXPECT_FALSE(is_fun_layout(l)) << l;
     EXPECT_FALSE(is_listed("classic", false));
     EXPECT_TRUE(is_listed("classic", true));
     EXPECT_TRUE(is_listed("classic", false, "classic"));
     EXPECT_TRUE(is_listed("terminals", false));
 
-    const std::vector<std::string> names = {"workspace", "terminals", "mac", "mission",
+    const std::vector<std::string> names = {"workspace", "terminals", "mac", "stage",
                                             "review",    "classic",   "mine"};
     EXPECT_EQ(next_listed(names, "workspace", false), "terminals");
     EXPECT_EQ(next_listed(names, "review", false), "mine");  // Classic is skipped
@@ -182,6 +188,10 @@ TEST(LayoutStyles, RemovedLayoutsHaveReplacements) {
     ASSERT_TRUE(cockpit);
     EXPECT_EQ(cockpit->layout, "workspace");
     EXPECT_FALSE(cockpit->square_corners);
-    for (const char* l : {"workspace", "terminals", "classic", "mission", "mine", ""})
+    const auto mission = replacement_for("mission");  // Stage replaced Mission Control
+    ASSERT_TRUE(mission);
+    EXPECT_EQ(mission->layout, "stage");
+    EXPECT_FALSE(mission->square_corners);
+    for (const char* l : {"workspace", "terminals", "classic", "stage", "mine", ""})
         EXPECT_FALSE(replacement_for(l)) << l;
 }
