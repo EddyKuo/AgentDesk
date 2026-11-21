@@ -218,4 +218,4 @@
 
 ## 測試
 
-開工時 431 個（Debug，`scripts\build.cmd msvc-x64-debug all`），完成後 TEST_COUNT 個。新增：`DesignTokens.*`（7 個）、`TerminalsOptions.*`（7 個）、`LayoutStyles.FunLayoutsStayOutOfTheListUntilTurnedOn`、`LayoutStyles.RemovedLayoutsHaveReplacements`、`LayoutTips.MergedTerminalsAndFunLayoutsAreExplained`；拿掉 `TilingLayout.*`（9 個）與 `Cockpit.*`（9 個）。
+開工時 431 個（Debug，`scripts\build.cmd msvc-x64-debug all`），完成後 430 個（單元測試 343 個）。全部通過，只有 `ConPty.CtrlCByteInterruptsPing` 在 agent 的 shell 裡失敗（單獨重跑也失敗），依指示不處理。新增：`DesignTokens.*`（7 個）、`TerminalsOptions.*`（7 個）、`LayoutStyles.FunLayoutsStayOutOfTheListUntilTurnedOn`、`LayoutStyles.RemovedLayoutsHaveReplacements`、`LayoutTips.MergedTerminalsAndFunLayoutsAreExplained`；拿掉 `TilingLayout.*`（9 個）與 `Cockpit.*`（9 個）。
