@@ -29,13 +29,16 @@ Card make(std::string_view k) {
                   mouse("Files and Changes: the buttons at the right end of the tab bar"),
                   key("Every command, searchable", "app.palette")};
     } else if (k == "terminals") {
-        c.purpose = "Just your terminals: no sidebar or status bar, the tabs in one bar at the top.";
-        c.tips = {mouse("The sidebar button at the far left brings back the layout with the sidebar",
-                        "sidebar.toggle"),
-                  mouse("Click the space chip beside it to go to another space, tab or agent", "app.picker"),
-                  key("New tab", "tab.new"),
-                  mouse("The gear opens Settings, where you can pick another layout", "app.settings"),
-                  key("Every command, searchable", "app.palette")};
+        c.purpose =
+            "Just your terminals: the tabs in one bar at the top, panes you can tile from the keyboard.";
+        c.tips = {
+            mouse("The sidebar button at the far left brings back the layout with the sidebar",
+                  "sidebar.toggle"),
+            key("Go to any space, tab or agent (or click the space chip)", "app.picker"),
+            key("Resize mode: H J K L or the arrows, Shift for small steps, Esc to finish",
+                "terminals.resize_mode"),
+            key("Split toward the pane's longer side / close the pane", "pane.split:auto", "pane.close"),
+            mouse("Square corners and gaps: Settings > Look; gaps off and on here too", "terminals.gaps")};
     } else if (k == "mac") {
         c.purpose = "A desktop look: a menu bar on top, your tab in a floating window, a Dock below.";
         c.tips = {mouse("The menus at the top run every command; the AgentDesk mark opens the app menu"),
@@ -62,28 +65,16 @@ Card make(std::string_view k) {
                   mouse("The list reloads when the agent finishes a turn; refresh is at the top right",
                         "review.refresh"),
                   key("Back to where you were", "review.toggle")};
-    } else if (k == "tiling") {
-        c.purpose = "Square panes with gaps and one thin bar, made for working from the keyboard.";
-        c.tips = {key("Resize mode: H J K L or the arrows, Shift for small steps, Esc to finish",
-                      "tiling.resize_mode"),
-                  key("Split toward the pane's longer side", "pane.split:auto"),
-                  key("Close the pane", "pane.close"), key("Gaps between panes off / on", "tiling.gaps"),
-                  key("Move to the pane on the left; the other directions work the same way", "pane.go:left")};
-    } else if (k == "cockpit") {
-        c.purpose = "A control panel: gauges on the left, every agent on the right, a log of changes below.";
-        c.tips = {mouse("The gauges count agents working, agents that need you, and agents done today"),
-                  mouse("Click NEEDS YOU to jump to the first agent that needs you"),
-                  mouse("Click a row in the agent list or the log to go to that agent"),
-                  mouse("Right-click an agent: Peek shows it without leaving, Keep in a pane opens it here"),
-                  mouse("Glow and grid can be turned off in Settings > Look", "app.settings")};
     } else if (k == "classic") {
         c.purpose = "The whole window drawn in text, like a monochrome terminal of old.";
-        c.tips = {key("Open the menu bar: arrows move, Enter runs, Esc closes", "classic.menu"),
-                  mouse("States are always written out: [!] needs you, [~] working, [+] done"),
-                  mouse("Screen effects (scan lines, glow): off, light or full in Settings > Look",
-                        "classic.effects"),
-                  mouse("Monochrome terminal: turn it off in Settings > Look to see coloured diffs"),
-                  key("Show or hide the text sidebar", "sidebar.toggle")};
+        c.tips = {
+            key("Open the menu bar: arrows move, Enter runs, Esc closes", "classic.menu"),
+            mouse("States are always written out: [!] needs you, [~] working, [+] done"),
+            mouse("Screen effects and the monochrome terminal (off for coloured diffs): Settings > Look",
+                  "classic.effects"),
+            key("Show or hide the text sidebar", "sidebar.toggle"),
+            mouse("A fun layout: turn on Settings > Look > Fun layouts to keep it in the layout list",
+                  "app.settings")};
     } else if (k == kFocusKey) {
         c.purpose = "Only the terminal you are working in, with the other agents as dots in a thin strip.";
         c.tips = {mouse("The dots are your other agents: red needs you, green done, a yellow ring working. "
@@ -101,9 +92,8 @@ Card make(std::string_view k) {
 }  // namespace
 
 const std::vector<std::string>& card_keys() {
-    static const std::vector<std::string> k = {"workspace", "terminals", "mac",
-                                               "mission",   "review",    "tiling",
-                                               "cockpit",   "classic",   std::string(kFocusKey)};
+    static const std::vector<std::string> k = {"workspace", "terminals",           "mac", "mission", "review",
+                                               "classic",   std::string(kFocusKey)};
     return k;
 }
 

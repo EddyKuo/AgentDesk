@@ -4,11 +4,13 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <string>
 
 #include <gtest/gtest.h>
 
 #include "agentdesk/ui/command_names.hpp"
+#include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/layout_styles.hpp"
 
 namespace tips = agentdesk::ui::tips;
@@ -23,9 +25,13 @@ std::string command_name(const std::string& command) {
 // sentence and three to five tips.
 TEST(LayoutTips, EveryLayoutAndFocusHasACard) {
     const auto& keys = tips::card_keys();
-    for (const char* k :
-         {"workspace", "terminals", "mac", "mission", "review", "tiling", "cockpit", "classic", "focus"})
+    for (const char* k : {"workspace", "terminals", "mac", "mission", "review", "classic", "focus"})
         EXPECT_NE(std::find(keys.begin(), keys.end(), k), keys.end()) << k;
+    // Removed layouts have no card any more.
+    for (const char* k : {"tiling", "cockpit"}) {
+        EXPECT_EQ(std::find(keys.begin(), keys.end(), k), keys.end()) << k;
+        EXPECT_FALSE(tips::card(k)) << k;
+    }
     for (const auto& k : keys) {
         const auto c = tips::card(k);
         ASSERT_TRUE(c) << k;
@@ -113,4 +119,36 @@ TEST(LayoutTips, SeenTracking) {
     EXPECT_FALSE(tips::should_show("mac", true, seen));
     EXPECT_TRUE(tips::should_show("focus", true, seen));
     EXPECT_TRUE(tips::should_show("workspace", true, seen));
+}
+
+// The Terminals card covers the options and keys that came from Tiling, and Classic's card says how
+// to keep it listed (Fun layouts).
+TEST(LayoutTips, MergedTerminalsAndFunLayoutsAreExplained) {
+    const auto tm = tips::card("terminals");
+    ASSERT_TRUE(tm);
+    std::set<std::string> cmds;
+    for (const auto& t : tm->tips)
+        cmds.insert(t.command);
+    EXPECT_TRUE(cmds.contains("terminals.resize_mode"));
+    EXPECT_TRUE(cmds.contains("pane.split:auto"));
+    EXPECT_TRUE(cmds.contains("terminals.gaps"));
+    const auto classic = tips::card("classic");
+    ASSERT_TRUE(classic);
+    bool fun = false;
+    for (const auto& t : classic->tips)
+        fun = fun || t.text.find("Fun layouts") != std::string::npos;
+    EXPECT_TRUE(fun);
+    // Terminals' keys come from its own keys.json section.
+    agentdesk::ui::Keymap k = agentdesk::ui::Keymap::defaults();
+    k.set_layout("terminals");
+    const auto shown = tips::resolve(*tm, [&](std::string_view c) {
+        for (const auto& [chord, cmd] : k.layout_map())
+            if (cmd == c)
+                return agentdesk::ui::Keymap::format(chord);
+        return k.chord_for(std::string(c));
+    });
+    bool resize_key = false;
+    for (const auto& st : shown)
+        resize_key = resize_key || (st.text.starts_with("Resize mode") && st.chord == "Alt+R");
+    EXPECT_TRUE(resize_key);
 }

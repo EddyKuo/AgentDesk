@@ -35,7 +35,7 @@ inline constexpr std::string_view kFocusKey = "focus";
 [[nodiscard]] std::optional<Card> card(std::string_view key);
 
 // The card for what is shown: Focus mode's while it is on; a built-in layout's own; a layout of the
-// person's that uses a built-in style (a copy of mac, tiling, ...) gets that style's card; else "".
+// person's that uses a built-in style (a copy of mac, terminals, ...) gets that style's card; else "".
 [[nodiscard]] std::string card_key(std::string_view layout, std::string_view style, bool focus);
 
 // A tip ready to draw: its text and its key ("" when it has none).
