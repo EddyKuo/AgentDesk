@@ -597,30 +597,6 @@ void draw_stage_strip(App::State& s, ImVec2 pos, ImVec2 size) {
 }
 
 // ---------------------------------------------------------------- the bar
-// "+" (the new menu), Settings and back to the layout before; returns their left edge.
-float bar_buttons(App::State& s, float right, float cy) {
-    const float b = px(28);
-    auto tip = [&](const char* text, const char* cmd) {
-        const std::string chord = s.keymap.chord_for(cmd);
-        return chord.empty() ? std::string(text) : std::string(text) + "  " + chord;
-    };
-    right -= b;
-    const std::string back = tip("Back to the layout before", "stage.toggle");
-    if (icon_button(s, "##stage-back", ui::icon::kLayers, ImVec2(right, cy - b * 0.5f), b, fpx(15),
-                    back.c_str(), g_pal->dim))
-        run_command(s, "stage.toggle");
-    right -= b + px(2);
-    const std::string settings = tip("Settings", "app.settings");
-    if (icon_button(s, "##stage-settings", ui::icon::kSettings, ImVec2(right, cy - b * 0.5f), b, fpx(15),
-                    settings.c_str(), g_pal->dim))
-        run_command(s, "app.settings");
-    right -= b + px(2);
-    if (icon_button(s, "##stage-new", ui::icon::kPlus, ImVec2(right, cy - b * 0.5f), b, fpx(15), "New",
-                    g_pal->dim))
-        ImGui::OpenPopup("##newmenu");
-    draw_new_menu(s);
-    return right;
-}
 
 // "← <name>": swaps the agent that was on stage before back in (stage.back). Returns its left edge.
 float back_pill(App::State& s, ImDrawList* dl, float right, float cy) {
@@ -669,7 +645,7 @@ void draw_stage_bar(App::State& s, ImVec2 pos, float w, float h) {
         draw_window_buttons(s, right, pos.y, h);
         right -= px(26) * 3 + px(4) + px(8);
     }
-    right = bar_buttons(s, right, cy) - tok::gap_s();
+    right = layout_bar_buttons(s, right, cy, "stage.toggle") - tok::gap_s();
     right = back_pill(s, dl, right, cy) - tok::gap_m();
 
     // "Stage", then who is on it: the ring and icon, the name, where it runs, its state and, when

@@ -908,30 +908,6 @@ float order_switch(App::State& s, ImDrawList* dl, float right, float cy) {
     return a.x;
 }
 
-float bar_buttons(App::State& s, float right, float cy) {
-    const float b = px(28);
-    auto tip = [&](const char* text, const char* cmd) {
-        const std::string chord = s.keymap.chord_for(cmd);
-        return chord.empty() ? std::string(text) : std::string(text) + "  " + chord;
-    };
-    right -= b;
-    const std::string back = tip("Back to the layout before", "inbox.toggle");
-    if (icon_button(s, "##inbox-back", ui::icon::kLayers, ImVec2(right, cy - b * 0.5f), b, fpx(15),
-                    back.c_str(), g_pal->dim))
-        run_command(s, "inbox.toggle");
-    right -= b + px(2);
-    const std::string settings = tip("Settings", "app.settings");
-    if (icon_button(s, "##inbox-settings", ui::icon::kSettings, ImVec2(right, cy - b * 0.5f), b, fpx(15),
-                    settings.c_str(), g_pal->dim))
-        run_command(s, "app.settings");
-    right -= b + px(2);
-    if (icon_button(s, "##inbox-new", ui::icon::kPlus, ImVec2(right, cy - b * 0.5f), b, fpx(15), "New",
-                    g_pal->dim))
-        ImGui::OpenPopup("##newmenu");
-    draw_new_menu(s);
-    return right;
-}
-
 }  // namespace
 
 void inbox_entered(App::State& s) {
@@ -957,7 +933,7 @@ void draw_inbox_bar(App::State& s, ImVec2 pos, float w, float h) {
         draw_window_buttons(s, right, pos.y, h);
         right -= px(26) * 3 + px(4) + px(8);
     }
-    right = bar_buttons(s, right, cy) - tok::gap_m();
+    right = layout_bar_buttons(s, right, cy, "inbox.toggle") - tok::gap_m();
     right = order_switch(s, dl, right, cy) - tok::gap_m();
     const Queue q = s.host->connected() ? collect(s) : Queue{};
     const char* title = "Inbox";

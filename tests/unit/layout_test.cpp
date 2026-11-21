@@ -250,9 +250,8 @@ TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
     EXPECT_EQ(main.find("sidebar")->size, Span::pixels(268));
     EXPECT_TRUE(main.find("panel")->hidden);
     EXPECT_EQ(main.find("panel-body")->active, "files");
-    EXPECT_EQ(builtin_names(),
-              (std::vector<std::string>{"workspace", "terminals", "stage", "inbox", "review", "pair", "mac",
-                                        "classic", "garden"}));
+    EXPECT_EQ(builtin_names(), (std::vector<std::string>{"workspace", "terminals", "stage", "inbox", "review",
+                                                         "pair", "mac", "classic", "garden"}));
     EXPECT_EQ(builtin("tiling"), main);  // removed layouts fall back to the workspace's tree
     EXPECT_EQ(builtin("cockpit"), main);
     EXPECT_EQ(builtin("mission"), main);  // Stage replaced Mission Control (settings say so)

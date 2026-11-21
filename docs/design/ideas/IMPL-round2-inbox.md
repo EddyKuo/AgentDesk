@@ -187,3 +187,12 @@ Snooze 讓卡片先收起來，直到下面任一件事發生才重新出現：A
 ## 測試
 
 開工時 430 個（Debug，`scripts\build.cmd msvc-x64-debug all`，全部通過），完成後 443 個（單元測試 369 個）。完整跑一次時只有 `HostFixture.SlowClientDoesNotStallHost` 失敗一次，單獨重跑通過，是時間相關的偶發失敗。新增 `Inbox.*` 13 個：排序（最新／最久、同時間的順序、`inbox_order` 名稱）、Snooze 規則、預設快速回答只給已知程式的 permission、自訂覆寫與 `"*"`、格式錯誤的項目、最多 9 個與標籤長度、JSON 來回、`describe_send`、鍵盤選取、文字（等待時間、摘要、種類），以及命令名稱、Ctrl+Shift+I、內建版面與提示卡都已登記。
+
+## 合併紀錄（Merge notes）
+
+2026-11-21 在 `feature/round2-merge` 合併時，Inbox 這邊統一了下面幾件事。排序、Snooze、快速回答、回覆的行為都沒有改：
+
+- **畫面預覽改用共用快取**：卡片的畫面最後幾行改呼叫 Stage 的 `screen_tail_of()`（`App::State::screen_tails`），刪掉 Inbox 自己的 `s.inbox.tails` 與 `tail_of()`。等下一次更新時由共用的 `tails_pending` 喚醒；關掉的終端機在 Inbox 畫佇列時從共用快取刪掉。
+- **變更檔案數只剩一套機制**：拿掉 `GitInfo::changed`，改用 Pair 的 `GitCache::with_changes()` 與 `GitInfo::changed_files`。只有需要你的卡片會要求計數，完成列只用一般的 `get()`。計數方式也跟著 Pair 改成 `git status --porcelain=v1 -z --untracked-files=all`：未追蹤的資料夾逐檔計算（原本是 `normal`，整個資料夾算一筆）。
+- **頂端列右邊的新增、設定、返回三顆按鈕**改用共用的 `layout_bar_buttons()`，外觀不變。
+- **版面順序**：Inbox 排在 Stage 之後、Review 之前；Ctrl+Shift+I 不變。

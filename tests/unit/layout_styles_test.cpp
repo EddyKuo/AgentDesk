@@ -170,14 +170,14 @@ TEST(LayoutStyles, FunLayoutsStayOutOfTheListUntilTurnedOn) {
     EXPECT_TRUE(is_listed("classic", false, "classic"));
     EXPECT_TRUE(is_listed("terminals", false));
 
-    const std::vector<std::string> names = {"workspace", "terminals", "stage", "inbox",  "review",
+    const std::vector<std::string> names = {"workspace", "terminals", "stage",   "inbox",  "review",
                                             "pair",      "mac",       "classic", "garden", "mine"};
     EXPECT_EQ(next_listed(names, "workspace", false), "terminals");
     EXPECT_EQ(next_listed(names, "review", false), "pair");
     EXPECT_EQ(next_listed(names, "mac", false), "mine");  // Classic and Garden are skipped
     EXPECT_EQ(next_listed(names, "mac", true), "classic");
     EXPECT_EQ(next_listed(names, "classic", true), "garden");
-    EXPECT_EQ(next_listed(names, "garden", false), "mine");  // leaving Garden
+    EXPECT_EQ(next_listed(names, "garden", false), "mine");     // leaving Garden
     EXPECT_EQ(next_listed(names, "mine", false), "workspace");  // wraps
     EXPECT_EQ(next_listed(names, "classic", false), "mine");    // leaving the fun layout
     EXPECT_EQ(next_listed(names, "gone", false), "workspace");  // not in the list: the first
@@ -201,4 +201,27 @@ TEST(LayoutStyles, RemovedLayoutsHaveReplacements) {
     EXPECT_FALSE(mission->square_corners);
     for (const char* l : {"workspace", "terminals", "classic", "stage", "mine", ""})
         EXPECT_FALSE(replacement_for(l)) << l;
+}
+
+// Saving ui.json drops the keys of removed layouts from the whole file, not only from the values
+// being written (phase 1 left tiling_* and cockpit_* in the file).
+TEST(LayoutStyles, SavingDropsKeysOfRemovedLayouts) {
+    for (const char* k :
+         {"tiling_gaps", "tiling_gaps_on", "tiling_titles", "tiling_focus_follows_mouse", "cockpit_effects",
+          "cockpit_done_today", "mission_filter", "mission_sub_agents", "mission_shells"})
+        EXPECT_TRUE(is_obsolete_setting(k)) << k;
+    for (const char* k :
+         {"terminals_gaps", "stage_filter", "inbox_order", "pair", "fun_layouts", "layout", ""})
+        EXPECT_FALSE(is_obsolete_setting(k)) << k;
+
+    auto doc = nlohmann::json::parse(R"({
+        "layout": "stage", "tiling_gaps": 6, "tiling_gaps_on": true, "cockpit_effects": "full",
+        "cockpit_done_today": 3, "mission_filter": "blocked", "mission_shells": true,
+        "terminals_gaps": 6, "stage_filter": "needs_you", "zoom": 1.0, "my_own_key": "kept"})");
+    EXPECT_EQ(drop_obsolete_settings(doc), 6);
+    EXPECT_EQ(doc, nlohmann::json::parse(R"({"layout": "stage", "terminals_gaps": 6,
+        "stage_filter": "needs_you", "zoom": 1.0, "my_own_key": "kept"})"));
+    EXPECT_EQ(drop_obsolete_settings(doc), 0);  // nothing left to drop
+    nlohmann::json not_object = nlohmann::json::array({"tiling_gaps"});
+    EXPECT_EQ(drop_obsolete_settings(not_object), 0);
 }

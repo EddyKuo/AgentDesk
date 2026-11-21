@@ -166,7 +166,7 @@ constexpr std::pair<const char*, const char*> kGlobal[] = {
     {"ctrl-shift-.", "focus.toggle"},
     {"ctrl-shift-m", "stage.toggle"},
     {"ctrl-shift-i", "inbox.toggle"},
-    {"ctrl-shift-2", "pair.toggle"},  // the digit row: every free Ctrl+Shift letter is taken or a terminal key
+    {"ctrl-shift-2", "pair.toggle"},  // free in every section (a terminal no longer sees Ctrl+@ there)
     {"ctrl-shift-r", "review.toggle"},
     {"ctrl-shift-h", "timeline.toggle"},
 };

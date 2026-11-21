@@ -126,3 +126,14 @@
 - `tools/qa/screenshot_ui.cpp`：新增 `pair-quick`、`pair-steady` 兩個 profile。
 
 和其他第二階段分支相鄰的地方：`builtin_names()`、`kModStyles` 的陣列大小、`kNames`、`card_keys()`、`command_names.cpp`、`kLayoutDefaults`、`frame.cpp` 的區塊分派、`commands.cpp` 的命令分派、`app_internal.hpp` 的 State 與宣告區段。合併時兩邊的項目都留下、陣列大小相加即可。
+
+## 合併紀錄（Merge notes）
+
+2026-11-21 在 `feature/round2-merge` 合併時，Pair 這邊統一或補上了下面幾件事，比賽與 worktree 的行為沒有改：
+
+- **全域切換鍵 Ctrl+Shift+2**（待解問題 1）：`global` 區段加上 `ctrl-shift-2` → `pair.toggle`。`global`、`terminal` 與每個 `layout:*` 區段的預設都檢查過，沒有用到這個組合，所以照整合時的指示採用它。代價是終端機裡收不到 Ctrl+Shift+2（有些程式把它當成 Ctrl+@），和其他 Ctrl+Shift 全域鍵一樣，可以在 keys.json 改掉。`Pair.KeysOnlyWhilePairShows` 多檢查兩件事：每個內建版面都能用它切換，預設裡也只有這一個綁定。設定卡左下因此會出現「Back: Ctrl+Shift+2」。
+- **命令面板**：`kCommands` 加上 `pair.toggle`、`pair.swap`、`pair.close`。
+- **第一次使用提示**：最後一條改成「Back to your layout」（Ctrl+Shift+2）。提示卡最多五條，所以拿掉 worktree 那一條；設定卡上本來就有說明。
+- **變更數只剩一套機制**：保留 Pair 的 `GitCache::with_changes()` 與 `changed_files`、`lines_added`、`lines_removed`，Inbox 改用同一套（拿掉 Inbox 的 `GitInfo::changed`）。
+- **頂端列**：右邊加上新增、設定、回到原本版面三顆按鈕（共用的 `layout_bar_buttons()`），和 Stage、Inbox、Garden 一致，停在設定卡時也能用滑鼠離開。
+- **版面順序**：Pair 排在 Review 之後、AgentDesk Mac 之前，仍是一般版面，不是彩蛋。

@@ -112,3 +112,13 @@ Inbox、Pair、Garden 新增內建版面時，會和這裡在 `builtin_names()`�
 開工時 430 個（第一階段紀錄的數字），單元測試 343 個。完成後單元測試 352 個：新增 `Stage.*` 11 個，拿掉 `Mission.ShippedLayoutHasBarWallAndMain`、`Mission.CommandsAreKnownAndBound`（改寫進 `Stage.ShippedLayoutHasBarStageAndStrip`、`Stage.CommandsAndKeys`），並更新 `LayoutStyles`、`Layout`、`LayoutTips` 裡的版面名稱與 Mission Control 轉換。
 
 `scripts\build.cmd msvc-x64-debug all`（/W4 /WX）：439 個測試全部通過，這次 `ConPty.CtrlCByteInterruptsPing` 也過了。
+
+## 合併紀錄（Merge notes）
+
+2026-11-21 在 `feature/round2-merge` 依序合併 Stage、Inbox、Pair、Garden 時，Stage 這邊統一了下面幾件事：
+
+- **畫面最後幾行的快取只剩一份**：`App::State::screen_tails` 與 `screen_tail_of()` 由 Stage 和 Inbox 共用，Inbox 自己的 `s.inbox.tails` 拿掉了。`tails_pending` 改在 `App::frame()` 開頭清掉，不再由 Stage 的頂端列清，所以 Inbox 在等下一次更新時也會醒來，離開 Stage 之後也不會一直每 100 ms 喚醒。關掉的終端機由 Stage（原本就有）和 Inbox 各自從快取刪掉。
+- **頂端列右邊的三顆按鈕變成共用元件**：Stage 的 `bar_buttons` 搬到 `state_card.cpp`，改名 `layout_bar_buttons(s, right, cy, toggle_command)`，Inbox 與 Pair 也用它。Garden 保留自己的版本（它刻意不在每一格配置字串）。
+- **版面順序**：`builtin_names()` 最後是 workspace、terminals、stage、inbox、review、pair、mac、classic、garden。Fun layouts 關著時，Ctrl+Shift+L 依序輪到 AgentDesk、Terminals、Stage、Inbox、Review、Pair、AgentDesk Mac。
+- **待解問題 6 修好了**：存 `ui.json` 時，`tiling_*`、`cockpit_*`、`mission_*` 開頭的鍵改由 `ui::styles::drop_obsolete_settings()` 從整份檔案刪掉（`settings_store.cpp` 合併完檔案內容後呼叫），不再只刪準備寫入的物件。單元測試是 `LayoutStyles.SavingDropsKeysOfRemovedLayouts`。
+- `ui::mission` 的共用邏輯照舊保留，Garden 用到的 `clean_message` 還在。

@@ -357,9 +357,9 @@ void save_settings(const Settings& s) {
         }
         for (const auto& [k, v] : ours.items())
             doc[k] = v;
-        // Mission Control's keys: Stage took them over above.
-        for (const char* k : {"mission_filter", "mission_sub_agents", "mission_shells"})
-            doc.erase(k);
+        // Keys of layouts that no longer ship (Tiling, Cockpit, Mission Control): what carries over
+        // was read at start-up, so they leave the file now.
+        ui::styles::drop_obsolete_settings(doc);
         // Telemetry off writes false; on deletes the key (on is the default).
         if (s.telemetry)
             doc.erase("telemetry");

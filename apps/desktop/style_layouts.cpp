@@ -64,10 +64,8 @@ void write_style_settings(nlohmann::json& j, const StyleSettings& in) {
     j["fun_layouts"] = in.fun_layouts;
     j["classic_effects"] = in.classic_effects;
     j["classic_mono_terminal"] = in.classic_mono_terminal;
-    // Keys of removed layouts are dropped when the file is next written.
-    for (const char* k : {"tiling_gaps", "tiling_gaps_on", "tiling_titles", "tiling_focus_follows_mouse",
-                          "cockpit_effects", "cockpit_done_today"})
-        j.erase(k);
+    // Keys of removed layouts leave the file in save_settings (ui::styles::drop_obsolete_settings):
+    // `j` holds only what is written, not the file's own keys.
 }
 
 std::string style_chord_for(const App::State& s, const std::string& command) {

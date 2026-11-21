@@ -350,7 +350,8 @@ ImU32 picker_fill() {
 }
 
 // ---------------------------------------------------------------- pair-bar (42 px)
-// "Pair", left vs right, and at the right Swap, Close pair and (Windows buttons) the window's.
+// "Pair", left vs right, and at the right Swap, Close pair, New, Settings, back and (Windows buttons)
+// the window's.
 void draw_bar(App::State& s, ImVec2 pos, float w, float h) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 end(pos.x + w, pos.y + h);
@@ -363,6 +364,8 @@ void draw_bar(App::State& s, ImVec2 pos, float w, float h) {
         draw_window_buttons(s, right + tok::gap_s(), pos.y, h);
         right -= px(26) * 3 + px(4) + px(12);
     }
+    // New, Settings and back to the layout before, as the other full-width layouts have them.
+    right = layout_bar_buttons(s, right, cy, "pair.toggle") - tok::gap_m();
     const pr::Phase ph = s.pair.model.phase();
     const bool paired = ph == pr::Phase::kRunning || ph == pr::Phase::kHalf;
     const float bh = px(26);

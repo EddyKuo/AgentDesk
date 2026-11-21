@@ -144,3 +144,13 @@
 ## 測試
 
 開工時 430 個（第一階段紀錄的數字）。新增 `Garden.*` 7 個：外觀由 id 決定、狀態對姿勢、姿勢內插、1～20 個的排列、子 Agent 跟隨父 Agent、畫格頻率、版面／命令／提示卡；另在 `LayoutStyles`、`Layout`、`LayoutTips` 既有測試裡補上 garden。完成後 437 個（Debug，`scripts\build.cmd msvc-x64-debug all`），全部通過。
+
+## 合併紀錄（Merge notes）
+
+2026-11-21 在 `feature/round2-merge` 合併時，Garden 這邊的處理：
+
+- **`ui::mission::clean_message` 還在**（待解問題 5）：Stage 保留了 `ui::mission` 的共用邏輯，懸停卡片照舊用它清理訊息。
+- **Fun layouts**：Garden 排在最後，和 Classic 一樣，只有設定 › Look 的「Fun layouts」打開時才出現在版面卡片與 Ctrl+Shift+L 的輪替裡；`layout:garden` 一律可用。`LayoutStyles.FunLayoutsStayOutOfTheListUntilTurnedOn` 改用合併後的完整版面清單。
+- **沒有預設按鍵**，照原本的決定；命令面板裡有 `garden.toggle`。
+- **截圖工具**：`state-cleared`、`state-done-later` 與 `SHOT_EXTRA` 的 `profile:name:子資料夾` 寫法都保留，和 Inbox 的 `ask-*`、Pair 的 `pair-quick`／`pair-steady` 並存。
+- 頂端列的三顆按鈕沒有改用共用的 `layout_bar_buttons()`：Garden 刻意不在每一格配置字串（返回按鈕的說明文字是預先算好的），外觀本來就一致。

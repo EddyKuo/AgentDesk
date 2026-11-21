@@ -46,6 +46,13 @@ struct Replacement {
 };
 std::optional<Replacement> replacement_for(std::string_view removed_layout);
 
+// ui.json keys that belonged to layouts that no longer ship (tiling_*, cockpit_*, mission_*): read
+// once for what carries over, then removed from the whole file the next time it is written.
+bool is_obsolete_setting(std::string_view key);
+// Erases every such key from a ui.json document (an object; anything else is left alone).
+// Returns how many went.
+int drop_obsolete_settings(nlohmann::json& doc);
+
 // Styles whose chrome shows a clock (the frame loop wakes when the minute turns over).
 bool has_clock(std::string_view style);
 

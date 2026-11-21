@@ -1502,6 +1502,9 @@ struct EmptyRow {
     std::function<void()> on_link;
 };
 void draw_empty_row(App::State& s, ImVec2 pos, ImVec2 size, const EmptyRow& row);
+// The right end of a full-width layout bar (Stage, Inbox, Pair): New (the new menu), Settings and
+// back to the layout before (`toggle_command`), right to left from `right`; returns their left edge.
+float layout_bar_buttons(App::State& s, float right, float cy, const char* toggle_command);
 // A button label followed by the command's key ("New terminal   Ctrl+Shift+T"), when it has one.
 std::string with_chord(const App::State& s, const std::string& label, const char* command);
 // Grey bars standing in for text that is not there yet, `row_h` apart, each `bar_h` high and the

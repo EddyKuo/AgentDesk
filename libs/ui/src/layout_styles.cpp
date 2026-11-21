@@ -130,6 +130,25 @@ std::optional<Replacement> replacement_for(std::string_view removed_layout) {
     return std::nullopt;
 }
 
+bool is_obsolete_setting(std::string_view key) {
+    for (const std::string_view prefix : {"tiling_", "cockpit_", "mission_"})
+        if (key.starts_with(prefix))
+            return true;
+    return false;
+}
+
+int drop_obsolete_settings(nlohmann::json& doc) {
+    if (!doc.is_object())
+        return 0;
+    std::vector<std::string> gone;
+    for (const auto& [k, v] : doc.items())
+        if (is_obsolete_setting(k))
+            gone.push_back(k);
+    for (const auto& k : gone)
+        doc.erase(k);
+    return static_cast<int>(gone.size());
+}
+
 bool has_clock(std::string_view style) {
     return style == "mac" || style == "classic";
 }

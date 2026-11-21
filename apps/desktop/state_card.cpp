@@ -226,5 +226,32 @@ void draw_skeleton_rows(ImDrawList* dl, ImVec2 pos, float w, std::initializer_li
     }
 }
 
+float layout_bar_buttons(App::State& s, float right, float cy, const char* toggle_command) {
+    const float b = px(28);
+    auto tip = [&](const char* text, const char* cmd) {
+        const std::string chord = s.keymap.chord_for(cmd);
+        return chord.empty() ? std::string(text) : std::string(text) + "  " + chord;
+    };
+    ImGui::PushID(toggle_command);
+    right -= b;
+    const std::string back = tip("Back to the layout before", toggle_command);
+    if (icon_button(s, "##bar-back", ui::icon::kLayers, ImVec2(right, cy - b * 0.5f), b, fpx(15),
+                    back.c_str(), g_pal->dim))
+        run_command(s, toggle_command);
+    right -= b + px(2);
+    const std::string settings = tip("Settings", "app.settings");
+    if (icon_button(s, "##bar-settings", ui::icon::kSettings, ImVec2(right, cy - b * 0.5f), b, fpx(15),
+                    settings.c_str(), g_pal->dim))
+        run_command(s, "app.settings");
+    right -= b + px(2);
+    const bool open_new = icon_button(s, "##bar-new", ui::icon::kPlus, ImVec2(right, cy - b * 0.5f), b,
+                                      fpx(15), "New", g_pal->dim);
+    ImGui::PopID();
+    if (open_new)
+        ImGui::OpenPopup("##newmenu");  // outside the ID scope: draw_new_menu looks for it there
+    draw_new_menu(s);
+    return right;
+}
+
 }  // namespace detail
 }  // namespace agentdesk::desktop

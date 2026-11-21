@@ -60,8 +60,9 @@ Card make(std::string_view k) {
                   "stage.auto_switch"),
             key("Back to your layout", "stage.toggle")};
     } else if (k == "inbox") {
-        c.purpose = "Every agent that is waiting for you, as a card: what it asks, how long it has waited, "
-                    "and the answer right there.";
+        c.purpose =
+            "Every agent that is waiting for you, as a card: what it asks, how long it has waited, "
+            "and the answer right there.";
         c.tips = {
             mouse("With the queue clicked, Up / Down pick a card and Enter opens it beside; a click on a "
                   "terminal types there as usual"),
@@ -78,14 +79,16 @@ Card make(std::string_view k) {
                         "review.refresh"),
                   key("Back to where you were", "review.toggle")};
     } else if (k == "pair") {
-        c.purpose = "Two agents side by side on the same task: see who finishes first, then keep the better result.";
-        c.tips = {mouse("Type once in the bar at the bottom: Enter sends it to both, or pick Left only / Right only"),
-                  key("Put the cursor in that bar (clicking a terminal takes the keys back)", "pair.prompt"),
-                  mouse("With separate worktrees on, each side works in its own checkout, so they never edit "
-                        "the same files"),
-                  mouse("When both are done, the strip on top says who won; open either side in Review or "
-                        "mark the one you keep"),
-                  key("Swap the two sides (Change on a side's header picks another agent)", "pair.swap")};
+        c.purpose =
+            "Two agents side by side on the same task: see who finishes first, then keep the better result.";
+        c.tips = {
+            mouse(
+                "Type once in the bar at the bottom: Enter sends it to both, or pick Left only / Right only"),
+            key("Put the cursor in that bar (clicking a terminal takes the keys back)", "pair.prompt"),
+            mouse("When both are done, the strip on top says who won; open either side in Review or "
+                  "mark the one you keep"),
+            key("Swap the two sides (Change on a side's header picks another agent)", "pair.swap"),
+            key("Back to your layout", "pair.toggle")};
     } else if (k == "classic") {
         c.purpose = "The whole window drawn in text, like a monochrome terminal of old.";
         c.tips = {
@@ -97,16 +100,18 @@ Card make(std::string_view k) {
             mouse("A fun layout: turn on Settings > Look > Fun layouts to keep it in the layout list",
                   "app.settings")};
     } else if (k == "garden") {
-        c.purpose = "Your agents as little creatures in a garden: who is busy, who needs you and who is done, "
-                    "at a glance.";
-        c.tips = {mouse("Hopping along: working. Waving with a red \"!\": needs you. A hop and a sparkle: done. "
-                        "Asleep: idle. Faded: no status"),
-                  mouse("Hover a creature for its program, state, how long and its last message"),
-                  mouse("Click a creature to work with it in your layout; right-click to peek, rename or "
-                        "close it"),
-                  mouse("Back to your layout: the button at the top right", "garden.toggle"),
-                  mouse("A fun layout: turn on Settings > Look > Fun layouts to keep it in the layout list",
-                        "app.settings")};
+        c.purpose =
+            "Your agents as little creatures in a garden: who is busy, who needs you and who is done, "
+            "at a glance.";
+        c.tips = {
+            mouse("Hopping along: working. Waving with a red \"!\": needs you. A hop and a sparkle: done. "
+                  "Asleep: idle. Faded: no status"),
+            mouse("Hover a creature for its program, state, how long and its last message"),
+            mouse("Click a creature to work with it in your layout; right-click to peek, rename or "
+                  "close it"),
+            mouse("Back to your layout: the button at the top right", "garden.toggle"),
+            mouse("A fun layout: turn on Settings > Look > Fun layouts to keep it in the layout list",
+                  "app.settings")};
     } else if (k == kFocusKey) {
         c.purpose = "Only the terminal you are working in, with the other agents as dots in a thin strip.";
         c.tips = {mouse("The dots are your other agents: red needs you, green done, a yellow ring working. "
@@ -124,9 +129,9 @@ Card make(std::string_view k) {
 }  // namespace
 
 const std::vector<std::string>& card_keys() {
-    static const std::vector<std::string> k = {"workspace", "terminals", "stage",   "inbox",
-                                               "review",    "pair",      "mac",     "classic",
-                                               "garden",    std::string(kFocusKey)};
+    static const std::vector<std::string> k = {
+        "workspace", "terminals", "stage",   "inbox",  "review",
+        "pair",      "mac",       "classic", "garden", std::string(kFocusKey)};
     return k;
 }
 
