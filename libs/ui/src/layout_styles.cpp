@@ -13,7 +13,7 @@ struct ModStyle {
 
 // Every mod name a style's renderer draws, and the style it selects.
 // clang-format off
-constexpr std::array<ModStyle, 16> kModStyles{{
+constexpr std::array<ModStyle, 19> kModStyles{{
     {"mac-menubar", "mac"},
     {"mac-dock", "mac"},
     {"mac-window-title", "mac"},
@@ -30,6 +30,9 @@ constexpr std::array<ModStyle, 16> kModStyles{{
     {"review-head", "review"},
     {"review-changes", "review"},
     {"review-commit", "review"},
+    {"pair-bar", "pair"},
+    {"pair-stage", "pair"},
+    {"pair-prompt", "pair"},
 }};
 // clang-format on
 
@@ -37,11 +40,12 @@ struct Named {
     std::string_view layout;
     std::string_view shown;
 };
-constexpr std::array<Named, 6> kNames{{{"workspace", "AgentDesk"},
+constexpr std::array<Named, 7> kNames{{{"workspace", "AgentDesk"},
                                        {"terminals", "Terminals"},
                                        {"mac", "AgentDesk Mac"},
                                        {"mission", "Mission Control"},
                                        {"review", "Review"},
+                                       {"pair", "Pair"},
                                        {"classic", "AgentDesk Classic"}}};
 
 // The fun layouts (Garden joins Classic when it ships).
@@ -150,6 +154,8 @@ ToastArea toast_area(std::string_view style, float bottom_block) {
         return {true, 28.0f + 10.0f};  // under the menu bar
     if (style == "classic")
         return {false, 22.0f};  // over the status line
+    if (style == "pair")
+        return {false, 60.0f};  // over the shared prompt bar
     return {false, bottom_block};
 }
 

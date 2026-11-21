@@ -189,7 +189,7 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
 // Defaults that apply only while one layout shows ("layout:<name>" sections). None of them is bound
 // in "global" or "terminal": the Review layout's F8 / Shift+F8 move between changed files (elsewhere
 // F8 still reaches the terminal); Terminals' Alt keys (resize mode, split, close, gaps); Classic's F10 menu
-// bar.
+// bar; Pair's Alt+P (into the shared prompt bar) and Alt+Shift+S (swap sides).
 struct LayoutDefault {
     const char* section;
     const char* chord;
@@ -204,6 +204,8 @@ constexpr LayoutDefault kLayoutDefaults[] = {
     {"layout:terminals", "alt-shift-q", "pane.close"},
     {"layout:terminals", "alt-shift-g", "terminals.gaps"},
     {"layout:classic", "f10", "classic.menu"},
+    {"layout:pair", "alt-p", "pair.prompt"},
+    {"layout:pair", "alt-shift-s", "pair.swap"},
 };
 // clang-format on
 

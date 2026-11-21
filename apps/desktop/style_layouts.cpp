@@ -84,13 +84,15 @@ float line_px(float w) {
 }
 
 bool styled_panes(const std::string& style) {
-    return style == "classic";
+    return style == "classic" || style == "pair";
 }
 
 StyledPane draw_styled_pane(App::State& s, const std::string& id, const ui::SessionView& v, ImVec2 pos,
                             ImVec2 max, const ui::styles::PaneLook& look, bool focused, bool connected) {
     if (style_of(s) == "classic")
         return draw_classic_pane(s, id, v, pos, max, look, focused, connected);
+    if (style_of(s) == "pair")
+        return draw_pair_pane(s, id, v, pos, max, focused);
     return {pos, max};
 }
 
@@ -149,6 +151,7 @@ void draw_style_overlay(App::State& s) {
 
 void style_tick(App::State& s) {
     track_state_changes(s);  // whatever layout shows
+    pair_tick(s);
 }
 
 ui::styles::ToastArea style_toast_area(const App::State& s) {
@@ -162,6 +165,8 @@ bool style_draws_window_buttons(const App::State& s) {
 bool style_layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 size) {
     if (name == "classic")
         classic_layout_preview(d, a, size);
+    else if (name == "pair")
+        pair_layout_preview(d, a, size);
     else
         return false;
     return true;

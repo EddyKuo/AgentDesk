@@ -65,6 +65,15 @@ Card make(std::string_view k) {
                   mouse("The list reloads when the agent finishes a turn; refresh is at the top right",
                         "review.refresh"),
                   key("Back to where you were", "review.toggle")};
+    } else if (k == "pair") {
+        c.purpose = "Two agents side by side on the same task: see who finishes first, then keep the better result.";
+        c.tips = {mouse("Type once in the bar at the bottom: Enter sends it to both, or pick Left only / Right only"),
+                  key("Put the cursor in that bar (clicking a terminal takes the keys back)", "pair.prompt"),
+                  mouse("With separate worktrees on, each side works in its own checkout, so they never edit "
+                        "the same files"),
+                  mouse("When both are done, the strip on top says who won; open either side in Review or "
+                        "mark the one you keep"),
+                  key("Swap the two sides (Change on a side's header picks another agent)", "pair.swap")};
     } else if (k == "classic") {
         c.purpose = "The whole window drawn in text, like a monochrome terminal of old.";
         c.tips = {
@@ -92,7 +101,8 @@ Card make(std::string_view k) {
 }  // namespace
 
 const std::vector<std::string>& card_keys() {
-    static const std::vector<std::string> k = {"workspace", "terminals",           "mac", "mission", "review",
+    static const std::vector<std::string> k = {"workspace", "terminals", "mac",
+                                               "mission",   "review",    "pair",
                                                "classic",   std::string(kFocusKey)};
     return k;
 }

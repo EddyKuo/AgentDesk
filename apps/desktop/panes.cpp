@@ -479,6 +479,11 @@ void draw_dividers(ImDrawList* dl, ui::Tab& tab, const ui::Rect& area, float gap
 
 }  // namespace
 
+void draw_one_pane(App::State& s, const std::string& id, ui::Rect r, bool connected,
+                   const ui::styles::PaneLook& look) {
+    draw_pane(s, id, r, connected, look);
+}
+
 void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected, const lay::PaneFrame* frame) {
     s.pane_area = {pos.x, pos.y, size.x, size.y};
     ui::Tab* tab = s.ws.active_tab();
