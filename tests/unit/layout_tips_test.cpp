@@ -25,7 +25,7 @@ std::string command_name(const std::string& command) {
 // sentence and three to five tips.
 TEST(LayoutTips, EveryLayoutAndFocusHasACard) {
     const auto& keys = tips::card_keys();
-    for (const char* k : {"workspace", "terminals", "mac", "mission", "review", "classic", "focus"})
+    for (const char* k : {"workspace", "terminals", "mac", "mission", "inbox", "review", "classic", "focus"})
         EXPECT_NE(std::find(keys.begin(), keys.end(), k), keys.end()) << k;
     // Removed layouts have no card any more.
     for (const char* k : {"tiling", "cockpit"}) {

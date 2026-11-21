@@ -57,6 +57,16 @@ Card make(std::string_view k) {
                   "agents"),
             mouse("Right-click a tile to peek, rename or close it"),
             mouse("Esc is not used here: it goes to the terminal, so you can still interrupt an agent")};
+    } else if (k == "inbox") {
+        c.purpose = "Every agent that is waiting for you, as a card: what it asks, how long it has waited, "
+                    "and the answer right there.";
+        c.tips = {
+            mouse("With the queue clicked, Up / Down pick a card and Enter opens it beside; a click on a "
+                  "terminal types there as usual"),
+            mouse("R types a reply (Enter sends it); 1-9 press the card's quick answers"),
+            mouse("S snoozes a card until the agent asks something new; Dismiss clears a finished one"),
+            mouse("Each program's quick answers can be changed: inbox_answers in ui.json"),
+            key("Back to the layout you came from", "inbox.toggle")};
     } else if (k == "review") {
         c.purpose = "The agent's terminal on the left, its uncommitted changes and diff on the right.";
         c.tips = {key("Next / previous changed file", "review.next_file", "review.prev_file"),
@@ -92,7 +102,7 @@ Card make(std::string_view k) {
 }  // namespace
 
 const std::vector<std::string>& card_keys() {
-    static const std::vector<std::string> k = {"workspace", "terminals",           "mac", "mission", "review",
+    static const std::vector<std::string> k = {"workspace", "terminals", "mac", "mission", "inbox", "review",
                                                "classic",   std::string(kFocusKey)};
     return k;
 }

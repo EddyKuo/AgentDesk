@@ -13,7 +13,7 @@ struct ModStyle {
 
 // Every mod name a style's renderer draws, and the style it selects.
 // clang-format off
-constexpr std::array<ModStyle, 16> kModStyles{{
+constexpr std::array<ModStyle, 18> kModStyles{{
     {"mac-menubar", "mac"},
     {"mac-dock", "mac"},
     {"mac-window-title", "mac"},
@@ -27,6 +27,8 @@ constexpr std::array<ModStyle, 16> kModStyles{{
     {"focus-strip", "focus"},  // Focus mode's tree
     {"mission-bar", "mission"},
     {"mission-wall", "mission"},
+    {"inbox-bar", "inbox"},
+    {"inbox-queue", "inbox"},
     {"review-head", "review"},
     {"review-changes", "review"},
     {"review-commit", "review"},
@@ -37,10 +39,11 @@ struct Named {
     std::string_view layout;
     std::string_view shown;
 };
-constexpr std::array<Named, 6> kNames{{{"workspace", "AgentDesk"},
+constexpr std::array<Named, 7> kNames{{{"workspace", "AgentDesk"},
                                        {"terminals", "Terminals"},
                                        {"mac", "AgentDesk Mac"},
                                        {"mission", "Mission Control"},
+                                       {"inbox", "Inbox"},
                                        {"review", "Review"},
                                        {"classic", "AgentDesk Classic"}}};
 

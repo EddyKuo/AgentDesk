@@ -325,6 +325,42 @@ void layout_preview(ImDrawList* d, const std::string& name, ImVec2 a, ImVec2 siz
         d->AddRect(a, b, g_pal->border, px(6));
         return;
     }
+    if (name == "inbox") {
+        // A bar; a column of cards (the first needs you: a red stripe and two answer chips) beside
+        // the opened agent's terminal.
+        d->AddRectFilled(a, b, g_pal->bg, px(6));
+        d->AddRectFilled(a, ImVec2(b.x, a.y + px(8)), g_pal->sidebar, px(6), ImDrawFlags_RoundCornersTop);
+        d->AddLine(ImVec2(a.x, a.y + px(8)), ImVec2(b.x, a.y + px(8)), g_pal->border);
+        line(a.x + px(4), a.y + px(2.5f), 12, g_pal->text);
+        d->AddRectFilled(ImVec2(a.x + px(19), a.y + px(2)), ImVec2(a.x + px(29), a.y + px(6)),
+                         alpha(g_pal->needs_you, 0x50), px(2));
+        const float qx = a.x + size.x * 0.44f;
+        d->AddRectFilled(ImVec2(a.x, a.y + px(8)), ImVec2(qx, b.y), g_pal->sidebar, px(6),
+                         ImDrawFlags_RoundCornersBottomLeft);
+        d->AddLine(ImVec2(qx, a.y + px(8)), ImVec2(qx, b.y), g_pal->border);
+        float y = a.y + px(12);
+        for (int i = 0; i < 3; ++i) {
+            const float h = i == 0 ? px(20) : px(11);
+            const ImVec2 p(a.x + px(4), y);
+            const ImVec2 q(qx - px(4), y + h);
+            d->AddRectFilled(p, q, g_pal->card, px(2));
+            d->AddRect(p, q, i == 0 ? alpha(g_pal->needs_you, 0xA0) : g_pal->border, px(2));
+            if (i < 2)
+                d->AddRectFilled(p, ImVec2(p.x + px(1.5f), q.y), i == 0 ? g_pal->needs_you : g_pal->done, px(1));
+            line(p.x + px(4), p.y + px(2.5f), i == 0 ? 16.0f : 12.0f, g_pal->dim);
+            if (i == 0) {
+                line(p.x + px(4), p.y + px(8), 24, g_pal->faint);
+                for (int k = 0; k < 2; ++k)
+                    d->AddRectFilled(ImVec2(p.x + px(4) + static_cast<float>(k) * px(9), q.y - px(6)),
+                                     ImVec2(p.x + px(11) + static_cast<float>(k) * px(9), q.y - px(2.5f)),
+                                     k == 0 ? alpha(g_pal->focus, 0xC0) : raised_color(), px(1));
+            }
+            y += h + px(3);
+        }
+        term(ImVec2(qx + px(4), a.y + px(12)), ImVec2(b.x - px(4), b.y - px(4)));
+        d->AddRect(a, b, g_pal->border, px(6));
+        return;
+    }
     if (name == "mission") {
         // A bar over a 3 x 2 wall of tiles; the first needs you (red edge), the second is done.
         d->AddRectFilled(a, b, g_pal->bg, px(6));

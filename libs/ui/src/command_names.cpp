@@ -25,6 +25,9 @@ bool is_builtin_command(std::string_view name) {
         "worktree.remove", "app.quit", "overlay.close", "app.check_updates", "app.update_core", "app.update",
         "focus.toggle", "focus.on", "focus.off", "mission.toggle", "mission.expand", "mission.wall",
         "mission.filter",
+        // Inbox layout
+        "inbox.toggle", "inbox.open", "inbox.snooze", "inbox.unsnooze", "inbox.dismiss", "inbox.answer",
+        "inbox.reply", "inbox.order",
         // Review layout, Timeline overlay
         "review.toggle", "review.next_file", "review.prev_file", "review.refresh", "timeline.toggle",
         "timeline.range",

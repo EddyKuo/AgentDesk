@@ -222,6 +222,11 @@ GitInfo GitCache::query(const std::string& key) {
         std::stringstream cs(c.output);
         cs >> g.ahead >> g.behind;
     }
+    // How many files the checkout has changed (the Inbox's cards say it). -z: one NUL-ended record
+    // per file, whatever its name holds; renames off, so each counts once.
+    const auto st = git({L"status", L"--porcelain=v1", L"-z", L"--no-renames", L"--untracked-files=normal"});
+    if (st.started && st.exit_code == 0)
+        g.changed = static_cast<int>(std::count(st.output.begin(), st.output.end(), '\0'));
     return g;
 }
 

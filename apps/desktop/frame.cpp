@@ -130,6 +130,10 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_mission_bar(s, pos, size.x, size.y);
     } else if (m == "mission-wall") {
         draw_mission_wall(s, pos, size);
+    } else if (m == "inbox-bar") {
+        draw_inbox_bar(s, pos, size.x, size.y);
+    } else if (m == "inbox-queue") {
+        draw_inbox_queue(s, pos, size);
     } else if (draw_review_block(s, m, pos, size)) {
         // review-head, review-changes, review-commit (review_layout.cpp)
     } else if (draw_timeline_block(s, m, pos, size)) {

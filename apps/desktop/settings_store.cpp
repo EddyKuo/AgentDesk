@@ -181,6 +181,9 @@ Settings load_settings_unchecked() {
     s.mission_filter = j.value("mission_filter", std::string("all"));
     s.mission_sub_agents = j.value("mission_sub_agents", false);
     s.mission_shells = j.value("mission_shells", false);
+    s.inbox_order = ui::inbox::order_name(j.value("inbox_order", std::string("newest")));
+    if (const auto it = j.find("inbox_answers"); it != j.end())
+        s.inbox_answers = ui::inbox::parse_answers(*it, &s.inbox_answer_errors);
     read_lists(j, s);
     s.layout = j.value("layout", s.layout);
     s.layout_return = j.value("layout_return", "");
@@ -305,6 +308,7 @@ void save_settings(const Settings& s) {
             {"mission_filter", s.mission_filter},
             {"mission_sub_agents", s.mission_sub_agents},
             {"mission_shells", s.mission_shells},
+            {"inbox_order", s.inbox_order},
             {"folded_machines", s.folded_machines},
             {"panels", s.panels},
             {"agents_changed", s.agents_changed},

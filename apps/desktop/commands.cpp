@@ -1103,6 +1103,8 @@ Outcome exec_layout_mod_command(App::State& s, const Command& c) {
             mission_entered(s);
         s.toast("Layout: " + layout_display_name(next), "", "", g_pal->info, 2);
         s.focus_view(s.ws.focused_session());
+        if (s.layout().style == "inbox")
+            inbox_entered(s);  // the queue, not the terminal, takes the keys
     } else if (c.name == "layout.clone") {
         return clone_layout(s, c.arg);
     } else if (c.name == "layout.reset") {
@@ -1147,6 +1149,8 @@ std::string exec_command(App::State& s, const std::string& cmd) {
     if (auto r = layout_command(s, c.name, c.arg))
         return *r;
     if (auto r = mission_command(s, c.name, c.arg))  // mission_layout.cpp
+        return *r;
+    if (auto r = inbox_command(s, c.name, c.arg))  // inbox_layout.cpp
         return *r;
     if (auto r = exec_review_command(s, c.name, c.arg))  // review_layout.cpp
         return *r;

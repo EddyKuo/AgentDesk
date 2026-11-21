@@ -386,6 +386,8 @@ long long App::next_wakeup_ms() const {
         ms = std::min<long long>(ms, 16);  // the edge glow, the header fading
     if (s_->mission.animating && !s_->settings.focus_on)
         ms = std::min<long long>(ms, 100);            // a tile's lines held back, skeleton bars breathing
+    if (s_->inbox.animating && !s_->settings.focus_on)
+        ms = std::min<long long>(ms, 100);  // an Inbox card's lines held back, or a wait time ticking
     if (ui::styles::has_clock(s_->layout().style)) {  // a bar's clock turns over on the minute
         const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
                                   std::chrono::system_clock::now().time_since_epoch())

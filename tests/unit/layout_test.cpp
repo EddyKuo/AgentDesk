@@ -251,7 +251,7 @@ TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
     EXPECT_TRUE(main.find("panel")->hidden);
     EXPECT_EQ(main.find("panel-body")->active, "files");
     EXPECT_EQ(builtin_names(),
-              (std::vector<std::string>{"workspace", "terminals", "mac", "mission", "review", "classic"}));
+              (std::vector<std::string>{"workspace", "terminals", "mac", "mission", "inbox", "review", "classic"}));
     EXPECT_EQ(builtin("tiling"), main);  // removed layouts fall back to the workspace's tree
     EXPECT_EQ(builtin("cockpit"), main);
     EXPECT_EQ(builtin("nope"), main);
