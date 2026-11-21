@@ -31,6 +31,7 @@ agentdesk_library(agentdesk_ui
     src/stage.cpp
     src/inbox.cpp
     src/review.cpp
+    src/pair.cpp
     src/timeline.cpp
     src/color_math.cpp
     src/schedule.cpp
@@ -51,7 +52,7 @@ target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agent
 
 # The shipped layout files (kept verbatim), compiled in as text for layout::builtin_text as
 # kPresetMain, kPresetTerminals (herdr-app's, third_party/herdr/layouts) and kPresetMac, kPresetFocus,
-# kPresetStage, kPresetReview, kPresetClassic (AgentDesk's own,
+# kPresetStage, kPresetInbox, kPresetReview, kPresetPair, kPresetClassic (AgentDesk's own,
 # layouts/ here).
 set(_layout_defaults "")
 foreach(_file
@@ -62,6 +63,7 @@ foreach(_file
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/stage.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/review.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/inbox.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/layouts/pair.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/layouts/classic.json")
     get_filename_component(_name "${_file}" NAME_WE)
     file(READ "${_file}" _text)

@@ -126,10 +126,12 @@ Queue collect(App::State& s) {
         c.unreachable = !s.machine_connected(machine);
         c.can_input = sess->can_input() && !c.unreachable;
         if (!v.cwd.empty()) {
-            const GitInfo g = s.git.get(v.cwd, machine);
+            // Only a waiting card says how many files changed: the count costs a git status, so the
+            // finished rows do not ask for it (the same counts Pair's headers use).
+            const GitInfo g = c.done ? s.git.get(v.cwd, machine) : s.git.with_changes(v.cwd, machine);
             if (g.repo) {
                 c.branch = g.branch == "HEAD" ? std::string("detached") : g.branch;
-                c.changed = g.changed;
+                c.changed = g.changed_files;
             }
         }
         c.message = mui::clean_message(v.agent_message);

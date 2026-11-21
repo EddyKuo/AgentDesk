@@ -1152,6 +1152,8 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         return *r;
     if (auto r = exec_review_command(s, c.name, c.arg))  // review_layout.cpp
         return *r;
+    if (auto r = exec_pair_command(s, c.name, c.arg))  // pair_layout.cpp
+        return *r;
     if (auto r = exec_timeline_command(s, c.name, c.arg))  // timeline.cpp
         return *r;
     if (auto r = exec_tips_command(s, c.name, c.arg))  // layout.tips (layout_tips.cpp)

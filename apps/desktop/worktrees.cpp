@@ -5,7 +5,6 @@
 namespace agentdesk::desktop {
 namespace detail {
 
-namespace {
 // Where new worktrees go: the Settings folder, else %USERPROFILE%\.agentdesk\worktrees on this
 // computer. Empty for another machine: its agent-host picks that folder in its own home.
 std::string worktree_root(const App::State& s, const std::string& machine) {
@@ -18,6 +17,7 @@ std::string worktree_root(const App::State& s, const std::string& machine) {
     return root;
 }
 
+namespace {
 // Asks agent-host to add the worktree, then to start the default shell in it; the new session
 // becomes a space of its own. The answers come on a HostClient thread: they set wt_busy and
 // wt_error ("done" on success) under placements_mutex.

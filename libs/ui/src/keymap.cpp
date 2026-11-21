@@ -166,6 +166,7 @@ constexpr std::pair<const char*, const char*> kGlobal[] = {
     {"ctrl-shift-.", "focus.toggle"},
     {"ctrl-shift-m", "stage.toggle"},
     {"ctrl-shift-i", "inbox.toggle"},
+    {"ctrl-shift-2", "pair.toggle"},  // the digit row: every free Ctrl+Shift letter is taken or a terminal key
     {"ctrl-shift-r", "review.toggle"},
     {"ctrl-shift-h", "timeline.toggle"},
 };
@@ -191,7 +192,8 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
 // in "global" or "terminal": the Review layout's F8 / Shift+F8 move between changed files (elsewhere
 // F8 still reaches the terminal); Terminals' Alt keys (resize mode, split, close, gaps); Classic's F10 menu
 // bar; Stage's Alt+Left / Alt+Right put the previous / next agent on stage (it shows one pane, so
-// moving between panes has nothing to do there).
+// moving between panes has nothing to do there); Pair's Alt+P (into the shared prompt bar) and
+// Alt+Shift+S (swap sides).
 struct LayoutDefault {
     const char* section;
     const char* chord;
@@ -208,6 +210,8 @@ constexpr LayoutDefault kLayoutDefaults[] = {
     {"layout:classic", "f10", "classic.menu"},
     {"layout:stage", "alt-left", "stage.prev"},
     {"layout:stage", "alt-right", "stage.next"},
+    {"layout:pair", "alt-p", "pair.prompt"},
+    {"layout:pair", "alt-shift-s", "pair.swap"},
 };
 // clang-format on
 

@@ -79,6 +79,10 @@ void place(App::State& s, const Placement& p) {
         s.focus(p.session);
         return;
     }
+    if (!p.pair_side.empty()) {
+        place_pair_side(s, p);  // pair_layout.cpp
+        return;
+    }
     switch (p.target) {
         case LaunchTarget::kSplitRight:
         case LaunchTarget::kSplitDown:

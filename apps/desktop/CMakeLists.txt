@@ -17,6 +17,7 @@ agentdesk_executable(agent-ui WIN32
     panes.cpp
     programs.cpp
     review_layout.cpp
+    pair_layout.cpp
     sessions.cpp
     settings_dialog.cpp
     settings_pages.cpp

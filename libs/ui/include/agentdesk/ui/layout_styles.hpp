@@ -14,7 +14,7 @@
 namespace agentdesk::ui::styles {
 
 // The style a mod name selects ("mac", "terminals", "classic", "focus", "stage", "inbox",
-// "review"), or
+// "review", "pair"), or
 // "" for a mod that selects none (workspace parts, the person's own mods).
 std::string_view style_of_mod(std::string_view mod);
 

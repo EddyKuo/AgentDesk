@@ -66,6 +66,7 @@
 #include "agentdesk/ui/workspace.hpp"
 #include "agentdesk/ui/window_buttons.hpp"
 #include "agentdesk/ui/layout_tips.hpp"
+#include "pair_layout.hpp"
 #include "style_layouts.hpp"
 #include "ui_tokens.hpp"
 
@@ -232,6 +233,7 @@ struct Settings {
     std::string ambient = "off";
     bool ambient_done = false;
     StyleSettings styles;  // Terminals' options, Fun layouts and Classic keys (style_layouts.hpp)
+    PairSettings pair;     // Pair's setup choices and the pair shown (pair_layout.hpp)
     // First-use tips (layout_tips.cpp): on unless turned off; the cards already seen (layout names
     // and "focus").
     bool tips = true;
@@ -400,6 +402,9 @@ inline constexpr CommandInfo kCommands[] = {
     {"inbox.order:oldest", "Inbox: longest waiting first"},
     {"inbox.unsnooze", "Inbox: show snoozed cards again"},
     {"review.toggle", "Review: show the agent's changes beside it (again: back)"},
+    {"pair.toggle", "Pair: two agents side by side, one prompt for both (again: back)"},
+    {"pair.swap", "Pair: swap the left and right agents"},
+    {"pair.close", "Pair: stop pairing (both terminals keep running)"},
     {"review.next_file", "Review: next changed file"},
     {"review.prev_file", "Review: previous changed file"},
     {"review.refresh", "Review: read the changes again"},
@@ -456,7 +461,12 @@ struct GitInfo {
     std::string branch;      // "HEAD" when detached
     int ahead = 0;
     int behind = 0;
-    int changed = -1;  // uncommitted files in the checkout (git status, untracked included); -1 unknown
+    // Uncommitted changes, only for folders asked for with GitCache::with_changes (Pair's headers,
+    // Inbox's cards):
+    // files changed (untracked ones included) and lines added and removed; files -1 until known.
+    int changed_files = -1;
+    int lines_added = 0;
+    int lines_removed = 0;
 };
 
 class GitCache {
@@ -475,6 +485,8 @@ public:
     // Cached facts for `dir` on `machine` ("" = here; empty until the first answer); schedules a
     // refresh when stale.
     GitInfo get(const std::string& dir, const std::string& machine = {});
+    // The same, with the folder's uncommitted change counts kept up to date from now on.
+    GitInfo with_changes(const std::string& dir, const std::string& machine = {});
     // Ask again soon (a command or an agent turn ended: a checkout or commit may have happened).
     void invalidate(const std::string& dir);
     // `dir` and every other folder in its repo (a commit there moves their ahead/behind too).
@@ -487,6 +499,7 @@ private:
         GitInfo info;
         Clock::time_point at{};
         bool queued = false;
+        bool changes = false;      // count the uncommitted changes too (with_changes)
         Clock::time_point used{};  // last asked for by the UI
     };
 
@@ -502,7 +515,7 @@ private:
     static std::string trim(std::string s);
     static std::string norm(std::string p);
 
-    GitInfo query(const std::string& key);
+    GitInfo query(const std::string& key, bool changes);
 
     void run(std::stop_token st);
 
@@ -688,6 +701,7 @@ struct Placement {
     std::string split_of;
     std::string replace;  // restart in place
     std::string space_name;
+    std::string pair_side;  // "left" / "right": one side of a pair being started (pair_layout.cpp)
 };
 
 struct WorktreeEntry {
@@ -1051,6 +1065,7 @@ struct App::State {
         bool focus_list = false;
     } timeline;
     StyleUi styles;  // the resize mode, agent state changes, Classic (style_layouts.hpp)
+    PairUi pair;     // the Pair layout (pair_layout.cpp)
     // First-use tips (layout_tips.cpp).
     struct LayoutTips {
         std::string open_key;   // the card shown now ("" none)
@@ -1562,6 +1577,27 @@ std::string toggle_layout(App::State& s, const std::string& style);
 bool draw_review_block(App::State& s, const std::string& mod, ImVec2 pos, ImVec2 size);
 // review.* commands, and panel:changes while Review shows. nullopt: not one of them.
 std::optional<std::string> exec_review_command(App::State& s, const std::string& name, const std::string& arg);
+
+// ------------------------------------------------------------ pair_layout.cpp
+// Pair: two agents side by side with a shared prompt bar and the race between them.
+// Its blocks (pair-bar, pair-stage, pair-prompt); false for another name.
+bool draw_pair_block(App::State& s, const std::string& mod, ImVec2 pos, ImVec2 size);
+// pair.* commands. nullopt: not one of them.
+std::optional<std::string> exec_pair_command(App::State& s, const std::string& name, const std::string& arg);
+// A session started for one side of a pair arrived: it goes into the pair's tab (sessions.cpp).
+void place_pair_side(App::State& s, const Placement& p);
+// Every tick: the pair's sessions, the race and the change counts (whatever layout shows).
+void pair_tick(App::State& s);
+// Pair's pane frame and header (draw_styled_pane), and its picture on the Settings card.
+StyledPane draw_pair_pane(App::State& s, const std::string& id, const ui::SessionView& v, ImVec2 pos,
+                          ImVec2 max, bool focused);
+void pair_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
+// One pane drawn at `r` as the shown layout frames it (panes.cpp).
+void draw_one_pane(App::State& s, const std::string& id, ui::Rect r, bool connected,
+                   const ui::styles::PaneLook& look);
+// Where new git worktrees go on `machine` (worktrees.cpp): Settings' folder, else the
+// .agentdesk\worktrees folder in the person's home here; "" for another machine (its agent-host picks).
+std::string worktree_root(const App::State& s, const std::string& machine);
 
 // ------------------------------------------------------------ timeline.cpp
 // The Timeline overlay (timeline.toggle) and the "timeline" layout block.

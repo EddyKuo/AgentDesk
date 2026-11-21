@@ -32,6 +32,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <wincodec.h>
@@ -300,6 +301,27 @@ Json shot_profiles() {
                              "Start-Sleep -Seconds ([int]$s[$i + 1]) } }";
         profiles.push_back({{"id", id},
                             {"name", id},
+                            {"executable", ps},
+                            {"args", {"-NoLogo", "-NoProfile", "-Command", script}}});
+    }
+    // Stand-in agents for the Pair layout: each waits for a line, reports working, prints a few
+    // steps, edits README.md and writes a note of its own in the folder, then reports done.
+    // "pair-quick" takes about 6 s, "pair-steady" about 11 s.
+    for (const auto& [id, name, pause, note] :
+         {std::tuple<const char*, const char*, int, const char*>{"pair-quick", "Quick agent", 3, "notes-quick.md"},
+          std::tuple<const char*, const char*, int, const char*>{"pair-steady", "Steady agent", 8,
+                                                                 "notes-steady.md"}}) {
+        const std::string script =
+            std::string("$n = 0; while ($true) { $t = Read-Host 'task'; $n++; ") +
+            "[Console]::Write([char]27 + ']7501;state=working' + [char]7); " +
+            "'Working on: ' + $t; Start-Sleep -Milliseconds 900; '  reading README.md'; " +
+            "Start-Sleep -Milliseconds 900; '  editing README.md'; " +
+            "Add-Content -Path 'README.md' -Value ('', '## Usage', ('Task ' + $n + ': ' + $t), 'Run the tool " +
+            "with --help to see every option.'); " +
+            "'  writing " + note + "'; Set-Content -Path '" + note + "' -Value ('# Notes', '', $t, '', '- step " +
+            "one', '- step two', '- step three'); Start-Sleep -Seconds " + std::to_string(pause) + "; " +            "'  done: 2 files changed'; [Console]::Write([char]27 + ']7501;state=done' + [char]7) }";
+        profiles.push_back({{"id", id},
+                            {"name", name},
                             {"executable", ps},
                             {"args", {"-NoLogo", "-NoProfile", "-Command", script}}});
     }

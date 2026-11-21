@@ -196,6 +196,7 @@ Settings load_settings_unchecked() {
         s.timeline_range = "1h";
     s.timeline_since_left = j.value("timeline_since_left", true);
     read_style_settings(j, s.styles);
+    read_pair_settings(j, s.pair);
     // Layouts that no longer ship: Tiling is Terminals with square corners, Cockpit the first layout,
     // Mission Control is Stage.
     if (const auto r = ui::styles::replacement_for(s.layout)) {
@@ -330,6 +331,7 @@ void save_settings(const Settings& s) {
                  return list;
              }()}};
     write_style_settings(ours, s.styles);
+    write_pair_settings(ours, s.pair);
     ours["tips"] = s.tips;
     ours["tips_seen"] = s.tips_seen;
     for (int attempt = 0; attempt < 3; ++attempt) {

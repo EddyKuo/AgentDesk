@@ -134,6 +134,8 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_inbox_queue(s, pos, size);
     } else if (draw_review_block(s, m, pos, size)) {
         // review-head, review-changes, review-commit (review_layout.cpp)
+    } else if (draw_pair_block(s, m, pos, size)) {
+        // pair-bar, pair-stage, pair-prompt (pair_layout.cpp)
     } else if (draw_timeline_block(s, m, pos, size)) {
         // timeline (timeline.cpp)
     } else if (s.mods != nullptr) {
