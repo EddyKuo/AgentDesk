@@ -378,6 +378,7 @@ inline constexpr CommandInfo kCommands[] = {
     {"mission.filter:all", "Mission Control: show all agents"},
     {"mission.filter:active", "Mission Control: show active agents"},
     {"mission.filter:blocked", "Mission Control: show agents that need you"},
+    {"garden.toggle", "Garden: your agents as little creatures"},
     {"review.toggle", "Review: show the agent's changes beside it (again: back)"},
     {"review.next_file", "Review: next changed file"},
     {"review.prev_file", "Review: previous changed file"},

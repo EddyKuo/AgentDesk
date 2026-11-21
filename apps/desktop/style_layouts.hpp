@@ -2,7 +2,7 @@
 // The layouts' style options as agent-ui's shared files see them: their ui.json settings, their
 // per-window state, and the hooks frame.cpp, panes.cpp, notices.cpp, commands.cpp and the settings
 // pages call. Terminals' options and resize mode are in terminals_options.cpp, Classic draws in
-// classic_layout.cpp; style_layouts.cpp dispatches to them.
+// classic_layout.cpp, Garden in garden_layout.cpp; style_layouts.cpp dispatches to them.
 #include <chrono>
 #include <map>
 #include <optional>
@@ -143,6 +143,15 @@ void classic_terminal_theme(App::State& s, ui::TerminalTheme& theme);
 void classic_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
 bool look_classic_options(App::State& s);
 std::optional<std::string> exec_classic_command(App::State& s, const std::string& name);
+
+// ------------------------------------------------------------ garden_layout.cpp
+// Garden (a fun layout): the bar, the scene, the Settings card picture, garden.* commands, and how
+// soon its creatures need the next frame (1000 when Garden is not shown or nothing moves).
+void draw_garden_bar(App::State& s, ImVec2 pos, float w, float h);
+void draw_garden_scene(App::State& s, ImVec2 pos, ImVec2 size);
+void garden_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
+std::optional<std::string> exec_garden_command(App::State& s, const std::string& name, const std::string& arg);
+long long garden_wakeup_ms(const App::State& s);
 }  // namespace detail
 
 }  // namespace agentdesk::desktop

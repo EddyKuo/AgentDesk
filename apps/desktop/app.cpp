@@ -376,8 +376,10 @@ long long App::next_wakeup_ms() const {
     if (s_->updates_asked)
         ms = std::min<long long>(ms, 300);  // Settings polls the update check every 300 ms
     ms = std::min<long long>(ms, timeline_wakeup_ms(*s_));
-    // The working mark spins; in Focus only the pane header (while shown) has one.
-    const bool spinners = !s_->settings.focus_on || s_->focus_mode.header.alpha() > 0.0f;
+    // The working mark spins; in Focus only the pane header (while shown) has one. Garden draws no
+    // spinners: its creatures keep their own pace (garden_wakeup_ms).
+    const bool spinners = s_->settings.focus_on ? s_->focus_mode.header.alpha() > 0.0f
+                                                : s_->layout().style != "garden";
     for (const auto& [id, v] : s_->views_by_id) {
         if (v.agent_state == "Working" && spinners)
             ms = std::min<long long>(ms, 50);
@@ -392,7 +394,8 @@ long long App::next_wakeup_ms() const {
                                   .count();
         ms = std::min<long long>(ms, ui::mac::ms_to_next_minute(now % 60000) + 5);
     }
-    ms = std::min<long long>(ms, tok::wakeup_ms());  // an eased transition is under way
+    ms = std::min<long long>(ms, garden_wakeup_ms(*s_));  // its creatures: 30, 10 or 4 frames a second
+    ms = std::min<long long>(ms, tok::wakeup_ms());       // an eased transition is under way
     if (ambient_moving())
         ms = std::min<long long>(ms, 33);  // the tint by agent state fades at about 30 frames a second
     return ms;

@@ -75,6 +75,17 @@ Card make(std::string_view k) {
             key("Show or hide the text sidebar", "sidebar.toggle"),
             mouse("A fun layout: turn on Settings > Look > Fun layouts to keep it in the layout list",
                   "app.settings")};
+    } else if (k == "garden") {
+        c.purpose = "Your agents as little creatures in a garden: who is busy, who needs you and who is done, "
+                    "at a glance.";
+        c.tips = {mouse("Hopping along: working. Waving with a red \"!\": needs you. A hop and a sparkle: done. "
+                        "Asleep: idle. Faded: no status"),
+                  mouse("Hover a creature for its program, state, how long and its last message"),
+                  mouse("Click a creature to work with it in your layout; right-click to peek, rename or "
+                        "close it"),
+                  mouse("Back to your layout: the button at the top right", "garden.toggle"),
+                  mouse("A fun layout: turn on Settings > Look > Fun layouts to keep it in the layout list",
+                        "app.settings")};
     } else if (k == kFocusKey) {
         c.purpose = "Only the terminal you are working in, with the other agents as dots in a thin strip.";
         c.tips = {mouse("The dots are your other agents: red needs you, green done, a yellow ring working. "
@@ -92,8 +103,9 @@ Card make(std::string_view k) {
 }  // namespace
 
 const std::vector<std::string>& card_keys() {
-    static const std::vector<std::string> k = {"workspace", "terminals",           "mac", "mission", "review",
-                                               "classic",   std::string(kFocusKey)};
+    static const std::vector<std::string> k = {"workspace", "terminals", "mac",
+                                               "mission",   "review",    "classic",
+                                               "garden",    std::string(kFocusKey)};
     return k;
 }
 

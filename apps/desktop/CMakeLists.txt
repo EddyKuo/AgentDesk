@@ -39,6 +39,7 @@ agentdesk_executable(agent-ui WIN32
     worktrees.cpp
     focus_mode.cpp
     mission_layout.cpp
+    garden_layout.cpp
     layout_tips.cpp
     ui_tokens.cpp
     agent-ui.manifest)

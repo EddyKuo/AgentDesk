@@ -18,6 +18,7 @@ extern const char* const kPresetFocus;
 extern const char* const kPresetMission;
 extern const char* const kPresetReview;
 extern const char* const kPresetClassic;
+extern const char* const kPresetGarden;
 }  // namespace detail
 
 namespace {
@@ -1073,7 +1074,7 @@ std::string text_of(const Node& n) {
 
 // ---------------------------------------------------------------- the shipped layouts
 std::vector<std::string> builtin_names() {
-    return {"workspace", "terminals", "mac", "mission", "review", "classic"};
+    return {"workspace", "terminals", "mac", "mission", "review", "classic", "garden"};
 }
 
 std::string_view builtin_file_name(std::string_view name) {
@@ -1096,6 +1097,8 @@ std::string_view builtin_text(std::string_view name) {
         return detail::kPresetReview;
     if (h == "classic")
         return detail::kPresetClassic;
+    if (h == "garden")
+        return detail::kPresetGarden;
     return {};
 }
 

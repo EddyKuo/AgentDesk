@@ -410,9 +410,9 @@ bool look_terminals(App::State& s) {
     return changed;
 }
 
-// Fun layouts: Classic (and Garden) join the cards and the Ctrl+Shift+L cycle.
+// Fun layouts: Classic and Garden join the cards and the Ctrl+Shift+L cycle.
 bool look_fun_layouts_row(App::State& s) {
-    settings_row(s, "Fun layouts", "Show the playful layouts (AgentDesk Classic) with the others.", px(36),
+    settings_row(s, "Fun layouts", "Show the playful layouts (AgentDesk Classic, Garden) with the others.", px(36),
                  px(20));
     const bool hit = settings_toggle("##fun-layouts", s.settings.styles.fun_layouts);
     if (hit)

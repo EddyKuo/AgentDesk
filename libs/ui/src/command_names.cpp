@@ -35,6 +35,8 @@ bool is_builtin_command(std::string_view name) {
         // merged into Terminals, so an older keys.json keeps working); Classic
         "terminals.resize_mode", "terminals.gaps", "terminals.corners", "tiling.resize_mode", "tiling.gaps",
         "classic.menu", "classic.effects",
+        // Garden
+        "garden.toggle", "garden.open",
         // first-use tips for the shown layout
         "layout.tips"};
     // clang-format on
