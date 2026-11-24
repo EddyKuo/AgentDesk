@@ -219,6 +219,15 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     s_->folded_machines.insert(s_->settings.folded_machines.begin(), s_->settings.folded_machines.end());
     s_->keymap = ui::Keymap::defaults();
     load_keys(*s_);
+    // The remembered folder may have been deleted since (a build folder, a removed worktree). New
+    // terminals would then fail to start there, so forget it and use the default instead.
+    if (!s_->settings.last_cwd.empty()) {
+        std::error_code ec;
+        const auto last = std::filesystem::path(
+            std::u8string(s_->settings.last_cwd.begin(), s_->settings.last_cwd.end()));
+        if (!std::filesystem::is_directory(last, ec))
+            s_->settings.last_cwd.clear();
+    }
     std::string cwd = s_->settings.last_cwd;
     if (cwd.empty()) {
         const auto u8 = std::filesystem::current_path().u8string();
