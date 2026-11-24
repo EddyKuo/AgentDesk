@@ -80,7 +80,10 @@ ui::telemetry::Config telemetry_config(App::State& s) {
         c.shipped_themes.emplace_back(p.id);
     for (const auto& [name, pal] : preset_palettes())
         c.shipped_themes.emplace_back(std::string(kPresetPrefix) + name);
-    c.shipped_themes.emplace_back("atom-one-dark");  // the shipped theme file
+    // The shipped theme files (third_party/herdr/themes and libs/ui/themes).
+    for (const char* id :
+         {"atom-one-dark", "mac-dusk", "mac-dawn", "phosphor-green", "phosphor-amber", "phosphor-paper"})
+        c.shipped_themes.emplace_back(id);
     c.mod_kinds = mod_kinds;
     // keys.json differs from the shipped one.
     c.keys_custom = [] {
@@ -215,6 +218,15 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     s_->folded_machines.insert(s_->settings.folded_machines.begin(), s_->settings.folded_machines.end());
     s_->keymap = ui::Keymap::defaults();
     load_keys(*s_);
+    // The remembered folder may have been deleted since (a build folder, a removed worktree). New
+    // terminals would then fail to start there, so forget it and use the default instead.
+    if (!s_->settings.last_cwd.empty()) {
+        std::error_code ec;
+        const auto last = std::filesystem::path(
+            std::u8string(s_->settings.last_cwd.begin(), s_->settings.last_cwd.end()));
+        if (!std::filesystem::is_directory(last, ec))
+            s_->settings.last_cwd.clear();
+    }
     std::string cwd = s_->settings.last_cwd;
     if (cwd.empty()) {
         const auto u8 = std::filesystem::current_path().u8string();
@@ -336,6 +348,8 @@ void App::on_close_requested() {
 }
 
 void App::on_focus_changed(bool focused) {
+    if (!focused && s_->window_focused)  // the Timeline shades the time away from here
+        s_->timeline.left_at_ms = now_ms();
     s_->window_focused = focused;
 }
 
@@ -370,15 +384,37 @@ long long App::next_wakeup_ms() const {
         ms = std::min<long long>(ms, 250);
     if (s_->updates_asked)
         ms = std::min<long long>(ms, 300);  // Settings polls the update check every 300 ms
+    ms = std::min<long long>(ms, timeline_wakeup_ms(*s_));
+    // The working mark spins; in Focus only the pane header (while shown) has one. Garden draws no
+    // spinners: its creatures keep their own pace (garden_wakeup_ms).
+    const bool spinners = s_->settings.focus_on ? s_->focus_mode.header.alpha() > 0.0f
+                                                : s_->layout().style != "garden";
     for (const auto& [id, v] : s_->views_by_id) {
-        if (v.agent_state == "Working")
-            ms = std::min<long long>(ms, 50);  // the working mark spins
+        if (v.agent_state == "Working" && spinners)
+            ms = std::min<long long>(ms, 50);
     }
+    if (focus_animating(*s_))
+        ms = std::min<long long>(ms, 16);  // the edge glow, the header fading
+    if ((s_->stage.animating || s_->tails_pending) && !s_->settings.focus_on)
+        ms = std::min<long long>(ms, 100);            // a thumbnail's lines held back, skeleton bars breathing
+    if (s_->inbox.animating && !s_->settings.focus_on)
+        ms = std::min<long long>(ms, 100);  // an Inbox card's lines held back, or a wait time ticking
+    if (ui::styles::has_clock(s_->layout().style)) {  // a bar's clock turns over on the minute
+        const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  std::chrono::system_clock::now().time_since_epoch())
+                                  .count();
+        ms = std::min<long long>(ms, ui::mac::ms_to_next_minute(now % 60000) + 5);
+    }
+    ms = std::min<long long>(ms, garden_wakeup_ms(*s_));  // its creatures: 30, 10 or 4 frames a second
+    ms = std::min<long long>(ms, tok::wakeup_ms());       // an eased transition is under way
+    if (ambient_moving())
+        ms = std::min<long long>(ms, 33);  // the tint by agent state fades at about 30 frames a second
     return ms;
 }
 
 Json App::report() const {
     Json out = {{"connected", s_->host->connected()}, {"host_instance_id", s_->host->host_instance_id()}};
+    out["ambient_k"] = ambient_strength();
     Json list = Json::array();
     for (const auto& s : s_->host->sessions()) {
         const auto v = s->view();
@@ -406,6 +442,8 @@ Json App::report() const {
     out["spaces"] = s_->ws.spaces.size();
     out["tabs"] = tabs;
     out["selected"] = s_->ws.focused_session();
+    out["layout"] = s_->settings.layout;
+    out["focus_on"] = s_->settings.focus_on;
     out["workspace"] = s_->ws.to_json();
 
     return out;

@@ -1,0 +1,24 @@
+{
+  "name": "Phosphor Amber",
+  "background": "#110C05",
+  "foreground": "#F5B850",
+  "selection": "#6B4A14",
+  "cursor": "#FFDE9C",
+  "ansi": [
+    "#1A1206", "#A3712A", "#C78C35", "#E2A64A", "#7D5520", "#A87538", "#CB9147", "#EFC27A",
+    "#5A3E1A", "#D19A3F", "#EFB35A", "#FFD08A", "#9E6E30", "#C59248", "#E7B26A", "#FFEBC8"
+  ],
+  "colors": {
+    "canvas": "#0A0703",
+    "chrome": "#0F0A04",
+    "surface": "#110C05",
+    "border": "#5A3F12",
+    "foreground": "#FFC766",
+    "muted": "#B98736",
+    "dim": "#755420",
+    "accent": "#FFDE9C",
+    "working": "#F5B850",
+    "blocked": "#FFF1D2",
+    "done": "#FFD98A"
+  }
+}

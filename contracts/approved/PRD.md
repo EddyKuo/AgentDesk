@@ -1,6 +1,6 @@
 ---
 contract_type: PRD
-version: 3.1.0
+version: 4.0.0
 status: approved
 author_agent: PM
 sprint: 11
@@ -10,12 +10,17 @@ skills_used:
   - shared/domain-coding-agents@1.0.0
 upstream_deps:
   - raw_requirement@2026-11-16
-  - docs/design/AgentDesk_Design.md@2.19
-  - sprint/current/status.md@2026-11-20
+  - docs/design/AgentDesk_Design.md@2.27
+  - sprint/current/status.md@2026-11-21
 downstream_consumers:
   - RD
   - QA
 change_summary: |
+  4.0.0（Major）：依使用者核准的第二輪構想（2026-11-21，「全部都做」，設計文件 v2.27、ADR-37～ADR-41）。移除需求：FR-40 Mission Control 由 Stage 取代（ADR-38）、FR-45 AgentDesk Tiling 併進 Terminals（ADR-37）、FR-46 AgentDesk Cockpit 拿掉（ADR-37）；FR-44 Classic 不再列在一般版面清單，改為好玩的版面（ADR-37）。這些屬於刪除需求內容，依憲法 6.3 升主版號，下游 RD、QA 需重新確認 FR-27、FR-40、FR-44～FR-46、FR-49。舊條文保留並標明被取代或移除，不刪歷史。新增第 11 節 FR-52～FR-57：Stage、Inbox、Pair、Garden、好玩的版面（Fun layouts）、Terminals 的直角、間距與鍵盤調整大小。存檔的 `tiling`、`cockpit`、`mission` 分別轉成 terminals、workspace、stage。上一版保存在 `contracts/deprecated/PRD_v3.5.0.md`。
+  3.5.0（Minor）：FR-39 補上按鈕顏色跟著主題；新增 FR-51 第一次使用提示（ADR-36，設計文件 v2.25，使用者 2026-11-20 回報）。既有需求不變。
+  3.4.0（Minor）：新增第 10 節 FR-40～FR-50，對應使用者選定並已實作的版面與主題構想（設計文件 v2.24、ADR-32～ADR-35）：Mission Control、Focus 模式、Review、Timeline（host 狀態歷史、`session.timeline`、`agentctl timeline`）、AgentDesk Classic、AgentDesk Tiling、AgentDesk Cockpit、依時間切換外觀、跟著 Agent 狀態變色、版面的建議主題（只建議，不自動套用）、主題編輯器。FR-21 的「看過」改以畫面上實際畫出的終端機判斷（FR-40），既有版面行為不變。T1（高對比與色盲友善）使用者決定延後，不列入。既有需求不變。
+  3.3.0（Minor）：FR-27 的內建版面加上 AgentDesk Mac（mac，ADR-31，設計文件 v2.21，使用者 2026-11-20 要求把原本 98 的想法改成 Mac 風格），加一條 Given／When／Then；既有需求不變。
+  3.2.0（Minor）：新增 FR-39 Mac 風格的視窗按鈕（ADR-30，設計文件 v2.20，使用者 2026-11-20 要求），既有需求不變。
   3.1.0（Minor）：FR-27 加一條驗收：在設定裡打開 mod 前先說明權限，確認才啟用（ADR-29，設計文件 v2.19）；mod 介面相容性規則見設計文件 ADR-29 與 `docs/mods.md`。既有需求不變。
   3.0.0（Major）：移除 AgentDesk 98（ADR-28，設計文件 v2.18，使用者 2026-11-20 要求，準備公開到 GitHub）。FR-27 的內建版面只剩 workspace、terminals 與自訂 JSON，FR-33 拿掉 AgentDesk 98 的圖片與圖示描述；刪除需求內容，依憲法 6.3 升主版號（下游 RD、QA 需重新確認 FR-27、FR-33）。程式、素材與 win98 測試已刪除；`ui.json` 存的 win98 改顯示 workspace。上一版保存在 `contracts/deprecated/PRD_v2.2.0.md`。
   2.2.0（Minor）：FR-27 的 AgentDesk 98 暫時隱藏（ADR-24，設計文件 v2.14，使用者 2026-11-20 要求）。需求內容保留、程式保留，重新開放不需改版；目前可切換的內建版面是 workspace 與 terminals。
@@ -37,7 +42,7 @@ change_summary: |
 
 # Product Requirements Document：AgentDesk
 
-> 本契約鎖定設計文件 **v2.18**，對應產品版本 0.2.0（2.2.0 鎖定 v2.14，2.0.0 鎖定 v2.11，1.3.1 鎖定 v2.5，1.1.0 鎖定 v1.7）。設計文件之後的變更若影響第 2、3、4、8、9 節，必須依 CLAUDE.md Section 6.3 將本契約升版，下游才能採用。上一版保存在 `contracts/deprecated/PRD_v2.2.0.md`。
+> 本契約鎖定設計文件 **v2.27**，對應產品版本 0.2.0（3.5.0 鎖定 v2.25，3.3.0 鎖定 v2.21，2.2.0 鎖定 v2.14，2.0.0 鎖定 v2.11，1.3.1 鎖定 v2.5，1.1.0 鎖定 v1.7）。設計文件之後的變更若影響第 2、3、4、8～11 節，必須依 CLAUDE.md Section 6.3 將本契約升版，下游才能採用。上一版保存在 `contracts/deprecated/PRD_v3.5.0.md`。
 
 ## 1. 產品概述
 
@@ -64,11 +69,11 @@ AgentDesk 的介面與行為依 herdr-app 的原始碼複刻（ADR-15），用 C
 - MVP 交付時，設計文件 6.2 驗收矩陣（QA-01～QA-22）全數通過，或未通過項目已寫入限制清單並經使用者同意。
 - 沒有任何一次把未知的 Agent 狀態標成 Done（設計文件 5.3）。
 - 第 1.3 節的數值目標全數達成，並附測試報告證據（設計文件 6.3）。
-- 第 8、9 節的需求（FR-20～FR-38）都有自動化測試或實機證據。使用者已在 2026-11-19 完成整體驗收（`sprint/current/status.md`）；還要人工驗收的項目列在設計文件 5.4、5.5。
+- 第 8～11 節仍有效的需求（FR-20～FR-57，已移除的 FR-40、FR-45、FR-46 除外）都有自動化測試或實機證據。使用者已在 2026-11-19 完成整體驗收（`sprint/current/status.md`）；還要人工驗收的項目列在設計文件 5.4、5.5。
 
 ## 2. 功能需求
 
-每項的驗收標準（Given／When／Then）在設計文件 **1.2.1**，詳細規則在對應章節。v1.2.0 之後新增的需求在第 8、9 節。
+每項的驗收標準（Given／When／Then）在設計文件 **1.2.1**，詳細規則在對應章節。v1.2.0 之後新增的需求在第 8～11 節。
 
 ### 2.1 啟動工作（US-01）
 **優先級**: P1
@@ -147,7 +152,9 @@ AgentDesk 的介面與行為依 herdr-app 的原始碼複刻（ADR-15），用 C
 | space | 一個工作地點，通常是一個 repo 或資料夾，可以在遠端機器上；底下有多個分頁 |
 | 分頁 | space 裡的一棵分割面板樹 |
 | 面板 | 分頁裡的一個終端機 |
-| 版面 | 決定顯示哪些區塊的設定（workspace、terminals 與自訂 JSON） |
+| 版面 | 決定顯示哪些區塊的設定（9 個內建版面：7 個列出、2 個好玩的，加上自訂 JSON，見 FR-27 與第 10、11 節） |
+| 好玩的版面 | Classic 與 Garden；設定 › Look 打開「Fun layouts」才列在版面清單（FR-56） |
+| Focus 模式 | 任何版面都能切換、只顯示一個終端機的模式（FR-41） |
 | mod | 放在 `mods\<名稱>\mod.dll` 的 C++ DLL 擴充（ADR-17） |
 | 機器 | 透過 ssh＋`agentctl bridge` 連上的另一台電腦 |
 
@@ -167,7 +174,7 @@ v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外�
 | FR-24 | 可為 repo 建立 git worktree 並開成新 space | Given 一個 git repo 的 space，When 使用者執行 New worktree 並輸入分支名稱，Then 在 `%USERPROFILE%\.agentdesk\worktrees\<repo>\<branch>` 建立 checkout，並開成新 space | `HostFixture.WorktreeAddCreatesCheckout` |
 | FR-25 | Agent 可開子 Agent、給第一則任務、等待它、接收它的回報 | Given 一個在 AgentDesk 終端機裡執行的 Agent，When 它執行 `agentctl run --task "<任務>"`，Then 新 session 的 parent 是它，任務在子 Agent 就緒（回報 Idle，或沒有狀態來源時等 8 秒）後送出；子 Agent 執行 `agentctl report` 時，文字加上 `[from <名稱> <id>]` 送進父 Agent 的輸入，父 Agent 正在工作或等待使用者時先排隊 | `HostFixture.SubAgentTaskReportAndWait` |
 | FR-26 | 可加入 ssh 可連線的機器，遠端的 space 與 Agent 顯示在同一個側欄 | Given 遠端是 Windows、已安裝 AgentDesk、`agentctl` 在 PATH 上且設好金鑰登入，When 使用者在 Add machine 選這台主機，Then AgentDesk 執行 `ssh <目標> agentctl bridge`，遠端的 space 與 Agent 列在同一個側欄 | `HostFixture.ProtocolOverBridgeCommand`；實際 ssh 待人工（設計文件 5.5） |
-| FR-27 | 可切換版面（workspace、terminals 與自訂 JSON；v2.0.0 依 ADR-18 更正，原文的看板與格狀已移除；v3.0.0 依 ADR-28 移除 AgentDesk 98），可用 mod（C++ DLL，ADR-17）加命令、面板與通知 | Given 目前是 workspace 版面，When 使用者按 Ctrl+Shift+L 切到 terminals，Then 側欄與狀態列消失，space 改在分頁列左邊選。Given 已啟用一個 mod，When 它的 DLL 當掉，Then 該 mod 被停用、錯誤顯示在設定頁，AgentDesk 照常執行。Given 一個 mod 是關閉的，When 使用者在設定 › Mods 打開它的開關，Then 先顯示權限說明，按「Turn on」才啟用，按「Cancel」維持關閉（v3.1.0，ADR-29） | `Layout.*`、`ModsTest.*`；設定頁截圖（status.md 2026-11-20） |
+| FR-27 | 可切換版面（workspace、terminals、AgentDesk Mac 與自訂 JSON；v2.0.0 依 ADR-18 更正，原文的看板與格狀已移除；v3.0.0 依 ADR-28 移除 AgentDesk 98；v3.3.0 依 ADR-31 加上 AgentDesk Mac；v3.4.0 再加 Mission Control、Review、AgentDesk Tiling、Cockpit、Classic，見第 10 節；v4.0.0 依 ADR-37、ADR-38 改為 workspace、terminals、Stage、Inbox、Review、Pair、AgentDesk Mac 七個列出的版面，加上好玩的 Classic 與 Garden，Mission Control、Tiling、Cockpit 已移除，見第 11 節），可用 mod（C++ DLL，ADR-17）加命令、面板與通知 | Given 目前是 workspace 版面，When 使用者按 Ctrl+Shift+L 切到 terminals，Then 側欄與狀態列消失，space 改在分頁列左邊選。Given 已啟用一個 mod，When 它的 DLL 當掉，Then 該 mod 被停用、錯誤顯示在設定頁，AgentDesk 照常執行。Given 一個 mod 是關閉的，When 使用者在設定 › Mods 打開它的開關，Then 先顯示權限說明，按「Turn on」才啟用，按「Cancel」維持關閉（v3.1.0，ADR-29）。Given 目前是 AgentDesk Mac 版面且有兩個分頁，When 使用者按目前視窗標題列的紅色圓鈕，Then 該分頁收進 Dock（圖塊變淡，程式繼續跑），視窗改顯示另一個分頁；點 Dock 上那個圖塊就回來（v3.3.0，ADR-31） | `Layout.*`、`ModsTest.*`、`MacLayout.*`、`MacDock.*`；設定頁截圖（status.md 2026-11-20） |
 | FR-28 | 已安裝的 WSL 發行版自動列為 shell，在目前資料夾開啟；在 Linux 裡 cd 後，space 名稱、分支與 Files／Changes 跟著變（v1.3.0，ADR-16） | Given 已安裝 Ubuntu（WSL），When 使用者從新增選單開「Ubuntu (WSL)」並在 bash 裡 `cd /mnt/d/src`，Then space 名稱、分支與 Files／Changes 跟著換到 `D:\src` | `CwdUri.*`；實機 Ubuntu 驗證見 TestReport |
 
 ## 9. v2.0.0 新增需求（Sprint 10，設計文件 2.4～2.8、5.6、ADR-15～ADR-21）
@@ -263,3 +270,223 @@ v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外�
 - Given 使用者移動並調整視窗大小後關閉，When 再次開啟，Then 回到同一個螢幕、位置與大小；關閉時是最大化就以最大化開啟。
 - Given 上次的螢幕已經不在，When 開啟，Then 以上次的大小置中於滑鼠所在的螢幕，而且不超出可用範圍。
 **驗證**: `WindowPlace.*`；實機（status.md 2026-11-20「視窗依螢幕自動調整大小、記住位置」）。
+
+### FR-39 Mac 風格的視窗按鈕（ADR-30）
+**優先級**: P2
+**描述**: 視窗按鈕預設是左上角三顆圓鈕（關閉、最小化、縮放），位置與周圍留白依版面的 `traffic_lights`；設定 › Look › Window buttons 可改回 Windows 式的右上按鈕。圖形與顏色由 AgentDesk 自己繪製，不使用 Apple 的素材。設計文件 4.1。
+**驗收標準**:
+- Given 預設設定，When 視窗打開，Then 左上角有三顆圓鈕，右上角沒有 Windows 式按鈕，品牌列、分頁列與 terminals 上方列都不被圓鈕遮住。
+- Given 滑鼠移到圓鈕上，When 停留，Then 三顆都顯示符號（×、−、＋）；點擊分別關閉（只關介面）、最小化、切換最大化。
+- Given 視窗不在前景，When 畫面更新，Then 圓鈕顯示為灰色。
+- Given 使用者在設定選 Windows，When 關閉設定，Then 圓鈕消失，分頁列右端出現最小化、最大化、關閉。
+**驗證**: 截圖（status.md 2026-11-20「Mac 風格的視窗按鈕」）。
+
+## 10. v3.4.0 新增需求：版面與主題構想（設計文件 2.9～2.12、ADR-32～ADR-35）
+
+使用者從 `docs/design/ideas.md` 選定 A1～A4、B1～B3、T2～T5，T1 延後。實作與規格的差異記在 `docs/design/ideas/IMPL-*.md`，本節以實作為準。截圖在各 IMPL 筆記列的 `build\shots\` 資料夾（不進版控）。v4.0.0 起 FR-40、FR-45、FR-46 已移除、FR-44 改為好玩的版面（第 11 節），條文保留作為歷史。
+
+### FR-40 Mission Control 版面（ADR-32）（v4.0.0 已移除，由 FR-52 Stage 取代，ADR-38）
+**狀態**: 已移除。下面的條文保留作為歷史，不再是驗收依據。仍然有效的部分：「看過」以畫面上實際畫出的終端機判斷（FR-21、設計文件 4.1），Esc 照常送給終端機；這兩點由 FR-52 承接。存檔的 `mission` 開成 Stage，`mission.toggle`、`mission.expand`、`mission.filter` 保留為 Stage 的別名。
+**優先級**: P2
+**描述**: 內建版面 `mission`（Mission Control）。所有 Agent 排成格子，每格是程式、名稱、狀態、變動距今多久、畫面最後幾行與 OSC 7501 訊息；需要你的格子有紅框並排在最前面。點一格以一般面板開啟那個 Agent。格子用快照畫，不建終端機檢視、不搶控制權。「看過」改以畫面上實際畫出的終端機判斷，所以只看牆面不會清掉 Done。設計文件 2.9、4.1。
+**驗收標準**:
+- Given 三個 Agent，一個需要你、一個完成、一個工作中，When 使用者按 Ctrl+Shift+M，Then 顯示牆面，順序是需要你、完成、工作中，需要你的格子有 `needs_you` 色的框。
+- Given 牆面上有一個完成的 Agent，When 使用者只看牆面、沒點開它，Then 它保持 Done；點開之後才變 Idle。
+- Given 牆面，When 使用者點一格或按 1～9、方向鍵加 Enter，Then 切到那個 Agent 的分頁，面板取得鍵盤；再按 Ctrl+Shift+M 回牆面，在牆面上再按一次回到原本的版面。
+- Given 牆面或展開的 Agent，When 使用者按 Esc，Then Esc 送給終端機，不離開 Mission Control。
+- Given 上方「Needs you」計數為 1，When 使用者點它，Then 只顯示需要你的 Agent；再點一次取消篩選。
+**驗證**: （v3.5.0 時）`Mission.*`、`Attention.*`、`Layout.ShippedLayoutsParseAndNameEveryNode`、`LayoutStyles.*`；截圖（IMPL-A12）。v4.0.0 起 `ui::mission` 的共用邏輯（`screen_tail`、`wall_order`、`clean_message` 等）仍由 `Mission.*` 測試，版面相關的兩個測試改寫進 `Stage.*`。
+
+### FR-41 Focus 模式（ADR-32）
+**優先級**: P2
+**描述**: 任何版面都能切換的模式，只顯示目前的終端機，底部一條細列顯示其他 Agent 的狀態點。分割與放大狀態不變，重開後仍在 Focus。視窗在前景時的提醒依 `focus_alerts`，預設 `edge_sound`（亮視窗邊緣並播放提示音、不跳通知），所以「需要你時一定播放提示音」仍成立。設計文件 2.9。
+**驗收標準**:
+- Given 一個分頁有兩個面板，When 使用者按 Ctrl+Shift+.，Then 只顯示焦點面板與底部細列；再按一次回到原本的版面，兩個面板與分割比例不變。
+- Given Focus 模式、預設設定、視窗在前景，When 另一個 Agent 需要使用者，Then 視窗邊緣亮一下並播放提示音，不跳通知。
+- Given `focus_alerts` 設為 `edge`，When 同上，Then 只亮邊緣，不播放提示音。
+- Given Focus 模式、視窗在背景，When 一個 Agent 需要使用者，Then 照平常播放提示音、跳通知。
+- Given 底部細列有一個 Agent 的狀態點，When 使用者點它，Then 換成顯示那個 Agent，仍在 Focus 模式。
+**驗證**: `FocusMode.*`、`Attention.AlertRules`；截圖（IMPL-A12）。
+
+### FR-42 Review 版面（ADR-33）
+**優先級**: P2
+**描述**: 內建版面 `review`（Review）。左邊是目前分頁，右邊是目前 Agent 資料夾的未提交改動、diff 與 commit 區。焦點換到另一個 Agent 時跟著換；焦點移到一般 shell 時，`review_follow` 為 `agent`（預設）保留上一個 Agent。F8／Shift+F8 換檔只在這個版面有作用。設計文件 2.10。
+**驗收標準**:
+- Given 一個 Agent 的資料夾有 4 個未提交的改動，When 使用者按 Ctrl+Shift+R，Then 右邊列出 4 個檔案並顯示第一個的 diff；再按 Ctrl+Shift+R 回到原本的版面。
+- Given Review 版面且終端機有焦點，When 使用者按 F8，Then 換到下一個檔案，F8 不送進終端機；在其他版面按 F8 時照常送給程式。
+- Given 右邊有改動，When 使用者輸入訊息並按 Commit，Then 提交成功，清單顯示「No uncommitted changes」，提示列顯示「Committed "…"」。
+- Given 同一個 checkout 有兩個執行中的 Agent，When 顯示 Review，Then 上方出現「2 agents in this repo」。
+- Given 目標 Agent 從 Working 變成其他狀態，When 狀態改變，Then 立刻重讀改動，不等 10 秒。
+**驗證**: `Review.*`、`Keymap.*`；截圖（IMPL-A34）。
+
+### FR-43 Timeline 與 host 狀態歷史（ADR-33）
+**優先級**: P2
+**描述**: Ctrl+Shift+H 開的時間軸，每個 Agent 一列，畫出工作中、需要你、完成、閒置與結束的時間段；範圍 15m、1h、4h、24h。歷史由 agent-host 記錄（UI 關著也記）：每個 session 最多 1,000 筆、24 小時，只記時間與狀態，不記訊息與畫面內容。新的唯讀方法 `session.timeline`，`session.state` 事件加選填欄位 `at`，協定版本不變。換版交接不搬歷史。`agentctl timeline` 在命令列輸出同樣的紀錄。設計文件 2.10、3.7.3、3.8。
+**驗收標準**:
+- Given 一個 Agent 依序回報 Working、Blocked、Idle，When 使用者打開 Timeline，Then 那一列依序畫出三段，滑鼠停在段落上顯示狀態與起訖時間；點段落切到那個 Agent 並關閉浮層。
+- Given 一個 session 有 1,100 次狀態變化，When 呼叫 `session.timeline`，Then 只回傳 1,000 筆並標 `truncated: true`；回應裡沒有訊息或畫面內容。
+- Given host 正在跑有歷史的終端機，When 執行 `agentctl update` 換版交接，Then 新 host 的歷史從接手時開始，`adopted` 為 true，UI 在軸上標「History starts HH:MM (agent-host updated)」。
+- Given 一台機器上是沒有 `session.timeline` 的舊 agent-host，When 新 UI 打開 Timeline，Then 那台機器的群組顯示「Timeline needs a newer agent-host on this machine」，其他機器照常顯示。
+- Given host 有紀錄，When 執行 `agentctl timeline --since 1h` 或加 `--json`，Then 輸出每個 session 的狀態變化（文字或 host 的原始 JSON）。
+**驗證**: `Timeline.*`、`StateTimeline.*`、`HostFixture.TimelineRecordsStateChangesInOrder`、`HostFixture.TimelineIsBoundedAndSaysSo`、`HostFixture.TimelineIsAnOrdinaryReadOnlyMethod`、`HostUpdate.TerminalsKeepRunningThroughAnUpdate`；截圖（IMPL-A34）。
+
+### FR-44 AgentDesk Classic 版面（ADR-34；v4.0.0 改為好玩的版面，ADR-37）
+**v4.0.0 變更**: Classic 不再列在一般版面清單。設定 › Look 的「Fun layouts」關著（預設）時，它不出現在版面卡片、Mac 與 Classic 的 View 選單，Ctrl+Shift+L 也跳過它；命令面板的「Layout: AgentDesk Classic」與 `layout:classic` 一律可用（FR-56）。外觀與下面的驗收標準不變。
+**優先級**: P3
+**描述**: 內建版面 `classic`（AgentDesk Classic）：整個視窗用字元畫成單色終端機的樣子，選單、分頁、框線與狀態都是文字；狀態一律有字元（`[!]`、`[~]`、`[+]`、`[.]`、`[?]`），不只靠顏色。F10 打開選單列（只在這個版面）。終端機可轉成主題的單色色階；掃描線特效在淺色主題與 Windows 高對比時不畫。設計文件 2.11。
+**驗收標準**:
+- Given Classic 版面且終端機有焦點，When 使用者按 F10、按右鍵到 File、選 Split right 並按 Enter，Then 目前面板往右分割；在其他版面按 F10 時照常送給程式。
+- Given Monochrome terminal 開啟、主題 phosphor-green，When 程式輸出 24-bit 紅字，Then 文字畫成綠色色階，和底色對比不低於 7:1。
+- Given 一個 Agent 需要使用者，When 顯示分頁列，Then 那個分頁有反白的 `[!]`。
+- Given 淺色主題或 Windows 高對比，When 畫面更新，Then 不畫掃描線與暗角。
+**驗證**: `ClassicLayout.*`、`LayoutStyles.*`；截圖（IMPL-B）。
+
+### FR-45 AgentDesk Tiling 版面（ADR-34）（v4.0.0 已移除，併進 Terminals，見 FR-57，ADR-37）
+**狀態**: 已移除。下面的條文保留作為歷史，不再是驗收依據。直角、間距與 Alt+R、Alt+Shift+Enter、Alt+Shift+Q、Alt+Shift+G 改在 Terminals（`layout:terminals`），由 FR-57 驗收；頂端狀態列、Pane titles、Focus follows mouse 沒有保留。存檔的 `tiling` 開成 Terminals 並打開直角。
+**優先級**: P3
+**描述**: 內建版面 `tiling`（AgentDesk Tiling）：沒有側欄與分頁卡片，頂端一條細狀態列，面板直角並留間距，以鍵盤為主。Alt+R 調整大小模式、Alt+Shift+Enter 往較長的一邊分割、Alt+Shift+Q 關閉面板、Alt+Shift+G 開關間距，這些鍵只在 `layout:tiling` 區段。設計文件 2.11。
+**驗收標準**:
+- Given Tiling 版面、左右兩個面板，When 使用者按 Alt+R 再按 L 三次，Then 左側面板寬了 120 px，沒有任何字元送進終端機；按 Esc 後打字回到原面板。
+- Given 一個寬大於高的面板，When 使用者按 Alt+Shift+Enter，Then 往右分割。
+- Given 間距關閉、未聚焦的面板需要使用者，When 畫面更新，Then 那個面板的框是 2 px `needs_you` 色，狀態列顯示 `!1`。
+- Given 其他版面，When 使用者按 Alt+R，Then 照常送給程式。
+**驗證**: （v3.5.0 時）`TilingLayout.*`（含 `TilingLayout.LayoutKeysDoNotClashWithDefaults`）、`LayoutStyles.*`；截圖（IMPL-B）。v4.0.0 拿掉 `TilingLayout.*`，改由 `TerminalsOptions.*` 驗證（FR-57）。
+
+### FR-46 AgentDesk Cockpit 版面（ADR-34）（v4.0.0 已移除，ADR-37）
+**狀態**: 已移除。下面的條文保留作為歷史，不再是驗收依據。程式、版面檔、`cockpit-night`／`cockpit-day` 主題、`cockpit.reset_today` 與 `cockpit_*` 設定都已刪除；它的用途由 Stage（FR-52）與 Inbox（FR-53）接手。存檔的 `cockpit` 開成 AgentDesk 版面，選了 Cockpit 主題的人退回預設主題。
+**優先級**: P3
+**描述**: 內建版面 `cockpit`（AgentDesk Cockpit）：左邊三個儀表（工作中、需要你、今天完成），右邊 Agent 清單，下方狀態變化紀錄（最多 200 筆，不存檔），中間是目前分頁。今天完成從本地時間午夜起算，存在 `cockpit_done_today`。窄視窗先藏清單再藏紀錄。設計文件 2.11。
+**驗收標準**:
+- Given Cockpit 版面、一個 Agent 在 Working，When 它變成 Done 或 Idle，Then DONE TODAY 加一，LOG 最上面多一列 `HH:MM:SS  space/程式  WORKING → …`。
+- Given 今天完成數為 3、存檔日期是昨天，When 本地時間換日後畫面更新，Then 歸零。
+- Given 窗寬小於 1000 設計 px，When 畫面更新，Then 藏起 Agent 清單；小於 820 再藏紀錄。
+- Given 使用者點「NEEDS YOU」儀表，When 有 Agent 需要使用者，Then 跳到第一個需要你的 Agent。
+**驗證**: （v3.5.0 時）`Cockpit.*`、`LayoutStyles.*`；截圖（IMPL-B）。v4.0.0 拿掉 `Cockpit.*`，由 `LayoutStyles.RemovedLayoutsHaveReplacements` 檢查存檔轉換。
+
+### FR-47 依時間切換淺色與深色（ADR-35）
+**優先級**: P3
+**描述**: 設定 › Look › Theme 的 Appearance 多一個 Schedule：依固定時間，或依日出日落切換淺色與深色。不連網、不使用 Windows 定位 API，緯度與經度由使用者手動輸入，只存到小數一位。`appearance.toggle` 暫時換成另一種，到下一個切換時間為止。設計文件 2.12。
+**驗收標準**:
+- Given Schedule、Fixed times 07:00／19:00，When 本地時間到 19:00，Then 一秒內換成深色主題。
+- Given 淺色 22:00、深色 06:00，When 本地時間 23:00，Then 顯示淺色（跨午夜的排程）。
+- Given Sunrise, sunset、緯度 25.0，When 計算台北夏至與冬至，Then 日出日落和 NOAA 的參考值相差不超過 3 分鐘。
+- Given 使用者沒填緯度，When 打開 Switch by，Then Sunrise, sunset 為灰色、不能選。
+- Given 排程模式顯示淺色，When 執行 `appearance.toggle`，Then 換成深色，到下一個切換時間回到排程。
+**驗證**: `Schedule.*`、`ThemeCommands.NamesAreBuiltIn`；截圖（IMPL-T）。
+
+### FR-48 跟著 Agent 狀態變色（ADR-35）
+**優先級**: P3
+**描述**: Tint by agent state（預設 Off）設為 Subtle 時，有 Agent 需要你，介面底色緩慢偏向 `needs_you` 的色相、強度很小；Also when done 開啟時，有完成的 Agent 偏向 `done` 色相、強度減半。文字、狀態色、框線與終端機顏色不變，強度受對比保護限制。主題編輯器開著、Windows 對比主題開著時不作用。設計文件 2.12。
+**驗收標準**:
+- Given Subtle、主題 Midnight，When 一個 Agent 需要使用者，Then 側欄底色在約 1.2 秒內偏暖（例如 `#101521` → `#151320`），終端機顏色不變；問題解決並維持至少 2 秒後淡回原色。
+- Given 任何主題，When 套用變色，Then 檢查的文字與圖形配對都不低於變色前與 AA 門檻中較低的那一個。
+- Given Windows 關閉動畫效果，When 狀態改變，Then 直接換到目標強度，不漸變。
+**驗證**: `AmbientTint.*`、`AmbientFade.*`、`ColorMath.*`、`PaletteCheck.*`。
+
+### FR-49 版面的建議主題（ADR-35）
+**優先級**: P3
+**描述**: 版面可以有一組為它配好的深淺主題（版面檔的 `suggested_themes` 或內建表：AgentDesk Mac 配 Dusk／Dawn、Classic 配 Phosphor Green／Paper；v4.0.0 起 Cockpit 與它的 Cockpit Night／Day 已移除）。建議只出現在設定頁，**不會自動改變外觀**（使用者決定）。設計文件 2.4、2.12。
+**驗收標準**:
+- Given 目前版面是 AgentDesk Mac、主題是 Midnight／Paper，When 打開設定 › Look › Theme，Then 出現「Made for …」列與 Use 按鈕，Dusk 與 Dawn 的主題卡有星號。
+- Given 同上，When 使用者按 Use，Then 這個版面的深淺主題改成 Dusk／Dawn，其他版面不變。
+- Given 使用者第一次切到 Classic，When 版面顯示，Then 主題不變，只在設定頁建議（v4.0.0 拿掉原本的 Cockpit）。
+- Given 版面目前的主題已經是建議值，或版面檔寫死 `theme`，When 打開設定，Then 不顯示建議列。
+**驗證**: `ThemeFile.BuiltinSuggestions`、`ThemeFile.SuggestedThemeFilesShip`、`ThemeFile.MacDuskAndDawnPassThePaletteCheck`、`Layout.SuggestedThemesAreReadAndWrittenBack`。
+
+### FR-50 主題編輯器（ADR-35）
+**優先級**: P3
+**描述**: 在設定裡複製或新建主題、調整每個顏色並即時預覽整個視窗，存成 `%LOCALAPPDATA%\AgentDesk\themes\<名稱>.json`（和手寫主題檔相同格式，只寫有改的顏色，保留未知的鍵）。顯示每個顏色的對比、可模擬三種色覺的範例與 Checks。刪除是改名成 `.json.old-<時間>`，不真的刪檔。設計文件 2.12。
+**驗收標準**:
+- Given 使用者在主題卡右鍵選 Edit a copy…，When 改了 accent，Then 整個視窗立刻用新顏色；按 Cancel 回到原本的主題。
+- Given 一個合法的名稱，When 按 Save 或 Ctrl+S，Then 寫入 `themes\<名稱>.json`，`colors` 只含改過的值，存完立刻套用，不必重開。
+- Given 名稱是空的、含 `<>:"/\|?*`、是保留裝置名稱或內建主題 id，When 輸入，Then Save 停用並顯示原因。
+- Given 終端機文字對背景低於 3:1，When 按 Save，Then 多問一次才存。
+- Given 一個使用者自己的主題正被某個版面使用，When 使用者選 Delete…並確認，Then 檔案改名為 `<名稱>.json.old-<時間>`，那個版面改回預設主題。
+**驗證**: `ThemeFile.*`（含 `ThemeFile.NameRules`、`ThemeFile.WriteKeepsUnknownKeysAndOnlyOverrides`）、`ColorMath.*`、`PaletteCheck.*`、`ThemeCommands.NamesAreBuiltIn`。
+
+### FR-51 第一次使用提示（ADR-36）
+**優先級**: P2
+**描述**: 每個內建版面與專注模式第一次出現時，顯示一張提示卡：用途與 3～5 個常用操作，快捷鍵依使用者目前的按鍵設定。之後可以隨時重看，也可以全部關閉。同一批修正：視窗按鈕顏色跟著主題（補充 FR-39）。設計文件 2.4、ADR-36。
+**驗收標準**:
+- Given 使用者第一次切到某個版面，When 畫面穩定後，Then 中央出現那個版面的提示卡；按「Got it」後，這個版面不會再自動出現提示。
+- Given 提示卡開著，When 使用者打字或按 Enter，Then 按鍵不會送進終端機；關閉後打字照常送進終端機。
+- Given 使用者在 keys.json 改了某個操作的鍵，When 提示卡顯示，Then 顯示的是改過的鍵。
+- Given 使用者按「Don't show tips」，When 之後切到沒看過的版面，Then 不再自動出現提示；執行 `layout.tips` 仍可打開。
+- Given 使用者換主題，When 畫面更新，Then 左上角的視窗按鈕改用該主題推算的顏色，三顆仍分得出來，且在所在的列上對比至少 3:1。
+**驗證**: `LayoutTips.*`、`WindowButtons.*`；截圖（status.md 2026-11-20「視窗按鈕跟著主題、第一次使用提示」）。v4.0.0 起提示卡換成目前的版面（Mission Control、Tiling、Cockpit 的卡拿掉，加上 Stage、Inbox、Pair、Garden），`LayoutTips.EveryLayoutAndFocusHasACard` 用新的名稱清單。
+
+## 11. v4.0.0 新增需求：第二輪版面（設計文件 2.9、2.11、2.13～2.16、ADR-37～ADR-41）
+
+使用者 2026-11-21 看過 `docs/design/ideas.md` 第二輪構想後說「全部都做」，依建議執行：共用設計規則與整體美化、Tiling 併進 Terminals、拿掉 Cockpit、Classic 改為好玩的版面，以及 C1 Inbox、C2 Stage、C3 Pair、C4 Garden。實作與規格的差異記在 `docs/design/ideas/IMPL-round2-*.md`，本節以實作為準。截圖在各 IMPL 筆記列的 `build\shots\` 資料夾（不進版控）。v2.27 時 Debug 共 477 個測試。
+
+### FR-52 Stage 版面（ADR-38，取代 FR-40）
+**優先級**: P2
+**描述**: 內建版面 `stage`（Stage）。一個 Agent 在大的主舞台上，是一般的面板，可以直接打字；其他 Agent 在下方底片條排成即時縮圖（程式、名稱、狀態、多久前變化、畫面最後幾行），縮圖用快照畫，不建終端機檢視、不搶控制權。需要你的縮圖發光並排到最前面（等最久的在前），其他維持固定順序。條上可篩選（All／Needs you／Working）與調整大小（S／M／L，視窗太矮時自動小一號）。Ctrl+Shift+M 切換 Stage，Alt+Left／Alt+Right 只在 Stage 換上一個／下一個 Agent。自動換台預設關閉。存檔的 `mission` 開成 Stage。設計文件 2.9。
+**驗收標準**:
+- Given 三個 Agent，一個需要你、兩個工作中，When 使用者按 Ctrl+Shift+M，Then 顯示 Stage，需要你的那張縮圖發光並排在底片條最前面；再按一次回到原本的版面。
+- Given Stage，When 使用者點一張縮圖，Then 那個 Agent 換上主舞台並取得鍵盤，原本台上的 Agent 回到底片條；頂端列的「←」換回剛才那一個。
+- Given Stage 且終端機有焦點，When 使用者按 Alt+Right，Then 換到下一個 Agent，按鍵不送進終端機；在其他版面按 Alt+Right 時照常是 `pane.go:right`。
+- Given 底片條上有一個完成的 Agent，When 使用者只看縮圖、沒把它放上台，Then 它保持 Done。
+- Given Stage，When 使用者按 Esc，Then Esc 送給終端機，不離開 Stage。
+- Given 「Switch to an agent that needs you」打開，When 使用者 4 秒內按過鍵，或有選單開著，或台上的 Agent 也在等使用者，Then 有新的 Agent 需要你時不自動換台；以上都不成立時自動換上台。
+- Given `ui.json` 存的是 `"layout": "mission"` 與 `mission_filter`，When AgentDesk 啟動，Then 開成 Stage 並沿用原本的篩選；下次存檔時 `mission_*` 鍵被刪掉。
+- Given Windows 關閉動畫效果，When 換台或有 Agent 需要你，Then 不淡入、不呼吸，直接顯示結果。
+**驗證**: `Stage.*`（含 `Stage.ShippedLayoutHasBarStageAndStrip`、`Stage.CommandsAndKeys`）、`Mission.*`（共用邏輯）、`LayoutStyles.RemovedLayoutsHaveReplacements`、`LayoutStyles.SavingDropsKeysOfRemovedLayouts`、`Attention.*`；截圖（IMPL-round2-stage）。
+
+### FR-53 Inbox 版面（ADR-39）
+**優先級**: P2
+**描述**: 內建版面 `inbox`（Inbox）。左邊是需要你的 Agent 卡片佇列（Agent 名稱、space 與分支、變更檔案數、等了多久、Agent 在結構化回報裡說它要什麼、畫面最後四行的預覽），右邊是目前分頁的面板。卡片上可以快速回答、回覆、Snooze 或 Open；下面的 DONE 區列出沒看過的完成，可 Dismiss；全部處理完顯示 Inbox zero。快速回答依程式設定在 `ui.json` 的 `inbox_answers`；隨附的預設只有 Claude Code（`1`／Esc）與 Codex（`y`／Esc）的 permission 回報，待用真的 CLI 驗證。狀態一律不從畫面文字判斷（ADR-09）。Ctrl+Shift+I 切換 Inbox。設計文件 2.14。
+**驗收標準**:
+- Given 兩個 Agent 需要使用者，一個 1 分鐘前開始等、一個 5 分鐘前，When 使用者按 Ctrl+Shift+I，Then 顯示兩張卡片，預設 1 分鐘的在前；切到 Oldest 後順序對調；再按 Ctrl+Shift+I 回到原本的版面。
+- Given 一張卡片的 Agent 用 OSC 7501 回報了訊息，When 顯示卡片，Then 顯示那段訊息；沒有訊息時顯示淡色提示，不從畫面文字推斷。
+- Given 選取的卡片，When 使用者在回覆欄位打字並按 Enter，Then 文字加一個 Enter 送進那個終端機，卡片顯示「✓ Sent」。
+- Given `inbox_answers` 給某個程式設了 `{"label": "Continue", "send": "", "enter": true}`，When 那個程式的卡片出現，Then 有一顆「Continue」按鈕，按下或按 1 送出 Enter；寫成空陣列時沒有按鈕；存檔後幾秒內生效，不用重開。
+- Given 使用者 Snooze 一張卡片，When 那個 Agent 換了問題，或離開等待後又回來，Then 卡片重新出現；重開 agent-ui 後 Snooze 清掉。
+- Given 佇列握有鍵盤，When 使用者按 ↓、R、1～9、S，Then 依序移動選取、回覆、快速回答、Snooze；點一下右邊的終端機後，同樣的鍵照常送給程式。
+- Given 所有卡片都處理完，When 佇列空了，Then 顯示 Inbox zero 與「N agents working, M idle」之類的摘要；Windows 關閉動畫效果時直接顯示最後一格。
+**驗證**: `Inbox.*`（排序、Snooze 規則、預設快速回答只給已知程式的 permission、自訂覆寫與 `"*"`、格式錯誤、最多 9 個、命令與 Ctrl+Shift+I）；截圖（IMPL-round2-inbox）。隨附的快速回答與真的 Claude Code、Codex 的互動待人工驗收。
+
+### FR-54 Pair 版面（ADR-40）
+**優先級**: P2
+**描述**: 內建版面 `pair`（Pair）。兩個 Agent 左右並排，下方一個共用輸入列，可以把同一段文字同時送給兩邊（貼上後補 Enter）。「Separate worktrees」預設打開，資料夾是 git 儲存庫時每一邊在 `pair/` 開頭的新分支有自己的 checkout。誰先完成只依結構化的 agent 狀態判斷，比的是各自的用時；兩邊都完成後顯示結果條，可 Review 或 Keep（只是畫面標記，不做 git 操作）。Pair 開的 worktree 不自動移除。Ctrl+Shift+2 切換 Pair，Alt+P 移到輸入列、Alt+Shift+S 交換左右，這兩個鍵只在 Pair。設計文件 2.15。
+**驗收標準**:
+- Given 目前資料夾是 git 儲存庫、Separate worktrees 打開，When 使用者在設定卡按 Start pair，Then 建立兩個 `pair/` 開頭分支的 worktree，在目前 space 一個名為「Pair」的新分頁裡左右開出「<profile> (A)」與「(B)」。
+- Given 資料夾不是 git 儲存庫，When 顯示設定卡，Then 開關停用並以黃色警告說明兩邊會在同一個資料夾工作，仍可以開始。
+- Given 一對 Agent，When 使用者在輸入列打字並按 Enter，Then 同一段文字加 Enter 送給兩邊並開始新的一輪；按 Left only 只送左邊。
+- Given 兩邊都回報過 Working，When 左邊先回報 Done，Then 左邊面板頂端出現終點線與「Finished first」；右邊也 Done 後，結果條寫「<名稱> finished first, Ns ahead」（相差不到 1 秒寫「A dead heat」），並顯示兩邊的時間與變更數。
+- Given 結果條，When 使用者按 Keep，Then 那一邊標「Kept」，git 沒有任何變化；按 Review 切到 Review 看那一邊的 diff，Ctrl+Shift+R 回到 Pair。
+- Given Pair 以外的版面，When 使用者按 Alt+P，Then 照常送進終端機。
+- Given 使用者按 Close pair，When 解除配對，Then 兩個終端機照常在「Pair」分頁裡跑，worktree 保留。
+**驗證**: `Pair.*`、`PairRace.*`（生命週期、比賽計時與結果、worktree 與 session 名稱、預設程式、命令、`Pair.KeysOnlyWhilePairShows`）；截圖（IMPL-round2-pair）。貼上後補 Enter 對真的 Claude Code 與 Codex 的效果待人工驗收。
+
+### FR-55 Garden 版面（ADR-41）
+**優先級**: P3
+**描述**: 內建的好玩版面 `garden`（Garden）。每個 Agent 是一隻 AgentDesk 自己畫的小動物，外觀由 session id 決定，顏色跟著所在 space。姿勢只看結構化狀態：工作中跳步、需要你揮手並有紅色「!」、完成時彈跳後坐下、閒置睡覺、Unknown 半透明。滑鼠停留顯示程式、狀態與最後一則訊息；點一下回到原本的版面並聚焦那個 Agent。深色主題是夜晚、淺色是白天。遵守 Windows 的「減少動畫」，視窗不在前景時降低更新頻率。沒有預設按鍵，在 Fun layouts 打開時才列在版面清單（FR-56）。設計文件 2.16。
+**驗收標準**:
+- Given 五個 Agent 分別是 Working、Blocked、Done、Idle、Unknown，When 打開 Garden，Then 五隻小動物依序是跳步、揮手加「!」、坐著笑、睡覺加「z z」、半透明；上方計數顯示需要你 1、工作中 1、完成 1。
+- Given 同一個 Agent，When 重開 Garden 或 agent-ui，Then 它的小動物長得一樣。
+- Given 使用者點一隻小動物，When 點擊，Then 回到原本的版面、聚焦那個 Agent，並跳出說明怎麼回到花園的通知。
+- Given Windows 關閉動畫效果，When Garden 顯示，Then 每隻小動物停在定格姿勢，不要求新的畫格。
+- Given 視窗不在前景，When 有 Agent 在工作，Then 更新頻率降到每秒約 4 格。
+- Given 沒有 Agent，When 打開 Garden，Then 草地中間顯示木牌與「Start a program…」按鈕。
+**驗證**: `Garden.*`（外觀由 id 決定、狀態對姿勢、姿勢內插、1～20 個的排列、子 Agent 跟隨、畫格頻率、版面與命令）；截圖（IMPL-round2-garden）。
+
+### FR-56 好玩的版面（Fun layouts）（ADR-37）
+**優先級**: P3
+**描述**: 設定 › Look 的「Fun layouts」開關（`ui.json` 的 `fun_layouts`，預設 false）。關著時 AgentDesk Classic 與 Garden 不出現在版面卡片、Mac 與 Classic 的 View 選單，Ctrl+Shift+L 也跳過它們；正在使用的版面一律保留自己的卡片。命令面板的「Layout: AgentDesk Classic」「Layout: Garden」與 `layout:classic`、`layout:garden` 一律可用。設計文件 2.4、2.11。
+**驗收標準**:
+- Given 預設設定，When 使用者連按 Ctrl+Shift+L，Then 依序輪到 AgentDesk、Terminals、Stage、Inbox、Review、Pair、AgentDesk Mac，不會出現 Classic 或 Garden。
+- Given Fun layouts 打開，When 打開設定 › Look，Then 版面卡片多出 AgentDesk Classic 與 Garden，Ctrl+Shift+L 也會輪到它們。
+- Given Fun layouts 關著，When 使用者在命令面板執行「Layout: Garden」，Then 切到 Garden，設定頁仍保留 Garden 的卡片直到換走。
+**驗證**: `LayoutStyles.FunLayoutsStayOutOfTheListUntilTurnedOn`、`LayoutTips.MergedTerminalsAndFunLayoutsAreExplained`；截圖（IMPL-round2-base、IMPL-round2-garden）。
+
+### FR-57 Terminals 的直角、間距與鍵盤調整大小（ADR-37，取代 FR-45）
+**優先級**: P3
+**描述**: 設定 › Look 選到 Terminals 時有 Square corners（`terminals_square`）與 Gaps（`terminals_gaps_on`、`terminals_gaps` 0～24 px，預設 8）。預設值時畫面和原本相同。Alt+R 調整大小模式、Alt+Shift+Enter 往較長的一邊分割、Alt+Shift+Q 關閉面板、Alt+Shift+G 開關間距，只綁在 `layout:terminals`。存檔的 `tiling` 開成 Terminals 並打開直角；`tiling.*` 舊命令仍可用。設計文件 2.11。
+**驗收標準**:
+- Given Terminals 版面、左右兩個面板，When 使用者按 Alt+R 再按 L 三次，Then 左側面板寬了 120 px，沒有任何字元送進終端機，面板區下方出現調整大小的提示卡；按 Esc 後打字回到原面板。
+- Given 一個寬大於高的面板，When 使用者按 Alt+Shift+Enter，Then 往右分割。
+- Given 使用者打開 Square corners、關掉 Gaps，When 畫面更新，Then 面板變成直角並彼此相貼，相鄰面板共用一條 1 px 邊線，左上角的視窗按鈕變成小方塊。
+- Given 其他版面，When 使用者按 Alt+R，Then 照常送給程式。
+- Given `ui.json` 存的是 `"layout": "tiling"` 與 `tiling_gaps: 12`，When AgentDesk 啟動，Then 開成 Terminals、直角打開、間距 12；下次存檔寫 `terminals_*`，刪掉 `tiling_*`。
+**驗證**: `TerminalsOptions.*`、`LayoutStyles.RemovedLayoutsHaveReplacements`、`LayoutStyles.SavingDropsKeysOfRemovedLayouts`、`DesignTokens.*`；截圖（IMPL-round2-base 的 `step2\`）。

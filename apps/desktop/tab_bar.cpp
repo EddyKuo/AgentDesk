@@ -90,6 +90,8 @@ void draw_new_menu_agents(App::State& s, ui::HostClient* mh,
     }
 }
 
+}  // namespace
+
 // The "+" menu: Terminal and the machine's other shells, "Start an agent", then New space, New
 // worktree… and Open worktree…. The agents and shells are those of the active space's machine.
 void draw_new_menu(App::State& s) {
@@ -136,14 +138,16 @@ void draw_window_buttons(App::State& s, float right, float top, float h) {
     const bool close = ImGui::InvisibleButton("##win-close", ImVec2(b, b));
     const bool hov = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
+    // Under the pointer close takes the theme's close colour, as the round buttons do.
     if (hov)
-        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + b, y + b), g_pal->hover, px(6));
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + b, y + b), window_button_color(0, g_pal->sidebar), px(6));
     draw_icon(s, dl, ui::icon::kWinClose, fpx(16), ImVec2(x + b * 0.5f, y + b * 0.5f),
-              hov ? g_pal->text : g_pal->dim);
+              hov ? window_button_glyph(0, g_pal->sidebar) : g_pal->dim);
     if (close)
         ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
 }
 
+namespace {
 // The Changes and Files toggles, laid out leftwards from `right`; returns the new right edge.
 float draw_panel_buttons(App::State& s, ImDrawList* dl, ImVec2 pos, float height, float right) {
     auto* sp = s.ws.active();
@@ -179,6 +183,8 @@ float draw_panel_buttons(App::State& s, ImDrawList* dl, ImVec2 pos, float height
     return right;
 }
 
+}  // namespace
+
 Attention tab_attention(App::State& s, const std::vector<std::string>& ids) {
     std::vector<Attention> atts;
     for (const auto& id : ids)
@@ -206,6 +212,7 @@ std::string tab_label(App::State& s, const ui::Tab& tab, int i, const std::vecto
     return label;
 }
 
+namespace {
 struct TabItem {
     int i;
     float w;
@@ -255,6 +262,8 @@ void scroll_to_active_tab(App::State& s, const std::vector<TabItem>& items, int 
         s.tab_scroll = active_start;
 }
 
+}  // namespace
+
 // The tab's context menu: Rename, New tab, Close, all acting on this tab by id.
 void tab_menu(App::State& s, const ui::Tab& tab, std::string& close_tab) {
     if (!begin_menu("##tabctx"))
@@ -269,6 +278,7 @@ void tab_menu(App::State& s, const ui::Tab& tab, std::string& close_tab) {
     ImGui::EndPopup();
 }
 
+namespace {
 // One tab between a and b. Selects on mouse-up over the same tab; a press dragged onto another
 // tab sets `drop`; double-click renames. The active tab is raised and has a close button.
 void draw_tab(App::State& s, ImDrawList* dl, ui::Space& sp, const TabItem& it, ImVec2 a, ImVec2 b,
@@ -319,8 +329,10 @@ void draw_tab(App::State& s, ImDrawList* dl, ui::Space& sp, const TabItem& it, I
         status_mark(s, dl, cx - px(1), cy, att, true);
         cx += px(12) + px(7);
     } else if (att == Attention::kBlocked || att == Attention::kDone) {
-        dl->AddCircleFilled(ImVec2(cx + px(3), cy), px(3),
-                            att == Attention::kBlocked ? g_pal->needs_you : g_pal->done);
+        // The dot eases from its last colour to the new one.
+        const ImU32 dot = tok::cross_fade(ImGui::GetID("##tab-dot"),
+                                          att == Attention::kBlocked ? g_pal->needs_you : g_pal->done);
+        dl->AddCircleFilled(ImVec2(cx + px(3), cy), px(3), dot);
         cx += px(12) + px(7);
     }
     if (active) {
@@ -408,13 +420,18 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
     dl->AddLine(ImVec2(pos.x, pos.y + height - 1), ImVec2(pos.x + width, pos.y + height - 1), g_pal->border);
     // Right part first, so the tabs know how much room is left.
     float right = pos.x + width - px(10);
-    if (s.config.hwnd != nullptr) {
+    // In Review the bar ends mid-window: the window buttons sit on the review column's head, and
+    // the changes always show there (no panel buttons).
+    const bool review = s.layout().style == "review";
+    if (s.config.hwnd != nullptr && !mac_window_buttons(s) && !review) {  // round ones sit at the top left instead
         draw_window_buttons(s, right + px(10) - px(6), pos.y, height);
         right -= px(26) * 3 + px(4) + px(12);
     }
-    right = draw_panel_buttons(s, dl, pos, height, right);
+    if (!review)
+        right = draw_panel_buttons(s, dl, pos, height, right);
     const float plus_x = right - px(26);
-    float x = pos.x + px(10);
+    // With the sidebar hidden (or narrower than them) the round window buttons are over this bar.
+    float x = clear_of_traffic_lights(s, pos.x + px(10), pos.y, pos.y + height, px(12));
     // Not in the original bar: once the sidebar is hidden (sidebar.toggle) nothing on screen could
     // bring it back, so a sidebar button leads the bar while it is hidden.
     if (const lay::Node* side = s.layout().tree.find("sidebar"); side != nullptr && side->hidden) {

@@ -124,6 +124,8 @@ void update_view_from_json(SessionView& v, const Json& j) {
     v.agent_kind = j.value("agent_kind", v.agent_kind);
     v.agent_message = j.value("agent_message", v.agent_message);
     v.last_agent_state = j.value("last_agent_state", v.last_agent_state);
+    if (const auto at = j.find("at"); at != j.end() && at->is_number_integer())
+        v.state_at_ms = at->get<long long>();
     v.still_running_after_interrupt =
         j.value("still_running_after_interrupt", v.still_running_after_interrupt);
     v.remaining_processes = j.value("remaining_processes", v.remaining_processes);

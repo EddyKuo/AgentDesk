@@ -517,7 +517,7 @@ Response SessionManager::dispatch(const ipc::ConnectionPtr& conn, const Request&
     if (updating_ || handed_over_) {
         static const std::set<std::string> kReadOnly = {"hello",       "profile.list", "session.list",
                                                         "session.get", "history.read", "ui.state.get",
-                                                        "fs.list",     "fs.read"};
+                                                        "fs.list",     "fs.read",      "session.timeline"};
         if (!kReadOnly.contains(m))
             return protocol::fail(req.id, ErrorCode::kOverloaded, "agent-host is updating", true);
     }
@@ -569,6 +569,8 @@ Response SessionManager::dispatch(const ipc::ConnectionPtr& conn, const Request&
         return do_label(req);
     if (m == "session.report")
         return do_report(req);
+    if (m == "session.timeline")
+        return do_timeline(req);
     return bad(req, "unknown method: " + m);
 }
 
@@ -883,6 +885,74 @@ Response SessionManager::do_report(const Request& req) {
     return protocol::ok(req.id, {{"queued", true}, {"to", to}});
 }
 
+Response SessionManager::do_timeline(const Request& req) {
+    const std::int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::system_clock::now().time_since_epoch())
+                                 .count();
+    // At most a day back; the mark before the range says which state it starts in.
+    std::int64_t since = now - StateTimeline::kKeepMs;
+    if (const auto it = req.params.find("since_ms"); it != req.params.end() && it->is_number_integer())
+        since = std::max(since, it->get<std::int64_t>());
+    std::string only;
+    if (req.params.contains("session")) {
+        std::optional<Response> err;
+        const auto m = resolve(req, err);
+        if (!m)
+            return *err;
+        only = m->record.id;
+    }
+    std::vector<ManagedPtr> ordered;
+    {
+        std::lock_guard lock(mutex_);
+        for (const auto& [id, m] : sessions_)
+            if (only.empty() || id == only)
+                ordered.push_back(m);
+    }
+    std::sort(ordered.begin(), ordered.end(), kOldestFirst);
+    Json list = Json::array();
+    for (const auto& m : ordered) {
+        // The session is kept alive by this copy (prune_exited), so it is used outside mutex_.
+        std::shared_ptr<Session> session;
+        SessionRecord record;
+        Session::Timeline t;
+        {
+            std::lock_guard lock(mutex_);
+            session = m->session;
+            record = m->record;
+            if (!session)
+                t = m->ended_timeline;
+        }
+        if (session) {
+            t = session->timeline(since);
+        } else {
+            // The copy kept at release is whole: cut it to the range the same way.
+            auto first = std::find_if(t.marks.begin(), t.marks.end(),
+                                      [&](const StateMark& k) { return k.at_ms >= since; });
+            if (first != t.marks.begin() && (first == t.marks.end() || first->at_ms > since))
+                --first;  // the state the range starts in
+            t.marks.erase(t.marks.begin(), first);
+        }
+        if (t.marks.empty())
+            continue;  // nothing recorded (a Lost record of an earlier agent-host)
+        Json marks = Json::array();
+        for (const auto& k : t.marks)
+            marks.push_back(Json::array({k.at_ms, to_string(k.agent), to_string(k.process)}));
+        const ProcessState ps = session ? session->info().process_state : ProcessState::kExited;
+        const bool ended = ps == ProcessState::kExited || ps == ProcessState::kFailed;
+        list.push_back({{"id", record.id},
+                        {"name", valid_utf8(record.name)},
+                        {"program", session && !ended ? session->foreground_program() : std::string()},
+                        {"profile", record.profile_id},
+                        {"parent", record.parent},
+                        {"created_at", record.created_at},
+                        {"ended", ended},
+                        {"truncated", t.truncated},
+                        {"adopted", t.adopted},
+                        {"marks", std::move(marks)}});
+    }
+    return protocol::ok(req.id, {{"now_ms", now}, {"sessions", std::move(list)}});
+}
+
 void SessionManager::prune_exited() {
     if (updating_ || handed_over_)
         return;  // frozen sessions are being handed over
@@ -899,6 +969,8 @@ void SessionManager::prune_exited() {
             for (std::size_t i = 0; i + kMaxExitedLive < exited.size(); ++i) {
                 exited[i]->subscribers.clear();
                 exited[i]->controller.reset();
+                // Its state history outlives the terminal (a quick copy under the session's lock).
+                exited[i]->ended_timeline = exited[i]->session->timeline(0);
                 doomed.push_back(std::move(exited[i]->session));  // metadata stays in the list
             }
         }
@@ -1485,6 +1557,10 @@ void SessionManager::on_session_info(const std::string& id, const SessionInfo& i
               {"last_agent_state", to_string(info.agent.last_state)},
               {"still_running_after_interrupt", info.still_running_after_interrupt},
               {"remaining_processes", info.remaining_processes}};
+    // When the agent or process state took its current value (ms since 1970): an optional field,
+    // which older clients ignore.
+    if (info.state_changed_ms > 0)
+        e.body["at"] = info.state_changed_ms;
     const std::string payload = protocol::serialize(e);
     for (auto& [cid, sub] : m.subscribers) {
         if (auto conn = sub.conn.lock())

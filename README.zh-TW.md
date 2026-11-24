@@ -19,7 +19,10 @@ AgentDesk 是 Windows 11 x64 的原生 AI coding agent 工作台。你可以在�
 - git worktree：輸入分支名稱就建立 checkout，開成新的 space。
 - 子 Agent：在 AgentDesk 的終端機裡執行 `agentctl run --task ...` 會開出子 Agent；`agentctl wait` 等它，`agentctl report` 把結果送回父 Agent。
 - 遠端機器：透過 `ssh <目標> agentctl bridge`，另一台 Windows 電腦的 space 與 Agent 顯示在同一個側欄。
-- 版面、主題與 mod：內建 workspace、terminals 兩種版面，也能用 JSON 自訂。主題有 AgentDesk 自己的四套，加上 herdr 的主題。mod 是 C++ DLL，可以加命令、面板與通知。
+- 版面：內建 7 種，也能用 JSON 自訂。AgentDesk（預設的 workspace）、Terminals（可改成直角、調整間距、用鍵盤調整面板大小）、Stage（一個 Agent 在大的主舞台上，其他的在下方排成即時縮圖；Ctrl+Shift+M）、Inbox（需要你的 Agent 排成卡片，可以直接回答、延後或打開；Ctrl+Shift+I）、Review（終端機旁邊就是這個 Agent 的 diff 與 commit 區）、Pair（兩個 Agent 各用自己的 worktree 並排，共用一個輸入列，比誰先做完；Ctrl+Shift+2）、AgentDesk Mac（選單列、浮動視窗與 Dock）。在設定 › Look 打開「Fun layouts」後，還有兩個好玩的版面：AgentDesk Classic（整個視窗用字元畫成單色終端機）與 Garden（每個 Agent 是一隻自己畫的小動物，動作代表它的狀態）。畫法都是 AgentDesk 自己的，共用同一套間距、字級、陰影與動畫規則，並遵守 Windows 的「減少動畫」設定。
+- 專注模式：Ctrl+Shift+. 只留目前的終端機，底下一條細列用小點顯示其他 Agent；有 Agent 需要你時視窗邊緣會亮，也照樣播放提示音。
+- 時間軸：Ctrl+Shift+H 看每個 Agent 什麼時候在工作、在等你、做完。agent-host 只記時間與狀態（最多 24 小時），關掉視窗也繼續記；`agentctl timeline` 可以在命令列看同樣的紀錄。
+- 主題與 mod：AgentDesk 自己的主題、herdr 的主題，以及為版面配好的主題。外觀可以依時間切換淺色與深色（固定時間，或依你輸入的緯度算日出日落；不連網、不用定位）。主題編輯器可以複製主題、即時預覽並檢查對比。mod 是 C++ DLL，可以加命令、面板與通知。
 - 更新：AgentDesk 與 agent-host 都能更新；agent-host 單獨更新時由新版接手，終端機裡的程式不會中斷。AgentDesk 沒有內建伺服器，要設定 `AGENTDESK_RELEASES_URL` 才會檢查。
 - 命令列 `agentctl`：`run`、`list`、`read`、`send`、`stop`、`wait` 等指令，`--json` 輸出穩定，退出碼固定。
 

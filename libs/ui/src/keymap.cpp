@@ -163,6 +163,12 @@ constexpr std::pair<const char*, const char*> kGlobal[] = {
     {"ctrl-0", "app.zoom_reset"},
     {"f2", "tab.rename"},
     {"shift-f2", "space.rename"},
+    {"ctrl-shift-.", "focus.toggle"},
+    {"ctrl-shift-m", "stage.toggle"},
+    {"ctrl-shift-i", "inbox.toggle"},
+    {"ctrl-shift-2", "pair.toggle"},  // free in every section (a terminal no longer sees Ctrl+@ there)
+    {"ctrl-shift-r", "review.toggle"},
+    {"ctrl-shift-h", "timeline.toggle"},
 };
 
 constexpr std::pair<const char*, const char*> kTerminal[] = {
@@ -182,6 +188,33 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
      "f"},
 };
 
+// Defaults that apply only while one layout shows ("layout:<name>" sections). None of them is bound
+// in "global" or "terminal": the Review layout's F8 / Shift+F8 move between changed files (elsewhere
+// F8 still reaches the terminal); Terminals' Alt keys (resize mode, split, close, gaps); Classic's F10 menu
+// bar; Stage's Alt+Left / Alt+Right put the previous / next agent on stage (it shows one pane, so
+// moving between panes has nothing to do there); Pair's Alt+P (into the shared prompt bar) and
+// Alt+Shift+S (swap sides).
+struct LayoutDefault {
+    const char* section;
+    const char* chord;
+    const char* command;
+};
+// clang-format off
+constexpr LayoutDefault kLayoutDefaults[] = {
+    {"layout:review", "f8", "review.next_file"},
+    {"layout:review", "shift-f8", "review.prev_file"},
+    {"layout:terminals", "alt-r", "terminals.resize_mode"},
+    {"layout:terminals", "alt-shift-enter", "pane.split:auto"},
+    {"layout:terminals", "alt-shift-q", "pane.close"},
+    {"layout:terminals", "alt-shift-g", "terminals.gaps"},
+    {"layout:classic", "f10", "classic.menu"},
+    {"layout:stage", "alt-left", "stage.prev"},
+    {"layout:stage", "alt-right", "stage.next"},
+    {"layout:pair", "alt-p", "pair.prompt"},
+    {"layout:pair", "alt-shift-s", "pair.swap"},
+};
+// clang-format on
+
 // Calls f(section, chord text, command) for every default binding, in install order.
 template <class F>
 void for_each_default(F&& f) {
@@ -193,6 +226,8 @@ void for_each_default(F&& f) {
     }
     for (const auto& [chord, cmd] : kTerminal)
         f("terminal", std::string(chord), std::string(cmd));
+    for (const auto& d : kLayoutDefaults)
+        f(d.section, std::string(d.chord), std::string(d.command));
 }
 
 }  // namespace

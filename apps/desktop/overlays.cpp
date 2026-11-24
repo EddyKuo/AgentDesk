@@ -409,7 +409,8 @@ bool palette_entry_row(App::State& s, ImDrawList* d, const PaletteEntry& e, int 
     ImGui::PopID();
     const bool sel = idx == s.palette_sel;
     if (hov || sel)
-        d->AddRectFilled(a, ImVec2(a.x + rw, a.y + px(32)), hov ? g_pal->hover : g_pal->selected, px(7));
+        d->AddRectFilled(a, ImVec2(a.x + rw, a.y + px(32)),
+                         hov ? tok::hover(popover_color()) : tok::selected(popover_color()), px(7));
     if (sel && palette_nav_key_pressed())
         ImGui::SetScrollHereY();
     const float cy = a.y + px(16);
@@ -766,7 +767,7 @@ PickerAction picker_list(App::State& s, const std::vector<PickerRow>& rows, floa
             s.picker_sel = k;  // the mouse selects only when it moves, so keys keep working
         const bool sel = k == s.picker_sel;
         if (sel) {
-            d->AddRectFilled(a, ImVec2(a.x + fw - px(4), a.y + rh), g_pal->selected, px(7));
+            d->AddRectFilled(a, ImVec2(a.x + fw - px(4), a.y + rh), tok::selected(popover_color()), px(7));
             if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) || ImGui::IsKeyPressed(ImGuiKey_UpArrow))
                 ImGui::SetScrollHereY();
         }

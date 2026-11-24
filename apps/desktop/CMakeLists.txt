@@ -2,29 +2,48 @@ agentdesk_executable(agent-ui WIN32
     main.cpp
     app.cpp
     chrome.cpp
+    classic_layout.cpp
     code_preview.cpp
     commands.cpp
     files_changes.cpp
     frame.cpp
     git_cache.cpp
     layouts.cpp
+    mac_layout.cpp
     machine_add.cpp
     notes.cpp
     notices.cpp
     overlays.cpp
     panes.cpp
     programs.cpp
+    review_layout.cpp
+    pair_layout.cpp
     sessions.cpp
     settings_dialog.cpp
     settings_pages.cpp
     settings_store.cpp
     side_panels.cpp
     sidebar.cpp
+    state_card.cpp
+    style_layouts.cpp
     tab_bar.cpp
     terminals_layout.cpp
+    terminals_options.cpp
+    timeline.cpp
     themes.cpp
+    appearance.cpp
+    theme_commands.cpp
+    theme_suggest.cpp
+    ambient.cpp
+    theme_editor.cpp
     welcome.cpp
     worktrees.cpp
+    focus_mode.cpp
+    stage_layout.cpp
+    inbox_layout.cpp
+    garden_layout.cpp
+    layout_tips.cpp
+    ui_tokens.cpp
     agent-ui.manifest)
 target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc d3d11 dxgi dwmapi shcore dbghelp winmm imm32 shell32 nlohmann_json::nlohmann_json)
 # The UI starts agent-host.exe from its own directory (design doc 2.2).
@@ -38,7 +57,9 @@ add_custom_command(TARGET agent-ui POST_BUILD
     # The source notes stay in the repository; the app ships the files and their licenses.
     COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:agent-ui>/fonts/README.agentdesk.md"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/programs" "$<TARGET_FILE_DIR:agent-ui>/programs"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/themes" "$<TARGET_FILE_DIR:agent-ui>/themes")
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/themes" "$<TARGET_FILE_DIR:agent-ui>/themes"
+    # AgentDesk's own theme files (the layouts' suggested themes), MIT like the rest.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/libs/ui/themes" "$<TARGET_FILE_DIR:agent-ui>/themes")
 # Last: a running agent-host holds its exe and conpty.dll open, and a failed copy stops the steps
 # after it.
 add_custom_command(TARGET agent-ui POST_BUILD

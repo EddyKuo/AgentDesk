@@ -6,7 +6,6 @@
 namespace agentdesk::desktop {
 namespace detail {
 
-namespace {
 // ------------------------------------------------------------------ the layout, drawn
 // Every shown node of the layout tree gets its rect (lay::place). A node's background and
 // border are painted under its children, and each block is drawn by what its content names:
@@ -43,6 +42,7 @@ std::optional<ImU32> layout_color(const std::string& c) {
     return std::nullopt;
 }
 
+namespace {
 // A stack's `"header": {"content": "tabs"}`: one tab per child, by its title (else its number);
 // a click selects it (layout.select).
 void draw_stack_tabs(App::State& s, const lay::Node& stack, const lay::Rect& r) {
@@ -78,12 +78,14 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
     const bool rail = r.w < px(160);  // workspace-chrome: the narrow sidebar
     switch (n.content.type) {
         case lay::Content::Type::kTab: {
+            if (l.style == "mac" && s.ws.active_tab() == nullptr)
+                return;  // the desktop says how to start instead (draw_mac_backdrop)
             // The details pane sits beside the panes when it is on (not in styled layouts).
             const bool details = l.style.empty() && l.details.value_or(s.settings.details);
             const float gap = px(8);
             const float details_w = details ? std::min(px(320), (r.w + 2 * gap) * 0.3f) : 0.0f;
             const ImVec2 panes(size.x - (details_w > 0 ? details_w + gap : 0.0f), size.y);
-            draw_panes(s, pos, panes, connected);
+            draw_panes(s, pos, panes, connected, n.content.pane ? &*n.content.pane : nullptr);
             if (details_w > 0)
                 draw_details(s, ImVec2(pos.x + panes.x + gap, pos.y), ImVec2(details_w, size.y), connected);
             return;
@@ -114,6 +116,28 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
         draw_status_bar(s, pos, size.x, size.y);
     } else if (m == "files" || m == "changes") {
         draw_side_panel(s, pos, size);
+    } else if (draw_style_block(s, n, pos, size)) {
+        // a Classic block
+    } else if (m == "mac-menubar") {
+        draw_mac_menubar(s, pos, size.x, size.y);
+    } else if (m == "mac-window-title") {
+        draw_mac_window_title(s, pos, size.x, size.y);
+    } else if (m == "mac-dock") {
+        draw_mac_dock(s, pos, size.x, size.y);
+    } else if (m == "focus-strip") {
+        draw_focus_strip(s, pos, size.x, size.y);
+    } else if (draw_stage_block(s, m, pos, size)) {
+        // stage-bar, stage-strip, stage-empty (stage_layout.cpp)
+    } else if (m == "inbox-bar") {
+        draw_inbox_bar(s, pos, size.x, size.y);
+    } else if (m == "inbox-queue") {
+        draw_inbox_queue(s, pos, size);
+    } else if (draw_review_block(s, m, pos, size)) {
+        // review-head, review-changes, review-commit (review_layout.cpp)
+    } else if (draw_pair_block(s, m, pos, size)) {
+        // pair-bar, pair-stage, pair-prompt (pair_layout.cpp)
+    } else if (draw_timeline_block(s, m, pos, size)) {
+        // timeline (timeline.cpp)
     } else if (s.mods != nullptr) {
         // A C++ DLL mod: its panels, in the block.
         ImGui::SetCursorScreenPos(pos);
@@ -126,11 +150,11 @@ void draw_layout_block(App::State& s, const LayoutSpec& l, const lay::Node& n, c
 }
 
 // Backgrounds and borders, parents first: a colour, or a two-colour gradient drawn top to bottom
-// (or left to right for angles near 90 / 270).
-void draw_layout_backgrounds(App::State& s, LayoutSpec& l) {
+// (or left to right for angles near 90 / 270). `tree` is the one placed this frame.
+void draw_layout_backgrounds(App::State& s, const LayoutSpec& l, const lay::Node& tree) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     for (const auto& id : s.placed.order) {
-        const lay::Node* n = l.tree.find(id);
+        const lay::Node* n = tree.find(id);
         const lay::Placed& p = s.placed.nodes.at(id);
         const ImVec2 a(p.outer.x, p.outer.y);
         const ImVec2 b(p.outer.right(), p.outer.bottom());
@@ -196,27 +220,39 @@ void draw_layout_separators(App::State& s, LayoutSpec& l) {
 }
 
 void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
-    LayoutSpec& l = s.layout();
+    // Focus mode puts its own tree in place of the shown layout's (which keeps its theme).
+    LayoutSpec& l = s.settings.focus_on ? focus_layout(s) : s.layout();
     sync_panel(s, l);
-    s.placed = lay::place(l.tree, lay::Rect{origin.x, origin.y, full.x, full.y}, g_scale, {}, true);
-    draw_layout_backgrounds(s, l);
+    // The Mac layout places an adjusted copy while its window fills the desktop or has no tab;
+    // clicks still go to the layout's own tree (the ids are the same).
+    // The other styles may adjust the tree the same way (Terminals' gaps and corners).
+    const std::optional<lay::Node> mac =
+        l.style == "mac" ? mac_layout_tree(s, l.tree) : style_layout_tree(s, l.tree);
+    const lay::Node& tree = mac ? *mac : l.tree;
+    s.placed = lay::place(tree, lay::Rect{origin.x, origin.y, full.x, full.y}, g_scale, {}, true);
+    if (l.style == "mac")
+        draw_mac_backdrop(s, tree);
+    else
+        draw_style_backdrop(s, tree);
+    draw_layout_backgrounds(s, l, tree);
     for (const auto& id : s.placed.order) {  // the blocks, in tree order
-        const lay::Node* n = l.tree.find(id);
+        const lay::Node* n = tree.find(id);
         if (n->is_block())
             draw_layout_block(s, l, *n, s.placed.nodes.at(id), connected);
     }
     for (const auto& [id, r] : s.placed.headers) {
-        const lay::Node* n = l.tree.find(id);
+        const lay::Node* n = tree.find(id);
         if (n != nullptr && n->header && n->header->content.is_string())
             draw_stack_tabs(s, *n, r);
     }
     draw_layout_separators(s, l);
+    draw_style_overlay(s);
 }
 
 // ------------------------------------------------------------------ --input automation
 // The script is ";"-separated steps run one per turn after the --run commands, once sessions
 // exist: wait:MS, move:X,Y, click / rclick / mclick / dblclick:X,Y, press:X,Y and release:X,Y
-// (a drag, with move steps between), key:NAME, type:TEXT, and shot:NAME (asks the screenshot
+// (a drag, with move steps between), key:NAME, type:TEXT, wheel:N, and shot:NAME (asks the screenshot
 // tool for a picture and waits until it has taken it, up to 10 s).
 
 ImGuiKey input_key(const std::string& n) {
@@ -225,7 +261,8 @@ ImGuiKey input_key(const std::string& n) {
         {"up", ImGuiKey_UpArrow},       {"down", ImGuiKey_DownArrow}, {"left", ImGuiKey_LeftArrow},
         {"right", ImGuiKey_RightArrow}, {"home", ImGuiKey_Home},      {"end", ImGuiKey_End},
         {"pgup", ImGuiKey_PageUp},      {"pgdn", ImGuiKey_PageDown},  {"back", ImGuiKey_Backspace},
-        {"del", ImGuiKey_Delete},       {"space", ImGuiKey_Space},    {"f2", ImGuiKey_F2}};
+        {"del", ImGuiKey_Delete},       {"space", ImGuiKey_Space},    {"period", ImGuiKey_Period},
+        {".", ImGuiKey_Period}};
     for (const auto& [name, key] : kKeys)
         if (n == name)
             return key;
@@ -233,6 +270,11 @@ ImGuiKey input_key(const std::string& n) {
         return static_cast<ImGuiKey>(ImGuiKey_A + (n[0] - 'a'));
     if (n.size() == 1 && n[0] >= '0' && n[0] <= '9')
         return static_cast<ImGuiKey>(ImGuiKey_0 + (n[0] - '0'));
+    if (n.size() >= 2 && n.size() <= 3 && n[0] == 'f') {  // f1..f12
+        const int f = std::atoi(n.c_str() + 1);
+        if (f >= 1 && f <= 12)
+            return static_cast<ImGuiKey>(ImGuiKey_F1 + (f - 1));
+    }
     return ImGuiKey_None;
 }
 
@@ -309,12 +351,29 @@ void run_input_step(App::State& s, const std::string& step, Clock::time_point no
         io.AddMousePosEvent(p.x, p.y);
         io.AddMouseButtonEvent(0, op == "press");
     } else if (op == "key") {
-        if (const ImGuiKey k = input_key(arg); k != ImGuiKey_None) {
+        // "ctrl+shift+m", "ctrl+shift+.", "shift+f8": modifiers held around the key.
+        std::string name = arg;
+        std::vector<ImGuiKey> mods;
+        for (const auto& [prefix, mod] : {std::pair<const char*, ImGuiKey>{"ctrl+", ImGuiMod_Ctrl},
+                                          {"shift+", ImGuiMod_Shift},
+                                          {"alt+", ImGuiMod_Alt}}) {
+            if (const auto at = name.find(prefix); at != std::string::npos) {
+                name.erase(at, std::strlen(prefix));
+                mods.push_back(mod);
+            }
+        }
+        if (const ImGuiKey k = input_key(name); k != ImGuiKey_None) {
+            for (const ImGuiKey m : mods)
+                io.AddKeyEvent(m, true);
             io.AddKeyEvent(k, true);
             io.AddKeyEvent(k, false);
+            for (const ImGuiKey m : mods)
+                io.AddKeyEvent(m, false);
         }
     } else if (op == "type") {
         io.AddInputCharactersUTF8(arg.c_str());
+    } else if (op == "wheel") {  // wheel:N, notches (negative scrolls down) where the mouse is
+        io.AddMouseWheelEvent(0, static_cast<float>(std::atof(arg.c_str())));
     } else if (op == "shot" && !s.config.shot_signal.empty()) {
         std::ofstream(s.config.shot_signal, std::ios::binary) << arg;
         s.input_shot_wait = true;
@@ -388,20 +447,24 @@ void run_global_shortcuts(App::State& s) {
         chords.insert(chord);
     for (const auto& [chord, cmd] : s.keymap.layout_map())
         chords.insert(chord);
+    // Run at the start of the next frame: a command that brings up a terminal (stage.toggle back
+    // to a layout with a focused pane) must not let that terminal see the same key press again.
     for (const ImGuiKeyChord chord : chords) {
         if (ImGui::IsKeyChordPressed(chord))
             if (const auto cmd = s.keymap.global(chord))
-                run_command(s, *cmd);
+                s.chord_commands.push_back(*cmd);
     }
 }
 
 // Dialogs and overlays, in the order they stack (later ones on top).
 void draw_dialogs(App::State& s) {
     draw_peek(s);
+    draw_timeline_overlay(s);
     draw_launcher(s);
     draw_rename(s);
     draw_worktree(s);
     draw_settings(s);
+    draw_theme_editor(s);
     draw_exit(s);
     draw_welcome(s);
     draw_machine_add(s);
@@ -409,6 +472,7 @@ void draw_dialogs(App::State& s) {
     draw_notes(s);
     draw_worktree_open(s);
     draw_close_notice(s);
+    draw_layout_tips(s);
     draw_palette(s);
     draw_picker(s);
     draw_help(s);
@@ -499,6 +563,7 @@ void App::tick() {
         create_session(s, s.config.start_profile, s.launch_cwd, "", p);
     }
     update_attention(s);
+    style_tick(s);
     // What is open, for usage data: every 10 s.
     if (Clock::now() - s.observed_at >= std::chrono::seconds(10)) {
         s.observed_at = Clock::now();
@@ -510,6 +575,8 @@ void App::tick() {
 
 void App::frame() {
     State& s = *s_;
+    // Set again this frame by whoever draws screen tails (Stage, Inbox) and still waits for one.
+    s.tails_pending = false;
     for (const auto& cmd : std::exchange(s.chord_commands, {}))
         run_command(s, cmd);
     g_scale = s.dpi * ui_scale(s.settings);
@@ -520,13 +587,7 @@ void App::frame() {
         g_settings_problem.clear();
     }
     s.keymap.set_layout(s.settings.layout);  // keys.json "layout:<name>" section
-    const auto theme_pair = layout_theme_pair(s.settings);
-    if (const Palette* want =
-            effective_palette(s.settings.appearance, theme_pair.first, theme_pair.second, s.layout().theme);
-        want != g_pal) {
-        g_pal = want;
-        apply_style(s.dpi, ui_scale(s.settings));
-    }
+    update_palette(s);  // theme, appearance schedule, editor preview, tint (theme_commands.cpp)
     const bool connected = s.host->connected();
     for (const auto& c : std::exchange(s.pending_mod_commands, {}))
         run_command(s, c, false);
@@ -550,12 +611,21 @@ void App::frame() {
     ImGui::GetWindowDrawList()->AddRectFilled(origin, ImVec2(origin.x + full.x, origin.y + full.y),
                                               g_pal->bg);
     // Commands raised while the layout draws wait for the end of it (State::deferred_commands).
+    traffic_lights_input(s, origin);
     s.defer_commands = true;
+    s.drawn_sessions.clear();
     draw_layout(s, origin, full, connected);
+    s.visible_sessions = s.drawn_sessions;  // what update_attention counts as seen
     run_deferred_commands(s);
+    traffic_lights_paint(s);
+    draw_focus_glow(s);
     ImGui::End();
     draw_dialogs(s);
+    // The dialog on top is raised like the other floating surfaces (drawn outside its edges only).
+    if (ui::adapter::WindowBox box; ui::adapter::topmost_modal(box))
+        tok::window_shadow(box.draw_list, box.min, box.max, box.rounding, 2);
     update_window_title(s);
+    tok::end_frame();
     persist(s);
     if (!s.window_opened) {  // the window is up: counted once for usage data
         s.window_opened = true;

@@ -1,0 +1,52 @@
+{
+  "id": "root",
+  "type": "column",
+  "titlebar": "none",
+  "traffic_lights": [12, 15],
+  "background": "canvas",
+  "children": [
+    {
+      "id": "bar",
+      "type": "block",
+      "size": { "px": 42 },
+      "window_drag": true,
+      "content": { "mod": "stage-bar" }
+    },
+    {
+      "id": "stage-body",
+      "type": "stack",
+      "active": "stage",
+      "children": [
+        {
+          "id": "stage",
+          "type": "block",
+          "padding": [8, 12],
+          "content": {
+            "tab": "active",
+            "pane": {
+              "gap": 8,
+              "radius": 10,
+              "background": "background",
+              "lone": true,
+              "border": { "width": 1, "color": "border" },
+              "focus": { "width": 1, "color": "accent" },
+              "header": { "content": { "mod": "pane" }, "height": 30 }
+            }
+          }
+        },
+        {
+          "id": "empty",
+          "type": "block",
+          "padding": 12,
+          "content": { "mod": "stage-empty" }
+        }
+      ]
+    },
+    {
+      "id": "strip",
+      "type": "block",
+      "size": { "px": 180 },
+      "content": { "mod": "stage-strip" }
+    }
+  ]
+}

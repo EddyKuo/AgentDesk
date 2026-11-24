@@ -196,8 +196,14 @@ bool begin_menu(const char* id) {
     ImGui::SetNextWindowSizeConstraints(ImVec2(px(200), 0), ImVec2(FLT_MAX, FLT_MAX));
     const bool open = ImGui::BeginPopupContextItem(id);
     ImGui::PopStyleVar(2);
-    if (open)
+    if (open) {
         menu_keys();
+        // Raised like the other floating surfaces (the size is last frame's; it settles at once).
+        const ImVec2 wp = ImGui::GetWindowPos();
+        const ImVec2 ws = ImGui::GetWindowSize();
+        tok::window_shadow(ImGui::GetWindowDrawList(), wp, ImVec2(wp.x + ws.x, wp.y + ws.y),
+                           ImGui::GetStyle().PopupRounding, 1);
+    }
     return open;
 }
 
@@ -280,6 +286,22 @@ void menu_separator() {
 // dot, an idle ring. Draws with its left edge at `x`, vertically centred on `cy`, and returns the
 // width used; with `measure` it only returns the width.
 float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a, bool compact, bool measure) {
+    // A mark that has just changed fades in (tokens: normal duration), keyed by the row's ID scope
+    // and the state, so a new state eases in instead of jumping.
+    static bool fading = false;
+    if (!measure && !fading && a != Attention::kNone) {
+        static constexpr const char* kIds[] = {"##mk-none", "##mk-idle", "##mk-work", "##mk-done",
+                                               "##mk-block"};
+        const auto i = static_cast<std::size_t>(std::clamp(static_cast<int>(a), 0, 4));
+        const float k = tok::appear(ImGui::GetID(kIds[i]), ui::tokens::kNormalMs);
+        if (k < 1.0f) {
+            float w = 0;
+            fading = true;
+            with_alpha(dl, k, [&] { w = status_mark(s, dl, x, cy, a, compact, false); });
+            fading = false;
+            return w;
+        }
+    }
     switch (a) {
         case Attention::kWorking: {
             const float r = px(5);
@@ -343,6 +365,160 @@ void window_drag_area(App::State& s, ImVec2 a, ImVec2 b) {
         ::SendMessageW(s.config.hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
         ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);  // the move loop ate the release
     }
+}
+
+// ------------------------------------------------------------------ round window buttons
+// Close, minimize and zoom as three buttons, left to right, at the layout's traffic_lights point:
+// 12 px buttons 8 px apart in colours worked out from the theme (libs/ui window_buttons). The
+// glyphs show only while the pointer is over the group, and an inactive window mutes them. Most
+// layouts draw them round; Terminals with square corners as small flat squares.
+namespace {
+constexpr float kLightSize = 12.0f;
+constexpr float kLightGap = 8.0f;
+constexpr float kLightsWidth = kLightSize * 3 + kLightGap * 2;  // 52
+constexpr const char* kLightCommands[3] = {"window.close", "window.minimize", "window.maximize"};
+
+ImU32 col_of(std::uint32_t rgb, int a = 255) {
+    return IM_COL32((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, a);
+}
+
+// The layout's [x, y] for the first button's top-left corner, in design pixels; [12, 16] when the
+// layout does not say.
+ImVec2 traffic_lights_point(const App::State& s) {
+    const Json& t = s.layout().tree.traffic_lights;
+    if (t.is_array() && t.size() == 2 && t[0].is_number() && t[1].is_number())
+        return {t[0].get<float>(), t[1].get<float>()};
+    return {12.0f, 16.0f};
+}
+
+// The look of the shown layout's window buttons (Focus mode keeps them round).
+WindowButtonLook light_look(const App::State& s) {
+    if (s.settings.focus_on)
+        return WindowButtonLook::kRound;
+    if (s.layout().style == "terminals" && s.settings.styles.terminals_square)
+        return WindowButtonLook::kSquare;
+    return WindowButtonLook::kRound;
+}
+}  // namespace
+
+ui::window_buttons::Colors window_button_colors(ImU32 bar) {
+    ui::window_buttons::Input in;
+    in.blocked = rgb_of(g_pal->needs_you);
+    in.working = rgb_of(g_pal->working);
+    in.done = rgb_of(g_pal->done);
+    in.accent = rgb_of(g_pal->focus);
+    in.bar = rgb_of(bar);
+    in.border = rgb_of(g_pal->border);
+    in.text = rgb_of(g_pal->text);
+    // Worked out once per theme and bar (the ambient tint moves the palette, so key on the colours).
+    static std::map<std::array<std::uint32_t, 7>, ui::window_buttons::Colors> cache;
+    const std::array<std::uint32_t, 7> k = {in.blocked, in.working, in.done, in.accent,
+                                            in.bar,     in.border,  in.text};
+    if (const auto it = cache.find(k); it != cache.end())
+        return it->second;
+    if (cache.size() > 64)
+        cache.clear();
+    return cache.emplace(k, ui::window_buttons::derive(in)).first->second;
+}
+
+ImU32 window_button_color(int kind, ImU32 bar) {
+    return col_of(window_button_colors(bar).fill[static_cast<std::size_t>(std::clamp(kind, 0, 2))]);
+}
+
+ImU32 window_button_glyph(int kind, ImU32 bar) {
+    return col_of(window_button_colors(bar).glyph[static_cast<std::size_t>(std::clamp(kind, 0, 2))]);
+}
+
+bool mac_window_buttons(const App::State& s) {
+    return s.config.hwnd != nullptr && s.settings.window_buttons != "windows" && !style_draws_window_buttons(s);
+}
+
+void traffic_lights_input(App::State& s, ImVec2 origin) {
+    s.lights = {};
+    if (!mac_window_buttons(s))
+        return;
+    const ImVec2 p = traffic_lights_point(s);
+    s.lights.shown = true;
+    s.lights.at = ImVec2(origin.x + px(p.x), origin.y + px(p.y));
+    if (s.settings.focus_on)  // Focus has no top bar: they sit at the left of its 22 px strip
+        s.lights.at = ImVec2(origin.x + px(10), origin.y + ImGui::GetMainViewport()->WorkSize.y - px(22) + px(5));
+    // Each button's hit area runs halfway into the gaps, so the group has no dead spots.
+    const float step = px(kLightSize + kLightGap);
+    const float pad = px(kLightGap * 0.5f);
+    for (int i = 0; i < 3; ++i) {
+        ImGui::PushID(i);
+        ImGui::SetCursorScreenPos(ImVec2(s.lights.at.x + step * static_cast<float>(i) - pad, s.lights.at.y - pad));
+        const bool hit = ImGui::InvisibleButton("##light", ImVec2(px(kLightSize) + pad * 2, px(kLightSize) + pad * 2));
+        if (ImGui::IsItemHovered())
+            s.lights.group_hovered = true;
+        if (ImGui::IsItemActive())
+            s.lights.held = i;
+        if (hit)
+            run_command(s, kLightCommands[i]);
+        ImGui::PopID();
+    }
+}
+
+// One button: `kind` 0 close (a cross), 1 minimize (a bar), 2 zoom (a plus), in the theme's
+// colours for buttons on `bar` (0: the chrome). Unlit ones take the muted colour; the glyph shows
+// only with `glyph`; a held one darkens.
+void paint_round_button(ImDrawList* dl, ImVec2 c, float r, int kind, bool lit, bool glyph, bool held,
+                        ImU32 bar, WindowButtonLook look) {
+    const int k = std::clamp(kind, 0, 2);
+    const auto colors = window_button_colors(bar != 0 ? bar : g_pal->sidebar);
+    const auto ki = static_cast<std::size_t>(k);
+    ImU32 fill = lit ? col_of(colors.fill[ki]) : col_of(colors.muted);
+    if (held)
+        fill = mix(fill, IM_COL32(0, 0, 0, 255), 0.18f);
+    const ImU32 ink = col_of(colors.glyph[ki], 225);
+    // Glyph half-length: smaller inside a square, so it clears the edge.
+    const float g = r * (look == WindowButtonLook::kRound ? 0.5f : 0.4f);
+    const float thick = std::max(1.0f, r * 0.22f);
+    switch (look) {
+        case WindowButtonLook::kRound:
+            dl->AddCircleFilled(c, r, fill, 24);
+            dl->AddCircle(c, r - 0.5f, mix(fill, IM_COL32(0, 0, 0, 255), 0.22f), 24, 1.0f);
+            break;
+        case WindowButtonLook::kSquare: {
+            const float h = std::round(r * 0.84f);
+            dl->AddRectFilled(ImVec2(c.x - h, c.y - h), ImVec2(c.x + h, c.y + h), fill,
+                              std::max(1.0f, r * 0.18f));
+            break;
+        }
+    }
+    if (!glyph)
+        return;
+    if (k == 0) {  // a cross
+        dl->AddLine(ImVec2(c.x - g, c.y - g), ImVec2(c.x + g, c.y + g), ink, thick);
+        dl->AddLine(ImVec2(c.x - g, c.y + g), ImVec2(c.x + g, c.y - g), ink, thick);
+    } else {  // a bar, and a plus for zoom
+        dl->AddLine(ImVec2(c.x - g - r * 0.08f, c.y), ImVec2(c.x + g + r * 0.08f, c.y), ink, thick);
+        if (k == 2)
+            dl->AddLine(ImVec2(c.x, c.y - g - r * 0.08f), ImVec2(c.x, c.y + g + r * 0.08f), ink, thick);
+    }
+}
+
+void traffic_lights_paint(App::State& s) {
+    if (!s.lights.shown)
+        return;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float r = px(kLightSize * 0.5f);
+    const WindowButtonLook look = light_look(s);
+    for (int i = 0; i < 3; ++i) {
+        const ImVec2 c(s.lights.at.x + px(kLightSize + kLightGap) * static_cast<float>(i) + r, s.lights.at.y + r);
+        paint_round_button(dl, c, r, i, s.window_focused || s.lights.group_hovered, s.lights.group_hovered,
+                           s.lights.held == i, g_pal->sidebar, look);
+    }
+}
+
+float clear_of_traffic_lights(const App::State& s, float x, float top, float bottom, float margin) {
+    if (!s.lights.shown)
+        return x;
+    const float lt = s.lights.at.y;
+    const float lb = lt + px(kLightSize);
+    if (bottom <= lt || top >= lb)
+        return x;
+    return std::max(x, s.lights.at.x + px(kLightsWidth) + margin);
 }
 
 GitTail git_tail(const GitInfo& g, const std::string& space_name, bool worktree_row) {

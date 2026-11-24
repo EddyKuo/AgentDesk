@@ -3,30 +3,15 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "overlay_kit.hpp"
 
+#include "agentdesk/ui/command_names.hpp"
+
 namespace agentdesk::desktop {
 namespace detail {
 
 namespace {
 // Every command name AgentDesk runs itself; telemetry counts only these.
 bool builtin_command(std::string_view name) {
-    // clang-format off
-    static const std::set<std::string, std::less<>> kNames = {
-        "agent.focus", "agent.keep", "agent.new", "agent.next", "agent.peek", "agent.prev", "app.exit_all",
-        "app.feedback", "app.help", "app.keys", "app.palette", "app.picker", "app.reset", "app.settings",
-        "app.welcome", "app.whats_new", "app.zoom_in", "app.zoom_out", "app.zoom_reset", "details.toggle",
-        "launch", "layout", "layout.clone", "layout.reset", "layout.switch", "layout.toggle", "machine.add",
-        "mod", "mod.clone", "mod.open", "mods.folder", "mods.reload", "pane.close", "pane.go", "pane.park",
-        "pane.rename", "pane.resize", "pane.split", "pane.swap", "pane.zoom", "panel", "session.focus",
-        "session.force_stop", "session.interrupt", "session.restart", "session.stop", "sidebar.rail",
-        "sidebar.toggle", "space.close", "space.move", "space.new", "space.next", "space.prev", "space.rename",
-        "space.select", "tab.close", "tab.move", "tab.new", "tab.next", "tab.prev", "tab.rename", "tab.select",
-        "tab.settle", "tab.unsettle", "terminal.copy", "terminal.kill", "terminal.open", "terminal.park",
-        "terminal.paste", "terminal.paste_image", "terminal.peek", "terminal.pin", "terminal.right_click",
-        "terminal.scroll", "terminal.search", "terminal.select_all", "theme", "window.close", "window.maximize",
-        "window.minimize", "worktree.new", "worktree.open", "worktree.remove", "app.quit", "overlay.close",
-        "app.check_updates", "app.update_core", "app.update"};
-    // clang-format on
-    return kNames.contains(name);
+    return ui::is_builtin_command(name);
 }
 
 // A "<mod>.<command>" name whose mod folder exists in <data>\mods.
@@ -838,7 +823,7 @@ void reset_to_default_screen(App::State& s) {
     s.toast("Back to the default screen", "keys.json was set aside as keys.json.aside.", "", g_pal->info);
 }
 
-// Collapses the sidebar to a 44 px rail, remembering its width, or widens it back (at least
+// Collapses the sidebar to a rail (44 px, 76 px with the round window buttons), remembering its width, or widens it back (at least
 // 160 px). A hidden sidebar is shown first.
 std::string toggle_sidebar_rail(App::State& s) {
     LayoutSpec& l = s.layout();
@@ -851,7 +836,7 @@ std::string toggle_sidebar_rail(App::State& s) {
     } else if (width >= 160) {
         s.settings.sidebar_restore = width;
         save_settings(s.settings);
-        side->size = lay::Span::pixels(44);
+        side->size = lay::Span::pixels(mac_window_buttons(s) ? 76.0f : 44.0f);  // the rail holds the round buttons
     } else {
         side->size = lay::Span::pixels(std::max(160.0f, s.settings.sidebar_restore));
     }
@@ -879,13 +864,25 @@ Outcome exec_app_command(App::State& s, const Command& c) {
         ::ShowWindow(s.config.hwnd, ::IsZoomed(s.config.hwnd) ? SW_RESTORE : SW_MAXIMIZE);
     } else if (name == "window.close") {
         ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
+    } else if (name == "window.fill") {
+        // The Mac layout's window fills the desktop (no margins), or floats again.
+        s.mac.fill = !s.mac.fill;
     } else if (name == "machine.add") {
         s.show_machine_add = true;
     } else if (name == "app.welcome") {
         s.show_welcome = true;
     } else if (name == "sidebar.rail") {
         return toggle_sidebar_rail(s);
+    } else if (name == "focus.toggle" || name == "focus.on" || name == "focus.off") {
+        set_focus(s, name == "focus.on" || (name == "focus.toggle" && !s.settings.focus_on));
     } else if (name == "sidebar.toggle") {
+        // In Focus the sidebar is not drawn: asking for it leaves Focus, and shows it if hidden.
+        if (s.settings.focus_on) {
+            set_focus(s, false);
+            const lay::Node* side = s.layout().tree.find("sidebar");
+            if (side == nullptr || !side->hidden)
+                return kDone;
+        }
         // layout.toggle on the "sidebar" node. A layout without one (terminals) switches to the first
         // layout that has a sidebar, shown, so "show the sidebar" works from every layout.
         if (s.layout().tree.find("sidebar") != nullptr)
@@ -1089,19 +1086,23 @@ void clone_mod(App::State& s, const std::string& arg) {
 // Switching, cloning and resetting layouts; mods.
 Outcome exec_layout_mod_command(App::State& s, const Command& c) {
     if (c.name == "layout.switch" || c.name == "layout") {
-        // `arg` names the layout; without one, the next in the list.
+        // `arg` names the layout; without one, the next listed one (fun layouts only when Settings >
+        // Look > Fun layouts is on).
         std::string next = c.arg;
         if (next.empty()) {
-            for (std::size_t i = 0; i < s.layouts.size(); ++i)
-                if (s.layouts[i].name == s.settings.layout)
-                    next = s.layouts[(i + 1) % s.layouts.size()].name;
+            std::vector<std::string> names;
+            for (const auto& l : s.layouts)
+                names.push_back(l.name);
+            next = ui::styles::next_listed(names, s.settings.layout, s.settings.styles.fun_layouts);
         }
         if (next.empty() && !s.layouts.empty())
             next = s.layouts.front().name;
         s.settings.layout = next;
         save_settings(s.settings);
-        s.toast("Layout: " + next, "", "", g_pal->info, 2);
+        s.toast("Layout: " + layout_display_name(next), "", "", g_pal->info, 2);
         s.focus_view(s.ws.focused_session());
+        if (s.layout().style == "inbox")
+            inbox_entered(s);  // the queue, not the terminal, takes the keys
     } else if (c.name == "layout.clone") {
         return clone_layout(s, c.arg);
     } else if (c.name == "layout.reset") {
@@ -1145,10 +1146,26 @@ std::string exec_command(App::State& s, const std::string& cmd) {
         return exec_command(s, "panel");
     if (auto r = layout_command(s, c.name, c.arg))
         return *r;
+    if (auto r = stage_command(s, c.name, c.arg))  // stage_layout.cpp
+        return *r;
+    if (auto r = inbox_command(s, c.name, c.arg))  // inbox_layout.cpp
+        return *r;
+    if (auto r = exec_review_command(s, c.name, c.arg))  // review_layout.cpp
+        return *r;
+    if (auto r = exec_pair_command(s, c.name, c.arg))  // pair_layout.cpp
+        return *r;
+    if (auto r = exec_timeline_command(s, c.name, c.arg))  // timeline.cpp
+        return *r;
+    if (auto r = exec_tips_command(s, c.name, c.arg))  // layout.tips (layout_tips.cpp)
+        return *r;
     if (const auto al = kCommandAliases.find(c.name); al != kCommandAliases.end())
         return exec_command(s, c.arg.empty() ? al->second : al->second + ":" + c.arg);
     if (c.name == "mod.open" && c.arg == "picker")
         return exec_command(s, "app.picker");
+    if (auto r = exec_theme_command(s, c.name, c.arg))  // appearance:*, theme.* (theme_commands.cpp)
+        return *r;
+    if (auto r = exec_style_command(s, c.name, c.arg))  // Terminals' tools, Classic (style_layouts.cpp)
+        return *r;
     for (const auto group :
          {exec_launch_command, exec_pane_command, exec_tab_space_command, exec_agent_command,
           exec_worktree_command, exec_app_command, exec_layout_mod_command})

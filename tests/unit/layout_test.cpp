@@ -84,6 +84,20 @@ TEST(Layout, NodesCarryLooksBackgroundsPaddingAndShadows) {
     EXPECT_EQ(round_trip(n), n);
 }
 
+TEST(Layout, SuggestedThemesAreReadAndWrittenBack) {
+    const Node n = node(R"({ "id": "root", "type": "block", "content": { "mod": "x" },
+      "suggested_themes": { "dark": "mac-dusk", "light": "mac-dawn" } })");
+    EXPECT_EQ(n.look["suggested_themes"]["dark"], "mac-dusk");
+    EXPECT_EQ(n.look["suggested_themes"]["light"], "mac-dawn");
+    EXPECT_FALSE(n.look.contains("theme"));  // a suggestion, not a forced theme
+    EXPECT_EQ(round_trip(n), n);
+    std::string error;
+    EXPECT_FALSE(parse_text(R"({ "id": "root", "type": "block", "content": { "mod": "x" },
+      "suggested_themes": "mac-dusk" })",
+                            &error));
+    EXPECT_NE(error.find("suggested_themes"), std::string::npos);
+}
+
 TEST(Layout, TabBlocksSayHowTheirPanesAreFramed) {
     const Node n = node(R"({ "id": "main", "type": "block", "content": { "tab": "active",
       "pane": { "header": { "content": { "mod": "pane" }, "height": 28, "reveal": "hover", "position": "bottom" },
@@ -212,14 +226,20 @@ TEST(Layout, MistakesSayWhatAndWhere) {
 
 // The shipped layouts parse, name every node, and match the layout files they are built from.
 TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
-    for (const auto& name : builtin_names()) {
+    // Every layout to pick, and Focus mode's tree (built in but not listed).
+    auto names = builtin_names();
+    names.emplace_back("focus");
+    for (const auto& name : names) {
         std::string error;
         const auto n = parse_text(builtin_text(name), &error);
         ASSERT_TRUE(n.has_value()) << name << ": " << error;
         for (const Node* x : n->walk())
             EXPECT_FALSE(x->id.empty()) << name;
-        std::ifstream in(std::string(AGENTDESK_PRESET_LAYOUTS_DIR) + "/" + std::string(builtin_file_name(name)) + ".json",
-                         std::ios::binary);
+        // herdr-app's files are kept in third_party; AgentDesk's own (mac, focus, stage, review and the
+        // style layouts) beside the engine.
+        const bool own = name != "workspace" && name != "terminals";
+        const std::string dir = own ? AGENTDESK_OWN_LAYOUTS_DIR : AGENTDESK_PRESET_LAYOUTS_DIR;
+        std::ifstream in(dir + "/" + std::string(builtin_file_name(name)) + ".json", std::ios::binary);
         std::stringstream ss;
         ss << in.rdbuf();
         std::string file = ss.str();
@@ -230,7 +250,11 @@ TEST(Layout, ShippedLayoutsParseAndNameEveryNode) {
     EXPECT_EQ(main.find("sidebar")->size, Span::pixels(268));
     EXPECT_TRUE(main.find("panel")->hidden);
     EXPECT_EQ(main.find("panel-body")->active, "files");
-    EXPECT_EQ(builtin_names(), (std::vector<std::string>{"workspace", "terminals"}));
+    EXPECT_EQ(builtin_names(), (std::vector<std::string>{"workspace", "terminals", "stage", "inbox", "review",
+                                                         "pair", "mac", "classic", "garden"}));
+    EXPECT_EQ(builtin("tiling"), main);  // removed layouts fall back to the workspace's tree
+    EXPECT_EQ(builtin("cockpit"), main);
+    EXPECT_EQ(builtin("mission"), main);  // Stage replaced Mission Control (settings say so)
     EXPECT_EQ(builtin("nope"), main);
     EXPECT_EQ(builtin("win98"), main);  // a name no longer built in falls back to the workspace
 }

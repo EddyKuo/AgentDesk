@@ -1,0 +1,20 @@
+{
+  "id": "root",
+  "type": "column",
+  "titlebar": "none",
+  "traffic_lights": [12, 15],
+  "children": [
+    {
+      "id": "bar",
+      "type": "block",
+      "size": { "px": 42 },
+      "window_drag": true,
+      "content": { "mod": "garden-bar" }
+    },
+    {
+      "id": "garden",
+      "type": "block",
+      "content": { "mod": "garden-scene" }
+    }
+  ]
+}

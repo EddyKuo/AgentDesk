@@ -149,48 +149,79 @@ void draw_toasts(App::State& s) {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     const float pill = draw_update_pill(s);
     float y = vp->WorkPos.y + vp->WorkSize.y - px(16) - pill;
+    // Each style says where notes go: the Mac layout keeps its Dock at the bottom, so they drop in
+    // under the menu bar, top right; Classic keeps its status line clear.
+    const ui::styles::ToastArea area = style_toast_area(s);
+    const bool top = area.top;
+    if (top)
+        y = vp->WorkPos.y + px(area.offset);
+    else
+        y -= px(area.offset);
     const float w = px(340);
     int n = 0;
-    // In the order opened: the oldest at the bottom, newer ones stacked above it.
+    // In the order opened: the oldest at the bottom (at the top under the menu bar), newer ones
+    // stacked above it (below it).
     for (auto it = s.toasts.begin(); it != s.toasts.end(); ++it, ++n) {
         const auto& t = *it;
-        const float h = px(72);
-        y -= h;
-        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - w - px(16), y));
+        // A one-line note is shorter than one with a body; both sit on the 4 px grid.
+        const float h = t.body.empty() ? px(52) : px(68);
+        if (!top)
+            y -= h;
+        // Each note slides in from the side and fades in once (tokens: normal duration, ease-out).
+        const ImGuiID nid =
+            ImGui::GetID((t.title + "\x1f" + std::to_string(t.until.time_since_epoch().count())).c_str());
+        const float k = tok::appear(nid, ui::tokens::kNormalMs, 1e12);
+        const float slide = (1.0f - k) * px(ui::tokens::kSlideDistance) * 2.0f;
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - w - px(16) + slide, y));
         ImGui::SetNextWindowSize(ImVec2(w, h));
         char name[32];
         std::snprintf(name, sizeof name, "##toast%d", n);
         push_overlay_style();
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, tok::radius_card());
+        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, k);
         ImGui::Begin(name, nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
                          ImGuiWindowFlags_NoMove);
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const ImVec2 wp = ImGui::GetWindowPos();
+        tok::window_shadow(dl, wp, ImVec2(wp.x + w, wp.y + h), tok::radius_card(), 1);
         if (ImGui::IsWindowHovered())
-            dl->AddRectFilled(ImVec2(wp.x + 1, wp.y + 1), ImVec2(wp.x + w - 1, wp.y + h - 1), g_pal->hover,
-                              px(7));
-        const float ty = wp.y + (t.body.empty() ? h * 0.5f - fpx(13) * 0.6f : h * 0.5f - px(17));
-        dl->AddCircleFilled(ImVec2(wp.x + px(18) + px(4), wp.y + h * 0.5f), px(4), t.color);
-        const float tx = wp.x + px(18) + px(8) + px(12);
-        text_clipped(dl, s.fonts.ui_bold, fpx(13), ImVec2(tx, ty), g_pal->text, t.title,
-                     wp.x + w - px(18) - tx);
+            dl->AddRectFilled(
+                ImVec2(wp.x + 1, wp.y + 1), ImVec2(wp.x + w - 1, wp.y + h - 1),
+                tok::hover(ImGui::ColorConvertFloat4ToU32(ImGui::GetStyleColorVec4(ImGuiCol_WindowBg))),
+                tok::radius_card() - 1.0f);
+        // The state colour as a short bar at the left edge, then the title and the body.
+        const float bar_h = h - tok::gap_l() * 2;
+        dl->AddRectFilled(ImVec2(wp.x + tok::gap_m(), wp.y + tok::gap_l()),
+                          ImVec2(wp.x + tok::gap_m() + px(3), wp.y + tok::gap_l() + bar_h), t.color,
+                          px(1.5f));
+        const float tx = wp.x + tok::gap_m() + px(3) + tok::gap_m();
+        const float title_h = tok::size(ui::tokens::kBody);
+        const float body_h = tok::size(ui::tokens::kCaption) + px(1);
+        const float block = t.body.empty() ? title_h : title_h + tok::gap_xs() + body_h;
+        const float ty = std::round(wp.y + (h - block) * 0.5f - px(1));
+        text_clipped(dl, tok::font(s, ui::tokens::kTitle), tok::size(ui::tokens::kBody), ImVec2(tx, ty),
+                     g_pal->text, t.title, wp.x + w - tok::gap_l() - tx);
         if (!t.body.empty()) {
             std::string body = t.body;
             std::replace(body.begin(), body.end(), '\n', ' ');
-            text_clipped(dl, s.fonts.ui, fpx(12), ImVec2(tx, ty + px(20)), g_pal->dim, body,
-                         wp.x + w - px(18) - tx);
+            text_clipped(dl, s.fonts.ui, tok::size(ui::tokens::kCaption) + px(0.5f),
+                         ImVec2(tx, ty + title_h + tok::gap_xs()), g_pal->dim, body,
+                         wp.x + w - tok::gap_l() - tx);
         }
         if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             if (!t.session.empty())
-                s.focus(t.session);
+                s.focus(t.session);  // in Stage: that agent takes the stage
             it->until = now;  // dismiss
         }
         ImGui::End();
+        ImGui::PopStyleVar(2);
         pop_overlay_style();
-        y -= px(8);
+        y += top ? h + tok::gap_s() : -tok::gap_s();
     }
-    draw_core_update_error(s, vp->WorkPos.y + vp->WorkSize.y - y);  // above the toasts
+    // Above the toasts (above the update pill when the toasts are at the top).
+    draw_core_update_error(s, top ? px(16) + pill : vp->WorkPos.y + vp->WorkSize.y - y);
 }
 
 // A press outside a dialog closes it (ImGui modals dim the window but leave the press to us).

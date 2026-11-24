@@ -239,6 +239,49 @@ int cmd_list(Ctx& ctx) {
     return kOk;
 }
 
+// timeline [<session>] [--since 15m|1h|4h|24h|<minutes>]: when each session's agent and process
+// state changed (local time), oldest session first; --json gives the host's answer as it is.
+int cmd_timeline(Ctx& ctx) {
+    Json params = Json::object();
+    if (!ctx.args.positional.empty())
+        params["session"] = ctx.args.positional[0];
+    const std::int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::system_clock::now().time_since_epoch())
+                                 .count();
+    if (const auto since = ctx.args.opt("--since")) {
+        long long minutes = std::atoll(since->c_str());
+        if (!since->empty() && since->back() == 'h')
+            minutes *= 60;
+        if (minutes <= 0)
+            throw std::invalid_argument("--since takes minutes or hours: 15m, 1h, 24h");
+        params["since_ms"] = now - minutes * 60000;
+    }
+    Json r;
+    if (const auto e = call(ctx, "session.timeline", params, r))
+        return *e;
+    if (ctx.json) {
+        out(r.dump() + "\n");
+        return kOk;
+    }
+    std::ostringstream s;
+    for (const auto& j : r.value("sessions", Json::array())) {
+        s << j.value("id", "").substr(0, 8) << "  " << j.value("name", "") << (j.value("ended", false) ? "  (ended)" : "")
+          << (j.value("truncated", false) ? "  (earlier history dropped)" : "") << '\n';
+        for (const auto& m : j.value("marks", Json::array())) {
+            if (!m.is_array() || m.size() < 3 || !m[0].is_number_integer())
+                continue;
+            const auto t = static_cast<std::time_t>(m[0].get<std::int64_t>() / 1000);
+            std::tm tm{};
+            ::localtime_s(&tm, &t);
+            char when[32];
+            std::strftime(when, sizeof when, "%m-%d %H:%M:%S", &tm);
+            s << "  " << when << "  " << m[1].get<std::string>() << " / " << m[2].get<std::string>() << '\n';
+        }
+    }
+    out(s.str());
+    return kOk;
+}
+
 // Collects the chunked "screen.snapshot" events for one snapshot id.
 struct SnapshotCollector {
     std::mutex mu;
@@ -668,6 +711,7 @@ const char* kUsage =
     "  wait <session> [--until idle|blocked|exited|change] [--timeout-ms N]\n"
     "  report <text...> [--to SESSION] [--from SESSION]\n"
     "  label <session> k=v...\n"
+    "  timeline [<session>] [--since 15m|1h|4h|24h|<minutes>]   when agent and process states changed\n"
     "  --skill   how agents use agentctl to run helper agents\n"
     "  bridge    relay stdin/stdout to this machine's agent-host (used through ssh)\n"
     "  update [--version V] [--exe PATH]\n"
@@ -691,7 +735,7 @@ int run_command(Ctx& ctx) {
         {"run", cmd_run},           {"list", cmd_list}, {"read", cmd_read},
         {"send", cmd_send},         {"stop", cmd_stop}, {"report-state", cmd_report_state},
         {"shutdown", cmd_shutdown}, {"wait", cmd_wait}, {"report", cmd_report},
-        {"label", cmd_label}};
+        {"label", cmd_label},       {"timeline", cmd_timeline}};
     const auto& c = ctx.args.command;
     if (const auto it = kCommands.find(c); it != kCommands.end())
         return it->second(ctx);

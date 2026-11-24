@@ -1,0 +1,56 @@
+// The command names agent-ui runs itself; see command_names.hpp.
+#include "agentdesk/ui/command_names.hpp"
+
+#include <set>
+#include <string>
+
+namespace agentdesk::ui {
+
+bool is_builtin_command(std::string_view name) {
+    // clang-format off
+    static const std::set<std::string, std::less<>> kNames = {
+        "agent.focus", "agent.keep", "agent.new", "agent.next", "agent.peek", "agent.prev", "app.exit_all",
+        "app.feedback", "app.help", "app.keys", "app.palette", "app.picker", "app.reset", "app.settings",
+        "app.welcome", "app.whats_new", "app.zoom_in", "app.zoom_out", "app.zoom_reset", "details.toggle",
+        "launch", "layout", "layout.clone", "layout.reset", "layout.switch", "layout.toggle", "machine.add",
+        "mod", "mod.clone", "mod.open", "mods.folder", "mods.reload", "pane.close", "pane.go", "pane.park",
+        "pane.rename", "pane.resize", "pane.split", "pane.swap", "pane.zoom", "panel", "session.focus",
+        "session.force_stop", "session.interrupt", "session.restart", "session.stop", "sidebar.rail",
+        "sidebar.toggle", "space.close", "space.move", "space.new", "space.next", "space.prev", "space.rename",
+        "space.select", "tab.close", "tab.goto", "tab.move", "tab.new", "tab.next", "tab.prev", "tab.rename",
+        "tab.select", "tab.settle", "tab.unsettle", "terminal.copy", "terminal.kill", "terminal.open",
+        "terminal.park", "terminal.paste", "terminal.paste_image", "terminal.peek", "terminal.pin",
+        "terminal.right_click", "terminal.scroll", "terminal.search", "terminal.select_all", "theme",
+        "window.close", "window.fill", "window.maximize", "window.minimize", "worktree.new", "worktree.open",
+        "worktree.remove", "app.quit", "overlay.close", "app.check_updates", "app.update_core", "app.update",
+        "focus.toggle", "focus.on", "focus.off",
+        // Stage, and the names of Mission Control it replaced (an older keys.json keeps working:
+        // mission.toggle toggles Stage, mission.expand puts that agent on stage, mission.filter
+        // filters the strip)
+        "stage.toggle", "stage.show", "stage.next", "stage.prev", "stage.back", "stage.filter", "stage.size",
+        "stage.auto_switch", "stage.shells", "mission.toggle", "mission.expand", "mission.filter",
+        // Inbox layout
+        "inbox.toggle", "inbox.open", "inbox.snooze", "inbox.unsnooze", "inbox.dismiss", "inbox.answer",
+        "inbox.reply", "inbox.order",
+        // Review layout, Timeline overlay
+        "review.toggle", "review.next_file", "review.prev_file", "review.refresh", "timeline.toggle",
+        "timeline.range",
+        // Theme features: appearance by schedule, suggested themes, tint by agent state, the editor.
+        "appearance", "appearance.toggle", "theme.suggested", "theme.ambient", "theme.new", "theme.edit",
+        "theme.folder", "theme.delete",
+        // Terminals' options and the keyboard resize mode (tiling.*: their names before Tiling
+        // merged into Terminals, so an older keys.json keeps working); Classic
+        "terminals.resize_mode", "terminals.gaps", "terminals.corners", "tiling.resize_mode", "tiling.gaps",
+        "classic.menu", "classic.effects",
+        // Pair (pair_layout.cpp; libs/ui pair.hpp lists them too)
+        "pair.toggle", "pair.start", "pair.send", "pair.prompt", "pair.swap", "pair.repair", "pair.close",
+        "pair.keep", "pair.review", "pair.dismiss",
+        // Garden
+        "garden.toggle", "garden.open",
+        // first-use tips for the shown layout
+        "layout.tips"};
+    // clang-format on
+    return kNames.contains(name);
+}
+
+}  // namespace agentdesk::ui

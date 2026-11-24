@@ -32,6 +32,7 @@
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 #include <dwmapi.h>
 #include <imgui.h>
@@ -43,17 +44,31 @@
 #include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/ui/chrome_logic.hpp"
+#include "agentdesk/ui/focus_mode.hpp"
+#include "agentdesk/ui/color_math.hpp"
 #include "agentdesk/ui/git_info.hpp"
 #include "agentdesk/ui/image_cache.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
 #include "agentdesk/ui/programs.hpp"
+#include "agentdesk/ui/schedule.hpp"
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/layout.hpp"
+#include "agentdesk/ui/mac_layout.hpp"
+#include "agentdesk/ui/inbox.hpp"
+#include "agentdesk/ui/mission.hpp"
 #include "agentdesk/ui/mods.hpp"
+#include "agentdesk/ui/stage.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
+#include "agentdesk/ui/timeline.hpp"
+#include "agentdesk/ui/theme_file.hpp"
 #include "agentdesk/ui/updates.hpp"
 #include "agentdesk/ui/workspace.hpp"
+#include "agentdesk/ui/window_buttons.hpp"
+#include "agentdesk/ui/layout_tips.hpp"
+#include "pair_layout.hpp"
+#include "style_layouts.hpp"
+#include "ui_tokens.hpp"
 
 namespace agentdesk::desktop {
 // detail stands where app.cpp's anonymous namespace was: its names are visible unqualified
@@ -113,6 +128,21 @@ bool system_light();
 const Palette* effective_palette(const std::string& appearance, const std::string& dark, const std::string& light,
                                  const std::string& layout_theme);
 void apply_style(float dpi, float zoom);
+// Only the ImGui colours from g_pal (sizes stay): for a palette whose colours move each frame.
+void apply_style_colors();
+// Theme files (the theme editor): where a theme's file is (empty for ours and the presets),
+// whether it is the person's own (<data>\themes), reading a saved one again in place (or adding
+// it), and dropping a deleted one from the lists. reload_theme returns why it failed, or "".
+std::filesystem::path theme_file_path(const std::string& id);
+bool is_user_theme(const std::string& id);
+std::string reload_theme(const std::string& name);
+void forget_theme(const std::string& id);
+// A Palette for a theme that is not in the lists (the editor's draft); its ANSI table is kept in
+// `ansi_storage`, which must outlive the Palette.
+Palette palette_from_theme(const ui::theme::ThemeFile& t, const char* id, const char* label,
+                           std::array<ImU32, 16>& ansi_storage);
+std::uint32_t rgb_of(ImU32 c);  // 0xRRGGBB
+ui::color::PaletteColors check_colors_of(const Palette& p);
 
 // ------------------------------------------------------------ settings_store.cpp
 // ------------------------------------------------------------------ settings (ui.json)
@@ -151,7 +181,10 @@ struct Settings {
     std::string terminal_font;   // font family; "" = JetBrains Mono (bundled)
     int terminal_weight = 500;   // terminal font weight (500: JetBrains Mono Medium)
     std::string ui_font;         // interface font family; "" = Geist (bundled)
-    std::string appearance = "system";  // "system", "light" or "dark"
+    std::string appearance = "system";  // "system", "light", "dark" or "schedule"
+    // "mac": three round buttons at the top left (the layout's traffic_lights); "windows": the usual
+    // minimize, maximize and close at the top right.
+    std::string window_buttons = "mac";
     std::string theme_dark = "midnight";
     std::string theme_light = "paper";
     // A layout is a look: each keeps its own dark and light theme (layout -> {dark, light}).
@@ -168,6 +201,43 @@ struct Settings {
     Json agents_changed = Json::object();  // session id -> {s: state, at: ms since 1970}
     // On unless the file says "telemetry": false; turning it on again removes the key.
     bool telemetry = true;
+    // Focus mode (focus_mode.cpp): on across restarts, and how an agent that needs you is told
+    // while it is on ("edge", "edge_sound" or "normal").
+    bool focus_on = false;
+    std::string focus_alerts = "edge_sound";
+    // Stage (stage_layout.cpp): the strip's filter ("all", "needs_you", "working") and thumbnail
+    // size ("s", "m", "l"), whether terminals without an agent status get thumbnails, and whether
+    // an agent that starts needing you takes the stage by itself (off: the stage never changes
+    // unless the person changes it). Read from Mission Control's keys when these are missing.
+    std::string stage_filter = "all";
+    std::string stage_size = "m";
+    bool stage_shells = false;
+    bool stage_auto_switch = false;
+    // Inbox (inbox_layout.cpp): the card order ("newest" or "oldest") and the person's quick
+    // answers per program (ui.json inbox_answers, only read: the file keeps what the person wrote).
+    std::string inbox_order = "newest";
+    ui::inbox::AnswerTable inbox_answers;
+    std::vector<std::string> inbox_answer_errors;
+    // The layout a toggle (stage.toggle, review.toggle) came from, to go back to on the second
+    // press (toggle_layout).
+    std::string layout_return;
+    // Review: "agent" keeps showing the last agent's changes when the focus moves to a plain
+    // shell; "focused" always follows the focused pane.
+    std::string review_follow = "agent";
+    // Timeline: the range last chosen (15m, 1h, 4h, 24h) and whether the time away is shaded.
+    std::string timeline_range = "1h";
+    bool timeline_since_left = true;
+    // Appearance "schedule": light and dark by clock time or by the sun (appearance.cpp).
+    ui::schedule::AppearanceSchedule appearance_schedule;
+    // Tint by agent state (ambient.cpp): "off" or "subtle"; also a cool tint for finished agents.
+    std::string ambient = "off";
+    bool ambient_done = false;
+    StyleSettings styles;  // Terminals' options, Fun layouts and Classic keys (style_layouts.hpp)
+    PairSettings pair;     // Pair's setup choices and the pair shown (pair_layout.hpp)
+    // First-use tips (layout_tips.cpp): on unless turned off; the cards already seen (layout names
+    // and "focus").
+    bool tips = true;
+    std::vector<std::string> tips_seen;
 };
 // %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk; created when missing.
 std::filesystem::path data_dir();
@@ -184,8 +254,8 @@ void save_settings(const Settings& s);
 // ------------------------------------------------------------ layouts.cpp
 // ------------------------------------------------------------------ layouts
 // A layout is a tree of blocks (rows, columns, stacks; the sidebar, tab bar, panes, panel and
-// status bar are blocks), parsed by libs/ui layout.hpp. Built-ins are workspace and
-// terminals; <data>\layouts\<name>.json adds one or replaces a built-in of that name. The person's
+// status bar are blocks), parsed by libs/ui layout.hpp. Built-ins are workspace, terminals and
+// mac; <data>\layouts\<name>.json adds one or replaces a built-in of that name. The person's
 // clicks on a layout (sizes, shown/hidden, a stack's child, where a float sits) live apart from
 // the file, in <data>\layouts\.state\<name>.json, so editing the file never loses them.
 // AgentDesk's older files ({"sidebar", "tab_bar", "status_bar", "theme", "style", "font_size",
@@ -206,8 +276,11 @@ struct LayoutSpec {
     // From the tree.
     std::string theme;         // a palette AgentDesk has, else "" (the person's theme)
     bool look_applies = true;  // false when the layout names a theme AgentDesk lacks
-    std::string style;         // "" or "terminals": which renderers its blocks name
+    std::string style;         // "", "terminals" or "mac": which renderers its blocks name
     std::optional<float> font_size;
+    // The theme pair (dark, light) it was designed with: the file's "suggested_themes", else the
+    // shipped table (ui::theme::builtin_suggestion). Only offered in Settings, never applied by itself.
+    std::optional<std::pair<std::string, std::string>> suggested;
 };
 std::filesystem::path layouts_dir();
 std::filesystem::path layout_state_path(const std::string& name);
@@ -311,6 +384,56 @@ inline constexpr CommandInfo kCommands[] = {
     {"mods.reload", "Reload mods and layouts"},
     {"mods.folder", "Open the mods folder"},
     {"app.exit_all", "Exit and stop all sessions"},
+    {"focus.toggle", "Focus mode: one terminal, nothing else"},
+    {"stage.toggle", "Stage: one agent big, the others live below (again: back)"},
+    {"stage.next", "Stage: next agent on stage"},
+    {"stage.prev", "Stage: previous agent on stage"},
+    {"stage.back", "Stage: swap back to the agent before"},
+    {"stage.filter:all", "Stage: show all agents in the strip"},
+    {"stage.filter:needs_you", "Stage: show agents that need you"},
+    {"stage.filter:working", "Stage: show working agents"},
+    {"stage.size:s", "Stage: small thumbnails"},
+    {"stage.size:m", "Stage: medium thumbnails"},
+    {"stage.size:l", "Stage: large thumbnails"},
+    {"stage.auto_switch", "Stage: let an agent that needs you take the stage (on / off)"},
+    {"stage.shells", "Stage: thumbnails for plain terminals too (on / off)"},
+    {"inbox.toggle", "Inbox: every agent waiting for you, with its question (again: back)"},
+    {"inbox.order:newest", "Inbox: newest waiting first"},
+    {"inbox.order:oldest", "Inbox: longest waiting first"},
+    {"inbox.unsnooze", "Inbox: show snoozed cards again"},
+    {"garden.toggle", "Garden: your agents as little creatures"},
+    {"review.toggle", "Review: show the agent's changes beside it (again: back)"},
+    {"pair.toggle", "Pair: two agents side by side, one prompt for both (again: back)"},
+    {"pair.swap", "Pair: swap the left and right agents"},
+    {"pair.close", "Pair: stop pairing (both terminals keep running)"},
+    {"review.next_file", "Review: next changed file"},
+    {"review.prev_file", "Review: previous changed file"},
+    {"review.refresh", "Review: read the changes again"},
+    {"timeline.toggle", "Timeline: what each agent did and when"},
+    {"timeline.range:15m", "Timeline: last 15 minutes"},
+    {"timeline.range:1h", "Timeline: last hour"},
+    {"timeline.range:4h", "Timeline: last 4 hours"},
+    {"timeline.range:24h", "Timeline: last 24 hours"},
+    // Theme features (theme_commands.cpp).
+    {"appearance:system", "Appearance: System"},
+    {"appearance:light", "Appearance: Light"},
+    {"appearance:dark", "Appearance: Dark"},
+    {"appearance:schedule", "Appearance: Schedule"},
+    {"appearance.toggle", "Toggle light / dark"},
+    {"theme.suggested", "Use the layout's suggested themes"},
+    {"theme.ambient:off", "Tint by agent state: Off"},
+    {"theme.ambient:subtle", "Tint by agent state: Subtle"},
+    {"theme.new", "New theme..."},
+    {"theme.edit", "Edit current theme..."},
+    {"theme.folder", "Open the themes folder"},
+    // layout options and keyboard tools
+    {"pane.split:auto", "Split along the longer side"},
+    {"terminals.resize_mode", "Resize panes with the keyboard"},
+    {"terminals.gaps", "Terminals: gaps off / on"},
+    {"terminals.corners", "Terminals: square / round corners"},
+    {"classic.menu", "Classic: open the menu bar"},
+    {"classic.effects", "Classic: screen effects off / light / full"},
+    {"layout.tips", "Tips for this layout"},
 };
 bool known_command(std::string_view name);
 
@@ -339,6 +462,12 @@ struct GitInfo {
     std::string branch;      // "HEAD" when detached
     int ahead = 0;
     int behind = 0;
+    // Uncommitted changes, only for folders asked for with GitCache::with_changes (Pair's headers,
+    // Inbox's cards):
+    // files changed (untracked ones included) and lines added and removed; files -1 until known.
+    int changed_files = -1;
+    int lines_added = 0;
+    int lines_removed = 0;
 };
 
 class GitCache {
@@ -357,6 +486,8 @@ public:
     // Cached facts for `dir` on `machine` ("" = here; empty until the first answer); schedules a
     // refresh when stale.
     GitInfo get(const std::string& dir, const std::string& machine = {});
+    // The same, with the folder's uncommitted change counts kept up to date from now on.
+    GitInfo with_changes(const std::string& dir, const std::string& machine = {});
     // Ask again soon (a command or an agent turn ended: a checkout or commit may have happened).
     void invalidate(const std::string& dir);
     // `dir` and every other folder in its repo (a commit there moves their ahead/behind too).
@@ -369,6 +500,7 @@ private:
         GitInfo info;
         Clock::time_point at{};
         bool queued = false;
+        bool changes = false;      // count the uncommitted changes too (with_changes)
         Clock::time_point used{};  // last asked for by the UI
     };
 
@@ -384,7 +516,7 @@ private:
     static std::string trim(std::string s);
     static std::string norm(std::string p);
 
-    GitInfo query(const std::string& key);
+    GitInfo query(const std::string& key, bool changes);
 
     void run(std::stop_token st);
 
@@ -475,6 +607,11 @@ public:
     void close_preview();
     void select_change(const std::string& path);
     void commit();
+    // Read the changes again on the next track_changes (an agent's turn ended, or Refresh).
+    void refresh_changes() {
+        std::lock_guard lock(mutex);
+        changes_at_ = {};
+    }
 
 private:
     static std::string join(const std::string& root, const std::string& rel);
@@ -565,6 +702,7 @@ struct Placement {
     std::string split_of;
     std::string replace;  // restart in place
     std::string space_name;
+    std::string pair_side;  // "left" / "right": one side of a pair being started (pair_layout.cpp)
 };
 
 struct WorktreeEntry {
@@ -594,7 +732,17 @@ struct App::State {
     Clock::time_point keys_checked{};
     ui::FontSet fonts;
     float dpi = 1.0f;
+    // Appearance "schedule": appearance.toggle shows the other look until the next switch.
+    std::optional<std::chrono::system_clock::time_point> schedule_override_until;
+    bool schedule_override_light = false;
     bool window_focused = true;
+    // This frame's round window buttons (traffic_lights_input): where they start and the pointer.
+    struct TrafficLights {
+        bool shown = false;
+        ImVec2 at{};
+        bool group_hovered = false;
+        int held = -1;  // 0 close, 1 minimize, 2 zoom
+    } lights;
     std::atomic<bool> exit_now{false};  // also set by shutdown_host's answer (a HostClient thread)
     // Updates and Privacy.
     std::optional<Clock::time_point> updates_asked;  // Settings asked for an update check (polls while set)
@@ -779,6 +927,154 @@ struct App::State {
     bool defer_commands = false;
     std::vector<DeferredCommand> deferred_commands;
     ui::ImageCache program_images;  // the program icons (programs\icons), as textures
+    // The AgentDesk Mac layout (mac_layout.cpp): the open menu and where each menu opens, whether
+    // the window fills the desktop, and each Dock tile's current magnification (by DockItem::key).
+    struct MacState {
+        int menu = -1;                // ui::mac::Menu, -1: none open
+        std::vector<ImVec2> menu_at;  // where each menu's dropdown opens, this frame
+        bool keyed = false;           // the open menu was moved through with the keyboard
+        bool fill = false;
+        std::map<std::string, float> scale;
+    } mac;
+    // The terminals this frame drew (draw_pane adds them) and the ones the last frame drew: what
+    // the person can see, for update_attention. A Stage thumbnail does not count.
+    std::set<std::string> drawn_sessions;
+    std::set<std::string> visible_sessions;
+    // Focus mode (focus_mode.cpp; on/off is Settings::focus_on): its tree, the edge glow and the
+    // pane header that fades in at the top.
+    struct FocusState {
+        LayoutSpec layout;  // the built-in "focus" tree, made on first use
+        Clock::time_point glow_at{};
+        ImU32 glow_color = 0;
+        int glow_peak = 0;
+        ui::focus::HeaderReveal header;
+    } focus_mode;
+    // A terminal's last screen lines for a thumbnail or card (Stage's filmstrip, Inbox's cards;
+    // screen_tail_of), worked out again only when its screen changed and at most 4 times a second.
+    // Display only.
+    struct ScreenTail {
+        std::uint64_t seq = 0;
+        std::uint64_t generation = 0;
+        bool filled = false;
+        int lines = 0;
+        Clock::time_point at{};
+        std::vector<ui::mission::TailLine> tail;
+    };
+    std::map<std::string, ScreenTail> screen_tails;
+    bool tails_pending = false;  // this frame: a tail waits for its next refresh (cleared in App::frame)
+    // Stage (stage_layout.cpp): what was on stage, the order agents were first seen in (the strip's
+    // stable order), who needed the person last frame (to spot a new one), the strip's scroll and
+    // each thumbnail's eased position, the swap fade and the last key or click.
+    struct StageState {
+        ui::stage::History history;
+        std::string shown;  // on stage last frame
+        std::map<std::string, long long> first_seen;
+        long long seen_next = 0;
+        std::map<std::string, Attention> last_att;
+        std::map<std::string, double> blocked_at;  // tok::now_ms() when it started needing you
+        std::map<std::string, ui::tokens::Tween> slot;
+        ui::tokens::Tween scroll_anim;
+        float scroll = 0;
+        double swap_at = -1.0;  // tok::now_ms() of the last swap (the stage fades in)
+        double input_at = 0;    // tok::now_ms() of the last key or click
+        // This frame's model, worked out by the bar (drawn first) for the stage and the strip.
+        struct Thumb {
+            Attention att = Attention::kNone;
+            bool unreachable = false;
+            bool shell = false;  // a terminal without an agent status (stage_shells)
+            int kids = 0;        // live sub-agents
+        };
+        std::map<std::string, Thumb> thumbs;  // every agent (and shell) that could have a thumbnail
+        std::vector<std::string> ring;        // all of them in their stable order (next / previous)
+        std::vector<std::string> order;       // the strip: filtered, left to right, without the stage
+        int blocked = 0, working = 0;         // counts for the filter buttons (without the stage)
+        bool animating = false;
+    } stage;
+    // The Inbox layout (inbox_layout.cpp): the selected card, the queue's scroll and whether it
+    // holds the keyboard, the reply being typed, snoozed cards, each card's eased position and
+    // cards on their way out. Their screen lines come from the shared cache (screen_tail_of).
+    struct InboxState {
+        std::string selected;
+        int selected_at = -1;          // its place last frame (the next card takes it when it goes)
+        std::map<std::string, double> sent;  // an answer or reply went out (tok::now_ms()): "Sent"
+        float scroll = 0;
+        bool queue_focus = false;      // the queue's keys apply (it was clicked, or Inbox just opened)
+        bool take_keyboard = false;    // next frame: take the keyboard from a terminal for the queue
+        bool reply_focus_next = false; // next frame: put the caret in the selected card's reply
+        bool reply_active = false;     // the reply field holds the keyboard (last frame)
+        std::string reply_for;         // whose card the reply text belongs to
+        char reply[1024] = {};
+        std::map<std::string, ui::inbox::Snooze> snoozed;
+        std::map<std::string, float> top;  // each card's eased top, relative to the list
+        // A card that went away (answered, snoozed, dismissed): drawn sliding out for a moment.
+        struct Ghost {
+            std::string id;
+            std::string title;
+            std::string line;
+            ui::Program program;
+            bool done = false;
+            float top = 0;
+            float h = 0;
+            double since = 0;  // tok::now_ms() when it left
+        };
+        std::vector<Ghost> leaving;
+        std::map<std::string, Ghost> shown;  // last frame's cards, to make ghosts from
+        bool animating = false;   // a card's lines held back: come back soon
+        int drawn_frame = -10;    // the ImGui frame that last drew the queue (a gap: just shown)
+        double zero_since = -1;   // when the queue last became empty (the Inbox zero animation)
+        Clock::time_point answers_checked{};
+        std::filesystem::file_time_type answers_mtime{};
+    } inbox;
+    // The Review layout (review_layout.cpp): whose changes show, and that agent's state last frame
+    // (a turn ending, Working to anything else, reads the changes again).
+    struct ReviewState {
+        std::string target;
+        std::string target_state;
+        float list_size = 0;  // the list / diff splitter as the person dragged it (real px; 0: default)
+        bool was_committing = false;
+        std::string committing_msg;  // the message of the commit under way
+        std::string committed;       // "Committed ..." after one went through (until the folder changes)
+        std::string shown_diff;      // the open file last frame: the list scrolls to a new one
+    } review;
+    // The Timeline overlay (timeline.cpp): each machine's state history from its agent-host
+    // (session.timeline), asked for while the overlay or a timeline block shows.
+    struct TimelineMachine {
+        std::vector<ui::timeline::HostSession> sessions;  // times already in this computer's clock
+        bool asked = false;      // a request is out
+        bool answered = false;   // at least one answer came
+        bool unsupported = false;  // its agent-host does not know session.timeline
+        std::string error;       // the last request failed (kept data stays)
+        long long last_ok_ms = 0;  // when it last answered (this computer's clock)
+        long long offset_ms = 0;   // this computer's clock minus the host's (from its now_ms)
+        Clock::time_point fetched{};
+        long long fetched_since = 0;  // the earliest time the last request covered (this computer's clock)
+    };
+    struct TimelineState {
+        bool open = false;
+        bool showing = false;  // a timeline block drew this frame (reset when the overlay's turn comes)
+        bool shown = false;    // the overlay or a block showed in the last frame
+        long long end_ms = 0;            // the right edge when panned back; 0 = now
+        std::map<std::string, TimelineMachine> machines;  // "" = this computer
+        // Answers from HostClient worker threads, picked up by the UI thread.
+        struct Inbox {
+            std::mutex mutex;
+            std::vector<std::tuple<std::string, Json, std::string, long long>> answers;  // machine, result, error, at
+        };
+        std::shared_ptr<Inbox> inbox = std::make_shared<Inbox>();
+        std::optional<long long> left_at_ms;  // the window last lost focus (this run only)
+        std::string selected;
+        bool focus_list = false;
+    } timeline;
+    StyleUi styles;  // the resize mode, agent state changes, Classic (style_layouts.hpp)
+    PairUi pair;     // the Pair layout (pair_layout.cpp)
+    // First-use tips (layout_tips.cpp).
+    struct LayoutTips {
+        std::string open_key;   // the card shown now ("" none)
+        std::string request;    // a card to open once no other popup is open
+        std::string shown_key;  // the card of what is on screen, and since when
+        Clock::time_point shown_since{};
+        bool close_settings = false;  // Settings' "Show tips" closes the dialog first
+    } layout_tips;
 
     // ---------------------------------------------------------------- helpers
     // The UI document (spaces, tabs, panes) changed: persist() sends it to the host soon.
@@ -974,6 +1270,27 @@ void draw_shell_picker(App::State& s, const char* id, const char* target);
 void menu_separator();
 float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a, bool compact, bool measure = false);
 void window_drag_area(App::State& s, ImVec2 a, ImVec2 b);
+// Round window buttons (Settings > Look > Window buttons = "mac"). Input before the layout draws,
+// so the bars' drag areas leave them alone; paint after it, on top of the bars.
+bool mac_window_buttons(const App::State& s);
+void traffic_lights_input(App::State& s, ImVec2 origin);
+void traffic_lights_paint(App::State& s);
+// The first x a bar spanning [top, bottom] may use without covering the round buttons, `margin`
+// after them; `x` itself when they are not shown there.
+float clear_of_traffic_lights(const App::State& s, float x, float top, float bottom, float margin);
+// The window buttons' colours (close, minimize, zoom, their glyphs, the inactive colour) in the
+// active theme, for buttons drawn on `bar` (libs/ui window_buttons; cached per theme and bar).
+ui::window_buttons::Colors window_button_colors(ImU32 bar);
+ImU32 window_button_color(int kind, ImU32 bar);  // kind 0 close, 1 minimize, 2 zoom
+ImU32 window_button_glyph(int kind, ImU32 bar);
+// How a layout draws its window buttons: round (most), small flat squares (Terminals with square
+// corners).
+enum class WindowButtonLook { kRound, kSquare };
+// One window button (kind 0 close with a cross, 1 minimize with a bar, 2 zoom with a plus) of radius
+// `r` centred on `c`, in the theme's colours for `bar` (0: the chrome); the window buttons and the
+// Mac layout's inner window draw theirs with it.
+void paint_round_button(ImDrawList* dl, ImVec2 c, float r, int kind, bool lit, bool glyph, bool held,
+                        ImU32 bar = 0, WindowButtonLook look = WindowButtonLook::kRound);
 
 // The space's git tail: "repo · branch" without the parts the name already says, main/master
 // dropped, then ahead/behind.
@@ -988,6 +1305,11 @@ void confirm_close_space(App::State& s, int index);
 
 // ------------------------------------------------------------ sidebar.cpp
 void draw_brand(App::State& s, ImVec2 pos, float w, bool rail);
+void draw_brand_mark(ImDrawList* dl, ImVec2 min, float side);
+// The avatar letter: the title's first character, upper-cased when ASCII.
+std::string avatar_letter(const std::string& title);
+void draw_space_avatar(App::State& s, ImDrawList* dl, ImVec2 min, float side, ImU32 fill, ImU32 ink,
+                       const std::string& letter, float font, float radius);
 float draw_spaces(App::State& s, ImVec2 pos, float w, float h, bool rail);
 bool is_agent(const ui::SessionView& v);
 // A tab is shown by its lead pane: the first agent, else the first pane.
@@ -997,10 +1319,29 @@ long long now_ms();
 void refresh_git_facts(App::State& s);
 bool live_agent(App::State& s, const std::string& id, const ui::SessionView& v);
 void draw_agents(App::State& s, ImVec2 pos, float w, float h, bool rail);
+// The agents the sidebar lists, in its order (this also sets State::agent_order, which
+// agent.next / agent.prev follow), with each one's urgency counting its sub-agents and the live
+// sub-agents by parent. Focus's strip and Stage use it so their agents agree.
+struct AgentRoster {
+    std::vector<std::string> ids;
+    std::map<std::string, int> urgency;
+    std::map<std::string, std::vector<std::string>> kids;
+};
+AgentRoster agent_roster(App::State& s);
 void draw_sidebar_footer(App::State& s, ImVec2 pos, float w, bool rail);
 
 // ------------------------------------------------------------ tab_bar.cpp
 void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height);
+// The "+" menu (popup "##newmenu", opened by the caller in the same ID scope).
+void draw_new_menu(App::State& s);
+// Windows' minimize, maximize and close, ending at `right`, centred in [top, top + h].
+void draw_window_buttons(App::State& s, float right, float top, float h);
+// The most urgent state of a tab's terminals, and the tab's label.
+Attention tab_attention(App::State& s, const std::vector<std::string>& ids);
+std::string tab_label(App::State& s, const ui::Tab& tab, int i, const std::vector<std::string>& ids);
+// The tab's context menu (popup "##tabctx" on the last item): Rename, New tab, Close. A Close sets
+// `close_tab` to the tab's id for the caller to close after drawing.
+void tab_menu(App::State& s, const ui::Tab& tab, std::string& close_tab);
 
 // ------------------------------------------------------------ terminals_layout.cpp
 // ---------------------------------------------------------------- Terminals layout
@@ -1013,6 +1354,18 @@ struct TerminalsLook {
 };
 TerminalsLook terminals_look();
 void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height);
+
+// ------------------------------------------------------------ mac_layout.cpp
+// The AgentDesk Mac layout: a menu bar, a wallpaper desktop with the active tab in a floating
+// window, and a Dock of spaces and tabs.
+// The tree to place this frame when it differs from the layout's: the window filling the desktop,
+// or no tab to show (the window card is not drawn then).
+std::optional<lay::Node> mac_layout_tree(const App::State& s, const lay::Node& tree);
+// The wallpaper, the window's shadow and the empty-desktop hint, under the layout's backgrounds.
+void draw_mac_backdrop(App::State& s, const lay::Node& tree);
+void draw_mac_menubar(App::State& s, ImVec2 pos, float w, float h);
+void draw_mac_window_title(App::State& s, ImVec2 pos, float w, float h);
+void draw_mac_dock(App::State& s, ImVec2 pos, float w, float h);
 void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::SessionView& v, ImVec2 pos,
                                 float w, float h, bool focused);
 
@@ -1020,7 +1373,8 @@ void draw_terminals_pane_header(App::State& s, const std::string& id, const ui::
 void draw_status_bar(App::State& s, ImVec2 pos, float width, float height);
 
 // ------------------------------------------------------------ panes.cpp
-void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected);
+// `frame`: the layout's pane frame for these panes (null: the style's defaults).
+void draw_panes(App::State& s, ImVec2 pos, ImVec2 size, bool connected, const lay::PaneFrame* frame = nullptr);
 std::string panel_folder(App::State& s, std::string* machine = nullptr);
 ImU32 mark_color(char m);
 void panel_header(App::State& s, ImDrawList* dl, ImVec2 a, float w, const char* title, const std::string& right,
@@ -1102,6 +1456,107 @@ void draw_settings(App::State& s);
 // ------------------------------------------------------------ sessions.cpp
 void play_alert(App::State& s, bool blocked);
 
+// ------------------------------------------------------------ state_card.cpp
+// One look for the empty, loading and error states of the newer views (Focus, Stage,
+// Review, Timeline): a centred title (`title_size` semibold; `needs_you` for an error; a spinner
+// above it while loading), a dim hint, an optional detail line in its own colour, buttons 36 px
+// high (the first in the accent colour, each running its command or action) and a text link.
+// Long lines wrap. `framed`: on a card (12 px corners, the border), else bare.
+enum class CardKind { kEmpty, kLoading, kError };
+struct StateCard {
+    struct Button {
+        std::string label;
+        std::string command;
+        std::function<void()> action;  // instead of a command
+    };
+    CardKind kind = CardKind::kEmpty;
+    std::string title;
+    std::string hint;
+    std::string detail;
+    ImU32 detail_color = 0;  // 0: dim
+    std::vector<Button> buttons;
+    float title_size = 18.0f;  // design px
+    bool framed = false;
+    // A small drawing above the title (empty states; ui_tokens.hpp).
+    tok::Art art = tok::Art::kNone;
+    // A text link under the buttons (accent colour, underlined while hovered).
+    std::string link;
+    std::function<void()> on_link;
+};
+void draw_state_card(App::State& s, ImVec2 pos, ImVec2 size, const StateCard& card);
+// The shared empty state: a drawing, one line (`title`), an optional quieter hint and an optional
+// accent button running `command`. Built on draw_state_card, so it lays out like the others.
+void draw_empty_state(App::State& s, ImVec2 pos, ImVec2 size, tok::Art art, const std::string& title,
+                      const std::string& hint = {}, const std::string& button = {},
+                      const std::string& command = {});
+// The same empty state laid out in one row for short areas (a strip): the drawing on the left,
+// the line and the hint beside it, then the button (or the text link), centred together. Falls
+// back to the line alone when even that does not fit.
+struct EmptyRow {
+    tok::Art art = tok::Art::kNone;
+    std::string title;
+    std::string hint;
+    std::string button;
+    std::string command;
+    std::string link;
+    std::function<void()> on_link;
+};
+void draw_empty_row(App::State& s, ImVec2 pos, ImVec2 size, const EmptyRow& row);
+// The right end of a full-width layout bar (Stage, Inbox, Pair): New (the new menu), Settings and
+// back to the layout before (`toggle_command`), right to left from `right`; returns their left edge.
+float layout_bar_buttons(App::State& s, float right, float cy, const char* toggle_command);
+// A button label followed by the command's key ("New terminal   Ctrl+Shift+T"), when it has one.
+std::string with_chord(const App::State& s, const std::string& label, const char* command);
+// Grey bars standing in for text that is not there yet, `row_h` apart, each `bar_h` high and the
+// given fraction of `w` long; they breathe once every 1.2 s (the caller keeps frames coming).
+void draw_skeleton_rows(ImDrawList* dl, ImVec2 pos, float w, std::initializer_list<float> widths, float row_h,
+                        float bar_h);
+
+// ------------------------------------------------------------ focus_mode.cpp
+// Focus mode: the shown layout gives way to one terminal and a 22 px strip of the other agents.
+LayoutSpec& focus_layout(App::State& s);
+void set_focus(App::State& s, bool on);
+void draw_focus_strip(App::State& s, ImVec2 pos, float w, float h);
+// No tab to show in Focus: "No terminal to focus" (or the connecting card).
+void draw_focus_empty(App::State& s, ImDrawList* dl, ImVec2 pos, ImVec2 size, bool connected);
+// An agent needs you or finished while Focus is on and the window is in front: the edge glows
+// instead of the note (and the sound, unless focus_alerts says to play it). Returns false when the
+// usual alert should run instead.
+bool focus_alert(App::State& s, bool blocked);
+// The glow around the window's inner edge, over everything but dialogs.
+void draw_focus_glow(App::State& s);
+// Something in Focus moves without input (the glow, the header fading): the next frame is due.
+bool focus_animating(const App::State& s);
+// Draws `fn`'s vertices at `alpha` (0..1) of their own opacity.
+void with_alpha(ImDrawList* dl, float alpha, const std::function<void()>& fn);
+
+// ------------------------------------------------------------ stage_layout.cpp
+// Stage: one agent's pane big on the stage, every other agent as a live thumbnail in a filmstrip
+// below; a click swaps a thumbnail onto the stage. The blocks stage-bar, stage-strip, stage-empty.
+bool draw_stage_block(App::State& s, const std::string& mod, ImVec2 pos, ImVec2 size);
+// The stage.* commands (and Mission Control's names for them); nullopt when `name` is not one.
+std::optional<std::string> stage_command(App::State& s, const std::string& name, const std::string& arg);
+// The strip's height for the chosen thumbnail size and the window, and the empty stage when there
+// is nothing to show (style_layout_tree).
+std::optional<ui::layout::Node> stage_layout_tree(const App::State& s, const ui::layout::Node& tree);
+// After the panes: the stage fading in after a swap, over the pane drawn there.
+void draw_stage_overlay(App::State& s);
+// The last `lines` lines of a terminal's screen for a thumbnail (cached; display only, never read
+// for its state).
+const App::State::ScreenTail& screen_tail_of(App::State& s, const std::string& id, int lines);
+// Stage's rows in Settings > Look.
+bool look_stage_options(App::State& s);
+
+// ------------------------------------------------------------ inbox_layout.cpp
+// Inbox: every agent that needs you as a card (its question, quick answers, a reply field), the
+// ones that finished below; the "main" block beside the queue shows the agent opened from it.
+void draw_inbox_bar(App::State& s, ImVec2 pos, float w, float h);
+void draw_inbox_queue(App::State& s, ImVec2 pos, ImVec2 size);
+// The inbox.* commands; nullopt when `name` is not one.
+std::optional<std::string> inbox_command(App::State& s, const std::string& name, const std::string& arg);
+// Switching to the Inbox: the queue takes the keyboard.
+void inbox_entered(App::State& s);
+
 // ------------------------------------------------------------ welcome.cpp
 void draw_welcome(App::State& s);
 
@@ -1113,6 +1568,96 @@ void draw_notes(App::State& s);
 void draw_confirm(App::State& s);
 void draw_exit(App::State& s);
 void draw_close_notice(App::State& s);
+
+// ------------------------------------------------------------ layouts.cpp (switching)
+// Shows the layout of `style` ("stage", "review": the built-in of that name, else the first
+// layout of that style), remembering the one shown in ui.json layout_return; when one of that
+// style already shows, goes back to the remembered one (the workspace when there is none). Leaves
+// Focus first. Returns an error, or "".
+std::string toggle_layout(App::State& s, const std::string& style);
+
+// ------------------------------------------------------------ review_layout.cpp
+// The Review layout's blocks (review-head, review-changes, review-commit); false for another name.
+bool draw_review_block(App::State& s, const std::string& mod, ImVec2 pos, ImVec2 size);
+// review.* commands, and panel:changes while Review shows. nullopt: not one of them.
+std::optional<std::string> exec_review_command(App::State& s, const std::string& name, const std::string& arg);
+
+// ------------------------------------------------------------ pair_layout.cpp
+// Pair: two agents side by side with a shared prompt bar and the race between them.
+// Its blocks (pair-bar, pair-stage, pair-prompt); false for another name.
+bool draw_pair_block(App::State& s, const std::string& mod, ImVec2 pos, ImVec2 size);
+// pair.* commands. nullopt: not one of them.
+std::optional<std::string> exec_pair_command(App::State& s, const std::string& name, const std::string& arg);
+// A session started for one side of a pair arrived: it goes into the pair's tab (sessions.cpp).
+void place_pair_side(App::State& s, const Placement& p);
+// Every tick: the pair's sessions, the race and the change counts (whatever layout shows).
+void pair_tick(App::State& s);
+// Pair's pane frame and header (draw_styled_pane), and its picture on the Settings card.
+StyledPane draw_pair_pane(App::State& s, const std::string& id, const ui::SessionView& v, ImVec2 pos,
+                          ImVec2 max, bool focused);
+void pair_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
+// One pane drawn at `r` as the shown layout frames it (panes.cpp).
+void draw_one_pane(App::State& s, const std::string& id, ui::Rect r, bool connected,
+                   const ui::styles::PaneLook& look);
+// Where new git worktrees go on `machine` (worktrees.cpp): Settings' folder, else the
+// .agentdesk\worktrees folder in the person's home here; "" for another machine (its agent-host picks).
+std::string worktree_root(const App::State& s, const std::string& machine);
+
+// ------------------------------------------------------------ timeline.cpp
+// The Timeline overlay (timeline.toggle) and the "timeline" layout block.
+void draw_timeline_overlay(App::State& s);
+bool draw_timeline_block(App::State& s, const std::string& mod, ImVec2 pos, ImVec2 size);
+// timeline.* commands. nullopt: not one of them.
+std::optional<std::string> exec_timeline_command(App::State& s, const std::string& name, const std::string& arg);
+// How soon the timeline needs a frame (its "now" line, a pending answer); 1 s cap when hidden.
+long long timeline_wakeup_ms(const App::State& s);
+// ------------------------------------------------------------ layout_tips.cpp
+// The first-use tips card (opens by itself the first time a layout shows; layout.tips brings it
+// back), its command, and the Settings > Look row ("Show tips for this layout", tips on / off).
+void draw_layout_tips(App::State& s);
+std::optional<std::string> exec_tips_command(App::State& s, const std::string& name, const std::string& arg);
+bool look_tips_row(App::State& s);
+// ------------------------------------------------------------ theme features
+// appearance.cpp: the appearance to pick the theme half by ("system", "light" or "dark"), with
+// "schedule" worked out; the Settings rows under Appearance when it is "schedule".
+std::string resolved_appearance(App::State& s);
+std::optional<std::string> exec_appearance_command(App::State& s, const std::string& name, const std::string& arg);
+bool look_schedule(App::State& s);
+// theme_suggest.cpp: a layout's suggested pair when both themes exist and the layout does not
+// force its own (else nullopt; a missing theme is reported once); the star on suggested cards;
+// the palette a layout shows with now (its card's thumbnail); the Settings row; theme.suggested.
+std::optional<std::pair<std::string, std::string>> usable_suggestion(const LayoutSpec& l);
+void draw_suggested_mark(ImDrawList* dl, ImVec2 c, float r, ImU32 col);
+const Palette* layout_palette(App::State& s, const LayoutSpec& l);
+bool look_theme_suggestion(App::State& s);
+std::optional<std::string> exec_suggest_command(App::State& s, const std::string& name);
+// ambient.cpp: tint by agent state. ambient_palette() returns `base` or a tinted copy of it;
+// recolor says the copy's colours changed this frame (apply_style_colors). `paused` (the theme
+// editor is open) drops the tint at once. ambient_moving() asks for ~30 frames a second.
+struct AmbientResult {
+    const Palette* palette = nullptr;
+    bool recolor = false;
+};
+AmbientResult ambient_palette(App::State& s, const Palette* base, bool paused);
+bool ambient_moving();
+double ambient_strength();  // 0..1, for --report
+bool look_ambient(App::State& s);  // its Settings rows
+// Windows' "Animation effects" is off (ui_tokens.cpp: tok::reduce_motion, read at most every 2 s).
+bool motion_reduced();
+// theme_commands.cpp: appearance:*, appearance.toggle and theme.* (nullopt: not one of them,
+// else "" when it ran or why it failed).
+std::optional<std::string> exec_theme_command(App::State& s, const std::string& name, const std::string& arg);
+// Sets g_pal for this frame (and the ImGui style when it changed).
+void update_palette(App::State& s);
+// theme_editor.cpp: the editor's draft palette while it is open (`changed`: its colours moved
+// since the last call), whether it is open, opening it on a theme (the person's own in place when
+// `in_place`, else a copy; `from_settings` goes back to Settings when it closes), its commands
+// (theme.new, theme.edit, theme.delete, theme.folder) and the dialog.
+const Palette* theme_editor_draft(const App::State& s, bool* changed);
+bool theme_editor_open(const App::State& s);
+void edit_theme(App::State& s, const std::string& id, bool in_place, bool from_settings);
+std::optional<std::string> exec_theme_editor_command(App::State& s, const std::string& name, const std::string& arg);
+void draw_theme_editor(App::State& s);
 }  // namespace detail
 
 }  // namespace agentdesk::desktop

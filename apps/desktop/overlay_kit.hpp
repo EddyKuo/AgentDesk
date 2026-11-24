@@ -56,11 +56,7 @@ inline void center_next_window(ImVec2 size) {
 
 // How a layout is named in Settings and the command palette.
 inline std::string layout_display_name(const std::string& name) {
-    if (name == "workspace")
-        return "AgentDesk";
-    if (name == "terminals")
-        return "Terminals";
-    return name;
+    return ui::styles::display_name(name);
 }
 
 // An agent's state as one small glyph: the spinner while working (drawn from `spin_x`), a ring

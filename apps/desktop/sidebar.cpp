@@ -23,27 +23,63 @@ Attention most_urgent_of(App::State& s, const std::vector<std::string>& ids) {
 
 }  // namespace
 
+// ---------------------------------------------------------------- shared marks
+// AgentDesk's mark, `side` px square at `min`: a rounded accent square with two short bars in the
+// card colour. Designed at 20 px; other sizes scale every part.
+void draw_brand_mark(ImDrawList* dl, ImVec2 min, float side) {
+    const float u = side / 20.0f;
+    const float cy = min.y + side * 0.5f;
+    dl->AddRectFilled(min, ImVec2(min.x + side, min.y + side), g_pal->focus, 5.0f * u);
+    dl->AddRectFilled(ImVec2(min.x + 5.0f * u, cy - 4.0f * u), ImVec2(min.x + 14.0f * u, cy - 1.5f * u), g_pal->card,
+                      1.0f * u);
+    dl->AddRectFilled(ImVec2(min.x + 5.0f * u, cy + 1.5f * u), ImVec2(min.x + 11.0f * u, cy + 4.0f * u), g_pal->card,
+                      1.0f * u);
+}
+
+// The avatar letter: the title's first character, upper-cased when ASCII.
+std::string avatar_letter(const std::string& title) {
+    std::string letter = title.empty() ? std::string("?") : title.substr(0, 1);
+    if (static_cast<unsigned char>(letter[0]) >= 0x80) {
+        std::size_t len = 1;
+        while (len < title.size() && (static_cast<unsigned char>(title[len]) & 0xC0) == 0x80)
+            ++len;
+        letter = title.substr(0, len);
+    } else {
+        letter[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(letter[0])));
+    }
+    return letter;
+}
+
+// A space's avatar: a rounded square in `fill` with its letter centred in bold `font` px.
+void draw_space_avatar(App::State& s, ImDrawList* dl, ImVec2 min, float side, ImU32 fill, ImU32 ink,
+                       const std::string& letter, float font, float radius) {
+    dl->AddRectFilled(min, ImVec2(min.x + side, min.y + side), fill, radius);
+    const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(font, FLT_MAX, 0, letter.c_str());
+    dl->AddText(s.fonts.ui_bold, font, ImVec2(min.x + (side - t.x) * 0.5f, min.y + (side - t.y) * 0.5f), ink,
+                letter.c_str());
+}
+
 // ---------------------------------------------------------------- sidebar: brand row
-// The mark and the name, then search and the sidebar toggle; neither button has a tooltip.
+// The mark and the name, then search and the sidebar toggle; neither button has a tooltip. With
+// the round window buttons the row starts after them, and the rail shows only them.
 void draw_brand(App::State& s, ImVec2 pos, float w, bool rail) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float h = px(46);
     const float cy = pos.y + h * 0.5f;
-    const float x = pos.x + (rail ? px(6) : px(14));
+    // The round window buttons take the row's left 76 px.
+    const float x = pos.x + (rail ? px(6) : mac_window_buttons(s) ? px(76) : px(14));
     if (!rail) {
         const float m = px(20);
-        dl->AddRectFilled(ImVec2(x, cy - m * 0.5f), ImVec2(x + m, cy + m * 0.5f), g_pal->focus, px(5));
-        dl->AddRectFilled(ImVec2(x + px(5), cy - px(4)), ImVec2(x + px(14), cy - px(1.5f)), g_pal->card,
-                          px(1));
-        dl->AddRectFilled(ImVec2(x + px(5), cy + px(1.5f)), ImVec2(x + px(11), cy + px(4)), g_pal->card,
-                          px(1));
+        draw_brand_mark(dl, ImVec2(x, cy - m * 0.5f), m);
         const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fpx(13.5f), FLT_MAX, 0, "AgentDesk");
         dl->AddText(s.fonts.ui_bold, fpx(13.5f), ImVec2(x + m + px(8), cy - t.y * 0.5f), g_pal->text,
                     "AgentDesk");
     }
     const float b = px(26);
     float bx = rail ? pos.x + (w - b) * 0.5f : pos.x + w - px(10) - b;
-    if (icon_button(s, "##sidebar-toggle", ui::icon::kSidebar, ImVec2(bx, cy - b * 0.5f), b, fpx(15), nullptr,
+    // On the rail the round window buttons fill the row; the rail's own "»" widens it again.
+    if (!(rail && mac_window_buttons(s)) &&
+        icon_button(s, "##sidebar-toggle", ui::icon::kSidebar, ImVec2(bx, cy - b * 0.5f), b, fpx(15), nullptr,
                     g_pal->dim))
         run_command(s, "sidebar.rail");
     if (!rail) {
@@ -314,7 +350,7 @@ float draw_rail_space(SpaceList& L, int ri, int i, ImVec2 a0) {
         s.focus_view(s.ws.focused_session());
     }
     if (active)
-        d->AddRectFilled(c, ImVec2(c.x + cw, c.y + ch), g_pal->selected, px(6));
+        d->AddRectFilled(c, ImVec2(c.x + cw, c.y + ch), tok::selected(g_pal->sidebar), px(6));
     else if (ImGui::IsItemHovered())
         d->AddRectFilled(c, ImVec2(c.x + cw, c.y + ch), g_pal->hover, px(6));
     const std::string num = std::to_string(i + 1);
@@ -335,20 +371,6 @@ float draw_rail_space(SpaceList& L, int ri, int i, ImVec2 a0) {
         L.active_bottom = c.y + ch;
     }
     return c.y + ch;
-}
-
-// The avatar letter: the title's first character, upper-cased when ASCII.
-std::string avatar_letter(const std::string& title) {
-    std::string letter = title.empty() ? std::string("?") : title.substr(0, 1);
-    if (static_cast<unsigned char>(letter[0]) >= 0x80) {
-        std::size_t len = 1;
-        while (len < title.size() && (static_cast<unsigned char>(title[len]) & 0xC0) == 0x80)
-            ++len;
-        letter = title.substr(0, len);
-    } else {
-        letter[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(letter[0])));
-    }
-    return letter;
 }
 
 // A dragged row draws at half opacity.
@@ -440,7 +462,7 @@ float draw_space_row(SpaceList& L, int ri, const SpaceRow& row, ImVec2 a) {
     }
     const bool dragged = s.drag_space == i && ImGui::IsMouseDragging(ImGuiMouseButton_Left, px(4));
     if (active)
-        d->AddRectFilled(a, b, g_pal->selected, px(8));
+        d->AddRectFilled(a, b, tok::selected(g_pal->sidebar), px(8));
     else if (hov)
         d->AddRectFilled(a, b, g_pal->hover, px(8));
     const ImU32 fade = dragged ? 128u : 255u;
@@ -454,12 +476,8 @@ float draw_space_row(SpaceList& L, int ri, const SpaceRow& row, ImVec2 a) {
     } else {
         const float side = px(18);
         const ImVec2 am(x, cy - side * 0.5f);
-        d->AddRectFilled(am, ImVec2(am.x + side, am.y + side), faded(avatar_color(sp.color), fade), px(5));
-        const std::string letter = avatar_letter(title);
-        const ImVec2 t = s.fonts.ui_bold->CalcTextSizeA(fpx(10.5f), FLT_MAX, 0, letter.c_str());
-        d->AddText(s.fonts.ui_bold, fpx(10.5f),
-                   ImVec2(am.x + (side - t.x) * 0.5f, am.y + (side - t.y) * 0.5f),
-                   faded(IM_COL32(255, 255, 255, 255), fade), letter.c_str());
+        draw_space_avatar(s, d, am, side, faded(avatar_color(sp.color), fade),
+                          faded(IM_COL32(255, 255, 255, 255), fade), avatar_letter(title), fpx(10.5f), px(5));
         x += side + px(9);
     }
     draw_space_name_and_tail(L, sp, row, title, x, cy, b.x, fade);
@@ -783,6 +801,14 @@ AgentList collect_agents(App::State& s, bool rail, bool by_priority) {
     return out;
 }
 
+}  // namespace
+
+AgentRoster agent_roster(App::State& s) {
+    AgentList l = collect_agents(s, false, s.settings.agents_sort != "space");
+    return {std::move(l.ids), std::move(l.urgency), std::move(l.kids)};
+}
+
+namespace {
 // A row reads "space · detail": the detail is a tab someone named or the agent's own title, never
 // an automatic tab number unless two rows would otherwise read the same.
 void label_agents(App::State& s, AgentList& out) {
@@ -985,7 +1011,7 @@ void draw_rail_agent_row(AgentRows& R, const std::string& id, int index) {
         s.focus(id);
     const bool hov = ImGui::IsItemHovered();
     if (focused)
-        d->AddRectFilled(a, ImVec2(a.x + rw, a.y + rh), g_pal->selected, px(6));
+        d->AddRectFilled(a, ImVec2(a.x + rw, a.y + rh), tok::selected(g_pal->sidebar), px(6));
     else if (hov)
         d->AddRectFilled(a, ImVec2(a.x + rw, a.y + rh), g_pal->hover, px(6));
     const float cell = a.x + rw - px(2) - px(14);
@@ -1130,7 +1156,7 @@ void draw_agent_row(AgentRows& R, const std::string& id, const std::vector<ui::T
     const bool clicked = ImGui::InvisibleButton("##agent", ImVec2(R.rw, rh));
     const bool hov = ImGui::IsItemHovered();
     if (focused)
-        d->AddRectFilled(a, b, g_pal->selected, px(8));
+        d->AddRectFilled(a, b, tok::selected(g_pal->sidebar), px(8));
     else if (hov)
         d->AddRectFilled(a, b, g_pal->hover, px(8));
     const float cy = a.y + rh * 0.5f;

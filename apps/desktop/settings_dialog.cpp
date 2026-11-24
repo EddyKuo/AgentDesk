@@ -120,6 +120,8 @@ bool draw_settings_nav(App::State& s, float h) {
 void look_layout_cards(App::State& s) {
     CardFlow lf = CardFlow::at_cursor();
     for (const auto& l : s.layouts) {
+        if (!ui::styles::is_listed(l.name, s.settings.styles.fun_layouts, s.settings.layout))
+            continue;
         const bool on = l.name == s.settings.layout;
         const float cw = px(kCardW), pad = px(kCardPad), ph = px(62), lh = line_h(12.5f);
         const float ch = pad + ph + px(6) + lh + pad;
@@ -135,11 +137,71 @@ void look_layout_cards(App::State& s) {
             d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), raised_color(), px(10));
         if (on)
             d->AddRect(a, ImVec2(a.x + cw, a.y + ch), g_pal->focus, px(10), 0, px(2));
-        layout_preview(d, l.name, ImVec2(a.x + pad, a.y + pad), ImVec2(cw - pad * 2, ph));
+        {  // drawn in the theme that layout shows with, not the current one
+            const Palette* const shown = std::exchange(g_pal, layout_palette(s, l));
+            layout_preview(d, l.name, ImVec2(a.x + pad, a.y + pad), ImVec2(cw - pad * 2, ph));
+            g_pal = shown;
+        }
         card_name(s, d, ImVec2(a.x + pad, a.y + pad + ph + px(6)), layout_display_name(l.name), on,
                   fpx(12.5f) * 0.55f);
     }
     lf.end();
+}
+
+// A theme card's right-click menu: edit a copy of any theme; edit or delete the person's own.
+void theme_card_menu(App::State& s, const Palette& p) {
+    if (!begin_menu("##theme-menu"))
+        return;
+    if (menu_row(s, ui::icon::kEdit, "Edit a copy..."))
+        edit_theme(s, p.id, false, true);
+    if (is_user_theme(p.id)) {
+        if (menu_row(s, ui::icon::kEdit, "Edit..."))
+            edit_theme(s, p.id, true, true);
+        if (menu_row(s, ui::icon::kClose, "Delete...")) {
+            s.confirm_title = std::string("Delete ") + p.label + "?";
+            s.confirm_detail = std::string("themes\\") + p.id +
+                               ".json is set aside (renamed .json.old-...), not erased. Layouts using it go back "
+                               "to the default theme.";
+            s.confirm_command = std::string("theme.delete:") + p.id;
+            s.show_confirm = true;
+        }
+    }
+    ImGui::EndPopup();
+}
+
+// The last card of a row: a dashed outline with a plus, "New theme". It starts a copy of the
+// layout's current theme of that kind.
+void new_theme_card(App::State& s, ImVec2 a, bool light_cards) {
+    const float cw = px(kCardW), pad = px(kCardPad), ph = px(46);
+    const float ch = pad + ph + px(6) + line_h(12.5f) + pad;
+    ImGui::SetCursorScreenPos(a);
+    ImGui::PushID(light_cards ? "new-light" : "new-dark");
+    const bool clicked = ImGui::InvisibleButton("##new-theme", ImVec2(cw, ch));
+    const bool hov = ImGui::IsItemHovered();
+    ImGui::PopID();
+    ImDrawList* d = ImGui::GetWindowDrawList();
+    if (hov)
+        d->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), raised_color(), px(10));
+    const ImVec2 pa(a.x + pad, a.y + pad);
+    const ImVec2 pb(a.x + cw - pad, pa.y + ph);
+    // Dashed outline: short segments along each side.
+    const ImU32 line = hov ? g_pal->dim : g_pal->faint;
+    const float dash = px(5), gap = px(4);
+    for (float x = pa.x + px(6); x < pb.x - px(6); x += dash + gap) {
+        d->AddLine(ImVec2(x, pa.y), ImVec2(std::min(x + dash, pb.x - px(6)), pa.y), line, px(1));
+        d->AddLine(ImVec2(x, pb.y), ImVec2(std::min(x + dash, pb.x - px(6)), pb.y), line, px(1));
+    }
+    for (float y = pa.y + px(6); y < pb.y - px(6); y += dash + gap) {
+        d->AddLine(ImVec2(pa.x, y), ImVec2(pa.x, std::min(y + dash, pb.y - px(6))), line, px(1));
+        d->AddLine(ImVec2(pb.x, y), ImVec2(pb.x, std::min(y + dash, pb.y - px(6))), line, px(1));
+    }
+    draw_icon(s, d, ui::icon::kPlus, fpx(16), ImVec2((pa.x + pb.x) * 0.5f, (pa.y + pb.y) * 0.5f),
+              hov ? g_pal->text : g_pal->dim);
+    card_name(s, d, ImVec2(a.x + pad, pb.y + px(6)), "New theme", false, 0);
+    if (clicked) {
+        const auto pair = layout_theme_pair(s.settings);
+        edit_theme(s, light_cards ? pair.second : pair.first, false, true);
+    }
 }
 
 // The theme cards of one kind (dark or light) for the current layout. Each has a 46 px preview
@@ -148,6 +210,7 @@ void look_layout_cards(App::State& s) {
 // Raised on hover, a 2 px accent border when chosen. Returns true when a theme was picked.
 bool look_theme_cards(App::State& s, bool light_cards) {
     bool changed = false;
+    const auto suggested = usable_suggestion(s.layout());
     CardFlow tf = CardFlow::at_cursor();
     for (const Palette* pal : all_palettes()) {
         const Palette& p = *pal;
@@ -165,6 +228,7 @@ bool look_theme_cards(App::State& s, bool light_cards) {
             changed = true;
         }
         const bool hov = ImGui::IsItemHovered();
+        theme_card_menu(s, p);
         ImGui::PopID();
         ImDrawList* d = ImGui::GetWindowDrawList();
         if (hov)
@@ -192,7 +256,14 @@ bool look_theme_cards(App::State& s, bool light_cards) {
             dx += px(8) + px(4);
         }
         card_name(s, d, ImVec2(a.x + pad, pb.y + px(6)), p.label, on, line_h(12.5f) * 0.5f);
+        // Made for this layout: a small accent star in the preview's top right corner.
+        if (suggested && (light_cards ? suggested->second : suggested->first) == p.id) {
+            const ImVec2 c(pb.x - px(9), pa.y + px(9));
+            d->AddCircleFilled(c, px(7), alpha(p.bg, 230));
+            draw_suggested_mark(d, c, px(5.5f), g_pal->focus);
+        }
     }
+    new_theme_card(s, tf.next(px(kCardW), px(kCardPad) * 2 + px(46) + px(6) + line_h(12.5f)), light_cards);
     tf.end();
     return changed;
 }
@@ -201,15 +272,25 @@ bool look_theme_cards(App::State& s, bool light_cards) {
 bool look_theme(App::State& s) {
     bool changed = false;
     settings_section(s, "Theme");
-    settings_row(s, "Appearance", "Light or dark, or as your system is now.", px(240), px(32));
+    settings_row(s, "Appearance", "Schedule switches by the clock.", px(320), px(32));
     if (segmented(s, "##appearance", s.settings.appearance,
-                  {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}}))
+                  {{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}, {"schedule", "Schedule"}})) {
+        s.schedule_override_until.reset();
+        changed = true;
+    }
+    settings_row_done(s);
+    if (s.settings.appearance == "schedule")
+        changed |= look_schedule(s);
+    settings_row(s, "Window buttons", "Round ones at the top left, or Windows' at the top right.", px(240), px(32));
+    if (segmented(s, "##window-buttons", s.settings.window_buttons, {{"mac", "Round"}, {"windows", "Windows"}}))
         changed = true;
     settings_row_done(s);
+    changed |= look_ambient(s);
     settings_gap(px(12));
     settings_wrapped(s, "For the layout you're in: each layout keeps its own light and dark theme.",
                      g_pal->faint);
     settings_gap(px(8));
+    changed |= look_theme_suggestion(s);
     for (const bool light_cards : {false, true}) {
         if (light_cards)
             settings_gap(px(10));
@@ -329,11 +410,25 @@ bool look_terminals(App::State& s) {
     return changed;
 }
 
+// Fun layouts: Classic and Garden join the cards and the Ctrl+Shift+L cycle.
+bool look_fun_layouts_row(App::State& s) {
+    settings_row(s, "Fun layouts", "Show the playful layouts (AgentDesk Classic, Garden) with the others.", px(36),
+                 px(20));
+    const bool hit = settings_toggle("##fun-layouts", s.settings.styles.fun_layouts);
+    if (hit)
+        s.settings.styles.fun_layouts = !s.settings.styles.fun_layouts;
+    settings_row_done(s);
+    return hit;
+}
+
 bool settings_look(App::State& s) {
     settings_section(s, "Layout");
     look_layout_cards(s);
+    bool changed = look_style_options(s);  // the shown style's own rows, if any
+    changed |= look_tips_row(s);
+    changed |= look_fun_layouts_row(s);
     settings_gap(px(18));
-    bool changed = look_theme(s);
+    changed |= look_theme(s);
     settings_gap(px(18));
     changed |= look_size_and_fonts(s);
     settings_gap(px(18));
@@ -578,6 +673,14 @@ bool settings_alerts(App::State& s) {
     };
     sound_row("An agent needs you", s.settings.sound_blocked, true);
     sound_row("An agent finished", s.settings.sound_done, false);
+    // Focus mode, with the window in front: the window's edge glows instead of the note.
+    settings_row(s, "In focus mode",
+                 "With the window in front, the window's edge glows instead of a note.",
+                 px(240), px(32));
+    if (segmented(s, "##st-focus-alerts", s.settings.focus_alerts,
+                  {{"edge", "Edge"}, {"edge_sound", "Edge + sound"}, {"normal", "Usual"}}))
+        changed = true;
+    settings_row_done(s);
     settings_footnote(
         s,
         "Want your own sounds? Ask your agent to set sound_done and sound_blocked in ui.json to "
@@ -704,7 +807,7 @@ void draw_settings(App::State& s) {
     ImGui::EndChild();
     if (changed)
         save_settings(s.settings);
-    if (close || ImGui::IsKeyPressed(ImGuiKey_Escape))
+    if (close || std::exchange(s.layout_tips.close_settings, false) || ImGui::IsKeyPressed(ImGuiKey_Escape))
         ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
 }

@@ -1,0 +1,34 @@
+{
+  "id": "root",
+  "type": "column",
+  "titlebar": "none",
+  "traffic_lights": [12, 15],
+  "background": "canvas",
+  "children": [
+    {
+      "id": "bar",
+      "type": "block",
+      "size": { "px": 42 },
+      "window_drag": true,
+      "content": { "mod": "pair-bar" }
+    },
+    {
+      "id": "stage",
+      "type": "block",
+      "padding": 8,
+      "content": { "mod": "pair-stage" }
+    },
+    {
+      "id": "prompt",
+      "type": "block",
+      "size": { "px": 60 },
+      "content": { "mod": "pair-prompt" }
+    },
+    {
+      "id": "status",
+      "type": "block",
+      "size": { "px": 28 },
+      "content": { "mod": "workspace-status" }
+    }
+  ]
+}

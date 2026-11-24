@@ -63,6 +63,34 @@ namespace {
 // the person's file until they fix it (as when it does not parse).
 bool g_settings_unreadable = false;
 
+// The appearance schedule and the ambient tint. A value of the wrong kind falls back to its
+// default here (it is rewritten on the next save); times are "HH:MM" strings.
+void read_theme_features(const Json& j, Settings& s) {
+    if (const auto it = j.find("appearance_schedule"); it != j.end() && it->is_object()) {
+        auto& a = s.appearance_schedule;
+        const Json& o = *it;
+        if (o.value("mode", Json()) == "sun")
+            a.mode = "sun";
+        for (const auto& [key, field] : {std::pair{"light_at", &a.light_at}, {"dark_at", &a.dark_at}})
+            if (const auto v = o.find(key); v != o.end() && v->is_string())
+                if (const auto m = ui::schedule::parse_hhmm(v->get<std::string>()))
+                    *field = *m;
+        if (a.light_at == a.dark_at)  // an error the file can't keep: back to the defaults
+            a = ui::schedule::AppearanceSchedule{a.mode, 7 * 60, 19 * 60, a.latitude, a.longitude, a.sun_offset};
+        for (const auto& [key, field, limit] :
+             {std::tuple{"latitude", &a.latitude, 90.0}, {"longitude", &a.longitude, 180.0}})
+            if (const auto v = o.find(key); v != o.end() && v->is_number() && std::abs(v->get<double>()) <= limit)
+                *field = ui::schedule::round_tenth(v->get<double>());
+        if (const auto v = o.find("sun_offset"); v != o.end() && v->is_number_integer())
+            a.sun_offset = std::clamp(v->get<int>(), -120, 120);
+        if (a.mode == "sun" && !a.latitude)
+            a.mode = "fixed";
+    }
+    s.ambient = j.value("ambient", Json()) == "subtle" ? "subtle" : "off";
+    if (const auto v = j.find("ambient_done"); v != j.end() && v->is_boolean())
+        s.ambient_done = v->get<bool>();
+}
+
 // The theme keys. Files from before "appearance" existed keep their one theme as the fixed
 // choice; ids of the older preset spelling are read as today's (theme_id).
 void read_themes(const Json& j, Settings& s) {
@@ -76,6 +104,7 @@ void read_themes(const Json& j, Settings& s) {
             if (pair.is_object())
                 s.layout_themes[name] = {theme_id(pair.value("dark", s.theme_dark)),
                                          theme_id(pair.value("light", s.theme_light))};
+    read_theme_features(j, s);
 }
 
 // The string elements of `list`, in order; anything else in it is skipped.
@@ -122,6 +151,7 @@ Settings load_settings_unchecked() {
     s.last_cwd = j.value("last_cwd", "");
     s.terminal_weight = std::clamp(j.value("terminal_weight", s.terminal_weight), 100, 900);
     s.ui_font = j.value("ui_font", "");
+    s.window_buttons = j.value("window_buttons", "mac") == "windows" ? "windows" : "mac";
     read_themes(j, s);
     s.zoom = std::clamp(j.value("zoom", 1.0f), 0.5f, 3.0f);
     s.font_size = std::clamp(j.value("font_size", 14.0f), 8.0f, 32.0f);  // the stepper's 8-32
@@ -146,8 +176,40 @@ Settings load_settings_unchecked() {
     s.sound_blocked = j.value("sound_blocked", "");
     s.welcomed = j.value("welcomed", "");
     s.seen_version = j.value("seen_version", "");
+    s.focus_on = j.value("focus_on", false);
+    s.focus_alerts = ui::focus::alerts_mode(j.value("focus_alerts", std::string("edge_sound")));
+    // Stage: its own keys, else what Mission Control (which it replaced) had saved.
+    s.stage_filter = std::string(ui::stage::filter_name(ui::stage::parse_filter(
+        j.value("stage_filter", j.value("mission_filter", std::string("all"))))));
+    s.stage_size = std::string(ui::stage::size_name(ui::stage::parse_size(j.value("stage_size", std::string("m")))));
+    s.stage_shells = j.value("stage_shells", j.value("mission_shells", false));
+    s.stage_auto_switch = j.value("stage_auto_switch", false);
+    s.inbox_order = ui::inbox::order_name(j.value("inbox_order", std::string("newest")));
+    if (const auto it = j.find("inbox_answers"); it != j.end())
+        s.inbox_answers = ui::inbox::parse_answers(*it, &s.inbox_answer_errors);
     read_lists(j, s);
     s.layout = j.value("layout", s.layout);
+    s.layout_return = j.value("layout_return", "");
+    s.review_follow = j.value("review_follow", "agent") == "focused" ? "focused" : "agent";
+    s.timeline_range = j.value("timeline_range", "1h");
+    if (s.timeline_range != "15m" && s.timeline_range != "4h" && s.timeline_range != "24h")
+        s.timeline_range = "1h";
+    s.timeline_since_left = j.value("timeline_since_left", true);
+    read_style_settings(j, s.styles);
+    read_pair_settings(j, s.pair);
+    // Layouts that no longer ship: Tiling is Terminals with square corners, Cockpit the first layout,
+    // Mission Control is Stage.
+    if (const auto r = ui::styles::replacement_for(s.layout)) {
+        s.layout = r->layout;
+        if (r->square_corners)
+            s.styles.terminals_square = true;
+    }
+    if (const auto r = ui::styles::replacement_for(s.layout_return))
+        s.layout_return = r->layout;
+    if (const auto it = j.find("tips"); it != j.end() && it->is_boolean())
+        s.tips = it->get<bool>();
+    if (const auto it = j.find("tips_seen"); it != j.end() && it->is_array())
+        add_strings(*it, s.tips_seen);
     for (const auto& m : j.value("machines", Json::array())) {
         if (m.is_object() && !m.value("name", "").empty() && !m.value("target", "").empty())
             s.machines.push_back({m.value("name", ""), m.value("target", ""), m.value("ctl", "")});
@@ -191,7 +253,7 @@ std::string read_text_file(const std::filesystem::path& p, bool* ok) {
 void save_settings(const Settings& s) {
     const auto path = data_dir() / L"ui.json";
     const auto tmp = std::filesystem::path(path).concat(L".tmp");
-    const Json ours = Json{
+    Json ours = Json{
             {"schema_version", 1},
             {"close_notice_shown", s.close_notice_shown},
             {"last_cwd", s.last_cwd},
@@ -199,6 +261,20 @@ void save_settings(const Settings& s) {
             {"terminal_weight", s.terminal_weight},
             {"ui_font", s.ui_font},
             {"appearance", s.appearance},
+            {"appearance_schedule",
+             [&] {
+                 const auto& a = s.appearance_schedule;
+                 auto deg = [](const std::optional<double>& v) { return v ? Json(*v) : Json(nullptr); };
+                 return Json{{"mode", a.mode},
+                             {"light_at", ui::schedule::format_hhmm(a.light_at)},
+                             {"dark_at", ui::schedule::format_hhmm(a.dark_at)},
+                             {"latitude", deg(a.latitude)},
+                             {"longitude", deg(a.longitude)},
+                             {"sun_offset", a.sun_offset}};
+             }()},
+            {"ambient", s.ambient},
+            {"ambient_done", s.ambient_done},
+            {"window_buttons", s.window_buttons},
             {"theme_dark", s.theme_dark},
             {"theme_light", s.theme_light},
             {"layout_themes",
@@ -232,17 +308,32 @@ void save_settings(const Settings& s) {
             {"sound_blocked", s.sound_blocked},
             {"welcomed", s.welcomed},
             {"seen_version", s.seen_version},
+            {"focus_on", s.focus_on},
+            {"focus_alerts", s.focus_alerts},
+            {"stage_filter", s.stage_filter},
+            {"stage_size", s.stage_size},
+            {"stage_shells", s.stage_shells},
+            {"stage_auto_switch", s.stage_auto_switch},
+            {"inbox_order", s.inbox_order},
             {"folded_machines", s.folded_machines},
             {"panels", s.panels},
             {"agents_changed", s.agents_changed},
             {"mods_enabled", std::vector<std::string>(s.mods_enabled.begin(), s.mods_enabled.end())},
             {"layout", s.layout},
+            {"layout_return", s.layout_return},
+            {"review_follow", s.review_follow},
+            {"timeline_range", s.timeline_range},
+            {"timeline_since_left", s.timeline_since_left},
             {"machines", [&] {
                  Json list = Json::array();
                  for (const auto& m : s.machines)
                      list.push_back({{"name", m.name}, {"target", m.target}, {"ctl", m.ctl}});
                  return list;
              }()}};
+    write_style_settings(ours, s.styles);
+    write_pair_settings(ours, s.pair);
+    ours["tips"] = s.tips;
+    ours["tips_seen"] = s.tips_seen;
     for (int attempt = 0; attempt < 3; ++attempt) {
         std::error_code ec;
         const bool exists = std::filesystem::exists(path, ec);
@@ -266,6 +357,9 @@ void save_settings(const Settings& s) {
         }
         for (const auto& [k, v] : ours.items())
             doc[k] = v;
+        // Keys of layouts that no longer ship (Tiling, Cockpit, Mission Control): what carries over
+        // was read at start-up, so they leave the file now.
+        ui::styles::drop_obsolete_settings(doc);
         // Telemetry off writes false; on deletes the key (on is the default).
         if (s.telemetry)
             doc.erase("telemetry");

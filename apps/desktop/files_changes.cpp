@@ -17,6 +17,28 @@ void panel_note(App::State& s, const std::string& t) {
     ImGui::PopStyleColor();
 }
 
+// An empty list: a small drawing and one line, centred in what is left of the panel.
+void panel_empty(App::State& s, tok::Art art, const std::string& t) {
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const ImVec2 room = ImGui::GetContentRegionAvail();
+    if (room.y < px(120)) {
+        panel_note(s, t);
+        return;
+    }
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float side = px(48);
+    const float cx = at.x + room.x * 0.5f;
+    const float top = at.y + std::max(tok::gap_xl(), room.y * 0.28f);
+    tok::draw_art(dl, art, ImVec2(cx, top + side * 0.5f), side);
+    const float wrap = std::max(px(80), room.x - tok::gap_xl() * 2);
+    ImFont* f = tok::font(s, ui::tokens::kBody);
+    const float fs = tok::size(ui::tokens::kBody);
+    const ImVec2 ts = f->CalcTextSizeA(fs, FLT_MAX, wrap, t.c_str());
+    dl->AddText(f, fs, ImVec2(cx - ts.x * 0.5f, top + side + tok::gap_m()), g_pal->dim, t.c_str(), nullptr,
+                wrap);
+    ImGui::Dummy(ImVec2(room.x, top - at.y + side + tok::gap_m() + ts.y));
+}
+
 // ---------------------------------------------------------------- Files
 
 // A message in place of the preview (binary, too large, unreadable): 12 px padding, dim UI text,
@@ -132,13 +154,13 @@ void draw_files_panel(App::State& s, ImVec2 pos, ImVec2 size) {
     ImGui::Dummy(ImVec2(0, px(6)));
     draw_file_rows(tree, "", 0);
     if (root.empty())
-        panel_note(s, "No folder");
+        panel_empty(s, tok::Art::kFiles, "No folder");
     else if (!p.files_error.empty())
         panel_note(s, p.files_error);
     else if (!p.listing.count(""))
         panel_note(s, "Loading files\xE2\x80\xA6");
     else if (p.listing[""].empty())
-        panel_note(s, "No files");
+        panel_empty(s, tok::Art::kFiles, "No files");
     if (p.files_limited)
         panel_note(s, "File list limited to 500 entries per folder and 5,000 total");
     ImGui::EndChild();
@@ -192,7 +214,7 @@ bool draw_change_row(App::State& s, ImDrawList* d, const SidePanels& p, const Si
     const bool hov = ImGui::IsItemHovered();
     ImGui::PopID();
     if (c.path == p.open_diff)
-        d->AddRectFilled(a, ImVec2(a.x + rw, a.y + px(28)), g_pal->selected, px(7));
+        d->AddRectFilled(a, ImVec2(a.x + rw, a.y + px(28)), tok::selected(g_pal->card), px(7));
     else if (hov)
         d->AddRectFilled(a, ImVec2(a.x + rw, a.y + px(28)), g_pal->hover, px(7));
     const float ry = a.y + px(14);
@@ -239,13 +261,15 @@ std::string draw_changes_list(App::State& s, const SidePanels& p, const std::str
         if (draw_change_row(s, d, p, c, rw))
             select = c.path;
     if (cwd.empty())
-        panel_note(s, "No folder");
+        panel_empty(s, tok::Art::kFiles, "No folder");
     else if (p.not_repo)
-        panel_note(s, "Not a git repository");
+        panel_empty(s, tok::Art::kChanges, "Not a git repository");
     else if (!p.changes_error.empty())
         panel_note(s, p.changes_error);
+    else if (p.changes.empty() && p.repo_top.empty())
+        panel_note(s, "Loading changes\xE2\x80\xA6");
     else if (p.changes.empty())
-        panel_note(s, p.repo_top.empty() ? "Loading changes\xE2\x80\xA6" : "No uncommitted changes");
+        panel_empty(s, tok::Art::kAllDone, "No uncommitted changes");
     ImGui::EndChild();
     return select;
 }

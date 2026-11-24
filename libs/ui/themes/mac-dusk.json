@@ -1,0 +1,28 @@
+{
+  "name": "Dusk",
+  "background": "#1b1a2e",
+  "foreground": "#dcdaf0",
+  "selection": "#4b3f8a",
+  "cursor": "#ffb27a",
+  "ansi": [
+    "#2a2840", "#ff6b8b", "#7fd68a", "#f5c451", "#7aa2ff", "#c99bff", "#5fd4c4", "#dcdaf0",
+    "#5f5c80", "#ff8fa8", "#a0e8a8", "#ffd98a", "#9dbbff", "#dcb8ff", "#8ce6da", "#f7f6ff"
+  ],
+  "colors": {
+    "canvas": "#141325",
+    "chrome": "#18172a",
+    "surface": "#1b1a2e",
+    "foreground": "#ecebf7",
+    "muted": "#aaa7c8",
+    "dim": "#8d8aae",
+    "accent": "#b48cff",
+    "info": "#ff9e64",
+    "border": "#2e2c4a",
+    "hover": "#23213b",
+    "selected": "#2e2b4c",
+    "blocked": "#ff6b8b",
+    "working": "#f5c451",
+    "done": "#5fd4c4",
+    "idle": "#8d8aae"
+  }
+}

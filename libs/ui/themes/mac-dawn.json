@@ -1,0 +1,28 @@
+{
+  "name": "Dawn",
+  "background": "#fffaf3",
+  "foreground": "#2f2938",
+  "selection": "#cdc3f5",
+  "cursor": "#5b4bd6",
+  "ansi": [
+    "#2a2433", "#c8324f", "#2f7d3a", "#9a6200", "#3d5bd1", "#8a3fb8", "#0f7480", "#6b6375",
+    "#8a8296", "#d64560", "#3a8f46", "#a87000", "#4f6ce0", "#9c52c9", "#158895", "#1c1724"
+  ],
+  "colors": {
+    "canvas": "#f6efe4",
+    "chrome": "#f1e8db",
+    "surface": "#fffaf3",
+    "foreground": "#2a2433",
+    "muted": "#5f566c",
+    "dim": "#675e74",
+    "accent": "#5b4bd6",
+    "info": "#e0703a",
+    "border": "#ddd1bf",
+    "hover": "#ebe1d2",
+    "selected": "#e4d8c6",
+    "blocked": "#c22a5c",
+    "working": "#9a6200",
+    "done": "#0b7285",
+    "idle": "#675e74"
+  }
+}

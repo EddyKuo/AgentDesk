@@ -2,6 +2,7 @@
 // copied in on first run.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
+#include "overlay_kit.hpp"
 
 namespace agentdesk::desktop {
 namespace detail {
@@ -35,15 +36,12 @@ void derive_layout(LayoutSpec& l) {
     }
     l.look_applies = theme.empty() || palette_exists(theme);
     l.theme = palette_exists(theme) ? theme : std::string();
-    l.style.clear();
-    for (const lay::Node* n : t.walk()) {
-        const std::string m = n->mod();
-        if (m == "terminals-bar" && l.style.empty())
-            l.style = "terminals";
-        if (n->is_block() && n->content.type == lay::Content::Type::kTab && n->content.pane &&
-            n->content.pane->header && n->content.pane->header->mod() == "terminals-pane" && l.style.empty())
-            l.style = "terminals";
-    }
+    if (const auto st = t.look.find("suggested_themes"); st != t.look.end() && st->is_object())
+        l.suggested = std::pair{st->value("dark", std::string()), st->value("light", std::string())};
+    else
+        l.suggested = ui::theme::builtin_suggestion(l.name);
+    // The mod names its blocks and pane headers use pick the renderers (ui::styles' table).
+    l.style = ui::styles::style_of_tree(t);
     // Font size: on the path from the root to the first shown panes' block, the deepest node that
     // sets one wins.
     l.font_size.reset();
@@ -193,7 +191,8 @@ std::vector<LayoutSpec> load_layouts(const Settings& st) {
     std::sort(files.begin(), files.end());
     for (const auto& f : files) {
         LayoutSpec l = read_layout_file(f);
-        const auto it = std::find_if(list.begin(), list.end(), [&](const LayoutSpec& x) { return x.name == l.name; });
+        const auto it =
+            std::find_if(list.begin(), list.end(), [&](const LayoutSpec& x) { return x.name == l.name; });
         if (it != list.end()) {
             l.builtin = it->builtin;
             *it = std::move(l);
@@ -204,6 +203,34 @@ std::vector<LayoutSpec> load_layouts(const Settings& st) {
     for (auto& l : list)
         apply_layout_state(l, st);
     return list;
+}
+
+std::string toggle_layout(App::State& s, const std::string& style) {
+    // Focus replaces whatever layout shows, so a toggle pressed in Focus leaves it and shows
+    // `style` rather than going back from a layout the person could not see.
+    const bool was_focus = s.settings.focus_on;
+    set_focus(s, false);
+    if (s.layout().style != style) {
+        // The built-in of that name when it has the style, else the first layout that does (a
+        // person's own copy counts).
+        auto it = std::find_if(s.layouts.begin(), s.layouts.end(),
+                               [&](const LayoutSpec& l) { return l.name == style && l.style == style; });
+        if (it == s.layouts.end())
+            it = std::find_if(s.layouts.begin(), s.layouts.end(),
+                              [&](const LayoutSpec& l) { return l.style == style; });
+        if (it == s.layouts.end())
+            return "no " + layout_display_name(style) + " layout";
+        s.settings.layout_return = s.settings.layout;
+        s.settings.layout = it->name;
+    } else if (!was_focus) {
+        const std::string& back = s.settings.layout_return;
+        const auto it = std::find_if(s.layouts.begin(), s.layouts.end(),
+                                     [&](const LayoutSpec& l) { return l.name == back && l.style != style; });
+        s.settings.layout = it != s.layouts.end() ? back : std::string("workspace");
+    }
+    save_settings(s.settings);
+    s.focus_view(s.ws.focused_session());
+    return {};
 }
 
 // ------------------------------------------------------------------ example mods (first run)
@@ -225,7 +252,8 @@ void write_example_mods() {
             continue;  // a folder of the person's own with that name
         std::filesystem::create_directories(to, ec);
         for (const wchar_t* f : {L"mod.dll", L"mod.json"})
-            std::filesystem::copy_file(e.path() / f, to / f, std::filesystem::copy_options::overwrite_existing, ec);
+            std::filesystem::copy_file(e.path() / f, to / f,
+                                       std::filesystem::copy_options::overwrite_existing, ec);
         if (!std::filesystem::exists(to / L"settings.json", ec) &&
             std::filesystem::is_regular_file(e.path() / L"settings.json", ec))
             std::filesystem::copy_file(e.path() / L"settings.json", to / L"settings.json", ec);
