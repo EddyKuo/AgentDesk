@@ -32,6 +32,9 @@ add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # host/input.hpp is part of the public interface (TerminalSource::send).
 if(APPLE)
+    # fonts.cpp asks FreeType which face of a collection (PingFang.ttc) a font is.
+    find_package(Freetype REQUIRED)
+    target_link_libraries(agentdesk_ui PRIVATE Freetype::Freetype)
     target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi lunasvg::lunasvg
         "-framework AppKit" "-framework CoreText" "-framework CoreFoundation" "-framework Carbon")
 else()

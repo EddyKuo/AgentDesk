@@ -10,6 +10,9 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreText/CoreText.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include <imgui_freetype.h>
 
 #include "agentdesk/platform/system.hpp"
 #include "agentdesk/platform/win/error.hpp"
@@ -85,6 +88,81 @@ const std::vector<std::filesystem::path>& system_font_dirs() {
     return dirs;
 }
 
+// Faces inside a collection (.ttc) found by PostScript name: file -> face index, for add_font_file.
+std::map<std::string, int>& face_indexes() {
+    static std::map<std::string, int> m;
+    return m;
+}
+
+// The face index of `postscript` inside `file` (0 when it is not a collection or not found).
+int face_index_of(const std::string& file, const std::string& postscript) {
+    FT_Library lib = nullptr;
+    if (FT_Init_FreeType(&lib) != 0)
+        return 0;
+    int found = 0;
+    FT_Face face = nullptr;
+    if (FT_New_Face(lib, file.c_str(), -1, &face) == 0) {
+        const FT_Long count = face->num_faces;
+        FT_Done_Face(face);
+        for (FT_Long i = 0; i < count; ++i) {
+            if (FT_New_Face(lib, file.c_str(), i, &face) != 0)
+                continue;
+            const char* ps = FT_Get_Postscript_Name(face);
+            const bool match = ps != nullptr && postscript == ps;
+            FT_Done_Face(face);
+            if (match) {
+                found = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+    FT_Done_FreeType(lib);
+    return found;
+}
+
+// A system font by PostScript name, through CoreText (it also finds fonts macOS keeps outside
+// /System/Library/Fonts, such as PingFang). The face index is remembered for collections.
+std::string coretext_font(const char* postscript) {
+    CFStringRef name = CFStringCreateWithCString(nullptr, postscript, kCFStringEncodingUTF8);
+    CTFontRef font = CTFontCreateWithName(name, 12, nullptr);
+    CFRelease(name);
+    std::string path;
+    if (font != nullptr) {
+        CFStringRef actual = CTFontCopyPostScriptName(font);
+        char actual_name[256]{};
+        const bool same = actual != nullptr && CFStringGetCString(actual, actual_name, sizeof actual_name,
+                                                                  kCFStringEncodingUTF8) &&
+                          std::string_view(actual_name) == postscript;  // no silent substitute
+        if (actual != nullptr)
+            CFRelease(actual);
+        if (auto url = static_cast<CFURLRef>(CTFontCopyAttribute(font, kCTFontURLAttribute))) {
+            char buf[1024]{};
+            if (same && CFURLGetFileSystemRepresentation(url, true, reinterpret_cast<UInt8*>(buf), sizeof buf))
+                path = buf;
+            CFRelease(url);
+        }
+        CFRelease(font);
+    }
+    if (!path.empty() && path.ends_with(".ttc"))
+        face_indexes()[path] = face_index_of(path, postscript);
+    return path;
+}
+
+// The system fonts that play the part of the Windows ones the callers name, by PostScript name
+// (CoreText) first, then by file in the system font folders.
+std::vector<std::string> mac_postscript_equivalents(std::wstring_view windows_name) {
+    static const std::map<std::wstring_view, std::vector<std::string>> kMap = {
+        {L"msjh.ttc", {"PingFangTC-Regular"}},     // what herdr's CoreText falls back to
+        {L"mingliu.ttc", {"PingFangTC-Regular"}},
+        {L"seguisym.ttf", {"AppleSymbols"}},
+        {L"CascadiaMono.ttf", {"SFMono-Regular", "Menlo-Regular"}},
+        {L"consola.ttf", {"Menlo-Regular"}},
+        {L"consolab.ttf", {"Menlo-Bold"}},
+    };
+    const auto it = kMap.find(windows_name);
+    return it == kMap.end() ? std::vector<std::string>{} : it->second;
+}
+
 std::vector<std::string> mac_equivalents(std::wstring_view windows_name) {
     static const std::map<std::wstring_view, std::vector<std::string>> kMap = {
         {L"msjh.ttc", {"STHeiti Medium.ttc", "Hiragino Sans GB.ttc", "Arial Unicode.ttf"}},
@@ -112,6 +190,9 @@ std::string find_font(std::initializer_list<const wchar_t*> bundled, std::initia
             return utf8(p);
     }
     for (const wchar_t* name : system) {
+        for (const auto& ps : mac_postscript_equivalents(name))
+            if (std::string path = coretext_font(ps.c_str()); !path.empty())
+                return path;
         for (const auto& mac : mac_equivalents(name)) {
             for (const auto& dir : system_font_dirs()) {
                 const auto p = dir / mac;
@@ -146,6 +227,13 @@ ImFont* add_font_file(const std::string& path, float size, ImFontConfig c) {
         it = files.emplace(path, std::move(bytes)).first;
     }
     c.FontDataOwnedByAtlas = false;
+#ifdef __APPLE__
+    // A face inside a collection (PingFang.ttc holds SC, TC, HK...), and glyphs drawn without
+    // hinting, as macOS's own text (CoreText) looks.
+    if (const auto it = face_indexes().find(path); it != face_indexes().end())
+        c.FontNo = static_cast<ImU32>(it->second);
+    c.FontLoaderFlags |= ImGuiFreeTypeLoaderFlags_NoHinting;
+#endif
     if (c.Name[0] == '\0') {  // AddFontFromFileTTF names the source after the file; keep doing so
         const std::string name =
             std::filesystem::path(std::u8string(path.begin(), path.end())).filename().string();

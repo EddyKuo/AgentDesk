@@ -156,8 +156,10 @@ static void schedule_pump(int frames);
 
 @implementation AgentDeskView
 
+// Typing reaches ImGui through the backend's own text-input view, which must stay the first
+// responder: if a click made this view first responder, keys would no longer turn into text.
 - (BOOL)acceptsFirstResponder {
-    return YES;
+    return NO;
 }
 
 - (BOOL)acceptsFirstMouse:(NSEvent*)event {
