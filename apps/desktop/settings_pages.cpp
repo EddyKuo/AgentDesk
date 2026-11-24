@@ -397,24 +397,9 @@ std::string clock_at(std::uint64_t secs) {
     return buf;
 }
 
-// Unix seconds as the date and time in the user's own Windows format.
+// Unix seconds as the date and time in the person's own format.
 std::string local_date_time(std::uint64_t secs) {
-#ifndef _WIN32
-    return macos::local_date_time(secs);
-#else
-    ULARGE_INTEGER u{};
-    u.QuadPart = (secs + 11644473600ull) * 10000000ull;  // 100 ns ticks since 1601
-    FILETIME ft{u.LowPart, u.HighPart};
-    FILETIME local{};
-    SYSTEMTIME st{};
-    ::FileTimeToLocalFileTime(&ft, &local);
-    ::FileTimeToSystemTime(&local, &st);
-    wchar_t d[64]{};
-    wchar_t t[64]{};
-    ::GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, DATE_SHORTDATE, &st, nullptr, d, 64, nullptr);
-    ::GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, 0, &st, nullptr, t, 64);
-    return win::to_utf8(std::wstring(d) + L", " + t);
-#endif
+    return os::local_date_time(secs);
 }
 
 enum class UpdateControl { kNone, kCheck, kRestart, kRetry, kUpdateCore };

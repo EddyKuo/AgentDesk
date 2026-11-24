@@ -5,10 +5,6 @@
 // value() throws type_error when the stored type differs, and win::to_utf8 throws on an unpaired
 // surrogate (on a worker thread either ends the process).
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
 #include <climits>
 #include <cstdint>
 #include <cmath>
@@ -86,11 +82,21 @@ inline std::optional<Gradient> gradient(const Json& background) {
 inline std::string utf8_lossy(std::wstring_view text) {
     if (text.empty() || text.size() > static_cast<std::size_t>(INT_MAX))
         return {};
-#ifndef _WIN32
-    // macOS: wide text is UTF-32; anything that is not a code point becomes U+FFFD.
+    // UTF-16 on Windows (pairs of surrogates make one code point), UTF-32 elsewhere; anything
+    // that is not a code point becomes U+FFFD.
     std::string out;
-    for (const wchar_t wc : text) {
-        auto c = static_cast<std::uint32_t>(wc);
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        auto c = static_cast<std::uint32_t>(text[i]);
+        if constexpr (sizeof(wchar_t) == 2) {
+            c &= 0xFFFF;
+            if (c >= 0xD800 && c <= 0xDBFF && i + 1 < text.size()) {
+                const auto lo = static_cast<std::uint32_t>(text[i + 1]) & 0xFFFF;
+                if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                    c = 0x10000 + ((c - 0xD800) << 10) + (lo - 0xDC00);
+                    ++i;
+                }
+            }
+        }
         if (c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF))
             c = 0xFFFD;
         if (c < 0x80) {
@@ -110,15 +116,6 @@ inline std::string utf8_lossy(std::wstring_view text) {
         }
     }
     return out;
-#else
-    const int in = static_cast<int>(text.size());
-    const int n = ::WideCharToMultiByte(CP_UTF8, 0, text.data(), in, nullptr, 0, nullptr, nullptr);
-    if (n <= 0)
-        return {};
-    std::string out(static_cast<std::size_t>(n), '\0');
-    ::WideCharToMultiByte(CP_UTF8, 0, text.data(), in, out.data(), n, nullptr, nullptr);
-    return out;
-#endif
 }
 
 }  // namespace agentdesk::desktop::safe

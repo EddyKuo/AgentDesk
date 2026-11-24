@@ -22,20 +22,18 @@ host::ToolResult remote_git(const RemoteCall& remote, const std::string& machine
     return r;
 }
 
+GitCache::GitCache()
+    : watch_(new_watch()),
+      worker_([this](std::stop_token st) { run(st); }),
+      watcher_([this](std::stop_token st) { watch_loop(st); }) {}
+
 GitCache::~GitCache() {
     worker_.request_stop();
     watcher_.request_stop();
     cv_.notify_all();
-#ifdef _WIN32
-    if (wake_ != nullptr)
-        ::SetEvent(wake_);
-#endif
+    wake_watcher();
     watcher_.join();
     worker_.join();
-#ifdef _WIN32
-    if (wake_ != nullptr)
-        ::CloseHandle(wake_);
-#endif
 }
 
 GitInfo GitCache::get(const std::string& dir, const std::string& machine) {
@@ -105,131 +103,7 @@ std::string GitCache::dir_of(const std::string& key) {
     return bar == std::string::npos ? key : key.substr(bar + 1);
 }
 
-#ifdef _WIN32
-void GitCache::watch_loop(std::stop_token st) {
-    std::map<std::string, HANDLE> handles;
-    while (!st.stop_requested()) {
-        {
-            std::set<std::string> wanted;
-            {
-                std::lock_guard lock(mutex_);
-                const auto now = Clock::now();
-                for (const auto& [k, e] : entries_)
-                    if (machine_of(k).empty() && e.info.repo && !e.info.common_dir.empty() &&
-                        now - e.used < std::chrono::minutes(10))
-                        wanted.insert(e.info.common_dir);
-            }
-            for (auto it = handles.begin(); it != handles.end();) {
-                if (!wanted.contains(it->first)) {
-                    ::FindCloseChangeNotification(it->second);
-                    it = handles.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-            for (const auto& dir : wanted) {
-                if (handles.size() >= 62 || handles.contains(dir))
-                    continue;
-                std::wstring wide;
-                try {  // git printed it: not always valid UTF-8; such a folder is not watched
-                    wide = win::to_wide(dir);
-                } catch (const std::exception&) {
-                    continue;
-                }
-                const HANDLE h = ::FindFirstChangeNotificationW(wide.c_str(), TRUE,
-                                                                FILE_NOTIFY_CHANGE_FILE_NAME |
-                                                                    FILE_NOTIFY_CHANGE_DIR_NAME |
-                                                                    FILE_NOTIFY_CHANGE_LAST_WRITE);
-                if (h != INVALID_HANDLE_VALUE)
-                    handles[dir] = h;
-            }
-        }
-        std::vector<HANDLE> wait{wake_};
-        std::vector<std::string> dirs{""};
-        for (const auto& [d, h] : handles) {
-            wait.push_back(h);
-            dirs.push_back(d);
-        }
-        const DWORD r = ::WaitForMultipleObjects(static_cast<DWORD>(wait.size()), wait.data(), FALSE, 2000);
-        if (st.stop_requested())
-            break;
-        if (r == WAIT_FAILED)
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        if (r <= WAIT_OBJECT_0 || r >= WAIT_OBJECT_0 + wait.size())
-            continue;
-        const std::string dir = dirs[r - WAIT_OBJECT_0];
-        // A git command writes many files: let it finish, then look once.
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-        ::FindNextChangeNotification(handles[dir]);
-        std::lock_guard lock(mutex_);
-        for (auto& [k, e] : entries_) {
-            if (!machine_of(k).empty() || _stricmp(e.info.common_dir.c_str(), dir.c_str()) != 0 || e.queued)
-                continue;
-            e.queued = true;
-            queue_.push_back(k);
-        }
-        cv_.notify_one();
-    }
-    for (const auto& [d, h] : handles)
-        ::FindCloseChangeNotification(h);
-}
-#else
-// macOS: the git folders' own files are checked every second (HEAD, index, refs, logs/HEAD, the
-// packed refs): a change there is what the Windows change notification reports, and a git command
-// writes many of them, so it is looked at once after it settled.
-void GitCache::watch_loop(std::stop_token st) {
-    std::map<std::string, std::filesystem::file_time_type> seen;
-    const auto stamp = [](const std::string& dir) {
-        std::filesystem::file_time_type newest{};
-        std::error_code ec;
-        for (const char* f : {"HEAD", "index", "packed-refs", "logs/HEAD", "refs/heads", "FETCH_HEAD"}) {
-            const auto t = std::filesystem::last_write_time(std::filesystem::path(dir) / f, ec);
-            if (!ec && t > newest)
-                newest = t;
-        }
-        return newest;
-    };
-    while (!st.stop_requested()) {
-        for (int i = 0; i < 10 && !st.stop_requested() && !wake_flag_.exchange(false); ++i)
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        if (st.stop_requested())
-            break;
-        std::set<std::string> wanted;
-        {
-            std::lock_guard lock(mutex_);
-            const auto now = Clock::now();
-            for (const auto& [k, e] : entries_)
-                if (machine_of(k).empty() && e.info.repo && !e.info.common_dir.empty() &&
-                    now - e.used < std::chrono::minutes(10))
-                    wanted.insert(e.info.common_dir);
-        }
-        std::erase_if(seen, [&](const auto& kv) { return !wanted.contains(kv.first); });
-        std::vector<std::string> changed;
-        for (const auto& dir : wanted) {
-            const auto t = stamp(dir);
-            const auto it = seen.find(dir);
-            if (it == seen.end()) {
-                seen[dir] = t;
-            } else if (it->second != t) {
-                it->second = t;
-                changed.push_back(dir);
-            }
-        }
-        if (changed.empty())
-            continue;
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-        std::lock_guard lock(mutex_);
-        for (const auto& dir : changed)
-            for (auto& [k, e] : entries_) {
-                if (!machine_of(k).empty() || _stricmp(e.info.common_dir.c_str(), dir.c_str()) != 0 || e.queued)
-                    continue;
-                e.queued = true;
-                queue_.push_back(k);
-            }
-        cv_.notify_one();
-    }
-}
-#endif
+// watch_loop is per system: win/git_cache_win.cpp, macos/git_cache_macos.cpp.
 
 std::string GitCache::trim(std::string s) {
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' '))
@@ -310,13 +184,8 @@ void GitCache::run(std::stop_token st) {
         e.info = info;
         e.at = Clock::now();
         e.queued = false;
-#ifdef _WIN32
-        if (new_dir && wake_ != nullptr)
-            ::SetEvent(wake_);  // a repo to watch
-#else
         if (new_dir)
-            wake_flag_ = true;
-#endif
+            wake_watcher();  // a repo to watch
     }
 }
 

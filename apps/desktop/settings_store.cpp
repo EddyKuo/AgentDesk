@@ -3,84 +3,17 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
-#ifndef _WIN32
-#include "agentdesk/ui/window_place.hpp"
-#endif
-
-#ifdef _WIN32
-// GetDpiForMonitor; app_internal.hpp brings in windows.h first.
-#include <shellscalingapi.h>
-#endif
 
 namespace agentdesk::desktop {
 namespace detail {
 
-#ifndef _WIN32
-// macOS (ADR-30): AGENTDESK_DATA_DIR, else ~/Library/Application Support/AgentDesk.
 std::filesystem::path data_dir() {
-    try {
-        return platform::data_dir();
-    } catch (const std::exception&) {
-        return std::filesystem::temp_directory_path() / "AgentDesk";
-    }
-}
-
-// The program's files (mods, programs, sounds, themes): the app bundle's Resources folder.
-std::filesystem::path exe_dir() { return macos::resources_dir(); }
-
-namespace {
-// The first run's zoom: 1.0, x1.15 on a screen 2400 points wide or wider (as on Windows, in
-// logical units: Retina already draws everything sharper, not bigger).
-float first_run_zoom() {
-    float z = 1.0f;
-    if (const auto monitors = ui::window_place::monitors(); !monitors.empty() && monitors.front().bounds.w >= 2400)
-        z *= 1.15f;
-    return std::clamp(std::round(z * 10.0f) / 10.0f, 0.5f, 3.0f);
-}
-}  // namespace
-#else
-std::filesystem::path data_dir() {
-    wchar_t buf[MAX_PATH]{};
-    DWORD n = ::GetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", buf, MAX_PATH);
-    std::filesystem::path dir;
-    if (n > 0 && n < MAX_PATH) {
-        dir = std::wstring(buf, n);
-    } else {
-        n = ::GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
-        dir = (n > 0 ? std::filesystem::path(std::wstring(buf, n)) : std::filesystem::temp_directory_path()) /
-              L"AgentDesk";
-    }
-    std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
-    return dir;
+    return os::data_dir();
 }
 
 std::filesystem::path exe_dir() {
-    wchar_t exe[MAX_PATH]{};
-    ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    return std::filesystem::path(exe).parent_path();
+    return os::program_files_dir();
 }
-
-namespace {
-// The first run's zoom: Windows' text size (Accessibility TextScaleFactor, 100..225 %), x1.15 when
-// the primary screen is 2400 DIPs or wider, rounded to tenths. DIPs, not pixels: Windows' display
-// scale already draws everything bigger, so a 4K screen at 200 % (1920 DIPs) gets no extra.
-float first_run_zoom() {
-    DWORD factor = 100, size = sizeof(factor);
-    ::RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Accessibility", L"TextScaleFactor", RRF_RT_REG_DWORD,
-                   nullptr, &factor, &size);
-    float z = std::clamp(static_cast<float>(factor) / 100.0f, 1.0f, 2.0f);
-    UINT dpi = 96, dpi_y = 96;
-    const HMONITOR primary = ::MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
-    if (FAILED(::GetDpiForMonitor(primary, MDT_EFFECTIVE_DPI, &dpi, &dpi_y)) || dpi == 0)
-        dpi = 96;
-    if (::GetSystemMetrics(SM_CXSCREEN) * 96.0 / dpi >= 2400.0)
-        z *= 1.15f;
-    return std::clamp(std::round(z * 10.0f) / 10.0f, 0.5f, 3.0f);
-}
-
-}  // namespace
-#endif
 
 // The shown layout's {dark, light} themes, else the defaults.
 std::pair<std::string, std::string> layout_theme_pair(const Settings& st) {
@@ -138,7 +71,7 @@ Settings load_settings_unchecked() {
     Settings s;
     std::ifstream in(data_dir() / L"ui.json", std::ios::binary);
     if (!in) {
-        s.zoom = first_run_zoom();
+        s.zoom = os::first_run_zoom();
         return s;
     }
     std::stringstream ss;
@@ -321,11 +254,7 @@ void save_settings(const Settings& s) {
             std::filesystem::remove(tmp, ec);
             continue;
         }
-#ifdef _WIN32
-        if (!::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-#else
-        if (std::error_code mv; std::filesystem::rename(tmp, path, mv), mv) {
-#endif
+        if (!os::replace_file(tmp, path)) {
             std::filesystem::remove(tmp, ec);
             g_settings_problem = "Not saved to ui.json";
         }

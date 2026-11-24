@@ -1,10 +1,21 @@
-// macOS (ADR-30): the system services of desktop_os.hpp, on AppKit.
+// desktop_os.hpp on macOS (ADR-30), on AppKit.
 #import <AppKit/AppKit.h>
 
+#include <fnmatch.h>
+
+#include <algorithm>
+#include <cmath>
+#include <ctime>
+
+#include "agentdesk/platform/process.hpp"
 #include "agentdesk/platform/system.hpp"
+#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/ui/window_place.hpp"
 #include "desktop_os.hpp"
 
-namespace agentdesk::desktop::macos {
+namespace agentdesk::desktop::os {
+
+namespace win = platform::win;
 
 namespace {
 
@@ -39,10 +50,18 @@ void open_text_file(const std::filesystem::path& p) {
     }
 }
 
-void play_sound_file(const std::filesystem::path& p) {
+// NSSound plays on the main thread; the path is copied into the block, which runs later.
+void play_alert(const std::filesystem::path& file, bool /*blocked*/) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(file, ec)) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          NSBeep();
+        });
+        return;
+    }
+    NSString* path = [NSString stringWithUTF8String:file.c_str()];
     dispatch_async(dispatch_get_main_queue(), ^{
       @autoreleasepool {
-          NSString* path = [NSString stringWithUTF8String:p.c_str()];
           NSSound* sound = path != nil ? [[NSSound alloc] initWithContentsOfFile:path byReference:YES] : nil;
           if (sound == nil || ![sound play])
               NSBeep();
@@ -51,16 +70,10 @@ void play_sound_file(const std::filesystem::path& p) {
     });
 }
 
-void play_system_alert() {
-    dispatch_async(dispatch_get_main_queue(), ^{
-      NSBeep();
-    });
-}
-
-bool system_dark() {
+bool system_light() {
     @autoreleasepool {
         NSString* style = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleInterfaceStyle"];
-        return style != nil && [style caseInsensitiveCompare:@"Dark"] == NSOrderedSame;
+        return style == nil || [style caseInsensitiveCompare:@"Dark"] != NSOrderedSame;
     }
 }
 
@@ -80,7 +93,62 @@ std::string local_date_time(std::uint64_t secs) {
     }
 }
 
-std::filesystem::path resources_dir() {
+std::string local_file_stamp() {
+    const std::time_t now = std::time(nullptr);
+    std::tm t{};
+    ::localtime_r(&now, &t);
+    char name[32]{};
+    std::strftime(name, sizeof name, "%Y%m%d-%H%M%S", &t);
+    return name;
+}
+
+bool replace_file(const std::filesystem::path& tmp, const std::filesystem::path& target) {
+    std::error_code ec;
+    std::filesystem::rename(tmp, target, ec);  // rename(2) replaces the target in one step
+    return !ec;
+}
+
+std::filesystem::path home_dir() {
+    return platform::home_dir();
+}
+
+// Looked up on the login shell's PATH, started in its own session.
+void start_detached(const std::vector<std::wstring>& argv) {
+    if (argv.empty())
+        return;
+    try {
+        const auto exe = platform::find_on_login_path(win::to_utf8(argv[0]));
+        if (!exe)
+            return;
+        std::vector<std::string> args;
+        for (std::size_t i = 1; i < argv.size(); ++i)
+            args.push_back(win::to_utf8(argv[i]));
+        platform::spawn_detached(*exe, args);
+    } catch (const std::exception&) {
+    }
+}
+
+std::vector<std::filesystem::path> matching_files(const std::filesystem::path& p) {
+    std::vector<std::filesystem::path> found;
+    std::error_code ec;
+    const std::string pattern = p.filename().string();
+    for (const auto& e : std::filesystem::directory_iterator(p.parent_path(), ec))
+        if (!e.is_directory(ec) && ::fnmatch(pattern.c_str(), e.path().filename().c_str(), 0) == 0)
+            found.push_back(e.path());
+    return found;
+}
+
+// AGENTDESK_DATA_DIR, else ~/Library/Application Support/AgentDesk.
+std::filesystem::path data_dir() {
+    try {
+        return platform::data_dir();
+    } catch (const std::exception&) {
+        return std::filesystem::temp_directory_path() / "AgentDesk";
+    }
+}
+
+// Contents/Resources in an app bundle, else the program's folder (a build folder).
+std::filesystem::path program_files_dir() {
     const auto dir = platform::executable_path().parent_path();
     std::error_code ec;
     if (const auto res = dir.parent_path() / "Resources";
@@ -89,4 +157,17 @@ std::filesystem::path resources_dir() {
     return dir;
 }
 
-}  // namespace agentdesk::desktop::macos
+// 1.0, x1.15 on a screen 2400 points wide or wider (in logical units, as on Windows: Retina
+// already draws everything sharper, not bigger).
+float first_run_zoom() {
+    float z = 1.0f;
+    if (const auto monitors = ui::window_place::monitors(); !monitors.empty() && monitors.front().bounds.w >= 2400)
+        z *= 1.15f;
+    return std::clamp(std::round(z * 10.0f) / 10.0f, 0.5f, 3.0f);
+}
+
+bool has_keyboard_settings() {
+    return true;
+}
+
+}  // namespace agentdesk::desktop::os

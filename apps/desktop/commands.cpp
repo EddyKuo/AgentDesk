@@ -928,11 +928,7 @@ Outcome exec_app_command(App::State& s, const Command& c) {
     } else if (name == "app.keys") {
         const auto path = data_dir() / L"keys.json";
         load_keys(s);  // writes the defaults when the file is missing
-#ifdef _WIN32
-        ::ShellExecuteW(nullptr, L"open", L"notepad.exe", path.c_str(), nullptr, SW_SHOWNORMAL);
-#else
-        macos::open_text_file(path);
-#endif
+        os::open_text_file(path);
         s.toast("keys.json opened", "Saved changes apply right away.", "", g_pal->info);
     } else if (name == "app.exit_all") {
         s.show_exit = true;
@@ -1122,11 +1118,7 @@ Outcome exec_layout_mod_command(App::State& s, const Command& c) {
         const auto dir = data_dir() / L"mods";
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
-#ifdef _WIN32
-        ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-#else
-        macos::open_path(dir);
-#endif
+        os::open_path(dir);
     } else if (c.name == "mod") {
         const auto c2 = c.arg.find(':');
         if (c2 == std::string::npos)

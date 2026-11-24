@@ -61,13 +61,17 @@ bool draw_settings_nav(App::State& s, float h) {
         const char* name;
         const char* glyph;
     };
-    static constexpr Section kSections[] = {{"Look", ui::icon::kPalette},
-#ifdef __APPLE__
-                                            {"Keyboard", ui::icon::kTerminal},  // macOS only (FR-40)
-#endif
-                                            {"Machines", ui::icon::kServer},
-                                            {"Alerts", ui::icon::kBell},     {"Mods", ui::icon::kExtensions},
-                                            {"Updates", ui::icon::kRefresh}, {"Privacy", ui::icon::kShield}};
+    static const std::vector<Section> kSections = [] {
+        std::vector<Section> v{{"Look", ui::icon::kPalette}};
+        if (os::has_keyboard_settings())
+            v.push_back({"Keyboard", ui::icon::kTerminal});  // macOS only (FR-40)
+        v.insert(v.end(), {{"Machines", ui::icon::kServer},
+                           {"Alerts", ui::icon::kBell},
+                           {"Mods", ui::icon::kExtensions},
+                           {"Updates", ui::icon::kRefresh},
+                           {"Privacy", ui::icon::kShield}});
+        return v;
+    }();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 wp = ImGui::GetWindowPos();
     const float nav_w = px(kNavW);

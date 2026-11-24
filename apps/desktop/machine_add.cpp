@@ -3,9 +3,6 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "overlay_kit.hpp"
 
-#ifndef _WIN32
-#include <fnmatch.h>
-#endif
 
 namespace agentdesk::desktop {
 namespace detail {
@@ -76,27 +73,8 @@ std::vector<std::filesystem::path> SshConfigReader::include_files(const std::str
             files.push_back(p);
             continue;
         }
-        std::vector<std::filesystem::path> found;
-#ifdef _WIN32
-        WIN32_FIND_DATAW fd{};
-        const HANDLE h = ::FindFirstFileW(p.c_str(), &fd);
-        if (h != INVALID_HANDLE_VALUE) {
-            do {
-                if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
-                    found.push_back(p.parent_path() / fd.cFileName);
-            } while (::FindNextFileW(h, &fd));
-            ::FindClose(h);
-        }
-#else
         // A wildcard in the last component (ssh's Include): the matching files of that folder.
-        {
-            std::error_code ec;
-            const std::string pattern = p.filename().string();
-            for (const auto& e : std::filesystem::directory_iterator(p.parent_path(), ec))
-                if (!e.is_directory(ec) && ::fnmatch(pattern.c_str(), e.path().filename().c_str(), 0) == 0)
-                    found.push_back(e.path());
-        }
-#endif
+        std::vector<std::filesystem::path> found = os::matching_files(p);
         std::sort(found.begin(), found.end());
         files.insert(files.end(), found.begin(), found.end());
     }
@@ -167,16 +145,9 @@ std::vector<std::pair<std::string, std::string>> SshConfigReader::hosts() const 
 }
 
 std::vector<std::pair<std::string, std::string>> ssh_config_hosts() {
-#ifdef _WIN32
-    wchar_t home_buf[MAX_PATH]{};
-    if (::GetEnvironmentVariableW(L"USERPROFILE", home_buf, MAX_PATH) == 0)
-        return {};
-    const std::filesystem::path home(home_buf);
-#else
-    const std::filesystem::path home = platform::home_dir();
+    const std::filesystem::path home = os::home_dir();
     if (home.empty())
         return {};
-#endif
     SshConfigReader reader(home);
     try {
         reader.read(home / L".ssh" / L"config", 0);

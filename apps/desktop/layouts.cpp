@@ -124,11 +124,7 @@ void save_layout_state(const LayoutSpec& l) {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         out << j.dump(2) << "\n";
     }
-#ifdef _WIN32
-    ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-#else
-    std::filesystem::rename(tmp, path, ec);
-#endif
+    os::replace_file(tmp, path);
 }
 
 namespace {

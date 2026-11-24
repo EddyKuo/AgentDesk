@@ -11,13 +11,8 @@ namespace {
 std::string worktree_root(const App::State& s, const std::string& machine) {
     std::string root = s.settings.worktree_dir;
     if (root.empty() && machine.empty()) {
-#ifdef _WIN32
-        wchar_t home[MAX_PATH]{};
-        ::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
-        root = win::to_utf8(home) + "\\.agentdesk\\worktrees";
-#else
-        root = (platform::home_dir() / ".agentdesk" / "worktrees").string();
-#endif
+        const auto u8 = (os::home_dir() / ".agentdesk" / "worktrees").u8string();
+        root.assign(u8.begin(), u8.end());
     }
     return root;
 }
