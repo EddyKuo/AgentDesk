@@ -359,10 +359,9 @@ void window_drag_area(App::State& s, ImVec2 a, ImVec2 b) {
     if (!ImGui::IsMouseHoveringRect(a, b, false) || !ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows))
         return;
     if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        ::ShowWindow(s.config.hwnd, ::IsZoomed(s.config.hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        window_toggle_maximize(s.config.hwnd);
     } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        ::ReleaseCapture();
-        ::SendMessageW(s.config.hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        window_begin_drag(s.config.hwnd);
         ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);  // the move loop ate the release
     }
 }
@@ -430,7 +429,11 @@ ImU32 window_button_glyph(int kind, ImU32 bar) {
 }
 
 bool mac_window_buttons(const App::State& s) {
-    return s.config.hwnd != nullptr && s.settings.window_buttons != "windows" && !style_draws_window_buttons(s);
+    return s.config.hwnd != nullptr && window_draws_own_buttons() && s.settings.window_buttons != "windows" && !style_draws_window_buttons(s);
+}
+
+bool windows_window_buttons(const App::State& s) {
+    return s.config.hwnd != nullptr && window_draws_own_buttons() && !mac_window_buttons(s);
 }
 
 void traffic_lights_input(App::State& s, ImVec2 origin) {
@@ -511,7 +514,21 @@ void traffic_lights_paint(App::State& s) {
     }
 }
 
+namespace {
+// Where the system keeps its own buttons at the window's top left (they do not zoom), a bar
+// under them starts after them, keeping the inset it had (at most 16 px).
+float clear_of_system_buttons(float x, float top, float bottom) {
+    const ImVec2 o = ImGui::GetMainViewport()->WorkPos;
+    const float room = window_system_buttons_width();
+    if (room <= 0 || bottom <= o.y || top >= o.y + window_system_buttons_height() || x >= o.x + room)
+        return x;
+    return o.x + room + std::min(x - o.x, px(16));
+}
+}  // namespace
+
 float clear_of_traffic_lights(const App::State& s, float x, float top, float bottom, float margin) {
+    if (!window_draws_own_buttons())
+        return clear_of_system_buttons(x, top, bottom);
     if (!s.lights.shown)
         return x;
     const float lt = s.lights.at.y;

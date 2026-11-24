@@ -10,7 +10,6 @@ namespace mui = ui::mission;
 
 namespace {
 constexpr auto kTailEvery = std::chrono::milliseconds(250);  // a thumbnail's lines at most 4 times a second
-constexpr float kBarH = 42.0f;
 
 bool stage_shown(const App::State& s) {
     return !s.settings.focus_on && s.layout().style == "stage";
@@ -641,7 +640,7 @@ void draw_stage_bar(App::State& s, ImVec2 pos, float w, float h) {
     const float cy = pos.y + h * 0.5f;
     float x = clear_of_traffic_lights(s, pos.x + tok::gap_l(), pos.y, end.y, tok::gap_m());
     float right = end.x - px(10);
-    if (!mac_window_buttons(s)) {
+    if (windows_window_buttons(s)) {
         draw_window_buttons(s, right, pos.y, h);
         right -= px(26) * 3 + px(4) + px(8);
     }

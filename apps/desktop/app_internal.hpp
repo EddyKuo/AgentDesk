@@ -34,10 +34,10 @@
 #include <thread>
 #include <tuple>
 #include <vector>
-#include <dwmapi.h>
 #include <imgui.h>
-#include <mmsystem.h>
-#include <shellapi.h>
+
+#include "agentdesk/platform/crt.hpp"
+#include "desktop_os.hpp"
 
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
@@ -51,12 +51,14 @@
 #include "agentdesk/ui/imgui_adapter.hpp"
 #include "agentdesk/ui/programs.hpp"
 #include "agentdesk/ui/schedule.hpp"
+#include "agentdesk/ui/keyboard.hpp"
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/mac_layout.hpp"
 #include "agentdesk/ui/inbox.hpp"
 #include "agentdesk/ui/mission.hpp"
 #include "agentdesk/ui/mods.hpp"
+#include "agentdesk/ui/path_text.hpp"
 #include "agentdesk/ui/stage.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
@@ -169,7 +171,7 @@ struct Settings {
     float scroll_speed = 1.0f;
     bool sidebar = true;
     bool details = false;
-    std::string worktree_dir;  // empty: %USERPROFILE%\.agentdesk\worktrees
+    std::string worktree_dir;  // empty: .agentdesk/worktrees in the home folder
     std::string shell_profile;  // new spaces/tabs/splits; empty: pwsh, powershell, cmd
     float ui_text = 15.0f;       // interface text size at zoom 1 (13 = the chrome's design size)
     float sidebar_width = 268;   // design px, 44..480; under 160 = rail
@@ -193,6 +195,8 @@ struct Settings {
     float line_height = 1.0f;    // terminal cell height multiplier
     float cell_width = 1.0f;     // terminal cell width multiplier
     std::string sound_done;      // MP3 replacing the bundled sounds
+    // macOS: the Option keys in terminals, "auto" | "on" | "off" | "left" | "right" (FR-40).
+    std::string option_as_alt = "auto";
     std::string sound_blocked;
     std::string welcomed;        // "", "finished" or "skipped"
     std::string seen_version;    // What's new was shown for this version (once after an update)
@@ -305,6 +309,8 @@ bool is_shell_profile(const std::string& id);
 std::string folder_name(const std::string& cwd);
 bool path_within(const std::string& p, const std::string& dir);
 std::string display_path(const std::string& cwd);
+// A file of the data folder for messages, with this system's separator: layouts\a.json, layouts/a.json.
+std::string data_file_text(const std::string& folder, const std::string& name);
 std::string elapsed_since(const std::string& iso);
 float text_clipped(ImDrawList* dl, ImFont* font, float size, ImVec2 pos, ImU32 col, const std::string& text,
                    float max_w);
@@ -472,10 +478,7 @@ struct GitInfo {
 
 class GitCache {
 public:
-    GitCache()
-        : wake_(::CreateEventW(nullptr, FALSE, FALSE, nullptr)),
-          worker_([this](std::stop_token st) { run(st); }),
-          watcher_([this](std::stop_token st) { watch_loop(st); }) {}
+    GitCache();
     ~GitCache();
     GitCache(const GitCache&) = delete;
     GitCache& operator=(const GitCache&) = delete;
@@ -509,12 +512,12 @@ private:
     static std::string machine_of(const std::string& key);
     static std::string dir_of(const std::string& key);
 
-    // Local repos' git folders, each with a change notification. A change looks again at every folder of that repo; folders no longer asked about for
-    // 10 minutes stop being watched. At most 62 at once (WaitForMultipleObjects).
+    // Local repos' git folders are watched for changes (a change notification on Windows, the
+    // files' times on macOS). A change looks again at every folder of that repo; folders no longer
+    // asked about for 10 minutes stop being watched.
     void watch_loop(std::stop_token st);
 
     static std::string trim(std::string s);
-    static std::string norm(std::string p);
 
     GitInfo query(const std::string& key, bool changes);
 
@@ -525,7 +528,14 @@ private:
     std::deque<std::string> queue_;
     std::map<std::string, Entry> entries_;
     std::atomic<bool> active_{true};
-    HANDLE wake_ = nullptr;
+    // What wakes the watcher, per system (win/git_cache_win.cpp, macos/git_cache_macos.cpp).
+    struct Watch;
+    struct WatchDeleter {
+        void operator()(Watch* p) const noexcept;
+    };
+    static Watch* new_watch();
+    void wake_watcher();
+    std::unique_ptr<Watch, WatchDeleter> watch_;  // before the threads that use it
     std::jthread worker_;
     std::jthread watcher_;
 };
@@ -614,7 +624,6 @@ public:
     }
 
 private:
-    static std::string join(const std::string& root, const std::string& rel);
     static std::string lower(std::string s);
     static constexpr std::size_t kPerFolder = 500;
     static constexpr std::size_t kTotal = 5000;
@@ -1176,7 +1185,7 @@ struct App::State {
         return false;
     }
     [[nodiscard]] std::string machine_label(const std::string& machine) const {
-        return machine.empty() ? std::string("This PC") : machine;
+        return machine.empty() ? std::string("This computer") : machine;
     }
     // The machine's spaces are still on their way: it is connecting (not connected, no error
     // yet), or this computer's document has not arrived. Disconnected or failed is not loading.
@@ -1273,6 +1282,8 @@ void window_drag_area(App::State& s, ImVec2 a, ImVec2 b);
 // Round window buttons (Settings > Look > Window buttons = "mac"). Input before the layout draws,
 // so the bars' drag areas leave them alone; paint after it, on top of the bars.
 bool mac_window_buttons(const App::State& s);
+// Whether the Windows-style buttons show instead; neither kind does where the system draws its own.
+bool windows_window_buttons(const App::State& s);
 void traffic_lights_input(App::State& s, ImVec2 origin);
 void traffic_lights_paint(App::State& s);
 // The first x a bar spanning [top, bottom] may use without covering the round buttons, `margin`
@@ -1449,6 +1460,7 @@ bool settings_toggle(const char* id, bool on);
 void settings_footnote(App::State& s, const char* text);
 bool settings_updates(App::State& s);
 bool settings_privacy(App::State& s);
+bool settings_keyboard(App::State& s);  // macOS only
 
 // ------------------------------------------------------------ settings_dialog.cpp
 void draw_settings(App::State& s);
@@ -1599,9 +1611,12 @@ void pair_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
 // One pane drawn at `r` as the shown layout frames it (panes.cpp).
 void draw_one_pane(App::State& s, const std::string& id, ui::Rect r, bool connected,
                    const ui::styles::PaneLook& look);
-// Where new git worktrees go on `machine` (worktrees.cpp): Settings' folder, else the
-// .agentdesk\worktrees folder in the person's home here; "" for another machine (its agent-host picks).
-std::string worktree_root(const App::State& s, const std::string& machine);
+// Where new git worktrees of `g` go on `machine` (worktrees.cpp): Settings' folder, else the
+// .agentdesk/worktrees folder in the person's home here; "" for another machine (its agent-host picks).
+std::string worktree_root(const App::State& s, const std::string& machine, const GitInfo& g);
+// <root>/<repo>/<branch as a folder name>, as root's system writes it; empty when root is (the host
+// picks the folder then).
+std::string worktree_path(const std::string& root, const std::string& repo, const std::string& branch);
 
 // ------------------------------------------------------------ timeline.cpp
 // The Timeline overlay (timeline.toggle) and the "timeline" layout block.

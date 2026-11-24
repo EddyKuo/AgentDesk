@@ -22,16 +22,18 @@ host::ToolResult remote_git(const RemoteCall& remote, const std::string& machine
     return r;
 }
 
+GitCache::GitCache()
+    : watch_(new_watch()),
+      worker_([this](std::stop_token st) { run(st); }),
+      watcher_([this](std::stop_token st) { watch_loop(st); }) {}
+
 GitCache::~GitCache() {
     worker_.request_stop();
     watcher_.request_stop();
     cv_.notify_all();
-    if (wake_ != nullptr)
-        ::SetEvent(wake_);
+    wake_watcher();
     watcher_.join();
     worker_.join();
-    if (wake_ != nullptr)
-        ::CloseHandle(wake_);
 }
 
 GitInfo GitCache::get(const std::string& dir, const std::string& machine) {
@@ -100,102 +102,28 @@ void GitCache::invalidate_repo(const std::string& dir, const std::string& machin
             e.at = Clock::time_point{};
 }
 
-// A Windows path cannot hold '|', so the first one ends the machine name.
+// A machine name never starts a path and cannot hold '|', so the first one ends it; a path on this
+// computer may hold one (on macOS).
 std::string GitCache::key_of(const std::string& dir, const std::string& machine) {
     return machine.empty() ? dir : machine + "|" + dir;
 }
 
 std::string GitCache::machine_of(const std::string& key) {
     const auto bar = key.find('|');
-    return bar == std::string::npos ? std::string() : key.substr(0, bar);
+    return bar == std::string::npos || ui::path_text::is_absolute(key) ? std::string() : key.substr(0, bar);
 }
 
 std::string GitCache::dir_of(const std::string& key) {
     const auto bar = key.find('|');
-    return bar == std::string::npos ? key : key.substr(bar + 1);
+    return bar == std::string::npos || ui::path_text::is_absolute(key) ? key : key.substr(bar + 1);
 }
 
-void GitCache::watch_loop(std::stop_token st) {
-    std::map<std::string, HANDLE> handles;
-    while (!st.stop_requested()) {
-        {
-            std::set<std::string> wanted;
-            {
-                std::lock_guard lock(mutex_);
-                const auto now = Clock::now();
-                for (const auto& [k, e] : entries_)
-                    if (machine_of(k).empty() && e.info.repo && !e.info.common_dir.empty() &&
-                        now - e.used < std::chrono::minutes(10))
-                        wanted.insert(e.info.common_dir);
-            }
-            for (auto it = handles.begin(); it != handles.end();) {
-                if (!wanted.contains(it->first)) {
-                    ::FindCloseChangeNotification(it->second);
-                    it = handles.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-            for (const auto& dir : wanted) {
-                if (handles.size() >= 62 || handles.contains(dir))
-                    continue;
-                std::wstring wide;
-                try {  // git printed it: not always valid UTF-8; such a folder is not watched
-                    wide = win::to_wide(dir);
-                } catch (const std::exception&) {
-                    continue;
-                }
-                const HANDLE h = ::FindFirstChangeNotificationW(wide.c_str(), TRUE,
-                                                                FILE_NOTIFY_CHANGE_FILE_NAME |
-                                                                    FILE_NOTIFY_CHANGE_DIR_NAME |
-                                                                    FILE_NOTIFY_CHANGE_LAST_WRITE);
-                if (h != INVALID_HANDLE_VALUE)
-                    handles[dir] = h;
-            }
-        }
-        std::vector<HANDLE> wait{wake_};
-        std::vector<std::string> dirs{""};
-        for (const auto& [d, h] : handles) {
-            wait.push_back(h);
-            dirs.push_back(d);
-        }
-        const DWORD r = ::WaitForMultipleObjects(static_cast<DWORD>(wait.size()), wait.data(), FALSE, 2000);
-        if (st.stop_requested())
-            break;
-        if (r == WAIT_FAILED)
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        if (r <= WAIT_OBJECT_0 || r >= WAIT_OBJECT_0 + wait.size())
-            continue;
-        const std::string dir = dirs[r - WAIT_OBJECT_0];
-        // A git command writes many files: let it finish, then look once.
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-        ::FindNextChangeNotification(handles[dir]);
-        std::lock_guard lock(mutex_);
-        for (auto& [k, e] : entries_) {
-            if (!machine_of(k).empty() || _stricmp(e.info.common_dir.c_str(), dir.c_str()) != 0 || e.queued)
-                continue;
-            e.queued = true;
-            queue_.push_back(k);
-        }
-        cv_.notify_one();
-    }
-    for (const auto& [d, h] : handles)
-        ::FindCloseChangeNotification(h);
-}
+// watch_loop is per system: win/git_cache_win.cpp, macos/git_cache_macos.cpp.
 
 std::string GitCache::trim(std::string s) {
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' '))
         s.pop_back();
     return s;
-}
-
-std::string GitCache::norm(std::string p) {
-    for (auto& c : p)
-        if (c == '/')
-            c = '\\';
-    while (p.size() > 3 && p.back() == '\\')
-        p.pop_back();
-    return p;
 }
 
 namespace {
@@ -272,7 +200,7 @@ GitInfo GitCache::query(const std::string& key, bool changes) {
     auto git = [&](std::vector<std::wstring> args) {
         if (!machine.empty())
             return remote_git(remote, machine, dir, args);
-        args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-C", cwd.native()});
+        args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-C", cwd.wstring()});
         return host::run_tool(args, cwd, std::chrono::seconds(10));
     };
     const auto r = git({L"rev-parse", L"--show-toplevel", L"--git-common-dir", L"--abbrev-ref", L"HEAD"});
@@ -285,13 +213,17 @@ GitInfo GitCache::query(const std::string& key, bool changes) {
     if (lines.size() < 3)
         return g;
     g.repo = true;
-    g.top = norm(lines[0]);
-    std::filesystem::path common(win::to_wide(lines[1]));
-    if (common.is_relative())
-        common = cwd / common;
-    common = machine.empty() ? std::filesystem::weakly_canonical(common, ec) : common.lexically_normal();
-    g.common_top = norm(win::to_utf8(common.parent_path().native()));
-    g.common_dir = norm(win::to_utf8(common.native()));
+    // git prints forward slashes everywhere; another machine's paths are that system's, so only
+    // this computer's go through std::filesystem (which also resolves links).
+    namespace pt = ui::path_text;
+    g.top = pt::native(lines[0]);
+    g.common_dir = pt::resolve(dir, lines[1]);
+    if (machine.empty()) {
+        const auto real = std::filesystem::weakly_canonical(std::filesystem::path(win::to_wide(g.common_dir)), ec);
+        if (!ec)
+            g.common_dir = pt::native(win::to_utf8(real.native()));
+    }
+    g.common_top = pt::parent(g.common_dir);
     g.worktree = _stricmp(g.common_top.c_str(), g.top.c_str()) != 0;
     g.branch = lines[2];
     const auto c = git({L"rev-list", L"--left-right", L"--count", L"HEAD...@{upstream}"});
@@ -343,8 +275,8 @@ void GitCache::run(std::stop_token st) {
         e.info = info;
         e.at = Clock::now();
         e.queued = false;
-        if (new_dir && wake_ != nullptr)
-            ::SetEvent(wake_);  // a repo to watch
+        if (new_dir)
+            wake_watcher();  // a repo to watch
     }
 }
 

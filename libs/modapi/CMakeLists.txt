@@ -13,6 +13,11 @@ function(agentdesk_mod name)
     agentdesk_target_defaults(${target})
     target_link_libraries(${target} PRIVATE agentdesk::modapi)
     set(out "${CMAKE_BINARY_DIR}/apps/desktop/mods/${name}")
+    if(APPLE)
+        # macOS (ADR-30): mods/<name>/mod.dylib.
+        set_target_properties(${target} PROPERTIES OUTPUT_NAME mod PREFIX "" SUFFIX ".dylib"
+            LIBRARY_OUTPUT_DIRECTORY "${out}")
+    endif()
     set_target_properties(${target} PROPERTIES
         OUTPUT_NAME mod
         RUNTIME_OUTPUT_DIRECTORY "${out}"

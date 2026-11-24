@@ -106,9 +106,10 @@ TEST(FocusMode, BuiltInTreeIsNotAListedLayout) {
     EXPECT_EQ(std::find(names.begin(), names.end(), "focus"), names.end());
 }
 
-// focus.toggle is a known command bound to Ctrl+Shift+. by default; focus.on / focus.off too.
+// focus.toggle is a known command bound by default (the keys: win/ and posix/ keymap tests);
+// focus.on / focus.off are known too.
 TEST(FocusMode, CommandsAreKnownAndBound) {
     for (const char* c : {"focus.toggle", "focus.on", "focus.off"})
         EXPECT_TRUE(is_builtin_command(c)) << c;
-    EXPECT_EQ(Keymap::defaults().chord_for("focus.toggle"), "Ctrl+Shift+.");
+    EXPECT_NE(Keymap::defaults().chord_for("focus.toggle"), "");
 }

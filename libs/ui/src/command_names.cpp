@@ -23,6 +23,7 @@ bool is_builtin_command(std::string_view name) {
         "terminal.right_click", "terminal.scroll", "terminal.search", "terminal.select_all", "theme",
         "window.close", "window.fill", "window.maximize", "window.minimize", "worktree.new", "worktree.open",
         "worktree.remove", "app.quit", "overlay.close", "app.check_updates", "app.update_core", "app.update",
+        "app.hide", "app.hide_others",  // macOS: Cmd+H, Cmd+Alt+H
         "focus.toggle", "focus.on", "focus.off",
         // Stage, and the names of Mission Control it replaced (an older keys.json keeps working:
         // mission.toggle toggles Stage, mission.expand puts that agent on stage, mission.filter

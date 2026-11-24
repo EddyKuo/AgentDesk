@@ -3,6 +3,7 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
+
 namespace agentdesk::desktop {
 namespace detail {
 
@@ -272,18 +273,7 @@ void emit_session_events(App::State& s, const std::vector<ui::ModSession>& list)
 // A program a mod asked to start: directly (never through a shell), without a window, not
 // waited for. argv[0] is looked up on PATH.
 void start_detached(const std::vector<std::wstring>& argv) {
-    wchar_t exe[MAX_PATH]{};
-    if (::SearchPathW(nullptr, argv[0].c_str(), L".exe", MAX_PATH, exe, nullptr) == 0)
-        return;
-    std::wstring cmd = win::build_command_line(exe, std::vector<std::wstring>(argv.begin() + 1, argv.end()));
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi{};
-    if (::CreateProcessW(exe, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si,
-                         &pi)) {
-        ::CloseHandle(pi.hThread);
-        ::CloseHandle(pi.hProcess);
-    }
+    os::start_detached(argv);
 }
 
 }  // namespace
@@ -316,7 +306,8 @@ void run_mods(App::State& s) {
 
 namespace {
 // An agent needs the person or finished. The sound plays either way (when on); a tab put away
-// comes back; the toast ("<space> / <tab>") only when the person was not looking at it.
+// comes back; the toast ("<space> / <tab>") only when the person was not looking at it and notes
+// are on.
 void alert(App::State& s, const std::string& id, const ui::SessionView& v, bool looking) {
     const bool blocked = v.agent_state == "Blocked";
     const std::string title = s.pane_title(id);
@@ -329,7 +320,7 @@ void alert(App::State& s, const std::string& id, const ui::SessionView& v, bool 
         play_alert(s, blocked);
     if (s.ws.unsettle_session(id))
         s.doc_changed();
-    if (looking)
+    if (looking || !s.settings.toasts)
         return;
     std::string where;
     const auto loc = s.ws.find(id);
@@ -404,20 +395,7 @@ void play_alert(App::State& s, bool blocked) {
         file = win::to_wide(custom);
     if (file.empty())
         file = exe_dir() / L"sounds" / (blocked ? L"request.mp3" : L"done.mp3");
-    if (!std::filesystem::is_regular_file(file, ec)) {
-        ::PlaySoundW(blocked ? L"SystemExclamation" : L"SystemAsterisk", nullptr,
-                     SND_ALIAS | SND_ASYNC | SND_NODEFAULT);
-        return;
-    }
-    static std::atomic<int> counter{0};
-    std::thread([file, id = ++counter] {
-        const std::wstring alias = L"agentdesk" + std::to_wstring(id);
-        const std::wstring open = L"open \"" + file.native() + L"\" type mpegvideo alias " + alias;
-        if (::mciSendStringW(open.c_str(), nullptr, 0, nullptr) == 0) {
-            ::mciSendStringW((L"play " + alias + L" wait").c_str(), nullptr, 0, nullptr);
-            ::mciSendStringW((L"close " + alias).c_str(), nullptr, 0, nullptr);
-        }
-    }).detach();
+    os::play_alert(file, blocked);
 }
 }  // namespace detail
 

@@ -12,23 +12,18 @@ namespace {
 // The local date, time and offsets now. AGENTDESK_NOW="YYYY-MM-DDTHH:MM" replaces the date and
 // time (screenshots of the schedule; the offsets stay this computer's).
 sch::LocalNow local_now() {
-    SYSTEMTIME st{};
-    ::GetLocalTime(&st);
-    TIME_ZONE_INFORMATION tz{};
-    const DWORD r = ::GetTimeZoneInformation(&tz);
+    const os::LocalTime t = os::local_time();
     sch::LocalNow n;
-    n.year = st.wYear;
-    n.month = st.wMonth;
-    n.day = st.wDay;
-    n.minute = st.wHour * 60 + st.wMinute;
-    n.utc_offset =
-        -static_cast<int>(tz.Bias + (r == TIME_ZONE_ID_DAYLIGHT ? tz.DaylightBias : tz.StandardBias));
-    n.std_offset = -static_cast<int>(tz.Bias + tz.StandardBias);
-    wchar_t buf[32]{};
-    if (const DWORD len = ::GetEnvironmentVariableW(L"AGENTDESK_NOW", buf, 32); len >= 16 && len < 32) {
+    n.year = t.year;
+    n.month = t.month;
+    n.day = t.day;
+    n.minute = t.hour * 60 + t.minute;
+    n.utc_offset = t.utc_offset;
+    n.std_offset = t.std_offset;
+    if (const std::string set = os::env("AGENTDESK_NOW"); set.size() >= 16 && set.size() < 32) {
         int y = 0, mo = 0, d = 0, h = 0, mi = 0;
-        if (::swscanf_s(buf, L"%d-%d-%dT%d:%d", &y, &mo, &d, &h, &mi) == 5 && mo >= 1 && mo <= 12 && d >= 1 &&
-            d <= 31 && h >= 0 && h < 24 && mi >= 0 && mi < 60) {
+        if (sscanf_s(set.c_str(), "%d-%d-%dT%d:%d", &y, &mo, &d, &h, &mi) == 5 && mo >= 1 && mo <= 12 &&
+            d >= 1 && d <= 31 && h >= 0 && h < 24 && mi >= 0 && mi < 60) {
             n.year = y;
             n.month = mo;
             n.day = d;

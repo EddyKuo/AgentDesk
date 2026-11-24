@@ -260,7 +260,7 @@ std::string reload_theme(const std::string& name) {
     std::string why;
     const auto t = ui::theme::parse(read_text_file(file), &why);
     if (!t)
-        return "themes\\" + name + ".json can't be read: " + why;
+        return data_file_text("themes", name + ".json") + " can't be read: " + why;
     // A deleted entry of that name is taken back (its address may still be in a setting).
     for (auto& o : g_loaded_palettes)
         if (o.id == name) {
@@ -374,11 +374,7 @@ bool system_light() {
     const auto now = std::chrono::steady_clock::now();
     if (now - checked > std::chrono::seconds(2)) {
         checked = now;
-        DWORD v = 0;
-        DWORD size = sizeof v;
-        light = ::RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                               L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &v, &size) == ERROR_SUCCESS &&
-                v != 0;
+        light = os::system_light();
     }
     return light;
 }

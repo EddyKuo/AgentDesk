@@ -8,14 +8,18 @@
 //   vt_probe crash   -> exits with 0xC0000005 (access violation) after 300 ms.
 //   vt_probe counter -> prints "COUNT n" every 200 ms until killed.
 //   vt_probe flood [seconds=5] [bytes_per_sec=1048576] -> numbered lines, then "FLOOD-DONE <n>".
-// Used by S1-5 (inbox vs bundled ConPTY), the integration tests and the QA tools.
-#include <windows.h>
-
+// Used by S1-5 (inbox vs bundled ConPTY), the integration tests and the QA tools. The console
+// handling per system is in vt_probe_win.cpp / vt_probe_posix.cpp.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <string_view>
+
+#include "vt_probe_os.hpp"
+
+namespace vt_probe {
 
 namespace {
 
@@ -30,52 +34,6 @@ std::string to_hex(std::string_view bytes) {
     return out;
 }
 
-void write_out(std::string_view s) {
-    DWORD written = 0;
-    ::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE), s.data(), static_cast<DWORD>(s.size()), &written, nullptr);
-}
-
-void enable_vt_io() {
-    HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);
-    DWORD mode = 0;
-    if (::GetConsoleMode(in, &mode)) {
-        mode &= ~static_cast<DWORD>(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
-        mode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
-        ::SetConsoleMode(in, mode);
-    }
-    HANDLE out = ::GetStdHandle(STD_OUTPUT_HANDLE);
-    if (::GetConsoleMode(out, &mode)) {
-        ::SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN);
-    }
-    ::SetConsoleOutputCP(CP_UTF8);
-    ::SetConsoleCP(CP_UTF8);
-}
-
-// Reads whatever arrives on stdin until `deadline`, without blocking past it.
-std::string read_until(std::chrono::steady_clock::time_point deadline, std::string_view stop = {}) {
-    HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);
-    std::string got;
-    while (std::chrono::steady_clock::now() < deadline) {
-        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
-            deadline - std::chrono::steady_clock::now());
-        if (::WaitForSingleObject(in, static_cast<DWORD>(std::max<long long>(left.count(), 0))) !=
-            WAIT_OBJECT_0) {
-            break;
-        }
-        char buf[256];
-        DWORD n = 0;
-        if (!::ReadFile(in, buf, sizeof(buf), &n, nullptr) || n == 0) {
-            // Console input may signal for non-key events; ReadFile then returns 0 bytes.
-            continue;
-        }
-        got.append(buf, n);
-        if (!stop.empty() && got.find(stop) != std::string::npos) {
-            break;
-        }
-    }
-    return got;
-}
-
 int run_query() {
     write_out("\x1b]7501;?\x1b\\\x1b[c");
     // The DA1 reply ends with 'c'; keep reading a little longer to catch late replies.
@@ -88,7 +46,7 @@ int run_report() {
     write_out("\x1b]7501;state=working:app=vtprobe:progress=10\x1b\\");
     write_out("\x1b]7501;state=blocked:kind=question\x07");
     write_out("PROBE-DONE\r\n");
-    ::Sleep(300);  // give the host a moment to read before the pseudoconsole closes
+    sleep_ms(300);  // give the host a moment to read before the pseudoconsole closes
     return 0;
 }
 
@@ -124,55 +82,55 @@ int run_flood(int seconds, long long bytes_per_sec) {
         const auto next = start + std::chrono::milliseconds(50 * (tick + 1));
         const auto now = std::chrono::steady_clock::now();
         if (next > now)
-            ::Sleep(static_cast<DWORD>(
+            sleep_ms(static_cast<unsigned>(
                 std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count()));
     }
     write_out("FLOOD-DONE " + std::to_string(n) + "\r\n");
-    ::Sleep(300);
+    sleep_ms(300);
     return 0;
 }
 
 }  // namespace
 
-int wmain(int argc, wchar_t** argv) {
-    enable_vt_io();
-    const std::wstring_view mode = argc > 1 ? argv[1] : L"query";
-    if (mode == L"query")
+// The modes after the system's entry point has set up the console.
+int run(std::string_view mode, const std::string& arg2, const std::string& arg3) {
+    if (mode == "query")
         return run_query();
-    if (mode == L"report")
+    if (mode == "report")
         return run_report();
-    if (mode == L"echo")
+    if (mode == "echo")
         return run_echo();
-    if (mode == L"mouse") {  // asks for click reporting (SGR), then echoes input like "echo"
+    if (mode == "mouse") {  // asks for click reporting (SGR), then echoes input like "echo"
         write_out("\x1b[?1000h\x1b[?1006h");
         return run_echo();
     }
-    if (mode == L"size") {  // QA-04: report the console size the child actually sees
+    if (mode == "size") {  // QA-04: report the console size the child actually sees
         for (;;) {
-            CONSOLE_SCREEN_BUFFER_INFO info{};
-            ::GetConsoleScreenBufferInfo(::GetStdHandle(STD_OUTPUT_HANDLE), &info);
-            const int cols = info.srWindow.Right - info.srWindow.Left + 1;
-            const int rows = info.srWindow.Bottom - info.srWindow.Top + 1;
+            int cols = 0;
+            int rows = 0;
+            console_size(cols, rows);
             write_out("\r\x1b[2KSIZE " + std::to_string(cols) + " " + std::to_string(rows));
-            ::Sleep(100);
+            sleep_ms(100);
         }
     }
-    if (mode == L"crash") {  // fault case: dies like an access violation after a short delay
+    if (mode == "crash") {  // fault case: dies like an access violation after a short delay
         write_out("CRASHING\r\n");
-        ::Sleep(300);
-        ::ExitProcess(0xC0000005u);
+        sleep_ms(300);
+        crash();
     }
-    if (mode == L"counter") {  // QA-05: "COUNT n" every 200 ms until killed
+    if (mode == "counter") {  // QA-05: "COUNT n" every 200 ms until killed
         for (long long n = 1;; ++n) {
             write_out("COUNT " + std::to_string(n) + "\r\n");
-            ::Sleep(200);
+            sleep_ms(200);
         }
     }
-    if (mode == L"flood") {
-        const int seconds = argc > 2 ? _wtoi(argv[2]) : 5;
-        const long long rate = argc > 3 ? _wtoi64(argv[3]) : 1024 * 1024;
+    if (mode == "flood") {
+        const int seconds = arg2.empty() ? 5 : std::atoi(arg2.c_str());
+        const long long rate = arg3.empty() ? 1024 * 1024 : std::atoll(arg3.c_str());
         return run_flood(seconds, rate);
     }
     write_out("usage: vt_probe query|report|echo\r\n");
     return 2;
 }
+
+}  // namespace vt_probe

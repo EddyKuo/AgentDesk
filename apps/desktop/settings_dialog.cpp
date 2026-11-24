@@ -61,9 +61,17 @@ bool draw_settings_nav(App::State& s, float h) {
         const char* name;
         const char* glyph;
     };
-    static constexpr Section kSections[] = {{"Look", ui::icon::kPalette},    {"Machines", ui::icon::kServer},
-                                            {"Alerts", ui::icon::kBell},     {"Mods", ui::icon::kExtensions},
-                                            {"Updates", ui::icon::kRefresh}, {"Privacy", ui::icon::kShield}};
+    static const std::vector<Section> kSections = [] {
+        std::vector<Section> v{{"Look", ui::icon::kPalette}};
+        if (os::has_keyboard_settings())
+            v.push_back({"Keyboard", ui::icon::kTerminal});  // macOS only (FR-40)
+        v.insert(v.end(), {{"Machines", ui::icon::kServer},
+                           {"Alerts", ui::icon::kBell},
+                           {"Mods", ui::icon::kExtensions},
+                           {"Updates", ui::icon::kRefresh},
+                           {"Privacy", ui::icon::kShield}});
+        return v;
+    }();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 wp = ImGui::GetWindowPos();
     const float nav_w = px(kNavW);
@@ -159,8 +167,8 @@ void theme_card_menu(App::State& s, const Palette& p) {
             edit_theme(s, p.id, true, true);
         if (menu_row(s, ui::icon::kClose, "Delete...")) {
             s.confirm_title = std::string("Delete ") + p.label + "?";
-            s.confirm_detail = std::string("themes\\") + p.id +
-                               ".json is set aside (renamed .json.old-...), not erased. Layouts using it go back "
+            s.confirm_detail = data_file_text("themes", std::string(p.id) + ".json") +
+                               " is set aside (renamed .json.old-...), not erased. Layouts using it go back "
                                "to the default theme.";
             s.confirm_command = std::string("theme.delete:") + p.id;
             s.show_confirm = true;
@@ -281,10 +289,13 @@ bool look_theme(App::State& s) {
     settings_row_done(s);
     if (s.settings.appearance == "schedule")
         changed |= look_schedule(s);
-    settings_row(s, "Window buttons", "Round ones at the top left, or Windows' at the top right.", px(240), px(32));
-    if (segmented(s, "##window-buttons", s.settings.window_buttons, {{"mac", "Round"}, {"windows", "Windows"}}))
-        changed = true;
-    settings_row_done(s);
+    if (window_draws_own_buttons()) {  // macOS keeps its own
+        settings_row(s, "Window buttons", "Round ones at the top left, or Windows' at the top right.", px(240),
+                     px(32));
+        if (segmented(s, "##window-buttons", s.settings.window_buttons, {{"mac", "Round"}, {"windows", "Windows"}}))
+            changed = true;
+        settings_row_done(s);
+    }
     changed |= look_ambient(s);
     settings_gap(px(12));
     settings_wrapped(s, "For the layout you're in: each layout keeps its own light and dark theme.",
@@ -400,8 +411,12 @@ bool look_terminals(App::State& s) {
     static char buf[512];
     if (ImGui::IsWindowAppearing() || buf[0] == '\0')
         std::snprintf(buf, sizeof buf, "%s", s.settings.worktree_dir.c_str());
-    settings_row(s, "Worktrees folder", "Empty: %USERPROFILE%\\.agentdesk\\worktrees", px(260),
-                 ImGui::GetFrameHeight());
+    // The default as this system writes it (home folder, its own separator).
+    static const std::string default_note = [] {
+        const auto u8 = (os::home_dir() / ".agentdesk" / "worktrees").u8string();
+        return "Empty: " + std::string(u8.begin(), u8.end());
+    }();
+    settings_row(s, "Worktrees folder", default_note.c_str(), px(260), ImGui::GetFrameHeight());
     if (ImGui::InputText("##wt", buf, sizeof buf)) {
         s.settings.worktree_dir = buf;
         changed = true;
@@ -647,17 +662,24 @@ bool settings_machines(App::State& s) {
 }
 
 // ------------------------------------------------------------------ Alerts page
-// Sounds only: a note shows in the corner either way.
+// Sounds and the corner notes, each with its own switch.
 bool settings_alerts(App::State& s) {
     bool changed = false;
-    settings_section(s, "Sounds");
-    settings_row(
-        s, "Play sounds",
-        "When an agent needs you, and when one finishes while you're not looking. A note shows in the "
-        "corner either way.",
-        px(36), px(20));
+    settings_section(s, "Sounds and notes");
+    settings_row(s, "Play sounds",
+                 "When an agent needs you (always), and when one finishes while you're not looking.", px(36),
+                 px(20));
     if (settings_toggle("##st-sounds", s.settings.sounds)) {
         s.settings.sounds = !s.settings.sounds;
+        changed = true;
+    }
+    settings_row_done(s);
+    settings_row(s, "Show notes",
+                 "A note in the corner when an agent you're not looking at needs you or finishes; click it to "
+                 "go there.",
+                 px(36), px(20));
+    if (settings_toggle("##st-toasts", s.settings.toasts)) {
+        s.settings.toasts = !s.settings.toasts;
         changed = true;
     }
     settings_row_done(s);
@@ -721,7 +743,7 @@ bool settings_mods(App::State& s) {
             settings_gap(px(6));
             settings_wrapped(s,
                              ("Turn on " + m.name +
-                              "? It will run inside AgentDesk with your Windows account's rights: it can read and "
+                              "? It will run inside AgentDesk with your user account's rights: it can read and "
                               "change your files, start programs and type into your terminals. Turn it on only "
                               "if you trust where it came from. A mod that hangs freezes this window until you end "
                               "agent-ui; your terminals keep running.")
@@ -793,6 +815,8 @@ void draw_settings(App::State& s) {
     const std::string& sec = s.settings_section;
     if (sec == "Look")
         changed = settings_look(s);
+    else if (sec == "Keyboard")
+        changed = settings_keyboard(s);
     else if (sec == "Machines")
         changed = settings_machines(s);
     else if (sec == "Alerts")

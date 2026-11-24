@@ -227,22 +227,19 @@ TEST(Stage, ShippedLayoutHasBarStageAndStrip) {
 }
 
 // Every stage.* command is known (and Mission Control's names for the ones Stage took over);
-// Ctrl+Shift+M toggles Stage; Alt+Left / Alt+Right step through agents only while Stage shows.
+// Stage has a toggle key, and keys that step through agents only while it shows (which ones: the
+// win/ and posix/ keymap tests).
 TEST(Stage, CommandsAndKeys) {
     for (const char* c : {"stage.toggle", "stage.show", "stage.next", "stage.prev", "stage.back",
                           "stage.filter", "stage.size", "stage.auto_switch", "stage.shells", "mission.toggle",
                           "mission.expand", "mission.filter"})
         EXPECT_TRUE(is_builtin_command(c)) << c;
     Keymap k = Keymap::defaults();
-    EXPECT_EQ(k.chord_for("stage.toggle"), "Ctrl+Shift+M");
+    EXPECT_NE(k.chord_for("stage.toggle"), "");
     EXPECT_EQ(k.chord_for("mission.toggle"), "");
-    const ImGuiKeyChord alt_left = ImGuiMod_Alt | ImGuiKey_LeftArrow;
-    const ImGuiKeyChord alt_right = ImGuiMod_Alt | ImGuiKey_RightArrow;
-    EXPECT_EQ(k.global(alt_left), "pane.go:left");  // elsewhere unchanged
     k.set_layout("stage");
-    EXPECT_EQ(k.global(alt_left), "stage.prev");
-    EXPECT_EQ(k.global(alt_right), "stage.next");
-    EXPECT_EQ(k.global(ImGuiMod_Ctrl | ImGuiKey_1), "tab.select:1");  // Ctrl+1..9 stay with the tabs
+    EXPECT_EQ(k.global(ImGuiMod_Ctrl | ImGuiKey_1),
+              "tab.select:1");  // Ctrl (macOS: Cmd) +1..9 stay with the tabs
 }
 
 // A saved "layout": "mission" opens Stage; the first-use tips cover Stage and drop Mission Control.

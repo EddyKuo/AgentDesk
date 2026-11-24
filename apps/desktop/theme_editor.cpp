@@ -196,10 +196,9 @@ std::string write_file_atomically(const std::filesystem::path& path, const std::
             return "Couldn't write the file (is the disk full or the folder read-only?)";
         }
     }
-    if (!::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        const DWORD err = ::GetLastError();
+    if (std::error_code why; !os::replace_file(tmp, path, &why)) {
         std::filesystem::remove(tmp, ec);
-        return std::system_category().message(static_cast<int>(err));
+        return why.message();
     }
     return {};
 }
@@ -221,7 +220,7 @@ void do_save(App::State& s) {
     g_ed.saved = g_ed.file;
     g_ed.dirty = false;
     g_ed.save_error.clear();
-    g_ed.note = "Saved as themes\\" + name + ".json";
+    g_ed.note = "Saved as " + data_file_text("themes", name + ".json");
     run_command(s, "theme:" + name);  // the layout shows it from now on (its light or dark half)
 }
 
@@ -596,7 +595,8 @@ void draw_preview(App::State& s, ImVec2 a, ImVec2 size) {
     dl->AddRect(ta, tb, c(p.focus), px(6), 0, px(1.5f));
     dl->AddRectFilled(ImVec2(ta.x + px(6), ta.y + px(22)), ImVec2(tb.x - px(6), tb.y - px(6)), c(p.term_bg),
                       px(3));
-    dl->AddText(s.fonts.ui, fs, ImVec2(ta.x + px(10), ta.y + px(5)), c(p.dim), "api  D:\\src\\project");
+    dl->AddText(s.fonts.ui, fs, ImVec2(ta.x + px(10), ta.y + px(5)), c(p.dim),
+                ui::path_text::local_separator() == '\\' ? "api  D:\\src\\project" : "api  ~/src/project");
     ImFont* mono = s.fonts.mono != nullptr ? s.fonts.mono : s.fonts.ui;
     const float ms = fpx(11);
     float ly = ta.y + px(30);
@@ -795,9 +795,8 @@ void draw_read_error(App::State& s) {
     settings_wrapped(s, msg.c_str(), g_pal->needs_you, 13.0f, 19.0f);
     ImGui::Dummy(ImVec2(0, px(10)));
     if (!g_ed.read_error_file.empty()) {
-        if (editor_button(s, "Open in Notepad", false))
-            ::ShellExecuteW(nullptr, L"open", L"notepad.exe", g_ed.read_error_file.c_str(), nullptr,
-                            SW_SHOWNORMAL);
+        if (editor_button(s, "Open in a text editor", false))
+            os::open_text_file(g_ed.read_error_file);
         ImGui::SameLine(0, px(8));
     }
     if (editor_button(s, "Close", true) || ImGui::IsKeyPressed(ImGuiKey_Escape))
@@ -833,7 +832,7 @@ std::optional<std::string> exec_theme_editor_command(App::State& s, const std::s
         const auto dir = data_dir() / L"themes";
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
-        ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        os::open_path(dir);
         return std::string();
     }
     if (name == "theme.delete") {
@@ -842,8 +841,10 @@ std::optional<std::string> exec_theme_editor_command(App::State& s, const std::s
         const auto file = user_theme_file(arg);
         // Set aside, not deleted: <name>.json.old-<time>, as layout.reset does.
         const auto aside = std::filesystem::path(file).concat(L".old-" + std::to_wstring(std::time(nullptr)));
-        if (!::MoveFileExW(file.c_str(), aside.c_str(), 0))
-            return std::system_category().message(static_cast<int>(::GetLastError()));
+        std::error_code ec;
+        std::filesystem::rename(file, aside, ec);
+        if (ec)
+            return ec.message();
         forget_theme(arg);
         // Wherever it was in use, the defaults take over.
         auto& st = s.settings;
@@ -858,7 +859,8 @@ std::optional<std::string> exec_theme_editor_command(App::State& s, const std::s
                 pair.second = st.theme_light;
         }
         save_settings(st);
-        s.toast("Theme deleted", "themes\\" + arg + ".json was set aside.", "", g_pal->info, 4);
+        s.toast("Theme deleted", data_file_text("themes", arg + ".json") + " was set aside.", "", g_pal->info,
+                4);
         return std::string();
     }
     return std::nullopt;

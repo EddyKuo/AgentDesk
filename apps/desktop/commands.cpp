@@ -32,7 +32,8 @@ bool known_command(std::string_view name) {
 }
 
 // Profile used for new spaces/tabs/splits: the configured one if it exists, else the first
-// shell found (PowerShell 7, Windows PowerShell, Command Prompt), else empty.
+// shell found (PowerShell 7, Windows PowerShell, Command Prompt; on macOS the login shell), else
+// empty.
 std::string pick_shell(const std::string& wanted,
                        const std::vector<std::pair<std::string, std::string>>& profiles) {
     const auto has = [&](const std::string& id) {
@@ -42,6 +43,10 @@ std::string pick_shell(const std::string& wanted,
         return wanted;
     for (const char* id : {"pwsh", "powershell", "cmd"})
         if (has(id))
+            return id;
+    // Elsewhere (macOS) the host lists the login shell first among the shells it found.
+    for (const auto& [id, name] : profiles)
+        if (is_shell_profile(id))
             return id;
     return {};
 }
@@ -61,7 +66,7 @@ host::ToolResult git_at(App::State& s, const std::string& machine, const std::st
                         std::chrono::seconds timeout = std::chrono::seconds(30)) {
     if (machine.empty()) {
         const std::filesystem::path p(win::to_wide(cwd));
-        args.insert(args.begin(), {L"git", L"-C", p.native()});
+        args.insert(args.begin(), {L"git", L"-C", p.wstring()});
         return host::run_tool(args, p, timeout);
     }
     return remote_git(s.panels->remote, machine, cwd, args);
@@ -106,7 +111,6 @@ std::vector<std::string> checked_out_submodules(App::State& s, const std::string
 
 WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std::string& top) {
     WorktreeRisk r;
-    const std::filesystem::path p(win::to_wide(top));
     const auto st = git_at(s, machine, top, {L"status", L"--porcelain"});
     r.dirty = git_ok(st) && !st.output.empty();
     const auto paths = checked_out_submodules(s, machine, top);
@@ -121,15 +125,14 @@ WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std:
                 path.compare(0, other.size(), other) == 0 && path[other.size()] == '/')
                 parent = other;
         }
-        const auto parent_dir = parent.empty() ? p : p / win::to_wide(parent);
+        const std::string parent_dir = ui::path_text::join(top, parent);
         const std::string inner = parent.empty() ? path : path.substr(parent.size() + 1);
-        const auto pinned = git_at(s, machine, win::to_utf8(parent_dir.native()),
-                                   {L"rev-parse", L"HEAD:" + win::to_wide(inner)});
+        const auto pinned = git_at(s, machine, parent_dir, {L"rev-parse", L"HEAD:" + win::to_wide(inner)});
         std::vector<std::wstring> args = {L"rev-list", L"-n1", L"--all", L"--not", L"--remotes"};
         const std::string pin = git_ok(pinned) ? trimmed(pinned.output) : std::string();
         if (!pin.empty())
             args.push_back(win::to_wide(pin));
-        const auto local = git_at(s, machine, win::to_utf8((p / win::to_wide(path)).native()), args);
+        const auto local = git_at(s, machine, ui::path_text::join(top, path), args);
         if (!git_ok(local) || !trimmed(local.output).empty())
             r.unpushed.push_back(path);  // a check that failed counts as at risk
     }
@@ -197,8 +200,7 @@ std::vector<WorktreeEntry> list_worktrees(App::State& s, const std::string& mach
         if (l.rfind("worktree ", 0) == 0) {
             e = {};
             skip = false;
-            e.path = l.substr(9);
-            std::replace(e.path.begin(), e.path.end(), '/', '\\');
+            e.path = ui::path_text::native(l.substr(9));
         } else if (l.rfind("branch ", 0) == 0) {
             e.branch = l.substr(7);
             if (e.branch.rfind("refs/heads/", 0) == 0)
@@ -858,12 +860,14 @@ Outcome exec_app_command(App::State& s, const Command& c) {
         s.picker_buf[0] = '\0';
         s.picker_sel = -1;
         s.picker_reset = true;
+    } else if (name == "app.hide" || name == "app.hide_others") {
+        app_hide(name == "app.hide_others");
     } else if (name == "window.minimize") {
-        ::ShowWindow(s.config.hwnd, SW_MINIMIZE);
+        window_minimize(s.config.hwnd);
     } else if (name == "window.maximize") {
-        ::ShowWindow(s.config.hwnd, ::IsZoomed(s.config.hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        window_toggle_maximize(s.config.hwnd);
     } else if (name == "window.close") {
-        ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
+        window_close(s.config.hwnd);
     } else if (name == "window.fill") {
         // The Mac layout's window fills the desktop (no margins), or floats again.
         s.mac.fill = !s.mac.fill;
@@ -907,7 +911,7 @@ Outcome exec_app_command(App::State& s, const Command& c) {
     } else if (name == "app.settings") {
         // `arg` names the page to open on ("mods", "alerts", ...).
         s.show_settings = true;
-        for (const char* sec : {"Look", "Machines", "Alerts", "Mods", "Updates", "Privacy"})
+        for (const char* sec : {"Look", "Keyboard", "Machines", "Alerts", "Mods", "Updates", "Privacy"})
             if (_stricmp(arg.c_str(), sec) == 0)
                 s.settings_tab = sec;
     } else if (name == "app.zoom_in" || name == "app.zoom_out" || name == "app.zoom_reset") {
@@ -923,7 +927,7 @@ Outcome exec_app_command(App::State& s, const Command& c) {
     } else if (name == "app.keys") {
         const auto path = data_dir() / L"keys.json";
         load_keys(s);  // writes the defaults when the file is missing
-        ::ShellExecuteW(nullptr, L"open", L"notepad.exe", path.c_str(), nullptr, SW_SHOWNORMAL);
+        os::open_text_file(path);
         s.toast("keys.json opened", "Saved changes apply right away.", "", g_pal->info);
     } else if (name == "app.exit_all") {
         s.show_exit = true;
@@ -954,7 +958,7 @@ Outcome exec_app_command(App::State& s, const Command& c) {
         if (!ui::updates::apply(&error)) {
             if (error.empty())
                 return "no update is ready yet";
-            return "Close AgentDesk's terminals (or restart Windows) and try again. Couldn't replace "
+            return "Close AgentDesk's terminals (or restart the computer) and try again. Couldn't replace "
                    "AgentDesk's files: " +
                    error + ".";
         }
@@ -1000,7 +1004,7 @@ std::string clone_layout(App::State& s, const std::string& arg) {
     const auto dest = layouts_dir() / win::to_wide(to + ".json");
     if (std::filesystem::exists(dest, ec) ||
         std::any_of(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) { return l.name == to; }))
-        return "cannot clone layout: layouts\\" + to + ".json is already there";
+        return "cannot clone layout: " + data_file_text("layouts", to + ".json") + " is already there";
     lay::Node node = it->file;
     node.cloned_from = Json{{"name", from}, {"version", AGENTDESK_VERSION_STRING}};
     {
@@ -1012,7 +1016,7 @@ std::string clone_layout(App::State& s, const std::string& arg) {
                                    std::filesystem::copy_options::overwrite_existing, ec);
     s.layouts = load_layouts(s.settings);
     run_command(s, "layout:" + to);
-    s.toast("Layout duplicated", "layouts\\" + to + ".json", "", g_pal->info);
+    s.toast("Layout duplicated", data_file_text("layouts", to + ".json"), "", g_pal->info);
     return {};
 }
 
@@ -1046,7 +1050,7 @@ std::string reset_layout(App::State& s, const std::string& arg) {
         }
         std::filesystem::rename(f, to, ec);
         if (ec)
-            return "cannot set layouts\\" + file_name + ".json aside: " + ec.message();
+            return "cannot set " + data_file_text("layouts", file_name + ".json") + " aside: " + ec.message();
         ++aside;
     }
     std::filesystem::remove(layout_state_path(which), ec);
@@ -1080,7 +1084,7 @@ void clone_mod(App::State& s, const std::string& arg) {
     if (ec)
         s.toast("Could not duplicate " + arg, ec.message(), "", g_pal->needs_you);
     else
-        s.toast("Mod duplicated", "mods\\" + to + " (off until you enable it)", "", g_pal->info);
+        s.toast("Mod duplicated", data_file_text("mods", to) + " (off until you enable it)", "", g_pal->info);
 }
 
 // Switching, cloning and resetting layouts; mods.
@@ -1117,7 +1121,7 @@ Outcome exec_layout_mod_command(App::State& s, const Command& c) {
         const auto dir = data_dir() / L"mods";
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
-        ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        os::open_path(dir);
     } else if (c.name == "mod") {
         const auto c2 = c.arg.find(':');
         if (c2 == std::string::npos)

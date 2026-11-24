@@ -387,8 +387,11 @@ void draw_classic_menubar(App::State& s, ImVec2 pos, float w, float h) {
     dl->AddRectFilled(pos, b, g_pal->sidebar);
     const float y = std::round(pos.y + (h - c.g.cell_h) * 0.5f);
     const int cols = c.g.cols(w);
-    const bool windows = s.config.hwnd != nullptr && s.settings.window_buttons == "windows";
-    const bool buttons = s.config.hwnd != nullptr;
+    const bool buttons = s.config.hwnd != nullptr && window_draws_own_buttons();
+    const bool windows = buttons && s.settings.window_buttons == "windows";
+    // Cells the system's own buttons cover (macOS); none on Windows.
+    const int lead = static_cast<int>(std::ceil(
+        (clear_of_traffic_lights(s, pos.x, pos.y, b.y, 0.0f) - pos.x) / std::max(1.0f, c.g.cell_w)));
 
     // What fits: all menus over 80 cells; the clock, then the counts go when it is tight.
     const AgentTally t = tally(s);
@@ -397,7 +400,7 @@ void draw_classic_menubar(App::State& s, ImVec2 pos, float w, float h) {
     localtime_s(&local, &now);
     const std::string clock = ui::chrome_common::clock_text(local.tm_wday, local.tm_hour, local.tm_min);
     const std::string counts = "!" + std::to_string(t.needs) + "  ~" + std::to_string(t.working);
-    int full = 1 + (buttons && !windows ? 10 : 0), brief = full;
+    int full = 1 + lead + (buttons && !windows ? 10 : 0), brief = full;
     for (const menus::Menu m : shown_menus(true))
         full += cl::text_cols(menu_label(m)) + 2;
     for (const menus::Menu m : shown_menus(false))
@@ -416,7 +419,7 @@ void draw_classic_menubar(App::State& s, ImVec2 pos, float w, float h) {
         cs.keyed = true;
         cs.open_request = -1;
     }
-    int col = 1;
+    int col = 1 + lead;
     if (buttons && !windows)
         col = draw_text_buttons(s, dl, c, pos.x, y, col, false) + 1;
     cs.menu_at.assign(shown.size(), ImVec2(pos.x, b.y));

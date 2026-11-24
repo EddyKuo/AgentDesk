@@ -65,9 +65,14 @@ void draw_space_avatar(App::State& s, ImDrawList* dl, ImVec2 min, float side, Im
 void draw_brand(App::State& s, ImVec2 pos, float w, bool rail) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float h = px(46);
-    const float cy = pos.y + h * 0.5f;
+    // macOS: the system's window buttons sit at the top-left; the mark and name start after them,
+    // and a rail (too narrow to share the row) puts its toggle below them.
+    const float system_buttons = pos.x < px(1) && pos.y < px(1) ? window_system_buttons_width() : 0.0f;
+    const float cy = pos.y + h * 0.5f + (rail && system_buttons > 0 ? px(14) : 0.0f);
     // The round window buttons take the row's left 76 px.
-    const float x = pos.x + (rail ? px(6) : mac_window_buttons(s) ? px(76) : px(14));
+    const float x = pos.x + (rail                    ? px(6)
+                             : mac_window_buttons(s) ? px(76)
+                                                     : px(14) + std::max(0.0f, system_buttons - px(8)));
     if (!rail) {
         const float m = px(20);
         draw_brand_mark(dl, ImVec2(x, cy - m * 0.5f), m);

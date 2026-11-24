@@ -1,12 +1,13 @@
 // ModHost tests against a test mod DLL: loading, settings, guarded calls and the panels it returns.
 #include "agentdesk/ui/mods.hpp"
 
-#include <windows.h>
 
 #include <filesystem>
 #include <fstream>
 
 #include <gtest/gtest.h>
+
+#include "test_util.hpp"
 
 namespace fs = std::filesystem;
 using agentdesk::ui::ModHost;
@@ -17,11 +18,13 @@ using agentdesk::ui::ModWidget;
 // mod.dll; each test copies it into a fresh mods folder.
 namespace {
 
+// mod.dll or mod.dylib: the test mod's own file name.
+const fs::path kModFile = fs::path(AGENTDESK_TEST_MOD).filename();
+
 class ModsTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        dir_ = fs::temp_directory_path() / (L"agentdesk-mods-" + std::to_wstring(::GetCurrentProcessId()) +
-                                            L"-" + std::to_wstring(::GetTickCount64()));
+        dir_ = fs::temp_directory_path() / ("agentdesk-mods-" + agentdesk::test::unique_suffix());
         fs::create_directories(dir_);
     }
     void TearDown() override {
@@ -30,7 +33,7 @@ protected:
     }
     void install(const std::string& mod, const std::string& settings = {}, const std::string& mod_json = {}) {
         fs::create_directories(dir_ / mod);
-        fs::copy_file(AGENTDESK_TEST_MOD, dir_ / mod / "mod.dll", fs::copy_options::overwrite_existing);
+        fs::copy_file(AGENTDESK_TEST_MOD, dir_ / mod / kModFile, fs::copy_options::overwrite_existing);
         if (!settings.empty())
             std::ofstream(dir_ / mod / "settings.json", std::ios::binary) << settings;
         if (!mod_json.empty())
@@ -139,7 +142,7 @@ TEST_F(ModsTest, OldLuaModsAndBadDllsReportErrors) {
     fs::create_directories(dir_ / "old");
     std::ofstream(dir_ / "old" / "main.lua", std::ios::binary) << "-- old\n";
     fs::create_directories(dir_ / "junk");
-    std::ofstream(dir_ / "junk" / "mod.dll", std::ios::binary) << "not a dll";
+    std::ofstream(dir_ / "junk" / kModFile, std::ios::binary) << "not a dll";
     ModHost h(dir_);
     h.load({"old", "junk"});
     const auto mods = h.mods();

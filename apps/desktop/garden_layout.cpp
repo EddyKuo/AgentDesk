@@ -772,7 +772,7 @@ void draw_garden_bar(App::State& s, ImVec2 pos, float w, float h) {
     const float cy = pos.y + h * 0.5f;
     float x = clear_of_traffic_lights(s, pos.x + tok::gap_l(), pos.y, end.y, px(14));
     float right = end.x - px(10);
-    if (!mac_window_buttons(s)) {
+    if (windows_window_buttons(s)) {
         draw_window_buttons(s, right, pos.y, h);
         right -= px(26) * 3 + px(4) + px(8);
     }

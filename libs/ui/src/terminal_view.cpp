@@ -13,7 +13,9 @@
 
 #include "agentdesk/ui/clipboard.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
+#include "agentdesk/ui/keyboard.hpp"
 #include "agentdesk/ui/sprites.hpp"
+#include "keyboard_os.hpp"
 
 namespace agentdesk::ui {
 
@@ -139,7 +141,18 @@ ImGuiKeyChord held_chord(const Modifiers& mods) {
         held |= ImGuiMod_Shift;
     if (mods.alt)
         held |= ImGuiMod_Alt;
+    held |= keyboard_os::extra_held(ImGui::GetIO());
     return held;
+}
+
+// What the program in the terminal gets as modifiers. On macOS (FR-40) that is the Control key
+// (ImGui's Super) and Option only while it acts as Alt; Cmd never reaches the program.
+Modifiers terminal_modifiers(const ImGuiIO& io) {
+    return keyboard_os::program_modifiers(io);
+}
+
+bool held_has_super(ImGuiKeyChord held) {
+    return keyboard_os::always_program(held);
 }
 
 bool is_modifier_key(ImGuiKey key) {
@@ -429,12 +442,18 @@ void TerminalView::paint_screen_rows(ImDrawList* dl, const Frame& f, const termi
                                   static_cast<int>((dl->GetClipRectMax().y - f.origin.y) / f.cell_h) + 1);
     for (int row = first_row; row < last_row; ++row) {
         const float y = f.y_at(row + f.offset);
-        // Backgrounds as merged runs of equal colour.
+        // Backgrounds as merged runs of equal colour. The right half of a wide character carries no
+        // colours of its own (it is a continuation cell): it takes its character's, else a coloured
+        // prompt shows a dark gap after every CJK character.
+        const auto bg_at = [&](int c) {
+            const terminal::Cell& cell = snap.at(row, c);
+            return colors_of(cell.width == 0 && c > 0 ? snap.at(row, c - 1) : cell, theme).bg;
+        };
         int col = 0;
         while (col < snap.cols) {
-            const ImU32 bg = colors_of(snap.at(row, col), theme).bg;
+            const ImU32 bg = bg_at(col);
             int end = col + 1;
-            while (end < snap.cols && colors_of(snap.at(row, end), theme).bg == bg)
+            while (end < snap.cols && bg_at(end) == bg)
                 ++end;
             if (bg != theme.default_bg)
                 dl->AddRectFilled(ImVec2(f.x_at(col), y), ImVec2(f.x_at(end), y + f.cell_h), bg);
@@ -626,9 +645,10 @@ void TerminalView::run_command(const std::string& cmd, TerminalSource& source,
 void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
                                    const terminal::ScreenSnapshot& snap) {
     const ImGuiIO& io = ImGui::GetIO();
-    const Modifiers mods{io.KeyCtrl, io.KeyShift, io.KeyAlt};
-    const bool alt_gr = mods.ctrl && mods.alt;  // AltGr arrives as Ctrl+Alt with a printable char
-    const ImGuiKeyChord held = held_chord(mods);
+    const Modifiers mods = terminal_modifiers(io);
+    const bool alt_gr = keyboard_os::is_alt_gr(mods);
+    const bool command = keyboard_os::app_only_modifier(io);
+    const ImGuiKeyChord held = held_chord(Modifiers{io.KeyCtrl, io.KeyShift, io.KeyAlt});
 
     // Bound chords first: global ones go to the app, terminal ones run here. Neither reaches
     // the program.
@@ -665,7 +685,9 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
     }
 
     // Ctrl+C copies when something is selected, otherwise it is an interrupt for the program.
-    if (!consumed.contains(ImGuiKey_C) && adapter::key_pressed_owned(ImGuiKey_C, str_id) &&
+    // (macOS: Cmd+C copies through keys.json; Control+C is always the interrupt.)
+    if (!command && !held_has_super(held) && !consumed.contains(ImGuiKey_C) &&
+        adapter::key_pressed_owned(ImGuiKey_C, str_id) &&
         classify_clipboard_chord(ImGuiKey_C, mods, has_selection()) == ClipboardAction::kCopy) {
         copy_selection(snap);
         clear_selection();
@@ -678,6 +700,8 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
         clear_selection();
         source.send(std::move(input));
     };
+    if (command)
+        return;  // an unbound Cmd chord: nothing for the program
     for (const ImGuiKey key : kNamedKeys) {
         if (consumed.contains(key) || !adapter::key_pressed_owned(key, str_id))
             continue;
@@ -709,7 +733,7 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
 void TerminalView::report_global_chords(const char* str_id) {
     const ImGuiIO& io = ImGui::GetIO();
     const ImGuiKeyChord held = held_chord(Modifiers{io.KeyCtrl, io.KeyShift, io.KeyAlt});
-    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k) {
+    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k) {  // NOLINT
         const auto key = static_cast<ImGuiKey>(k);
         if (is_modifier_key(key) || !adapter::key_pressed_owned(key, str_id))
             continue;
@@ -867,7 +891,7 @@ void TerminalView::forward_mouse(TerminalSource& source, const terminal::ScreenS
                                  CellPos cell) {
     const ImGuiIO& io = ImGui::GetIO();
     std::uint8_t mods = terminal::kModNone;
-    if (io.KeyCtrl)
+    if (terminal_modifiers(io).ctrl)
         mods |= terminal::kModCtrl;
     if (io.KeyAlt)
         mods |= terminal::kModAlt;
@@ -1228,6 +1252,17 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     }
     dl->PopClipRect();
 
+    // An input method's composition (macOS): drawn over the caret, underlined, until committed.
+    if (item.active) {
+        if (const std::string pre = keyboard::preedit(); !pre.empty()) {
+            const ImVec2 size = f.font->CalcTextSizeA(f.font_size, FLT_MAX, 0.0f, pre.c_str());
+            const ImVec2 b(caret.x + size.x + 2, caret.y + f.cell_h);
+            dl->AddRectFilled(caret, b, theme.default_bg);
+            dl->AddText(f.font, f.font_size, ImVec2(caret.x + 1, caret.y + (f.cell_h - size.y) * 0.5f),
+                        theme.default_fg, pre.c_str());
+            dl->AddLine(ImVec2(caret.x, b.y - 1), ImVec2(b.x, b.y - 1), theme.default_fg);
+        }
+    }
     if (item.active) {
         adapter::set_ime_caret(caret, f.cell_h);
         if (source.can_input())

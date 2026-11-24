@@ -1017,7 +1017,7 @@ void draw_launcher(App::State& s) {
         ImGui::TextDisabled("Machine");
         ImGui::SetNextItemWidth(-1);
         if (ImGui::BeginCombo("##machine", s.machine_label(s.launch_machine).c_str())) {
-            if (ImGui::Selectable("This PC", s.launch_machine.empty()))
+            if (ImGui::Selectable("This computer", s.launch_machine.empty()))
                 s.launch_machine.clear();
             for (const auto& r : s.remotes) {
                 const std::string label = r.cfg.name + (r.host->connected() ? "" : "  (not connected)");

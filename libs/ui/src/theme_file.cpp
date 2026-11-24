@@ -243,7 +243,7 @@ std::string name_problem(const std::string& name, const std::vector<std::string>
                                             "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"};
     for (const char* r : kReserved)
         if (upper == r)
-            return "Windows keeps that name for itself.";
+            return "Windows reserves that name, so the file could not be shared with it.";
     std::string lower;
     for (const char c : name)
         lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));

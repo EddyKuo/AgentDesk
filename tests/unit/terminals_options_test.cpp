@@ -113,12 +113,11 @@ TEST(TerminalsOptions, LayoutKeysDoNotClashWithDefaults) {
     }
     Keymap k = Keymap::defaults();
     k.set_layout("terminals");
-    EXPECT_EQ(*k.global(*Keymap::parse("alt-r")), "terminals.resize_mode");
-    EXPECT_EQ(*k.global(*Keymap::parse("alt-shift-enter")), "pane.split:auto");
-    EXPECT_EQ(*k.global(*Keymap::parse("alt-shift-g")), "terminals.gaps");
-    EXPECT_EQ(*k.global(*Keymap::parse("alt-shift-q")), "pane.close");
-    k.set_layout("workspace");
-    EXPECT_FALSE(k.global(*Keymap::parse("alt-r")).has_value());  // only while Terminals shows
+    for (const auto& [chord, cmd] : file["layout:terminals"].items())
+        EXPECT_EQ(k.global(*Keymap::parse(chord)), cmd.get<std::string>()) << chord;
+    k.set_layout("workspace");  // only while Terminals shows
+    for (const auto& [chord, cmd] : file["layout:terminals"].items())
+        EXPECT_FALSE(k.global(*Keymap::parse(chord)).has_value()) << chord;
 }
 
 TEST(TerminalsOptions, CommandsAreKnown) {

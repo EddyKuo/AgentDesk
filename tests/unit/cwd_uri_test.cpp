@@ -43,3 +43,13 @@ TEST(CwdUri, UnmappableUrisGiveEmpty) {
 TEST(CwdUri, MntWithoutDriveLetterStaysInsideWsl) {
     EXPECT_EQ(map("file://Ubuntu/mnt/wsl/x"), R"(\\wsl.localhost\Ubuntu\mnt\wsl\x)");
 }
+
+TEST(CwdUri, PosixPathsFromThisComputer) {
+    using agentdesk::terminal::posix_path_from_cwd_uri;
+    EXPECT_EQ(posix_path_from_cwd_uri("file://mac/Users/me/src%20x", "mac.local"), "/Users/me/src x");
+    EXPECT_EQ(posix_path_from_cwd_uri("file:///tmp/", ""), "/tmp");
+    EXPECT_EQ(posix_path_from_cwd_uri("file://localhost/", "mac"), "/");
+    EXPECT_EQ(posix_path_from_cwd_uri("file://other/Users/me", "mac"), "");
+    EXPECT_EQ(posix_path_from_cwd_uri("file://mac/Users/../etc", "mac"), "");
+    EXPECT_EQ(posix_path_from_cwd_uri("http://mac/x", "mac"), "");
+}

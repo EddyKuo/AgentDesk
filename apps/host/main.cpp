@@ -17,6 +17,7 @@
 
 #include <shellapi.h>
 
+#include "agentdesk/host/handover.hpp"
 #include "agentdesk/host/session_manager.hpp"
 #include "agentdesk/host/store.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"

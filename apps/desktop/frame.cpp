@@ -487,7 +487,7 @@ void update_window_title(App::State& s) {
         title = s.ws.space_title(s.ws.active_space, s.session_cwds()) + " - AgentDesk";
     if (title != last) {
         last = title;
-        ::SetWindowTextW(s.config.hwnd, win::to_wide(title).c_str());
+        window_set_title(s.config.hwnd, title);
     }
 }
 

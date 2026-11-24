@@ -134,3 +134,35 @@ std::string windows_path_from_cwd_uri(std::string_view uri, std::string_view loc
 }
 
 }  // namespace agentdesk::terminal
+
+namespace agentdesk::terminal {
+
+std::string posix_path_from_cwd_uri(std::string_view uri, std::string_view local_host) {
+    constexpr std::string_view kScheme = "file://";
+    if (uri.size() < kScheme.size() || !iequals(uri.substr(0, kScheme.size()), kScheme))
+        return {};
+    uri.remove_prefix(kScheme.size());
+    const std::size_t slash = uri.find('/');
+    if (slash == std::string_view::npos)
+        return {};
+    const std::string_view host = uri.substr(0, slash);
+    // zsh and Terminal.app send the short host name; gethostname() may carry ".local".
+    std::string_view local = local_host;
+    if (local.ends_with(".local"))
+        local.remove_suffix(6);
+    std::string_view h = host;
+    if (h.ends_with(".local"))
+        h.remove_suffix(6);
+    const bool is_local = h.empty() || iequals(h, "localhost") || (!local.empty() && iequals(h, local));
+    if (!is_local)
+        return {};
+    const auto decoded = percent_decode(uri.substr(slash));
+    if (!decoded || has_dotdot(*decoded))
+        return {};
+    std::string path = *decoded;
+    while (path.size() > 1 && path.back() == '/')
+        path.pop_back();
+    return path;
+}
+
+}  // namespace agentdesk::terminal

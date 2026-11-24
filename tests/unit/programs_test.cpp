@@ -7,7 +7,8 @@
 #include <fstream>
 
 #include <gtest/gtest.h>
-#include <process.h>
+
+#include "test_util.hpp"
 
 using agentdesk::ui::powershell_line;
 using agentdesk::ui::powershell_words;
@@ -89,7 +90,7 @@ TEST(Programs, EveryEntryHasItsIcon) {
 
 TEST(Programs, APersonsFileGoesOnTopEntryByEntry) {
     const auto dir = std::filesystem::temp_directory_path() /
-                     ("agentdesk-programs-test-" + std::to_string(_getpid()));  // runs side by side
+                     ("agentdesk-programs-test-" + agentdesk::test::unique_suffix());  // runs side by side
     std::filesystem::create_directories(dir);
     {
         std::ofstream(dir / "programs.json") << R"({"programs": {"claude": {"name": "My Claude"}, "mine": {"icon": "icons/x.svg"}}})";

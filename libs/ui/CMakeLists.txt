@@ -2,7 +2,7 @@
 find_package(imgui CONFIG REQUIRED)
 find_package(lunasvg CONFIG REQUIRED)
 
-agentdesk_library(agentdesk_ui
+set(_ui_sources
     src/input_mapping.cpp
     src/imgui_adapter.cpp
     src/fonts.cpp
@@ -11,13 +11,13 @@ agentdesk_library(agentdesk_ui
     src/workspace.cpp
     src/chrome_logic.cpp
     src/keymap.cpp
+    src/keyboard.cpp
     src/git_info.cpp
+    src/path_text.cpp
     src/mods.cpp
     src/remote_screen.cpp
     src/host_client.cpp
     src/links.cpp
-    src/clipboard.cpp
-    src/system_process.cpp
     src/telemetry.cpp
     src/updates.cpp
     src/image_cache.cpp
@@ -45,10 +45,44 @@ agentdesk_library(agentdesk_ui
     src/design_tokens.cpp
     src/garden.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/layout_defaults.cpp)
+# What differs per system lives in its own files (*_win.cpp; *_posix.cpp and macos/*.mm, ADR-30)
+# behind the internal headers in src/ (*_os.hpp, system_process.hpp).
+if(WIN32)
+    list(APPEND _ui_sources
+        src/clipboard.cpp
+        src/fonts_win.cpp
+        src/keyboard_win.cpp
+        src/keymap_win.cpp
+        src/links_win.cpp
+        src/mods_win.cpp
+        src/system_process.cpp
+        src/updates_win.cpp
+        src/window_place_win.cpp)
+else()
+    list(APPEND _ui_sources
+        src/macos/clipboard_macos.mm
+        src/macos/fonts_macos.cpp
+        src/macos/keyboard_macos.mm
+        src/macos/keymap_macos.cpp
+        src/macos/window_place_macos.mm
+        src/links_posix.cpp
+        src/mods_posix.cpp
+        src/system_process_posix.cpp
+        src/updates_posix.cpp)
+endif()
+agentdesk_library(agentdesk_ui ${_ui_sources})
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # host/input.hpp is part of the public interface (TerminalSource::send).
-target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt shcore lunasvg::lunasvg)
+if(APPLE)
+    # fonts.cpp asks FreeType which face of a collection (PingFang.ttc) a font is.
+    find_package(Freetype REQUIRED)
+    target_link_libraries(agentdesk_ui PRIVATE Freetype::Freetype)
+    target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi lunasvg::lunasvg
+        "-framework AppKit" "-framework CoreText" "-framework CoreFoundation" "-framework Carbon")
+else()
+    target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt shcore lunasvg::lunasvg)
+endif()
 target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agentdesk::host agentdesk::ipc agentdesk::protocol)
 
 # The shipped layout files (kept verbatim), compiled in as text for layout::builtin_text as

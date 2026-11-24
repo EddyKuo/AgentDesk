@@ -1,10 +1,10 @@
-// agentctl.exe: command-line client of agent-host.exe (design doc 3.8).
+// agentctl: command-line client of agent-host (design doc 3.8). The entry point and what differs
+// per system are in cli_win.cpp / cli_posix.cpp.
 // Exit codes: 0 ok, 2 bad arguments, 3 host unreachable, 4 session not found or ambiguous,
 // 5 operation refused, 6 start failed, 7 timeout. With --json, stdout carries only the result.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
-#include <windows.h>
-
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -21,9 +21,11 @@
 
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
+#include "agentdesk/platform/crt.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/protocol/messages.hpp"
 #include "agentdesk/ui/updates.hpp"
+#include "cli_os.hpp"
 
 namespace {
 
@@ -152,9 +154,7 @@ std::optional<int> call(Ctx& ctx, const std::string& method, Json params, Json& 
 }
 
 std::string env(const wchar_t* name) {
-    wchar_t buf[512]{};
-    const DWORD n = ::GetEnvironmentVariableW(name, buf, 512);
-    return n > 0 && n < 512 ? win::to_utf8(std::wstring(buf, n)) : std::string();
+    return agentdesk::cli::os::env(name);
 }
 
 Json labels_json(const std::vector<std::string>& list) {
@@ -497,7 +497,8 @@ when the window closes.
   Stop it:
     agentctl stop reviewer --interrupt
 
-Profiles: agentctl run needs a profile id; ask the person or look at %LOCALAPPDATA%\AgentDesk\profiles.json.
+Profiles: agentctl run needs a profile id; ask the person or look at profiles.json in AgentDesk's data folder
+(%LOCALAPPDATA%\AgentDesk on Windows, ~/Library/Application Support/AgentDesk on macOS).
 Never send prompts to agents the person did not ask you to start.
 )";
 
@@ -515,19 +516,10 @@ int cmd_shutdown(Ctx& ctx) {
 // (Codex Stop/Interrupt accept only JSON) and a decision on PermissionRequest would bypass the
 // person's approval prompt, which AgentDesk must never do. Never starts a host; gives up fast.
 int run_hook() {
-    std::string input;
-    {
-        HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);
-        char buf[4096];
-        DWORD n = 0;
-        while (input.size() < 1024 * 1024 && in != nullptr && in != INVALID_HANDLE_VALUE &&
-               ::ReadFile(in, buf, sizeof buf, &n, nullptr) && n > 0)
-            input.append(buf, n);
-    }
-    wchar_t session[256]{};
-    wchar_t pipe[512]{};
-    if (::GetEnvironmentVariableW(L"AGENTDESK_SESSION_ID", session, 256) == 0 ||
-        ::GetEnvironmentVariableW(L"AGENTDESK_PIPE", pipe, 512) == 0)
+    const std::string input = agentdesk::cli::os::read_stdin(1024 * 1024);
+    const std::string session = env(L"AGENTDESK_SESSION_ID");
+    const std::wstring pipe = win::to_wide(env(L"AGENTDESK_PIPE"));
+    if (session.empty() || pipe.empty())
         return kOk;  // not inside an AgentDesk session
     const auto evt = Json::parse(input, nullptr, false);
     if (!evt.is_object())
@@ -550,7 +542,7 @@ int run_hook() {
                                                     std::chrono::system_clock::now().time_since_epoch())
                                                     .count());
     Json params{
-        {"session", win::to_utf8(session)}, {"source", "agentdesk-hook"}, {"state", state}, {"seq", seq}};
+        {"session", session}, {"source", "agentdesk-hook"}, {"state", state}, {"seq", seq}};
     if (!kind.empty())
         params["kind"] = kind;
     try {
@@ -573,45 +565,11 @@ int run_bridge(const std::wstring& pipe, bool may_start) {
         return kNoHost;
     }
     host.client->close();
-    win::UniqueHandle p = ipc::open_raw_pipe(pipe, 10s);
-    if (!p) {
+    if (!agentdesk::cli::os::bridge_stdio(pipe)) {  // exits the process once the bridge ends
         diag("cannot open the agent-host pipe");
         return kNoHost;
     }
-    HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);
-    HANDLE out_h = ::GetStdHandle(STD_OUTPUT_HANDLE);
-    std::atomic<bool> done{false};
-    auto io = [&](bool write, char* buf, DWORD len, DWORD& n) {
-        OVERLAPPED ov{};
-        win::UniqueHandle ev(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
-        ov.hEvent = ev.get();
-        const BOOL ok = write ? ::WriteFile(p.get(), buf, len, nullptr, &ov)
-                              : ::ReadFile(p.get(), buf, len, nullptr, &ov);
-        if (!ok && ::GetLastError() != ERROR_IO_PENDING)
-            return false;
-        return ::GetOverlappedResult(p.get(), &ov, &n, TRUE) != FALSE;
-    };
-    std::thread up([&] {
-        char buf[16384];
-        DWORD n = 0;
-        while (!done && ::ReadFile(in, buf, sizeof buf, &n, nullptr) && n > 0) {
-            DWORD w = 0;
-            if (!io(true, buf, n, w) || w != n)
-                break;
-        }
-        done = true;
-        ::CancelIoEx(p.get(), nullptr);
-    });
-    char buf[16384];
-    DWORD n = 0;
-    while (!done && io(false, buf, sizeof buf, n) && n > 0) {
-        DWORD w = 0;
-        if (!::WriteFile(out_h, buf, n, &w, nullptr) || w != n)
-            break;
-    }
-    done = true;
-    up.detach();  // may be blocked reading stdin; the process exit ends it
-    ::ExitProcess(kOk);
+    return kOk;
 }
 
 // agentctl update: agent-host to its latest release; terminals keep running (agent-host hands
@@ -724,8 +682,8 @@ const char* kUsage =
 std::wstring session_pipe(const Ctx& ctx) {
     if (const auto p = ctx.args.opt("--pipe"))
         return win::to_wide(*p);
-    if (wchar_t buf[512]{}; ::GetEnvironmentVariableW(L"AGENTDESK_PIPE", buf, 512) > 0)
-        return buf;
+    if (const std::string p = env(L"AGENTDESK_PIPE"); !p.empty())
+        return win::to_wide(p);
     return ipc::default_pipe_name();
 }
 
@@ -746,8 +704,7 @@ int run_command(Ctx& ctx) {
 
 }  // namespace
 
-int wmain(int argc, wchar_t** argv) {
-    ::SetConsoleOutputCP(CP_UTF8);
+int agentdesk::cli::agentctl_main(int argc, wchar_t** argv) {
     Ctx ctx;
     try {
         ctx.args = parse_args(argc, argv);

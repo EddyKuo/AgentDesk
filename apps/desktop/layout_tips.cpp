@@ -25,8 +25,7 @@ std::string shown_card_key(const App::State& s) {
 bool auto_allowed(const App::State& s) {
     if (!s.config.automated)
         return true;
-    char buf[8] = {};
-    return ::GetEnvironmentVariableA("AGENTDESK_TIPS", buf, sizeof buf) > 0 && buf[0] == '1';
+    return os::env("AGENTDESK_TIPS").starts_with('1');
 }
 
 void close_card(App::State& s, bool all_off) {

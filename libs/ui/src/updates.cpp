@@ -2,8 +2,6 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/updates.hpp"
 
-#include <windows.h>
-
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -12,12 +10,12 @@
 #include <thread>
 #include <vector>
 
-#include <bcrypt.h>
 #include <nlohmann/json.hpp>
 
 #include "agentdesk/protocol/frame.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "system_process.hpp"
+#include "updates_os.hpp"
 
 namespace agentdesk::ui::updates {
 
@@ -66,7 +64,7 @@ Shared& g() {
 }
 
 std::string u8(const fs::path& p) {
-    return detail::to_utf8(p.native());
+    return detail::to_utf8(p.wstring());
 }
 
 std::string os_error(const std::error_code& ec) {
@@ -120,11 +118,11 @@ std::optional<std::string> releases() {
 
 // The folder inside a release zip (tools/package names it this way).
 std::wstring packed(const std::string& version) {
-    return L"AgentDesk-" + detail::to_wide(version) + L"-win-x64";
+    return os::packed(version);
 }
 
 fs::path exe_in(const fs::path& app) {
-    return app / L"agent-ui.exe";
+    return os::ui_exe_in(app);
 }
 
 // Left by swap(): the next start knows it follows an update.
@@ -158,7 +156,7 @@ bool curl_text(const std::string& url, std::string* text, std::string* error) {
 
 bool curl_file(const std::string& url, const fs::path& to, std::string* error) {
     return run(system(L"curl"),
-               {L"-fsSL", L"--max-time", kDownloadTimeout, L"-o", to.native(), detail::to_wide(url)}, error);
+               {L"-fsSL", L"--max-time", kDownloadTimeout, L"-o", to.wstring(), detail::to_wide(url)}, error);
 }
 
 // The file's sha256 matches `expected` (any case). False also when it cannot be read.
@@ -186,7 +184,7 @@ bool unpack(const std::string& url, const std::string& sha, const fs::path& work
         return false;
     }
     // bsdtar picks the format itself; -z would refuse a zip.
-    if (!run(system(L"tar"), {L"-xf", archive.native(), L"-C", work.native()}, error))
+    if (!run(system(L"tar"), {L"-xf", archive.wstring(), L"-C", work.wstring()}, error))
         return false;
     *app = work / packed(version);
     return true;
@@ -269,29 +267,10 @@ void wake_ui() {
         g().config.wake();
 }
 
-// Starts Windows PowerShell, which waits for this process to exit and then starts the app again.
-// With `expected`, the new process sees AGENTDESK_UPDATE_EXPECTED and never retries an update.
+// Starts the app again once this process has exited (os::relaunch).
 bool relaunch_expected(const std::optional<std::string>& expected) {
     const auto r = root();
-    if (!r)
-        return false;
-    std::wstring quoted;  // a single-quoted PowerShell string: ' doubles
-    for (wchar_t c : exe_in(*r).native()) {
-        quoted += c;
-        if (c == L'\'')
-            quoted += L'\'';
-    }
-    const std::wstring script = L"Wait-Process -Id " + std::to_wstring(::GetCurrentProcessId()) +
-                                L" -ErrorAction SilentlyContinue; Start-Process '" + quoted + L"'";
-    // Windows' own copy, not whatever `powershell` PATH finds.
-    const fs::path powershell = [] {
-        wchar_t sys[MAX_PATH]{};
-        const UINT n = ::GetSystemDirectoryW(sys, MAX_PATH);
-        return fs::path(std::wstring(sys, n)) / L"WindowsPowerShell" / L"v1.0" / L"powershell.exe";
-    }();
-    return detail::spawn_detached(powershell, {L"-NoProfile", L"-NonInteractive", L"-Command", script},
-                                  expected ? L"AGENTDESK_UPDATE_EXPECTED" : L"",
-                                  expected ? detail::to_wide(*expected) : L"");
+    return r && os::relaunch(*r, expected);
 }
 
 // Moves a verified download from `unpacked` to <root>.new and writes its receipt.
@@ -566,58 +545,14 @@ std::optional<std::string> startup_target(std::string_view running, const std::o
     return std::nullopt;
 }
 
-std::string sha256(std::string_view bytes) {
-    BCRYPT_ALG_HANDLE alg = nullptr;
-    std::string out;
-    if (::BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0)
-        return out;
-    unsigned char digest[32]{};
-    BCRYPT_HASH_HANDLE hash = nullptr;
-    if (::BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) == 0) {
-        // BCryptHashData takes a ULONG length: feed large inputs in 1 GiB pieces.
-        std::size_t at = 0;
-        do {
-            const ULONG n = static_cast<ULONG>(std::min<std::size_t>(bytes.size() - at, 1u << 30));
-            ::BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<char*>(bytes.data() + at)), n, 0);
-            at += n;
-        } while (at < bytes.size());
-        ::BCryptFinishHash(hash, digest, sizeof digest, 0);
-        ::BCryptDestroyHash(hash);
-        static constexpr char kHex[] = "0123456789abcdef";
-        for (unsigned char b : digest) {
-            out += kHex[b >> 4];
-            out += kHex[b & 15];
-        }
-    }
-    ::BCryptCloseAlgorithmProvider(alg, 0);
-    return out;
-}
-
 fs::path beside(const fs::path& root, std::wstring_view suffix) {
-    std::wstring name = root.filename().native();
+    std::wstring name = root.filename().wstring();
     name += suffix;
     return root.parent_path() / name;
 }
 
 fs::path system(std::wstring_view name) {
     return detail::system32_exe(name);
-}
-
-std::string target() {
-    return "windows-x86_64";
-}
-
-// An install is the folder unpacked from the portable zip, recognised by the
-// THIRD_PARTY_NOTICES.md it holds; a build folder has none.
-std::optional<fs::path> find_root(const fs::path& exe) {
-    std::error_code ec;
-    const fs::path real = fs::canonical(exe, ec);
-    if (ec)
-        return std::nullopt;
-    const fs::path dir = real.parent_path();
-    if (fs::is_regular_file(dir / L"THIRD_PARTY_NOTICES.md", ec))
-        return dir;
-    return std::nullopt;
 }
 
 // ---- steps
@@ -848,9 +783,9 @@ void leave_install_folder() {
     auto a = real.begin();
     auto b = r->begin();
     for (; b != r->end(); ++a, ++b)
-        if (a == real.end() || _wcsicmp(a->c_str(), b->c_str()) != 0)
+        if (a == real.end() || !os::same_component(*a, *b))
             return;
-    const auto home = detail::env_var(L"USERPROFILE");
+    const auto home = detail::home_folder();
     if (home)
         fs::current_path(*home, ec);
 }
@@ -859,7 +794,7 @@ bool apply_on_startup() {
     const auto expected = detail::env_var(L"AGENTDESK_UPDATE_EXPECTED");
     if (expected) {
         // Do not leak the guard into agent-host's environment and every terminal it starts.
-        ::SetEnvironmentVariableW(L"AGENTDESK_UPDATE_EXPECTED", nullptr);
+        detail::unset_env_var(L"AGENTDESK_UPDATE_EXPECTED");
         return false;  // relaunched as this version, or not: never retried
     }
     const auto r = checks_app();
@@ -915,7 +850,9 @@ void after_update() {
     std::thread([root = *r] {
         std::string now;
         std::string error;
-        const bool ok = run_core_update({L"--exe", (root / L"agent-host.exe").native()}, &now, &error);
+        const bool ok = run_core_update(
+            {L"--exe", os::host_exe_in(root).wstring()},
+            &now, &error);
         {
             std::lock_guard lock(g().mutex);
             auto& core = g().core;
@@ -949,7 +886,7 @@ bool run_core_update(const std::vector<std::wstring>& extra, std::string* now, s
             args.insert(args.end(), {L"--pipe", g().pipe});
     }
     args.insert(args.end(), extra.begin(), extra.end());
-    const fs::path ctl = g().config.exe.parent_path() / L"agentctl.exe";
+    const fs::path ctl = os::ctl_exe_beside(g().config.exe.parent_path());
     const auto r = detail::run_process(ctl, args);
     if (!r.started) {
         *error = "cannot run agentctl update";

@@ -13,7 +13,7 @@ constexpr const char* kWhatsNew[] = {
     "Bigger interface text by default (15 px), adjustable in Settings > Look; Geist and JetBrains Mono are "
     "bundled.",
     "New tabs, spaces and splits open a shell in the focused folder; spaces and branches follow cd.",
-    "WSL distributions are listed as shells, and Linux cd is followed too.",
+    "The + menus list every shell found on this computer, so each new space or tab can use a different one.",
     "Programs that read the mouse get clicks and the wheel; Shift keeps the mouse for selecting.",
     "Settle tab puts a running tab away until you show it or it needs you.",
     "Duplicate or reset a layout, duplicate a mod.",
@@ -43,16 +43,8 @@ bool whats_new_body(App::State& s) {
 // The feedback draft as it would be sent: the message, then a line naming the version, the
 // Windows build and the layout.
 std::string feedback_draft(const App::State& s) {
-    OSVERSIONINFOEXW os{};
-    os.dwOSVersionInfoSize = sizeof os;
-    // RtlGetVersion reports the real Windows version; GetVersionEx is capped by the manifest.
-    using RtlGetVersionFn = LONG(WINAPI*)(OSVERSIONINFOEXW*);
-    if (auto fn_ptr = reinterpret_cast<RtlGetVersionFn>(
-            ::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion")))
-        fn_ptr(&os);
-    const std::string about = std::string("AgentDesk ") + AGENTDESK_VERSION_STRING + ", Windows " +
-                              std::to_string(os.dwMajorVersion) + "." + std::to_string(os.dwMinorVersion) +
-                              "." + std::to_string(os.dwBuildNumber) + ", layout " + s.settings.layout;
+    const std::string about = std::string("AgentDesk ") + AGENTDESK_VERSION_STRING + ", " + os::os_version() +
+                              ", layout " + s.settings.layout;
     return std::string(s.feedback_buf) + "\n\n-- " + about + "\n";
 }
 
@@ -61,13 +53,8 @@ void save_feedback(const std::string& draft) {
     const auto dir = data_dir() / L"feedback";
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
-    SYSTEMTIME t{};
-    ::GetLocalTime(&t);
-    wchar_t name[64]{};
-    std::swprintf(name, 64, L"feedback-%04u%02u%02u-%02u%02u%02u.md", t.wYear, t.wMonth, t.wDay, t.wHour,
-                  t.wMinute, t.wSecond);
-    std::ofstream(dir / name, std::ios::binary) << draft;
-    ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    std::ofstream(dir / ("feedback-" + os::local_file_stamp() + ".md"), std::ios::binary) << draft;
+    os::open_path(dir);
 }
 
 // The feedback body, scrolling between the title and the footer, 24 px in, 10 px gaps: the
@@ -364,8 +351,8 @@ void draw_close_notice(App::State& s) {
     ImGui::TextWrapped(
         "Closing this window only detaches. Your sessions keep running in agent-host, and reopening "
         "AgentDesk "
-        "brings back the same spaces, tabs and panes. Use \"Exit and stop all\" in the sidebar to end "
-        "everything.");
+        "brings back the same spaces, tabs and panes. To end everything, run \"Exit and stop all "
+        "sessions\" from the command palette.");
     primary_button_style(true);
     if (ImGui::Button("Close window")) {
         s.settings.close_notice_shown = true;  // shown once (design doc 4.3)

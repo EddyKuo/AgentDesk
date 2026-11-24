@@ -9,7 +9,7 @@
 - 字型：介面用 Geist（`s.fonts.ui`、`ui_medium`、`ui_bold`），終端機文字用 JetBrains Mono（`s.fonts.mono`）。
 - 顏色寫 `Palette` 的欄位名（`apps/desktop/app_internal.hpp`）：`bg`、`sidebar`、`card`、`border`、`focus`（強調色，版面 JSON 叫 `accent`）、`hover`、`selected`、`text`、`dim`、`faint`、`needs_you`、`done`、`working`、`idle`、`info`、`term_bg`、`term_fg`、`cursor`、`selection`。半透明寫成 `alpha(g_pal->X, 0xNN)`，混色寫 `mix(a, b, t)`，都是現有的 helper。
 - 狀態標記沿用 `status_mark()`（`chrome.cpp`）：工作中是轉圈、需要你是「Needs you」膠囊或「!」。依設計文件 4.1，狀態不能只靠顏色。
-- 這四個版面在 herdr-app 都沒有對應的東西（`docs/research/herdr-app/` 的研究筆記沒提到，這是觀察結果），所以是 AgentDesk 自己的設計；照 ADR-31 的做法，每個新版面都要先寫一條 ADR。
+- 這四個版面在 herdr-app 都沒有對應的東西（`docs/research/herdr-app/` 的研究筆記沒提到，這是觀察結果），所以是 AgentDesk 自己的設計；照 ADR-43 的做法，每個新版面都要先寫一條 ADR。
 - 現有快捷鍵（`libs/ui/src/keymap.cpp` 的 `kGlobal`、`kTerminal`）已經用掉：Ctrl+Shift+T／N／K／W／X／O／E／Z／P／/／B／L／C／V／F、Ctrl+,、Ctrl+=／-／0、Ctrl+Tab、Ctrl+PageUp／PageDown（含 Shift）、Ctrl+1～9、Alt+1～9、Alt+[／]、Alt+方向鍵、Alt+H／J／K／L（含 Shift）、F2、Shift+F2、Ctrl+Backspace、Ctrl+←／→、Ctrl+V、Ctrl+Insert、Shift+Insert，以及 Ctrl+Alt+Shift+Esc。下面提的新快捷鍵都避開這些。
 - 新命令都要加進三個地方：`kCommands`（命令面板，`app_internal.hpp`）、`is_builtin_command` 的名稱表（`libs/ui/src/command_names.cpp`），以及說明視窗。
 
