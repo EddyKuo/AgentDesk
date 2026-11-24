@@ -11,7 +11,8 @@ std::unique_ptr<DynamicLibrary> DynamicLibrary::load(const std::filesystem::path
     if (handle == nullptr) {
         const char* why = ::dlerror();
         if (error != nullptr)
-            *error = "cannot load " + file.filename().string() + " (" + (why != nullptr ? why : "unknown error") + ")";
+            *error = "cannot load " + file.filename().string() + " (" +
+                     (why != nullptr ? why : "unknown error") + ")";
         return nullptr;
     }
     return std::unique_ptr<DynamicLibrary>(new DynamicLibrary(handle));

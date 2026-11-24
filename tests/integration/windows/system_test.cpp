@@ -1,12 +1,12 @@
 // Folders, identifiers, hashes, file replacement, shells and libraries on Windows.
 #include "agentdesk/platform/system.hpp"
 
+#include <windows.h>
+
 #include <array>
 #include <fstream>
 #include <regex>
 #include <sstream>
-
-#include <windows.h>
 
 #include <gtest/gtest.h>
 
@@ -66,7 +66,8 @@ TEST(System, DataDirHonorsTheOverride) {
 
 TEST(System, UuidsAndRandomBytes) {
     const auto a = ap::new_uuid();
-    EXPECT_TRUE(std::regex_match(a, std::regex("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")))
+    EXPECT_TRUE(std::regex_match(
+        a, std::regex("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")))
         << a;
     EXPECT_NE(a, ap::new_uuid());
     std::array<std::byte, 64> x{};

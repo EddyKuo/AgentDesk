@@ -65,7 +65,7 @@ target_include_directories(unit_tests PRIVATE ${PROJECT_SOURCE_DIR}/apps/desktop
 target_link_libraries(unit_tests PRIVATE agentdesk::ui agentdesk::protocol agentdesk::terminal agentdesk::vterm
     nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock)
 if(WIN32)
-    target_link_libraries(unit_tests PRIVATE agentdesk::platform_win shell32)
+    target_link_libraries(unit_tests PRIVATE agentdesk::platform shell32)
 endif()
 # A mod library for the mod tests (tests/fixtures/mods/test_mod.cpp): test_mods/mod.dll, mod.dylib.
 add_library(test_mod SHARED fixtures/mods/test_mod.cpp)
@@ -88,6 +88,10 @@ target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK
     AGENTDESK_OWN_THEMES_DIR="${PROJECT_SOURCE_DIR}/libs/ui/themes"
     AGENTDESK_TEST_MOD=L"$<TARGET_FILE:test_mod>")
 gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)
+# Shared files name no system (cmake/CheckPlatformBoundaries.cmake).
+add_test(NAME PlatformBoundaries
+    COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/CheckPlatformBoundaries.cmake)
+set_tests_properties(PlatformBoundaries PROPERTIES LABELS "unit" TIMEOUT 60)
 
 if(NOT WIN32)
     # macOS (ADR-30): the POSIX integration tests of the platform layer (real child processes in
@@ -130,12 +134,12 @@ agentdesk_executable(win_integration_tests
     integration/windows/use_bundled_conpty.cpp
     integration/windows/updates_test.cpp)
 target_link_libraries(win_integration_tests PRIVATE psapi advapi32 ws2_32 agentdesk::ui
-    agentdesk::host agentdesk::ipc agentdesk::platform_win agentdesk::terminal nlohmann_json::nlohmann_json GTest::gtest_main)
+    agentdesk::host agentdesk::ipc agentdesk::platform agentdesk::terminal nlohmann_json::nlohmann_json GTest::gtest_main)
 # A stand-in agent-ui.exe for the update tests (tests/fixtures/fake_agent_ui.cpp).
 add_executable(fake_agent_ui fixtures/fake_agent_ui.cpp)
 agentdesk_target_defaults(fake_agent_ui)
 # agent-host built as a later release (99.0.0), for agent-host's own update (design doc 7.4 OQ-09).
-add_executable(agent_host_next WIN32 ${PROJECT_SOURCE_DIR}/apps/host/main.cpp)
+add_executable(agent_host_next WIN32 ${PROJECT_SOURCE_DIR}/apps/host/main_win.cpp)
 agentdesk_target_defaults(agent_host_next)
 target_link_libraries(agent_host_next PRIVATE agentdesk::host agentdesk::ipc shell32)
 target_compile_definitions(agent_host_next PRIVATE AGENTDESK_VERSION_STRING="99.0.0")

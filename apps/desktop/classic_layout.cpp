@@ -387,7 +387,7 @@ void draw_classic_menubar(App::State& s, ImVec2 pos, float w, float h) {
     dl->AddRectFilled(pos, b, g_pal->sidebar);
     const float y = std::round(pos.y + (h - c.g.cell_h) * 0.5f);
     const int cols = c.g.cols(w);
-    const bool buttons = s.config.hwnd != nullptr && window_draws_own_buttons();
+    const bool buttons = s.config.window != nullptr && window_draws_own_buttons();
     const bool windows = buttons && s.settings.window_buttons == "windows";
     // Cells the system's own buttons cover (macOS); none on Windows.
     const int lead = static_cast<int>(std::ceil(

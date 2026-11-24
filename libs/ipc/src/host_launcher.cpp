@@ -1,15 +1,15 @@
 // Connects to agent-host (starting it when allowed) or to a remote host over ssh-like stdio.
+#include "agentdesk/ipc/host_launcher.hpp"
+
 #include <memory>
 #include <mutex>
 #include <thread>
 
-#include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/platform/process.hpp"
 #include "agentdesk/platform/system.hpp"
 #include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::ipc {
-
 
 namespace {
 

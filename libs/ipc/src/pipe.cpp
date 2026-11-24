@@ -1,14 +1,14 @@
 // Local IPC: framing, send budgets and request matching over platform::ByteStream. Each connection
 // has a reader (the connection thread) and a writer thread, so a slow client never blocks the
 // messages coming from it.
+#include "agentdesk/ipc/pipe.hpp"
+
 #include <array>
 #include <stdexcept>
 
-#include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/system.hpp"
 
 namespace agentdesk::ipc {
-
 
 namespace {
 

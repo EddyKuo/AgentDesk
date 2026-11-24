@@ -22,8 +22,8 @@ struct ProcessSpec {
     std::map<std::string, std::string> env_overrides;  // empty value removes the variable
     bool pipe_stdin = false;
     bool pipe_stdout = true;
-    bool pipe_stderr = false;     // stderr in a pipe of its own (ssh, git explain failures there)
-    bool merge_stderr = false;    // stderr into the stdout pipe (neither: to the null device)
+    bool pipe_stderr = false;   // stderr in a pipe of its own (ssh, git explain failures there)
+    bool merge_stderr = false;  // stderr into the stdout pipe (neither: to the null device)
     // ~Process ends it and what it started, and so does our own end (Windows: a kill-on-close job;
     // macOS: its own process group, ended by ~Process only). false: it may outlive us.
     bool end_with_parent = true;

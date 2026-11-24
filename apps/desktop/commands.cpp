@@ -863,11 +863,11 @@ Outcome exec_app_command(App::State& s, const Command& c) {
     } else if (name == "app.hide" || name == "app.hide_others") {
         app_hide(name == "app.hide_others");
     } else if (name == "window.minimize") {
-        window_minimize(s.config.hwnd);
+        window_minimize(s.config.window);
     } else if (name == "window.maximize") {
-        window_toggle_maximize(s.config.hwnd);
+        window_toggle_maximize(s.config.window);
     } else if (name == "window.close") {
-        window_close(s.config.hwnd);
+        window_close(s.config.window);
     } else if (name == "window.fill") {
         // The Mac layout's window fills the desktop (no margins), or floats again.
         s.mac.fill = !s.mac.fill;

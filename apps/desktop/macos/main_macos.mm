@@ -688,7 +688,7 @@ int main(int argc, char** argv) {
         hopts.wake = [] { schedule_pump(2); };
 
         agentdesk::desktop::AppConfig cfg;
-        cfg.hwnd = (__bridge void*)window;
+        cfg.window = (__bridge void*)window;
         cfg.wake = [] { schedule_pump(2); };
         cfg.start_profile = g_shell.dev.start_profile;
         cfg.run_commands = g_shell.dev.run;

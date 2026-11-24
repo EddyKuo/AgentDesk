@@ -12,7 +12,8 @@ std::unique_ptr<DynamicLibrary> DynamicLibrary::load(const std::filesystem::path
     if (module == nullptr) {
         const DWORD code = ::GetLastError();
         if (error != nullptr)
-            *error = "cannot load " + to_utf8(file.filename().native()) + " (error " + std::to_string(code) + ")";
+            *error =
+                "cannot load " + to_utf8(file.filename().native()) + " (error " + std::to_string(code) + ")";
         return nullptr;
     }
     return std::unique_ptr<DynamicLibrary>(new DynamicLibrary(module));

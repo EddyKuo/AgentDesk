@@ -107,8 +107,8 @@ void add_folder_hook(platform::PtySpawnSpec& spec) {
         std::string l = a;
         for (auto& c : l)
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (l == "-command" || l == "-c" || l == "-file" || l == "-f" || l == "-encodedcommand" || l == "-ec" ||
-            l == "-noninteractive")
+        if (l == "-command" || l == "-c" || l == "-file" || l == "-f" || l == "-encodedcommand" ||
+            l == "-ec" || l == "-noninteractive")
             return;
     }
     spec.args.push_back("-NoExit");

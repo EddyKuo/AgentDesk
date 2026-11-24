@@ -1,7 +1,7 @@
 // system_process.hpp on Windows: lenient text conversion, the environment, the system's own tools.
-#include "system_process.hpp"
-
 #include <windows.h>
+
+#include "system_process.hpp"
 
 namespace agentdesk::ui::detail {
 
@@ -54,7 +54,6 @@ std::filesystem::path system32_exe(std::wstring_view name) {
         return std::filesystem::path(file);
     return std::filesystem::path(std::wstring(root, n)) / L"System32" / file;
 }
-
 
 const char* os_name() {
     return "windows";

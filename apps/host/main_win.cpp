@@ -180,9 +180,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             manager = std::make_shared<host::SessionManager>(cfg);
         }
         auto server = serve(pipe_name, handlers_for(manager), taking_over);
-        log_line(data_dir, std::string(taking_over ? "took over" : "started") +
-                               " instance=" + cfg.host_instance_id +
-                               " conpty=" + (bundled_conpty ? "bundled" : "inbox"));
+        log_line(data_dir, std::string(taking_over ? "took over" : "started") + " instance=" +
+                               cfg.host_instance_id + " conpty=" + (bundled_conpty ? "bundled" : "inbox"));
         if (old_host)
             remove_old_exe_after(std::move(old_host));
         ::WaitForSingleObject(shutdown.get(), INFINITE);

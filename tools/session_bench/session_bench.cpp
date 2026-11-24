@@ -19,8 +19,8 @@
 #include <tlhelp32.h>
 
 #include "agentdesk/host/session.hpp"
-#include "agentdesk/platform/win/pty_conpty.hpp"
 #include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/win/pty_conpty.hpp"
 
 namespace win = agentdesk::platform::win;
 namespace host = agentdesk::host;
@@ -64,8 +64,7 @@ nlohmann::json memory() {
             {"peak_working_set_mb", static_cast<double>(pmc.PeakWorkingSetSize) / (1024.0 * 1024.0)}};
 }
 
-host::SessionConfig probe_config(const std::filesystem::path& probe,
-                                 std::vector<std::string> args) {
+host::SessionConfig probe_config(const std::filesystem::path& probe, std::vector<std::string> args) {
     host::SessionConfig c;
     c.spec.executable = probe;
     c.spec.args = std::move(args);
@@ -114,11 +113,10 @@ HistoryCheck check_history(const host::Session& session, const std::regex& line_
     return check;
 }
 
-nlohmann::json run_flood(const std::filesystem::path& probe, int seconds,
-                         long long rate) {
+nlohmann::json run_flood(const std::filesystem::path& probe, int seconds, long long rate) {
     const auto start = Clock::now();
-    auto session = host::Session::start(
-        probe_config(probe, {"flood", std::to_string(seconds), std::to_string(rate)}));
+    auto session =
+        host::Session::start(probe_config(probe, {"flood", std::to_string(seconds), std::to_string(rate)}));
     const auto code = session->wait_exit(std::chrono::seconds(seconds * 3 + 30));
     const auto elapsed = std::chrono::duration<double>(Clock::now() - start).count();
     const auto info = session->info();

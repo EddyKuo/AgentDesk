@@ -1,10 +1,10 @@
 // platform::Process on Windows: pipes, exit codes, timeouts and who ends whom.
 #include "agentdesk/platform/process.hpp"
 
+#include <windows.h>
+
 #include <chrono>
 #include <thread>
-
-#include <windows.h>
 
 #include <gtest/gtest.h>
 

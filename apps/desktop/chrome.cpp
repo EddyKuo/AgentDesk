@@ -353,15 +353,15 @@ float status_mark(App::State& s, ImDrawList* dl, float x, float cy, Attention a,
 // maximize. The press is handed to Windows as a caption click (WM_NCLBUTTONDOWN + HTCAPTION), so
 // the system move loop runs and Aero Snap works.
 void window_drag_area(App::State& s, ImVec2 a, ImVec2 b) {
-    if (s.config.hwnd == nullptr || ImGui::IsAnyItemHovered() ||
+    if (s.config.window == nullptr || ImGui::IsAnyItemHovered() ||
         ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId))
         return;
     if (!ImGui::IsMouseHoveringRect(a, b, false) || !ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows))
         return;
     if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        window_toggle_maximize(s.config.hwnd);
+        window_toggle_maximize(s.config.window);
     } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        window_begin_drag(s.config.hwnd);
+        window_begin_drag(s.config.window);
         ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);  // the move loop ate the release
     }
 }
@@ -429,11 +429,11 @@ ImU32 window_button_glyph(int kind, ImU32 bar) {
 }
 
 bool mac_window_buttons(const App::State& s) {
-    return s.config.hwnd != nullptr && window_draws_own_buttons() && s.settings.window_buttons != "windows" && !style_draws_window_buttons(s);
+    return s.config.window != nullptr && window_draws_own_buttons() && s.settings.window_buttons != "windows" && !style_draws_window_buttons(s);
 }
 
 bool windows_window_buttons(const App::State& s) {
-    return s.config.hwnd != nullptr && window_draws_own_buttons() && !mac_window_buttons(s);
+    return s.config.window != nullptr && window_draws_own_buttons() && !mac_window_buttons(s);
 }
 
 void traffic_lights_input(App::State& s, ImVec2 origin) {

@@ -106,7 +106,8 @@ public:
     // pty master, and a root that is alive, ours and owns the terminal; Windows: process id, job
     // membership, kill-on-close, OpenConsole). The reader starts paused (resume_reader()). Throws
     // when a check fails; everything passed is closed then.
-    static std::unique_ptr<Pty> adopt(const PtyHandles& handles, PtyOutputSink on_output, PtyExitSink on_exit);
+    static std::unique_ptr<Pty> adopt(const PtyHandles& handles, PtyOutputSink on_output,
+                                      PtyExitSink on_exit);
 
     struct Impl;
 

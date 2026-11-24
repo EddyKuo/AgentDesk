@@ -1,7 +1,6 @@
 // system_process.hpp on macOS (ADR-30). The system's own tools live in /usr/bin (curl, tar).
-#include "system_process.hpp"
-
 #include "agentdesk/platform/text.hpp"
+#include "system_process.hpp"
 
 namespace agentdesk::ui::detail {
 
@@ -29,7 +28,6 @@ bool start_in_background(const std::filesystem::path& exe, const std::vector<std
 std::filesystem::path system32_exe(std::wstring_view name) {
     return std::filesystem::path("/usr/bin") / platform::to_utf8(name);
 }
-
 
 const char* os_name() {
     return "macos";

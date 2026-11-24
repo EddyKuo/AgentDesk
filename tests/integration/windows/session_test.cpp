@@ -207,7 +207,12 @@ TEST(Session, LastOutputArrivesBeforeTheExit) {
     for (int i = 0; i < kSessions; ++i) {
         ASSERT_TRUE(sessions[static_cast<std::size_t>(i)]->wait_exit(60s).has_value());
         auto& s = *seen[static_cast<std::size_t>(i)];
-        EXPECT_TRUE(wait_until([&] { std::lock_guard lock(s.mutex); return s.exited; }, 5s));
+        EXPECT_TRUE(wait_until(
+            [&] {
+                std::lock_guard lock(s.mutex);
+                return s.exited;
+            },
+            5s));
         std::lock_guard lock(s.mutex);
         EXPECT_TRUE(s.complete) << "session " << i << " ended before its last output";
         EXPECT_EQ(s.after_exit, 0);

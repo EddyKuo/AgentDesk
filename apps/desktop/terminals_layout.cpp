@@ -73,7 +73,7 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
     // Window buttons: 6 px left and 4 px right padding, 8 px apart; 24 px round chips with 14 px
     // icons; hover uses the edge colour and the text colour.
     if (windows_window_buttons(s)) {  // round ones sit at the top left instead
-        const bool zoomed = window_is_maximized(s.config.hwnd);
+        const bool zoomed = window_is_maximized(s.config.window);
         struct B {
             const char* id;
             const char* glyph;

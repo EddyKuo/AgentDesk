@@ -1,6 +1,9 @@
 // ipc_transport.hpp on Windows: Named Pipes with a DACL for the current user, remote clients
 // rejected and the peer's user checked on both ends; and the one-host-per-user lock.
-#include <windows.h>
+#include "agentdesk/platform/ipc_transport.hpp"
+#include "agentdesk/platform/win/error.hpp"
+// sddl.h needs windows.h first (included through win/error.hpp).
+#include <sddl.h>
 
 #include <algorithm>
 #include <array>
@@ -8,11 +11,7 @@
 #include <mutex>
 #include <stdexcept>
 
-#include <sddl.h>
-
-#include "agentdesk/platform/ipc_transport.hpp"
 #include "agentdesk/platform/process.hpp"
-#include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/platform/win/unique_handle.hpp"
 #include "agentdesk/platform/win/user.hpp"
 
@@ -81,8 +80,9 @@ public:
 
     std::size_t read_some(std::span<char> buf) override {
         const auto len = static_cast<DWORD>(std::min<std::size_t>(buf.size(), 1u << 20));
-        return transfer(read_event_.get(),
-                        [&](OVERLAPPED* ov) { return ::ReadFile(pipe_.get(), buf.data(), len, nullptr, ov); });
+        return transfer(read_event_.get(), [&](OVERLAPPED* ov) {
+            return ::ReadFile(pipe_.get(), buf.data(), len, nullptr, ov);
+        });
     }
 
     bool write_all(std::string_view bytes) override {
@@ -347,8 +347,8 @@ InstanceLock::InstanceLock(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) 
 InstanceLock::~InstanceLock() = default;  // the name goes with its last handle
 
 std::unique_ptr<InstanceLock> InstanceLock::try_acquire(const std::string& name, bool taking_over) {
-    const std::wstring full =
-        to_wide("Local\\AgentDesk-" + name + "-" + win::user_sid() + "-s" + std::to_string(win::logon_session()));
+    const std::wstring full = to_wide("Local\\AgentDesk-" + name + "-" + win::user_sid() + "-s" +
+                                      std::to_string(win::logon_session()));
     auto impl = std::make_unique<Impl>();
     impl->mutex.reset(::CreateMutexW(nullptr, FALSE, full.c_str()));
     if (!impl->mutex || (::GetLastError() == ERROR_ALREADY_EXISTS && !taking_over))

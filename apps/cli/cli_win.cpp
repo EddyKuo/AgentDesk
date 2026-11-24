@@ -6,8 +6,8 @@
 #include <thread>
 
 #include "agentdesk/ipc/pipe.hpp"
-#include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/platform/ipc_transport.hpp"
+#include "agentdesk/platform/win/error.hpp"
 #include "cli_os.hpp"
 
 int wmain(int argc, wchar_t** argv) {

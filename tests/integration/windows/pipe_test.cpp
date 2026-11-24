@@ -1,8 +1,7 @@
 // libs/ipc: Named Pipe transport (S2-1, QA-17).
 #include "agentdesk/ipc/pipe.hpp"
-#include "agentdesk/platform/ipc_transport.hpp"
-#include "agentdesk/platform/text.hpp"
-#include "agentdesk/platform/win/user.hpp"
+
+#include <windows.h>
 
 #include <array>
 #include <atomic>
@@ -12,10 +11,11 @@
 #include <optional>
 #include <thread>
 
-#include <windows.h>
-
 #include <gtest/gtest.h>
 
+#include "agentdesk/platform/ipc_transport.hpp"
+#include "agentdesk/platform/text.hpp"
+#include "agentdesk/platform/win/user.hpp"
 #include "agentdesk/protocol/messages.hpp"
 
 using namespace std::chrono_literals;
@@ -118,8 +118,8 @@ TEST(Pipe, OversizedFrameDisconnectsClient) {
     auto h = echo_handlers();
     h.on_close = [&](const ipc::ConnectionPtr&) { ++closed; };
     ipc::PipeServer server(name, h);
-    HANDLE raw =
-        ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    HANDLE raw = ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                               nullptr, OPEN_EXISTING, 0, nullptr);
     ASSERT_NE(raw, INVALID_HANDLE_VALUE);
     const unsigned char hdr[4] = {0xFF, 0xFF, 0xFF, 0x7F};
     DWORD written = 0;
@@ -195,8 +195,8 @@ TEST(Pipe, DroppableMessagesRespectSendBudget) {
         }
     };
     ipc::PipeServer server(name, h);
-    HANDLE raw =
-        ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    HANDLE raw = ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                               nullptr, OPEN_EXISTING, 0, nullptr);
     ASSERT_NE(raw, INVALID_HANDLE_VALUE);
     const std::string req = protocol::encode_frame(R"({"v":1,"id":"a","method":"go"})");
     DWORD written = 0;
@@ -227,8 +227,8 @@ TEST(Pipe, StopDoesNotWaitForAClientThatStoppedReading) {
         ++sent;
     };
     auto server = std::make_unique<ipc::PipeServer>(name, h);
-    HANDLE raw =
-        ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    HANDLE raw = ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                               nullptr, OPEN_EXISTING, 0, nullptr);
     ASSERT_NE(raw, INVALID_HANDLE_VALUE);
     const std::string req = protocol::encode_frame(R"({"v":1,"id":"a","method":"go"})");
     DWORD written = 0;

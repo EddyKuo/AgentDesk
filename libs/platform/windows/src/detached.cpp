@@ -40,7 +40,8 @@ DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vecto
     DetachedResult result;
     auto start = [&](DWORD flags) {
         return ::CreateProcessW(exe.c_str(), cmdline.data(), nullptr, nullptr, FALSE, flags,
-                                environment.empty() ? nullptr : environment.data(), cwd.c_str(), &si, &pi) != FALSE;
+                                environment.empty() ? nullptr : environment.data(), cwd.c_str(), &si,
+                                &pi) != FALSE;
     };
     if (start(kBase | CREATE_BREAKAWAY_FROM_JOB)) {
         result.broke_away = true;

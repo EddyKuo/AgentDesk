@@ -5,13 +5,12 @@
 
 #include <unistd.h>
 
+#include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/platform/system.hpp"
 #include "agentdesk/terminal/cwd_uri.hpp"
-#include "agentdesk/host/git_tools.hpp"
 #include "host_os.hpp"
 
 namespace agentdesk::host::detail {
-
 
 std::string os_error_text(const std::exception& /*e*/, std::string what) {
     return what;

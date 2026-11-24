@@ -1,12 +1,11 @@
 // Reads the Windows clipboard for a terminal paste: dropped-file lists, Unicode text, images.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
-#include "agentdesk/ui/clipboard.hpp"
-
 #include <windows.h>
 
 #include <shellapi.h>
 
 #include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/ui/clipboard.hpp"
 
 namespace agentdesk::ui {
 

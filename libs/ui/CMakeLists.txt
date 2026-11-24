@@ -50,7 +50,7 @@ set(_ui_sources
 # behind the internal headers in src/ (*_os.hpp, system_process.hpp).
 if(WIN32)
     list(APPEND _ui_sources
-        src/clipboard.cpp
+        src/clipboard_win.cpp
         src/fonts_win.cpp
         src/keyboard_win.cpp
         src/keymap_win.cpp

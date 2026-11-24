@@ -16,7 +16,6 @@
 
 namespace agentdesk::host {
 
-
 void write_json_atomic(const std::filesystem::path& file, const nlohmann::json& doc) {
     const auto tmp = std::filesystem::path(file).concat(L".tmp");
     {

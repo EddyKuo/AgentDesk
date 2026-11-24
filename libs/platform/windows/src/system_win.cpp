@@ -122,7 +122,8 @@ std::filesystem::path data_dir() {
         dir = *set;
     } else {
         const auto local = variable(L"LOCALAPPDATA");
-        dir = (local && !local->empty() ? std::filesystem::path(*local) : std::filesystem::temp_directory_path()) /
+        dir = (local && !local->empty() ? std::filesystem::path(*local)
+                                        : std::filesystem::temp_directory_path()) /
               L"AgentDesk";
     }
     std::filesystem::create_directories(dir);
@@ -208,7 +209,8 @@ std::string sha256_hex(std::string_view bytes) {
 std::string sha256_file_hex(const std::filesystem::path& file) {
     std::ifstream in(file, std::ios::binary);
     if (!in)
-        throw std::system_error(std::make_error_code(std::errc::no_such_file_or_directory), "open a file to hash");
+        throw std::system_error(std::make_error_code(std::errc::no_such_file_or_directory),
+                                "open a file to hash");
     Sha256 h;
     std::string buf(64 * 1024, '\0');
     while (in) {

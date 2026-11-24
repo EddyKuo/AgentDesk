@@ -4,10 +4,11 @@
 // This file is the platform shell; the window contents are in app.cpp and the files that share
 // app_internal.hpp.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
-#include <functional>
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <windows.h>
+
+#include <functional>
 // dwmapi/shellapi need windows.h first.
 #include <algorithm>
 #include <atomic>
@@ -65,15 +66,15 @@ HANDLE g_wake = nullptr;  // set by IPC threads; the UI loop wakes and redraws
 // without a frame at each new size, DWM stretches the last one (text and pictures warp until the
 // mouse is released). WM_SIZE draws one through g_draw_now while that loop runs.
 std::function<void()> g_draw_now;
-bool g_sizing = false;  // between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE
+bool g_sizing = false;   // between WM_ENTERSIZEMOVE and WM_EXITSIZEMOVE
 bool g_drawing = false;  // a frame is being built (WM_SIZE can arrive from inside one)
 float g_pending_dpi = 0.0f;
 std::atomic<bool> g_close_requested{false};
 std::atomic<int> g_focus_change{-1};  // -1 none, 0 lost, 1 gained
 
 // Windows takes Ctrl+Esc (Start) and Ctrl+Shift+Esc (Task Manager) before any window sees them.
-// While AgentDesk is in front and keys.json binds the chord (its layout section or global), a low-level keyboard hook keeps
-// it from the shell and hands it to the app. Anywhere else Windows keeps them.
+// While AgentDesk is in front and keys.json binds the chord (its layout section or global), a low-level
+// keyboard hook keeps it from the shell and hands it to the app. Anywhere else Windows keeps them.
 HWND g_main_hwnd = nullptr;
 // The window's last rect while neither maximized nor minimized: what window.json keeps.
 ui::window_place::Rect g_normal_rect;
@@ -104,7 +105,7 @@ LRESULT CALLBACK reserved_keys_hook(int code, WPARAM wparam, LPARAM lparam) {
     }
     return ::CallNextHookEx(nullptr, code, wparam, lparam);
 }
-std::vector<std::string> g_dropped;   // files dropped on the window (UTF-8), for the app
+std::vector<std::string> g_dropped;  // files dropped on the window (UTF-8), for the app
 
 void create_rtv() {
     ID3D11Texture2D* back = nullptr;
@@ -164,8 +165,8 @@ bool create_swap_chain(HWND hwnd) {
 bool create_device(HWND hwnd) {
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0};
     D3D_FEATURE_LEVEL got{};
-    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION,
-                                   &g_gfx.device, &got, &g_gfx.context);
+    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2,
+                                   D3D11_SDK_VERSION, &g_gfx.device, &got, &g_gfx.context);
     if (hr == DXGI_ERROR_UNSUPPORTED) {  // no hardware device: WARP software rasterizer
         hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, levels, 2, D3D11_SDK_VERSION,
                                &g_gfx.device, &got, &g_gfx.context);
@@ -411,7 +412,8 @@ bool answered_version() {
         return false;
     const std::string line = std::string("agent-ui ") + AGENTDESK_VERSION_STRING + "\n";
     DWORD written = 0;
-    ::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE), line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
+    ::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE), line.data(), static_cast<DWORD>(line.size()), &written,
+                nullptr);
     return true;
 }
 
@@ -444,8 +446,8 @@ ui::window_place::Place start_place(bool automated) {
         return {{100, 100, 1400, 900}, false};
     std::size_t under_cursor = 0;
     const auto monitors = place::monitors(&under_cursor);
-    return place::restore(place::load(agentdesk::desktop::data_folder() / L"window.json"), monitors, under_cursor,
-                          agentdesk::desktop::saved_zoom());
+    return place::restore(place::load(agentdesk::desktop::data_folder() / L"window.json"), monitors,
+                          under_cursor, agentdesk::desktop::saved_zoom());
 }
 
 // Keeps the window's place for the next start.
@@ -457,8 +459,8 @@ void save_place(HWND hwnd) {
     wp.length = sizeof(wp);
     ::GetWindowPlacement(hwnd, &wp);
     // Minimized from maximized: it reopens maximized.
-    const bool maximized = ::IsZoomed(hwnd) != FALSE ||
-                           (::IsIconic(hwnd) != FALSE && (wp.flags & WPF_RESTORETOMAXIMIZED) != 0);
+    const bool maximized =
+        ::IsZoomed(hwnd) != FALSE || (::IsIconic(hwnd) != FALSE && (wp.flags & WPF_RESTORETOMAXIMIZED) != 0);
     const auto monitors = place::monitors();
     place::save(agentdesk::desktop::data_folder() / L"window.json",
                 place::capture(g_normal_rect, maximized, place::monitor_for(g_normal_rect, monitors)));
@@ -466,7 +468,7 @@ void save_place(HWND hwnd) {
 
 agentdesk::desktop::AppConfig app_config(const DevOptions& dev, HWND hwnd) {
     agentdesk::desktop::AppConfig cfg;
-    cfg.hwnd = hwnd;
+    cfg.window = hwnd;
     cfg.wake = [] { ::SetEvent(g_wake); };
     cfg.start_profile = dev.start_profile;
     cfg.run_commands = dev.run;
@@ -608,7 +610,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
             app.on_focus_changed(f == 1);
         sync_reserved_hook(app, instance, reserved_hook);
         if (const int r = g_reserved_chord.exchange(0); r != 0)  // the bound command, as its window chord
-            app.run_chord(r == 2 ? (ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Escape) : (ImGuiMod_Ctrl | ImGuiKey_Escape));
+            app.run_chord(r == 2 ? (ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Escape)
+                                 : (ImGuiMod_Ctrl | ImGuiKey_Escape));
         if (!g_dropped.empty())
             app.on_files_dropped(std::exchange(g_dropped, {}));
         if (exit_now || app.exit_requested())
@@ -637,7 +640,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         // Sessions, attention (sounds, toasts, taskbar flash), mods and persistence run on every
         // wake, drawn or not: minimized or locked is exactly when an alert matters. Occluded,
         // a burst of IPC wake-ups runs it at most every 100 ms.
-        if (const auto now = Clock::now(); !g_gfx.occluded || now - last_tick >= std::chrono::milliseconds(100)) {
+        if (const auto now = Clock::now();
+            !g_gfx.occluded || now - last_tick >= std::chrono::milliseconds(100)) {
             last_tick = now;
             app.tick();
         }
