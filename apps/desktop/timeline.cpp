@@ -733,13 +733,16 @@ void keep_fresh(App::State& s) {
     follow_live_states(s);
 }
 
-// Keys inside the overlay: Esc and Ctrl+Shift+H close; left / right pan by half the range, End
+// Keys inside the overlay: Esc and the timeline.toggle keys close; left / right pan by half the range, End
 // returns to now; 1-4 pick the range; Ctrl+wheel zooms around the pointer.
 void overlay_keys(App::State& s, bool& close, ImVec2 a, ImVec2 size) {
     const ImGuiIO& io = ImGui::GetIO();
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
-        ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_H))
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
         close = true;
+    // The overlay is a popup, so the global shortcuts do not run under it.
+    for (const auto& [chord, cmd] : s.keymap.global_map())
+        if (cmd == "timeline.toggle" && ImGui::IsKeyChordPressed(chord))
+            close = true;
     // (The overlay has no text field; the terminal under it may still ask for text input.)
     const long long range = tl::range_ms(s.settings.timeline_range);
     const long long now = now_ms();

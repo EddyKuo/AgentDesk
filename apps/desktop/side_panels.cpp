@@ -161,17 +161,6 @@ void SidePanels::commit() {
     });
 }
 
-std::string SidePanels::join(const std::string& root, const std::string& rel) {
-    if (rel.empty())
-        return root;
-    std::string p = root;
-    if (!p.empty() && p.back() != '\\')
-        p += '\\';
-    for (const char c : rel)
-        p += c == '/' ? '\\' : c;
-    return p;
-}
-
 std::string SidePanels::lower(std::string s) {
     for (auto& c : s)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -185,7 +174,7 @@ std::pair<std::vector<SidePanels::FileEntry>, bool> SidePanels::list_folder(cons
     std::vector<FileEntry> out;
     bool more = false;
     if (!mc.empty()) {
-        const auto r = remote ? remote(mc, "fs.list", Json{{"path", join(root, rel)}, {"max", kPerFolder}})
+        const auto r = remote ? remote(mc, "fs.list", Json{{"path", ui::path_text::join(root, rel)}, {"max", kPerFolder}})
                               : std::nullopt;
         if (!r) {
             if (failed != nullptr)
@@ -201,7 +190,7 @@ std::pair<std::vector<SidePanels::FileEntry>, bool> SidePanels::list_folder(cons
         return {out, more};
     }
     std::error_code ec;
-    std::filesystem::directory_iterator it(win::to_wide(join(root, rel)),
+    std::filesystem::directory_iterator it(win::to_wide(ui::path_text::join(root, rel)),
                                            std::filesystem::directory_options::skip_permission_denied, ec);
     for (; !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
         const std::string name = safe::utf8_lossy(it->path().filename().wstring());
@@ -243,10 +232,7 @@ std::string SidePanels::top_of(const std::string& mc, const std::string& cwd) {
         return {};
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r'))
         out.pop_back();
-    for (auto& c : out)
-        if (c == '/')
-            c = '\\';
-    return out;
+    return ui::path_text::native(out);
 }
 
 std::vector<std::pair<std::string, std::string>> SidePanels::status(const std::string& mc,
@@ -385,7 +371,7 @@ bool SidePanels::read_text(const std::string& mc, const std::string& path, std::
 
 void SidePanels::load_preview(const std::string& mc, const std::string& root, const std::string& rel) {
     std::string text, message;
-    if (read_text(mc, join(root, rel), text, message) && text.size() > 400000) {
+    if (read_text(mc, ui::path_text::join(root, rel), text, message) && text.size() > 400000) {
         text.resize(400000);
         text += "\n\xE2\x80\xA6 (file truncated)";
     }
@@ -457,7 +443,7 @@ void SidePanels::load_changes(const std::string& mc, const std::string& cwd, std
         c.untracked = xy == "??" || (!has_head && xy.find('A') != std::string::npos);
         if (c.untracked) {
             std::string text, msg;
-            if (read_text(mc, join(top, path), text, msg))
+            if (read_text(mc, ui::path_text::join(top, path), text, msg))
                 c.add = static_cast<int>(std::count(text.begin(), text.end(), '\n') +
                                          (!text.empty() && text.back() != '\n' ? 1 : 0));
         } else if (const auto it = counts.find(path); it != counts.end()) {
@@ -537,7 +523,7 @@ void SidePanels::load_diff(const std::string& mc, const std::string& top, const 
         message = "Binary file changed";
     } else if (c.untracked) {
         std::string text, msg;
-        if (!read_text(mc, join(top, c.path), text, msg)) {
+        if (!read_text(mc, ui::path_text::join(top, c.path), text, msg)) {
             message = msg.find("Binary") != std::string::npos ? "Binary file \xC2\xB7 no text diff" : msg;
         } else {
             if (text.size() > 400000)

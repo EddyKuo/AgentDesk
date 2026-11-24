@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <utility>
 
 #include <vterm.h>
 #include <vterm_agentdesk.h>

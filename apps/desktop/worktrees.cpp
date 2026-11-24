@@ -5,15 +5,24 @@
 namespace agentdesk::desktop {
 namespace detail {
 
-// Where new worktrees go: the Settings folder, else %USERPROFILE%\.agentdesk\worktrees on this
-// computer. Empty for another machine: its agent-host picks that folder in its own home.
-std::string worktree_root(const App::State& s, const std::string& machine) {
+// Where new worktrees of `g` go: the Settings folder, else .agentdesk/worktrees in the home folder
+// on this computer. Empty for another machine, or when the Settings folder is a path of another
+// system than the repository's: the machine's agent-host picks that folder in its own home.
+std::string worktree_root(const App::State& s, const std::string& machine, const GitInfo& g) {
     std::string root = s.settings.worktree_dir;
+    if (!machine.empty() && ui::path_text::is_windows(root) != ui::path_text::is_windows(g.top))
+        return {};
     if (root.empty() && machine.empty()) {
         const auto u8 = (os::home_dir() / ".agentdesk" / "worktrees").u8string();
         root.assign(u8.begin(), u8.end());
     }
     return root;
+}
+
+std::string worktree_path(const std::string& root, const std::string& repo, const std::string& branch) {
+    if (root.empty())
+        return {};
+    return ui::path_text::join(ui::path_text::join(root, repo), host::worktree_slug(branch));
 }
 
 namespace {
@@ -28,8 +37,8 @@ void start_worktree(App::State& s, ui::HostClient* wthost, const std::string& ma
         s.wt_error.clear();
     }
     Json params{{"repo", g.top}, {"branch", branch}};
-    if (!root.empty())
-        params["path"] = root + "\\" + repo + "\\" + host::worktree_slug(branch);
+    if (const std::string path = worktree_path(root, repo, branch); !path.empty())
+        params["path"] = path;
     const std::string shell = pick_shell(s.settings.shell_profile, wthost->profiles());
     wthost->call(
         "worktree.add", params,
@@ -81,17 +90,21 @@ void draw_worktree(App::State& s) {
     const std::string wt_machine = s.ws.active() != nullptr ? s.ws.active()->machine : std::string();
     const GitInfo g = s.git.get(s.wt_repo, wt_machine);
     const std::string repo = folder_name(g.common_top.empty() ? g.top : g.common_top);
-    const std::string root = worktree_root(s, wt_machine);
-    const std::string shown_root = root.empty() ? std::string("~\\.agentdesk\\worktrees") : root;
+    const std::string root = worktree_root(s, wt_machine, g);
+    // Another machine's home folder is only known there: "~".
+    const char sep = ui::path_text::separator(root.empty() ? g.top : root);
+    const std::string shown_root =
+        (root.empty() ? std::string("~") + sep + ".agentdesk" + sep + "worktrees" : display_path(root)) +
+        sep + repo + sep;
     worktree_title(s, g.repo ? "New worktree of " + repo : std::string("New worktree"));
     ImGui::PushStyleColor(ImGuiCol_Text, v4(g_pal->dim));
     if (!g.repo)
         ImGui::TextWrapped("%s is not in a git repository.", display_path(s.wt_repo).c_str());
     else
         ImGui::TextWrapped(
-            "A new space on a checkout in %s\\%s\\. A branch that exists is checked out; a new one "
+            "A new space on a checkout in %s. A branch that exists is checked out; a new one "
             "starts from here.",
-            display_path(shown_root).c_str(), repo.c_str());
+            shown_root.c_str());
     ImGui::PopStyleColor();
     ImGui::Dummy(ImVec2(0, px(6)));
     ui::HostClient* wthost = s.host_for(wt_machine);

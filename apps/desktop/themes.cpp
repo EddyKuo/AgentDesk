@@ -260,7 +260,7 @@ std::string reload_theme(const std::string& name) {
     std::string why;
     const auto t = ui::theme::parse(read_text_file(file), &why);
     if (!t)
-        return "themes\\" + name + ".json can't be read: " + why;
+        return data_file_text("themes", name + ".json") + " can't be read: " + why;
     // A deleted entry of that name is taken back (its address may still be in a setting).
     for (auto& o : g_loaded_palettes)
         if (o.id == name) {

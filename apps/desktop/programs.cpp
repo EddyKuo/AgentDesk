@@ -142,6 +142,10 @@ std::string display_path(const std::string& cwd) {
     return cwd;
 }
 
+std::string data_file_text(const std::string& folder, const std::string& name) {
+    return folder + ui::path_text::local_separator() + name;
+}
+
 std::string elapsed_since(const std::string& iso) {
     std::tm tm{};
     std::istringstream in(iso);

@@ -167,8 +167,8 @@ void theme_card_menu(App::State& s, const Palette& p) {
             edit_theme(s, p.id, true, true);
         if (menu_row(s, ui::icon::kClose, "Delete...")) {
             s.confirm_title = std::string("Delete ") + p.label + "?";
-            s.confirm_detail = std::string("themes\\") + p.id +
-                               ".json is set aside (renamed .json.old-...), not erased. Layouts using it go back "
+            s.confirm_detail = data_file_text("themes", std::string(p.id) + ".json") +
+                               " is set aside (renamed .json.old-...), not erased. Layouts using it go back "
                                "to the default theme.";
             s.confirm_command = std::string("theme.delete:") + p.id;
             s.show_confirm = true;

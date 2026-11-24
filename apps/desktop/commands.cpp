@@ -111,7 +111,6 @@ std::vector<std::string> checked_out_submodules(App::State& s, const std::string
 
 WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std::string& top) {
     WorktreeRisk r;
-    const std::filesystem::path p(win::to_wide(top));
     const auto st = git_at(s, machine, top, {L"status", L"--porcelain"});
     r.dirty = git_ok(st) && !st.output.empty();
     const auto paths = checked_out_submodules(s, machine, top);
@@ -126,15 +125,14 @@ WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std:
                 path.compare(0, other.size(), other) == 0 && path[other.size()] == '/')
                 parent = other;
         }
-        const auto parent_dir = parent.empty() ? p : p / win::to_wide(parent);
+        const std::string parent_dir = ui::path_text::join(top, parent);
         const std::string inner = parent.empty() ? path : path.substr(parent.size() + 1);
-        const auto pinned = git_at(s, machine, win::to_utf8(parent_dir.native()),
-                                   {L"rev-parse", L"HEAD:" + win::to_wide(inner)});
+        const auto pinned = git_at(s, machine, parent_dir, {L"rev-parse", L"HEAD:" + win::to_wide(inner)});
         std::vector<std::wstring> args = {L"rev-list", L"-n1", L"--all", L"--not", L"--remotes"};
         const std::string pin = git_ok(pinned) ? trimmed(pinned.output) : std::string();
         if (!pin.empty())
             args.push_back(win::to_wide(pin));
-        const auto local = git_at(s, machine, win::to_utf8((p / win::to_wide(path)).native()), args);
+        const auto local = git_at(s, machine, ui::path_text::join(top, path), args);
         if (!git_ok(local) || !trimmed(local.output).empty())
             r.unpushed.push_back(path);  // a check that failed counts as at risk
     }
@@ -202,8 +200,7 @@ std::vector<WorktreeEntry> list_worktrees(App::State& s, const std::string& mach
         if (l.rfind("worktree ", 0) == 0) {
             e = {};
             skip = false;
-            e.path = l.substr(9);
-            std::replace(e.path.begin(), e.path.end(), '/', '\\');
+            e.path = ui::path_text::native(l.substr(9));
         } else if (l.rfind("branch ", 0) == 0) {
             e.branch = l.substr(7);
             if (e.branch.rfind("refs/heads/", 0) == 0)
@@ -1007,7 +1004,7 @@ std::string clone_layout(App::State& s, const std::string& arg) {
     const auto dest = layouts_dir() / win::to_wide(to + ".json");
     if (std::filesystem::exists(dest, ec) ||
         std::any_of(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) { return l.name == to; }))
-        return "cannot clone layout: layouts\\" + to + ".json is already there";
+        return "cannot clone layout: " + data_file_text("layouts", to + ".json") + " is already there";
     lay::Node node = it->file;
     node.cloned_from = Json{{"name", from}, {"version", AGENTDESK_VERSION_STRING}};
     {
@@ -1019,7 +1016,7 @@ std::string clone_layout(App::State& s, const std::string& arg) {
                                    std::filesystem::copy_options::overwrite_existing, ec);
     s.layouts = load_layouts(s.settings);
     run_command(s, "layout:" + to);
-    s.toast("Layout duplicated", "layouts\\" + to + ".json", "", g_pal->info);
+    s.toast("Layout duplicated", data_file_text("layouts", to + ".json"), "", g_pal->info);
     return {};
 }
 
@@ -1053,7 +1050,7 @@ std::string reset_layout(App::State& s, const std::string& arg) {
         }
         std::filesystem::rename(f, to, ec);
         if (ec)
-            return "cannot set layouts\\" + file_name + ".json aside: " + ec.message();
+            return "cannot set " + data_file_text("layouts", file_name + ".json") + " aside: " + ec.message();
         ++aside;
     }
     std::filesystem::remove(layout_state_path(which), ec);
@@ -1087,7 +1084,7 @@ void clone_mod(App::State& s, const std::string& arg) {
     if (ec)
         s.toast("Could not duplicate " + arg, ec.message(), "", g_pal->needs_you);
     else
-        s.toast("Mod duplicated", "mods\\" + to + " (off until you enable it)", "", g_pal->info);
+        s.toast("Mod duplicated", data_file_text("mods", to) + " (off until you enable it)", "", g_pal->info);
 }
 
 // Switching, cloning and resetting layouts; mods.

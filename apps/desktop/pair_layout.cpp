@@ -177,15 +177,14 @@ std::string start_pair(App::State& s, std::string left, std::string right) {
     std::tm lt{};
     localtime_s(&lt, &t);
     const std::string stamp = pr::stamp_of(lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min);
-    const std::string root = worktree_root(s, machine);
+    const std::string root = worktree_root(s, machine, g);
     const std::string repo = folder_name(g.common_top.empty() ? g.top : g.common_top);
     for (const Side side : kSides) {
         const std::string& prof = side == Side::kLeft ? left : right;
         std::string branch, path;
         if (worktrees) {
             branch = pr::branch_name(prof, side, stamp);
-            if (!root.empty())
-                path = root + "\\" + repo + "\\" + host::worktree_slug(branch);
+            path = worktree_path(root, repo, branch);
         }
         start_side(s, hc, machine, side, prof, cwd, pr::session_name(profile_name(profiles, prof), side),
                    g.top, branch, path);

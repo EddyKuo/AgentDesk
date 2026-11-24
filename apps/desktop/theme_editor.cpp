@@ -220,7 +220,7 @@ void do_save(App::State& s) {
     g_ed.saved = g_ed.file;
     g_ed.dirty = false;
     g_ed.save_error.clear();
-    g_ed.note = "Saved as themes\\" + name + ".json";
+    g_ed.note = "Saved as " + data_file_text("themes", name + ".json");
     run_command(s, "theme:" + name);  // the layout shows it from now on (its light or dark half)
 }
 
@@ -595,7 +595,8 @@ void draw_preview(App::State& s, ImVec2 a, ImVec2 size) {
     dl->AddRect(ta, tb, c(p.focus), px(6), 0, px(1.5f));
     dl->AddRectFilled(ImVec2(ta.x + px(6), ta.y + px(22)), ImVec2(tb.x - px(6), tb.y - px(6)), c(p.term_bg),
                       px(3));
-    dl->AddText(s.fonts.ui, fs, ImVec2(ta.x + px(10), ta.y + px(5)), c(p.dim), "api  D:\\src\\project");
+    dl->AddText(s.fonts.ui, fs, ImVec2(ta.x + px(10), ta.y + px(5)), c(p.dim),
+                ui::path_text::local_separator() == '\\' ? "api  D:\\src\\project" : "api  ~/src/project");
     ImFont* mono = s.fonts.mono != nullptr ? s.fonts.mono : s.fonts.ui;
     const float ms = fpx(11);
     float ly = ta.y + px(30);
@@ -858,7 +859,8 @@ std::optional<std::string> exec_theme_editor_command(App::State& s, const std::s
                 pair.second = st.theme_light;
         }
         save_settings(st);
-        s.toast("Theme deleted", "themes\\" + arg + ".json was set aside.", "", g_pal->info, 4);
+        s.toast("Theme deleted", data_file_text("themes", arg + ".json") + " was set aside.", "", g_pal->info,
+                4);
         return std::string();
     }
     return std::nullopt;

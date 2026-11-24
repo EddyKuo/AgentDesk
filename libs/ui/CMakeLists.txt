@@ -13,6 +13,7 @@ set(_ui_sources
     src/keymap.cpp
     src/keyboard.cpp
     src/git_info.cpp
+    src/path_text.cpp
     src/mods.cpp
     src/remote_screen.cpp
     src/host_client.cpp

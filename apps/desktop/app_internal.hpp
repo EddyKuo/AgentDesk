@@ -58,6 +58,7 @@
 #include "agentdesk/ui/inbox.hpp"
 #include "agentdesk/ui/mission.hpp"
 #include "agentdesk/ui/mods.hpp"
+#include "agentdesk/ui/path_text.hpp"
 #include "agentdesk/ui/stage.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/terminal_view.hpp"
@@ -170,7 +171,7 @@ struct Settings {
     float scroll_speed = 1.0f;
     bool sidebar = true;
     bool details = false;
-    std::string worktree_dir;  // empty: %USERPROFILE%\.agentdesk\worktrees
+    std::string worktree_dir;  // empty: .agentdesk/worktrees in the home folder
     std::string shell_profile;  // new spaces/tabs/splits; empty: pwsh, powershell, cmd
     float ui_text = 15.0f;       // interface text size at zoom 1 (13 = the chrome's design size)
     float sidebar_width = 268;   // design px, 44..480; under 160 = rail
@@ -308,6 +309,8 @@ bool is_shell_profile(const std::string& id);
 std::string folder_name(const std::string& cwd);
 bool path_within(const std::string& p, const std::string& dir);
 std::string display_path(const std::string& cwd);
+// A file of the data folder for messages, with this system's separator: layouts\a.json, layouts/a.json.
+std::string data_file_text(const std::string& folder, const std::string& name);
 std::string elapsed_since(const std::string& iso);
 float text_clipped(ImDrawList* dl, ImFont* font, float size, ImVec2 pos, ImU32 col, const std::string& text,
                    float max_w);
@@ -515,7 +518,6 @@ private:
     void watch_loop(std::stop_token st);
 
     static std::string trim(std::string s);
-    static std::string norm(std::string p);
 
     GitInfo query(const std::string& key, bool changes);
 
@@ -622,7 +624,6 @@ public:
     }
 
 private:
-    static std::string join(const std::string& root, const std::string& rel);
     static std::string lower(std::string s);
     static constexpr std::size_t kPerFolder = 500;
     static constexpr std::size_t kTotal = 5000;
@@ -1610,9 +1611,12 @@ void pair_layout_preview(ImDrawList* d, ImVec2 a, ImVec2 size);
 // One pane drawn at `r` as the shown layout frames it (panes.cpp).
 void draw_one_pane(App::State& s, const std::string& id, ui::Rect r, bool connected,
                    const ui::styles::PaneLook& look);
-// Where new git worktrees go on `machine` (worktrees.cpp): Settings' folder, else the
-// .agentdesk\worktrees folder in the person's home here; "" for another machine (its agent-host picks).
-std::string worktree_root(const App::State& s, const std::string& machine);
+// Where new git worktrees of `g` go on `machine` (worktrees.cpp): Settings' folder, else the
+// .agentdesk/worktrees folder in the person's home here; "" for another machine (its agent-host picks).
+std::string worktree_root(const App::State& s, const std::string& machine, const GitInfo& g);
+// <root>/<repo>/<branch as a folder name>, as root's system writes it; empty when root is (the host
+// picks the folder then).
+std::string worktree_path(const std::string& root, const std::string& repo, const std::string& branch);
 
 // ------------------------------------------------------------ timeline.cpp
 // The Timeline overlay (timeline.toggle) and the "timeline" layout block.

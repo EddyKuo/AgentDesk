@@ -102,19 +102,20 @@ void GitCache::invalidate_repo(const std::string& dir, const std::string& machin
             e.at = Clock::time_point{};
 }
 
-// A Windows path cannot hold '|', so the first one ends the machine name.
+// A machine name never starts a path and cannot hold '|', so the first one ends it; a path on this
+// computer may hold one (on macOS).
 std::string GitCache::key_of(const std::string& dir, const std::string& machine) {
     return machine.empty() ? dir : machine + "|" + dir;
 }
 
 std::string GitCache::machine_of(const std::string& key) {
     const auto bar = key.find('|');
-    return bar == std::string::npos ? std::string() : key.substr(0, bar);
+    return bar == std::string::npos || ui::path_text::is_absolute(key) ? std::string() : key.substr(0, bar);
 }
 
 std::string GitCache::dir_of(const std::string& key) {
     const auto bar = key.find('|');
-    return bar == std::string::npos ? key : key.substr(bar + 1);
+    return bar == std::string::npos || ui::path_text::is_absolute(key) ? key : key.substr(bar + 1);
 }
 
 // watch_loop is per system: win/git_cache_win.cpp, macos/git_cache_macos.cpp.
@@ -123,15 +124,6 @@ std::string GitCache::trim(std::string s) {
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' '))
         s.pop_back();
     return s;
-}
-
-std::string GitCache::norm(std::string p) {
-    for (auto& c : p)
-        if (c == '/')
-            c = '\\';
-    while (p.size() > 3 && p.back() == '\\')
-        p.pop_back();
-    return p;
 }
 
 namespace {
@@ -221,13 +213,17 @@ GitInfo GitCache::query(const std::string& key, bool changes) {
     if (lines.size() < 3)
         return g;
     g.repo = true;
-    g.top = norm(lines[0]);
-    std::filesystem::path common(win::to_wide(lines[1]));
-    if (common.is_relative())
-        common = cwd / common;
-    common = machine.empty() ? std::filesystem::weakly_canonical(common, ec) : common.lexically_normal();
-    g.common_top = norm(win::to_utf8(common.parent_path().native()));
-    g.common_dir = norm(win::to_utf8(common.native()));
+    // git prints forward slashes everywhere; another machine's paths are that system's, so only
+    // this computer's go through std::filesystem (which also resolves links).
+    namespace pt = ui::path_text;
+    g.top = pt::native(lines[0]);
+    g.common_dir = pt::resolve(dir, lines[1]);
+    if (machine.empty()) {
+        const auto real = std::filesystem::weakly_canonical(std::filesystem::path(win::to_wide(g.common_dir)), ec);
+        if (!ec)
+            g.common_dir = pt::native(win::to_utf8(real.native()));
+    }
+    g.common_top = pt::parent(g.common_dir);
     g.worktree = _stricmp(g.common_top.c_str(), g.top.c_str()) != 0;
     g.branch = lines[2];
     const auto c = git({L"rev-list", L"--left-right", L"--count", L"HEAD...@{upstream}"});

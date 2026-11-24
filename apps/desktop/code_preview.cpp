@@ -422,9 +422,10 @@ void handle_preview_keys_and_menu(SidePanels& p, const PreviewGeom& g, bool hove
         ImGui::OpenPopup("##preview-menu");
     if (ImGui::BeginPopup("##preview-menu")) {
         const std::string t = selected_text(p, g.text);
-        if (ImGui::MenuItem("Copy", "Ctrl+C", false, !t.empty()))
+        if (ImGui::MenuItem("Copy", ui::Keymap::format(ImGuiMod_Ctrl | ImGuiKey_C).c_str(), false,
+                            !t.empty()))
             ImGui::SetClipboardText(t.c_str());
-        if (ImGui::MenuItem("Select all", "Ctrl+A") && g.n > 0)
+        if (ImGui::MenuItem("Select all", ui::Keymap::format(ImGuiMod_Ctrl | ImGuiKey_A).c_str()) && g.n > 0)
             select_all(p, g);
         ImGui::EndPopup();
     }
