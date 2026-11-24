@@ -378,7 +378,7 @@ HandoverSupport handover_support();
 1. 舊 host 用 `socketpair` 開私有通道，啟動新 host（`--takeover`），把通道的一端交給它。
 2. 凍結每個 session（reader 停在 parser 的 ground state、輸入清空、不再監看結束），用 `SCM_RIGHTS` 把 PTY master fd 傳過去，連同 root pid、程序群組、session id 與引擎狀態。
 3. 新 host 逐一核對：fd 是 PTY master（`ptsname` 成功）、`tcgetpgrp(fd)` 的群組屬於該 session（`getsid` 等於 root pid）、root pid 還活著且 uid 相同。任何一項不符就整個放棄，舊 host 照常繼續。
-4. 之後的 ready／go 交接順序與 Windows 相同。新 host 不能 `waitpid` 不是自己子程序的 root，改用 kqueue `EVFILT_PROC`／`NOTE_EXIT` 監看結束；exit code 拿不到時記為 unknown，這是和 Windows 的差異，要寫進設計文件。
+4. 之後的 ready／go 交接順序與 Windows 相同。新 host 不能 `waitpid` 不是自己子程序的 root，改用 kqueue `EVFILT_PROC`／`NOTE_EXIT` 監看結束；exit code 拿不到時記為 unknown，這是和 Windows 的差異（設計文件 5.2、第 9 章）。
 
 Windows 照現行做法，不受影響。
 
@@ -509,20 +509,20 @@ int run_shell(const ShellOptions& options);  // main loop; replaces wWinMain's b
 
 | 風險 | 影響 | 對策 |
 |---|---|---|
-| macOS 沒有 Job Object，改了程序群組的子孫在 session 結束後可能還活著 | 違反「session 結束時整棵程序樹一起結束」的期望 | 結束時另外列出以 root 為祖先的程序補殺；文件寫明差異 |
-| `imgui_impl_osx` 的輸入法支援不完整 | 注音、日文輸入選字窗位置錯、組字中文字不顯示 | 第 10 步先做輸入法 PoC，不行就自己實作 `NSTextInputClient` |
+| macOS 沒有 Job Object，改了程序群組的子孫在 session 結束後可能還活著 | 違反「session 結束時整棵程序樹一起結束」的期望 | 結束時對以這個終端機為控制終端機的所有程序送訊號，不只根程序群組（已實作，設計文件 3.4） |
+| `imgui_impl_osx` 的輸入法支援不完整 | 注音、日文輸入選字窗位置錯、組字中文字不顯示 | 第 11 步先做輸入法 PoC，不行就自己實作 `NSTextInputClient` |
 | macOS 新 host 無法 `waitpid` 接手的程序 | 熱更新後的 session 結束時拿不到 exit code | 用 `EVFILT_PROC` 監看結束、exit code 記為 unknown；設計文件寫明差異 |
 | 第 2 步改動 Session 的等待方式 | 程序結束時遺漏最後的輸出，或關閉時死結（背壓解除順序） | 保留現有順序：先解除背壓、再 close、再 drain；補壓力測試 |
 | 重構期間 Windows 版退化 | 已驗收的功能壞掉 | 每步獨立 PR、全測試加截圖比對；第 1～8 步不改任何對外行為 |
 | 自繪標題列在 macOS 和系統紅綠燈按鈕衝突 | 版面和 herdr-app 不一致 | 標題列左側讓出 `title_bar_insets()`；細節要查 herdr-app 在 macOS 的做法 |
-| macOS 沒有程式碼簽章與公證 | Gatekeeper 擋下執行 | 需要 Apple Developer 帳號，屬於發布問題，第 11 步再處理 |
+| macOS 沒有程式碼簽章與公證 | Gatekeeper 擋下執行 | 需要 Apple Developer 帳號，屬於發布問題，第 12 步處理；帳號還沒決定（OQ-11） |
 
 ## 10. 實作狀態（2026-11-24）
 
-macOS 部分（第 9～12 步）已在分支 `feature/sprint-11/macos-port` 完成，平台差異對照寫在設計文件 3.11，完成狀態與待人工驗收的項目在設計文件 5.8。和這份草案不同的地方：
+macOS 部分（第 9～12 步）已在分支 `feature/sprint-11/macos-port` 完成，平台差異對照寫在設計文件第 9 章，待人工驗收的項目在設計文件 12.2。和這份草案不同的地方：
 
-- **Windows 先行的第 1～8 步還沒做。** 為了讓 Windows 程式少動、之後和 Windows 端的修改合併時少衝突，共用程式暫時沿用 `platform::win` 的名稱：macOS 上由 `libs/platform/posix/compat/` 提供同名的標頭檔，接到第 5 節的中立介面。第 1～8 步做完時，這一層就拿掉。
-- **平台差異在建置時分開（2026-11-24 重構）。** 共用的 `.cpp` 不再有 `#ifdef _WIN32`。各模組不同的部分放在小的內部介面後面（`host_os.hpp`、`fonts_os.hpp`、`keymap_os.hpp`、`keyboard_os.hpp`、`links_os.hpp`、`mods_os.hpp`、`updates_os.hpp`、`apps/desktop/desktop_os.hpp`、`apps/cli/cli_os.hpp`），實作分成 `*_win.cpp`（或 `win/`）與 `*_posix.cpp`（或 `macos/`），由 CMake 挑選。宣告本身不同的標頭檔放在 `include_win/`、`include_posix/`，靠 include 路徑挑選。剩下的 `#ifdef` 只有第 5 節中立介面裡 POSIX 專用的成員，以及給第三方用的 `mod_sdk.hpp` 匯出巨集。原本整份是 Win32 的檔案（`pipe.cpp`、`handover.cpp`、`apps/host/main.cpp`、`apps/desktop/main.cpp`）留在原位，方便合併。
+- Windows 先行的第 1～8 步還沒做：為了讓 Windows 程式少動、之後和 Windows 端的修改合併時少衝突，共用程式暫時沿用 `platform::win` 的名稱：macOS 上由 `libs/platform/posix/compat/` 提供同名的標頭檔，接到第 5 節的中立介面。第 1～8 步做完時，這一層就拿掉。
+- 平台差異在建置時分開（2026-11-24 重構）：共用的 `.cpp` 不再有 `#ifdef _WIN32`。各模組不同的部分放在小的內部介面後面（`host_os.hpp`、`fonts_os.hpp`、`keymap_os.hpp`、`keyboard_os.hpp`、`links_os.hpp`、`mods_os.hpp`、`updates_os.hpp`、`apps/desktop/desktop_os.hpp`、`apps/cli/cli_os.hpp`），實作分成 `*_win.cpp`（或 `win/`）與 `*_posix.cpp`（或 `macos/`），由 CMake 挑選。宣告本身不同的標頭檔放在 `include_win/`、`include_posix/`，靠 include 路徑挑選。剩下的 `#ifdef` 只有第 5 節中立介面裡 POSIX 專用的成員，以及給第三方用的 `mod_sdk.hpp` 匯出巨集。原本整份是 Win32 的檔案（`pipe.cpp`、`handover.cpp`、`apps/host/main.cpp`、`apps/desktop/main.cpp`）留在原位，方便合併。
 - **5.1**：`Pty` 多了熱更新用的 `read_available`、`handover_fd`、`release_after_handover`、`adopt`（只在 POSIX 上有）。root 程序結束一律用 kqueue 監看，熱更新時才能停止監看還在執行的程式。
 - **5.2**：`ProcessSpec` 多了 `stderr_fd`（POSIX），讓 ssh 和 git 的 stderr 可以分開收。
 - **5.3**：`--pipe` 名稱不含 `/` 時，對應到 runtime 資料夾裡的 `<名稱>.sock`。
