@@ -17,7 +17,6 @@ int wmain(int argc, wchar_t** argv) {
 
 namespace agentdesk::cli::os {
 
-namespace win = platform::win;
 using namespace std::chrono_literals;
 
 std::string read_stdin(std::size_t max) {
