@@ -34,8 +34,6 @@ namespace host = agentdesk::host;
 namespace ipc = agentdesk::ipc;
 namespace platform = agentdesk::platform;
 
-constexpr int kHandoverFd = 3;  // the old host's end of the handover channel
-
 // Diagnostics only: IDs, event types, error codes. Never input text or environment (3.9).
 void log_line(const std::filesystem::path& dir, const std::string& line) {
     std::ofstream(dir / "host.log", std::ios::app)
@@ -59,7 +57,7 @@ std::unique_ptr<ipc::PipeServer> serve(const std::string& name, const ipc::Serve
 struct HostArgs {
     std::string pipe_name;
     std::filesystem::path data_dir;
-    std::uint32_t takeover_from = 0;  // the old host's pid, or 0
+    std::string takeover;  // the old host's pid, when taking over
     bool version = false;
 };
 
@@ -72,7 +70,7 @@ HostArgs parse_command_line(int argc, char** argv) {
         else if (arg == "--data-dir" && i + 1 < argc)
             a.data_dir = argv[++i];
         else if (arg == "--takeover" && i + 1 < argc)
-            a.takeover_from = static_cast<std::uint32_t>(std::strtoul(argv[++i], nullptr, 10));
+            a.takeover = argv[++i];
         else if (arg == "--version")
             a.version = true;
     }
@@ -88,20 +86,16 @@ std::filesystem::path resolve_data_dir(std::filesystem::path given) {
 
 // The new host's side of host.update: adopts the old host's sessions and waits for its "go".
 // nullptr when the takeover did not go through (logged); the old host then keeps everything.
-std::shared_ptr<host::SessionManager> take_over(const host::HostConfig& cfg, std::uint32_t old_pid,
+std::shared_ptr<host::SessionManager> take_over(const host::HostConfig& cfg, host::OldHost& old_host,
                                                 const std::filesystem::path& data_dir) {
-    ::fcntl(kHandoverFd, F_SETFD, FD_CLOEXEC);
     std::shared_ptr<host::SessionManager> manager;
     try {
-        manager = host::receive_handover(cfg, kHandoverFd);
+        manager = host::receive_handover(cfg, old_host);
     } catch (const std::exception& e) {
         log_line(data_dir, std::string("takeover refused: ") + e.what());
-        ::close(kHandoverFd);
         return nullptr;
     }
-    const bool go = host::await_handover_go(kHandoverFd, old_pid);
-    ::close(kHandoverFd);
-    if (!go) {
+    if (!host::await_handover_go(old_host)) {
         manager->abandon_adopted();
         log_line(data_dir, "takeover abandoned: the old host kept its sessions");
         return nullptr;
@@ -155,7 +149,7 @@ int main(int argc, char** argv) {
     const std::string pipe_name = custom_pipe ? args.pipe_name : ipc::default_pipe_name();
     const std::filesystem::path data_dir = resolve_data_dir(args.data_dir);
     std::filesystem::create_directories(data_dir);
-    const bool taking_over = args.takeover_from != 0;
+    const bool taking_over = !args.takeover.empty();
 
     // One host per user (design doc 2.2 step 2). A second one just exits; its launcher then
     // connects to the existing host. A host taking over from the running one waits for its lock.
@@ -178,7 +172,8 @@ int main(int argc, char** argv) {
     try {
         std::shared_ptr<host::SessionManager> manager;
         if (taking_over) {
-            manager = take_over(cfg, args.takeover_from, data_dir);
+            const auto old_host = host::OldHost::from_takeover(args.takeover);
+            manager = take_over(cfg, *old_host, data_dir);
             if (!manager)
                 return 1;
             // The old host has exited or is about to: its lock becomes ours.

@@ -40,13 +40,6 @@ void log_line(const std::filesystem::path& dir, const std::string& line) {
         << host::iso8601_now() << " pid=" << ::GetCurrentProcessId() << ' ' << line << '\n';
 }
 
-HANDLE handle_arg(const std::wstring& s, std::size_t& at) {
-    const auto comma = s.find(L',', at);
-    const std::wstring part = s.substr(at, comma == std::wstring::npos ? std::wstring::npos : comma - at);
-    at = comma == std::wstring::npos ? s.size() : comma + 1;
-    return reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(std::wcstoull(part.c_str(), nullptr, 10)));
-}
-
 // The old host's pipe instances close just before it says "go"; give the name a moment.
 std::unique_ptr<ipc::PipeServer> serve(const std::string& name, const ipc::ServerHandlers& handlers,
                                        bool after_takeover) {
@@ -105,21 +98,16 @@ std::filesystem::path resolve_data_dir(std::filesystem::path given) {
 
 // The new host's side of host.update: adopts the old host's sessions and waits for its "go".
 // nullptr when the takeover did not go through (logged); the old host then keeps everything.
-std::shared_ptr<host::SessionManager> take_over(const host::HostConfig& cfg, const std::wstring& takeover,
-                                                const std::filesystem::path& data_dir,
-                                                win::UniqueHandle& old_host) {
-    std::size_t at = 0;
-    win::UniqueHandle from_old(handle_arg(takeover, at));
-    win::UniqueHandle to_old(handle_arg(takeover, at));
-    old_host.reset(handle_arg(takeover, at));
+std::shared_ptr<host::SessionManager> take_over(const host::HostConfig& cfg, host::OldHost& old_host,
+                                                const std::filesystem::path& data_dir) {
     std::shared_ptr<host::SessionManager> manager;
     try {
-        manager = host::receive_handover(cfg, from_old.get(), to_old.get());
+        manager = host::receive_handover(cfg, old_host);
     } catch (const std::exception& e) {
         log_line(data_dir, std::string("takeover refused: ") + e.what());
         return nullptr;
     }
-    if (!host::await_handover_go(from_old.get(), old_host.get())) {
+    if (!host::await_handover_go(old_host)) {
         manager->abandon_adopted();
         log_line(data_dir, "takeover abandoned: the old host kept its sessions");
         return nullptr;
@@ -140,9 +128,9 @@ ipc::ServerHandlers handlers_for(const std::shared_ptr<host::SessionManager>& ma
 
 // The program file the old host ran from may have been moved aside as agent-host.exe.old
 // (agentctl update); it can go once that host has exited.
-void remove_old_exe_after(win::UniqueHandle old_host) {
+void remove_old_exe_after(std::shared_ptr<host::OldHost> old_host) {
     std::thread([old = std::move(old_host)] {
-        ::WaitForSingleObject(old.get(), 60000);
+        old->wait_exit(std::chrono::seconds(60));
         std::error_code ec;
         std::filesystem::remove(ipc::sibling_executable("agent-host").concat(".old"), ec);
     }).detach();
@@ -182,9 +170,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
     try {
         std::shared_ptr<host::SessionManager> manager;
-        win::UniqueHandle old_host;
+        std::shared_ptr<host::OldHost> old_host;
         if (taking_over) {
-            manager = take_over(cfg, args.takeover, data_dir, old_host);
+            old_host = host::OldHost::from_takeover(win::to_utf8(args.takeover));
+            manager = take_over(cfg, *old_host, data_dir);
             if (!manager)
                 return 1;
         } else {
