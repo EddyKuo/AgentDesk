@@ -76,6 +76,7 @@ DevOptions parse_dev_options(int argc, char** argv) {
             o.input = argv[++i];
         else if (a == "--screenshot" && i + 1 < argc)
             o.screenshot = argv[++i];
+
         else if (a == "--run" && i + 1 < argc) {
             const std::string all = argv[++i];
             for (std::size_t p = 0; p <= all.size();) {
@@ -184,6 +185,24 @@ static void schedule_pump(int frames);
 // ---------------------------------------------------------------- window and app delegates
 
 @interface AgentDeskWindowDelegate : NSObject <NSWindowDelegate>
+@end
+
+static void render_frame();
+
+// Draws when the loop asks the view to ([view draw]).
+@interface AgentDeskRenderer : NSObject <MTKViewDelegate>
+@end
+
+@implementation AgentDeskRenderer
+
+- (void)drawInMTKView:(MTKView*)view {
+    if (g_shell.app != nullptr && !g_shell.quitting)
+        render_frame();
+}
+
+- (void)mtkView:(MTKView*)view drawableSizeWillChange:(CGSize)size {
+}
+
 @end
 
 static void note_normal_rect() {
@@ -341,7 +360,13 @@ static void write_png(id<MTLTexture> tex, const std::filesystem::path& file) {
     CGColorSpaceRelease(space);
 }
 
-static void draw_frame(bool capture = false) {
+// One frame, from the view's drawInMTKView: (MTKView hands out a fresh drawable for each `draw`
+// and releases it afterwards; drawing outside it would present the same drawable again and again,
+// and the screen would stop changing). `g_capture`: also write the frame for --screenshot.
+static bool g_capture = false;
+
+static void render_frame() {
+    const bool capture = g_capture;
     AgentDeskView* view = g_shell.view;
     MTLRenderPassDescriptor* pass = view.currentRenderPassDescriptor;
     if (pass == nil)
@@ -381,7 +406,9 @@ static void pump() {
         Clock::now() - g_shell.launched > std::chrono::milliseconds(g_shell.dev.exit_after_ms)) {
         if (!g_shell.dev.screenshot.empty()) {
             @autoreleasepool {
-                draw_frame(true);
+                g_capture = true;
+                [g_shell.view draw];
+                g_capture = false;
             }
         }
         finish_and_exit();
@@ -400,7 +427,7 @@ static void pump() {
     }
     if (g_shell.frames_to_draw > 0 && visible) {
         @autoreleasepool {
-            draw_frame();
+            [g_shell.view draw];
         }
         --g_shell.frames_to_draw;
     } else if (!visible) {
@@ -592,7 +619,9 @@ int main(int argc, char** argv) {
         }
         g_shell.queue = [g_shell.device newCommandQueue];
         AgentDeskView* view = [[AgentDeskView alloc] initWithFrame:frame device:g_shell.device];
-        view.paused = YES;  // drawn by pump(), not by a display link
+        view.paused = YES;  // drawn by pump() through [view draw], not by a display link
+        AgentDeskRenderer* renderer = [[AgentDeskRenderer alloc] init];
+        view.delegate = renderer;
         view.enableSetNeedsDisplay = NO;
         view.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
         view.framebufferOnly = g_shell.dev.screenshot.empty();  // readable only for --screenshot
