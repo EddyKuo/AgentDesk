@@ -47,6 +47,7 @@ using Clock = std::chrono::steady_clock;
 
 // Room the traffic lights take at the top-left of the window (points), outside full screen.
 static constexpr float kTrafficLightsWidth = 76.0f;
+static constexpr float kTrafficLightsHeight = 28.0f;
 
 namespace {
 
@@ -344,6 +345,10 @@ void app_hide(bool others) {
 float window_system_buttons_width() {
     NSWindow* win = g_shell.window;
     return win != nil && (win.styleMask & NSWindowStyleMaskFullScreen) != 0 ? 0.0f : kTrafficLightsWidth;
+}
+
+float window_system_buttons_height() {
+    return window_system_buttons_width() > 0.0f ? kTrafficLightsHeight : 0.0f;
 }
 
 }  // namespace agentdesk::desktop

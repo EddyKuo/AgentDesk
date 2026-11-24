@@ -515,13 +515,12 @@ void traffic_lights_paint(App::State& s) {
 }
 
 namespace {
-// macOS: the system keeps its own buttons at the window's top left (points: they do not zoom). A bar
+// Where the system keeps its own buttons at the window's top left (they do not zoom), a bar
 // under them starts after them, keeping the inset it had (at most 16 px).
 float clear_of_system_buttons(float x, float top, float bottom) {
-    constexpr float kSystemButtonsHeight = 28.0f;  // points
     const ImVec2 o = ImGui::GetMainViewport()->WorkPos;
     const float room = window_system_buttons_width();
-    if (room <= 0 || bottom <= o.y || top >= o.y + kSystemButtonsHeight || x >= o.x + room)
+    if (room <= 0 || bottom <= o.y || top >= o.y + window_system_buttons_height() || x >= o.x + room)
         return x;
     return o.x + room + std::min(x - o.x, px(16));
 }

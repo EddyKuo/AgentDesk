@@ -48,6 +48,10 @@ float window_system_buttons_width() {
     return 0.0f;
 }
 
+float window_system_buttons_height() {
+    return 0.0f;
+}
+
 void app_hide(bool /*others*/) {}
 
 }  // namespace agentdesk::desktop

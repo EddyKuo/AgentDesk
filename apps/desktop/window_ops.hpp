@@ -23,6 +23,8 @@ void window_set_title(NativeWindow w, const std::string& utf8);
 bool window_draws_own_buttons();
 // Room the system keeps at the left of the top bar for its own window buttons (logical px).
 float window_system_buttons_width();
+// How far down from the window's top those buttons reach (logical px; 0 where there are none).
+float window_system_buttons_height();
 // macOS's Cmd+H / Cmd+Alt+H (keys.macos.json): this app, or every other app; nothing on Windows.
 void app_hide(bool others);
 

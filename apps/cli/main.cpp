@@ -21,6 +21,7 @@
 
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
+#include "agentdesk/platform/crt.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/protocol/messages.hpp"
 #include "agentdesk/ui/updates.hpp"
