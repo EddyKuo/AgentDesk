@@ -14,16 +14,16 @@ AgentDesk 由三個程式組成：
 
 | 程式 | 角色 |
 |---|---|
-| `agent-host` | 每位使用者一個的背景程序，擁有所有終端機：偽終端機、子程序、終端機引擎（libvterm）與捲動歷史 |
+| `agent-host` | 每位使用者只有一個的背景程序，擁有所有終端機：偽終端機、子程序、終端機引擎（libvterm）與捲動歷史 |
 | `agent-ui` | 視窗（macOS 上是 `AgentDesk.app`）。它只是 agent-host 的 client：畫出快照與即時更新，送出你的輸入 |
 | `agentctl` | 命令列 client，也負責 hook 的狀態回報、透過 ssh 轉接協定，以及更新 agent-host |
 
-三者透過只開放給你自己帳號的本機通道溝通：Windows 用 Named Pipe，macOS 用 Unix socket。一切都由 host 持有，所以關掉視窗只是中斷連線。
+三者透過只開放給你自己帳號的本機通道溝通：Windows 用 Named Pipe，macOS 用 Unix socket。終端機和裡面的程式都在 host 裡，所以關掉視窗只是中斷連線。
 
 ## 功能
 
-- **背景執行**：關掉視窗只會中斷連線，重開時以快照加即時更新接回。
-- **space、分頁、分割**：一個 space 是一個工作地點，通常是一個 repo。底下有多個分頁，每個分頁可以往右或往下分割、放大、拖曳交換面板。版面由 host 保存，重開後還原，每個視窗都一樣。
+- **背景執行**：終端機在 agent-host 裡繼續跑，重開視窗時以快照加即時更新接回。
+- **space、分頁、分割**：一個 space 是一個工作地點，通常是一個 repo。底下有多個分頁，每個分頁可以往右或往下分割、放大、拖曳交換面板。版面由 host 保存，重開後還原；同時開幾個視窗，看到的都是同一份版面。
 - **可信的 Agent 狀態**：程序狀態與 Agent 狀態分開顯示。Agent 狀態只來自結構化回報：Claude Code 2.1.295 以上的 OSC 7501（不用設定），以及 Codex CLI 透過 `agentctl hook`。沒有可信來源時顯示 Unknown，AgentDesk 不從畫面文字猜。shell 重新顯示提示字元時，Agent 的狀態會被清掉。
 - **提醒與通知**：Agent 需要你時一定會響；你沒在看的 Agent 做完時標成 Done 並跳出通知，點一下就跳過去。提示音與通知可以分別關掉。
 - **選擇 shell**：側欄的「+」列出這台電腦找到的 shell。Windows 是 PowerShell 7、Windows PowerShell、命令提示字元與各個 WSL 發行版；macOS 是登入 shell 與 `/etc/shells` 列出的 shell。
@@ -71,7 +71,7 @@ AgentDesk 由三個程式組成：
 
 ## 快速上手
 
-1. 一開始是 shell。`cd` 到專案資料夾，space 名稱與分支會跟著變。
+1. 新開的面板一開始是 shell。`cd` 到專案資料夾，space 名稱與分支會跟著變。
 2. 輸入 `claude` 或 `codex` 啟動 Agent。它需要你的時候，側欄的 Agents 區會標出來並播放提示音。
 3. 分割、開分頁與 space：
 
@@ -186,4 +186,4 @@ AgentDesk 以 MIT License 釋出，見 [LICENSE](LICENSE)。
 
 ## 致謝
 
-AgentDesk 的介面與行為依 [herdr-app](https://github.com/herdrdev/herdr-app)（Apache-2.0）的原始碼移植成 C++。它的授權見 [third_party/herdr/LICENSE](third_party/herdr/LICENSE) 與發布包的 THIRD_PARTY_NOTICES。AgentDesk 是獨立專案，與 herdr 沒有關係。
+AgentDesk 的介面與行為依 [herdr-app](https://github.com/herdrdev/herdr-app)（Apache-2.0）的原始碼移植成 C++。它的授權見 [third_party/herdr/LICENSE](third_party/herdr/LICENSE) 與發布包的 THIRD_PARTY_NOTICES。AgentDesk 是獨立專案，與 herdr 沒有隸屬或合作關係。
