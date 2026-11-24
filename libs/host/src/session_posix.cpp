@@ -66,6 +66,13 @@ void Session::wait_for_work(bool& root_exited) {
     }
 }
 
+// The platform layer reports -1 for an exit it could not observe; real codes are 0..255.
+std::optional<std::uint32_t> Session::recorded_exit_code(std::optional<std::uint32_t> waited) {
+    if (waited == static_cast<std::uint32_t>(-1))
+        return std::nullopt;
+    return waited.value_or(0);
+}
+
 std::string Session::local_path_from_cwd_uri(const std::string& uri) {
     static const std::string local = [] {
         char buf[256]{};

@@ -211,6 +211,9 @@ private:
     void wait_for_work(bool& root_exited);
     std::unique_ptr<platform::win::PtyProcess> spawn_process();
     std::unique_ptr<platform::win::PtyProcess> adopt_process(const platform::win::PtyHandles& handles);
+    // The exit code to record from what wait_exit() gave after the root exited; nullopt when the
+    // system cannot know it (macOS: a root adopted in a handover is not our child).
+    static std::optional<std::uint32_t> recorded_exit_code(std::optional<std::uint32_t> waited);
     // The local folder an OSC 7 URI names, or "" when it is another machine's.
     static std::string local_path_from_cwd_uri(const std::string& uri);
     std::condition_variable queue_space_cv_;

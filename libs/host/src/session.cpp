@@ -325,7 +325,7 @@ void Session::on_root_exit() {
     {
         std::lock_guard lock(state_mutex_);
         info_.process_state = ProcessState::kExited;
-        info_.exit_code = code.value_or(0);
+        info_.exit_code = recorded_exit_code(code);
         info_.remaining_processes = remaining > 0 ? remaining - 1 : 0;  // excluding the root
         info_.still_running_after_interrupt = false;
     }

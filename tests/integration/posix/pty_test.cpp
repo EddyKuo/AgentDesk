@@ -237,3 +237,43 @@ TEST(PosixPty, CapabilitiesOnMacOS) {
     EXPECT_TRUE(ap::is_shell_name("pwsh.exe"));
     EXPECT_FALSE(ap::is_shell_name("node"));
 }
+
+// A program that never reads its input fills the terminal's input queue: the writer waits, but
+// close() still ends everything promptly and the stuck write gives up.
+TEST(PosixPty, CloseIsNotHeldUpByAWriteTheProgramNeverReads) {
+    Output out;
+    auto pty = ap::Pty::spawn(sh("stty raw -echo; echo ready; sleep 30"), out.sink(), {});
+    ASSERT_TRUE(out.wait_for("ready", 5s));
+    std::atomic<bool> write_ended{false};
+    std::thread writer([&] {
+        try {
+            pty->write(std::string(1024 * 1024, 'x'));
+        } catch (const std::exception&) {
+        }
+        write_ended = true;
+    });
+    std::this_thread::sleep_for(300ms);
+    EXPECT_FALSE(write_ended.load());  // still waiting for room
+    const auto t0 = std::chrono::steady_clock::now();
+    pty->resize({100, 30});  // does not wait for the writer
+    EXPECT_LT(std::chrono::steady_clock::now() - t0, 1s);
+    pty->close();
+    EXPECT_LT(std::chrono::steady_clock::now() - t0, 6s);
+    writer.join();
+    EXPECT_TRUE(write_ended.load());
+}
+
+// A shell puts each job in its own process group; closing the terminal ends those too.
+TEST(PosixPty, CloseEndsJobsInOtherProcessGroups) {
+    Output out;
+    auto pty = ap::Pty::spawn(sh("set -m; sleep 300 & echo \"job=$!\"; wait"), out.sink(), {});
+    ASSERT_TRUE(out.wait_for("\n", 5s));
+    const std::string text = out.text();
+    const auto at = text.find("job=");
+    ASSERT_NE(at, std::string::npos) << text;
+    const pid_t job = static_cast<pid_t>(std::stol(text.substr(at + 4)));
+    ASSERT_NE(::getpgid(job), static_cast<pid_t>(pty->pid()));  // its own group
+    EXPECT_GE(pty->live_processes(), 2u);
+    pty->close();
+    EXPECT_TRUE(wait_gone(job, 3s));
+}

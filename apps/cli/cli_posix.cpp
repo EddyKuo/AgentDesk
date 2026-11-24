@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <csignal>
 #include <thread>
 #include <vector>
 
@@ -16,6 +17,7 @@
 // The arguments arrive as UTF-8; the shared code takes them as wide strings, as on Windows.
 int main(int argc, char** argv_utf8) {
     namespace win = agentdesk::platform::win;
+    std::signal(SIGPIPE, SIG_IGN);  // the bridge's ssh peer may go away: EPIPE, not death
     std::vector<std::wstring> wide;
     try {
         for (int i = 0; i < argc; ++i)

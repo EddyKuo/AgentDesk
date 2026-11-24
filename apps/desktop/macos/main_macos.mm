@@ -12,6 +12,7 @@
 #import <ImageIO/ImageIO.h>
 
 #include <algorithm>
+#include <csignal>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -99,9 +100,19 @@ int g_crash_fd = -1;
 
 void on_crash(int sig) {
     if (g_crash_fd >= 0) {
-        char head[64];
-        const int n = std::snprintf(head, sizeof head, "signal %d\n", sig);
-        (void)::write(g_crash_fd, head, static_cast<std::size_t>(n));
+        // Only async-signal-safe calls here: a fresh file, then the signal number by hand.
+        (void)::ftruncate(g_crash_fd, 0);
+        (void)::lseek(g_crash_fd, 0, SEEK_SET);
+        char head[24] = "signal ";
+        std::size_t n = 7;
+        char digits[8];
+        int d = 0;
+        for (int v = sig > 0 ? sig : 0; d == 0 || v > 0; v /= 10)
+            digits[d++] = static_cast<char>('0' + v % 10);
+        while (d > 0)
+            head[n++] = digits[--d];
+        head[n++] = '\n';
+        (void)::write(g_crash_fd, head, n);
         void* frames[64];
         const int count = ::backtrace(frames, 64);
         ::backtrace_symbols_fd(frames, count, g_crash_fd);
@@ -572,6 +583,9 @@ int main(int argc, char** argv) {
         std::printf("agent-ui %s\n", AGENTDESK_VERSION_STRING);
         return 0;
     }
+    // A pipe whose reader went away (ssh to another machine, a tool we ran) must give EPIPE, not
+    // end the app; the programs we start get the default back (POSIX_SPAWN_SETSIGDEF, the pty).
+    std::signal(SIGPIPE, SIG_IGN);
     install_crash_report();
     ui::updates::configure({AGENTDESK_VERSION_STRING, agentdesk::platform::executable_path(),
                             agentdesk::desktop::data_folder(), [] { schedule_pump(2); }});

@@ -2,6 +2,7 @@
 // controlling tty, so the shell's process group is what close() and terminate() end.
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <set>
@@ -17,6 +18,7 @@
 #include <sys/proc.h>
 #include <sys/proc_info.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
@@ -69,9 +71,12 @@ struct Pty::Impl {
     bool stop_requested = false;
     std::optional<int> exit_code;
 
-    std::mutex write_mutex;
+    dev_t tty = 0;  // the slave's device: every process of the terminal has it as its controlling tty
+
+    std::mutex write_mutex;          // one writer at a time; never held while waiting on close_mutex
     mutable std::mutex close_mutex;  // lock order: close_mutex before write_mutex
     bool closed = false;
+    std::atomic<bool> closing{false};  // a write waiting for room gives up once set
 
     void wake() const {
         const char b = 1;
@@ -152,9 +157,11 @@ struct Pty::Impl {
                 break;
             }
             struct kevent event{};
-            const int n = ::kevent(kq.get(), nullptr, 0, &event, 1, nullptr);
+            // A deadline, so the checks above also run when kevent itself fails.
+            const timespec step{1, 0};
+            const int n = ::kevent(kq.get(), nullptr, 0, &event, 1, &step);
             if (n < 0 && errno != EINTR)
-                return;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
             if (n == 1 && event.filter == EVFILT_USER)
                 return;  // cancelled: the program keeps running in another host
             if (n == 1 && event.filter == EVFILT_PROC && adopted)
@@ -181,6 +188,15 @@ struct Pty::Impl {
 
     // Starts the reader (paused when asked) and the waiter.
     void start_threads(bool paused_reader) {
+        // Non-blocking: a program that stops reading its input must not hold a writer (and with it
+        // close()) forever; write() waits for room with poll() instead.
+        ::fcntl(master.get(), F_SETFL, ::fcntl(master.get(), F_GETFL) | O_NONBLOCK);
+        {
+            std::lock_guard lock(g_ptsname_mutex);
+            struct stat st {};
+            if (const char* name = ::ptsname(master.get()); name != nullptr && ::stat(name, &st) == 0)
+                tty = st.st_rdev;
+        }
         kq.reset(::kqueue());
         if (!kq.valid())
             posix::throw_errno("kqueue");
@@ -199,11 +215,21 @@ struct Pty::Impl {
         reader = std::thread([this] { reader_loop(); });
     }
 
-    // The process group is the child's pid (it called setsid()).
-    void signal_group(int sig) const {
-        if (::killpg(pid, sig) != 0 && errno == ESRCH) {
-            // Group already empty.
-        }
+    // The root's process group (its pid: it called setsid()) and every other process of the
+    // terminal: a shell puts each job in a group of its own.
+    void signal_all(int sig) const {
+        ::killpg(pid, sig);  // ESRCH: the group is already empty
+        for (const pid_t p : posix::terminal_members(tty))
+            ::kill(p, sig);
+    }
+
+    // The processes still running in the terminal, its root's group included.
+    std::vector<pid_t> remaining() const {
+        std::vector<pid_t> all = posix::process_group_members(pid);
+        for (const pid_t p : posix::terminal_members(tty))
+            if (std::find(all.begin(), all.end(), p) == all.end())
+                all.push_back(p);
+        return all;
     }
 };
 
@@ -319,13 +345,29 @@ std::unique_ptr<Pty> Pty::spawn(const PtySpawnSpec& spec, PtyOutputSink on_outpu
     return std::unique_ptr<Pty>(new Pty(std::move(impl)));
 }
 
+// Holds only write_mutex: resize(), foreground() and close() never wait for a program that does
+// not read its input. While the terminal's input queue is full it waits for room in 50 ms steps,
+// and gives up once close() started.
 void Pty::write(std::string_view bytes) {
-    std::lock_guard close_lock(impl_->close_mutex);
-    if (impl_->closed)
-        throw std::system_error(EBADF, std::generic_category(), "pty closed");
-    std::lock_guard lock(impl_->write_mutex);
-    if (!posix::write_fully(impl_->master.get(), bytes.data(), bytes.size()))
+    Impl& s = *impl_;
+    std::lock_guard lock(s.write_mutex);
+    while (!bytes.empty()) {
+        if (s.closing.load() || !s.master.valid())
+            throw std::system_error(EBADF, std::generic_category(), "pty closed");
+        const ssize_t n = ::write(s.master.get(), bytes.data(), bytes.size());
+        if (n > 0) {
+            bytes.remove_prefix(static_cast<std::size_t>(n));
+            continue;
+        }
+        if (n < 0 && errno == EINTR)
+            continue;
+        if (n < 0 && errno == EAGAIN) {
+            pollfd p{s.master.get(), POLLOUT, 0};
+            ::poll(&p, 1, 50);
+            continue;
+        }
         posix::throw_errno("write(pty)");
+    }
 }
 
 void Pty::resize(PtySize size) {
@@ -342,7 +384,7 @@ void Pty::interrupt() {
 }
 
 void Pty::terminate() {
-    impl_->signal_group(SIGKILL);
+    impl_->signal_all(SIGKILL);
 }
 
 std::optional<int> Pty::exit_code() const {
@@ -361,7 +403,7 @@ std::uint32_t Pty::pid() const noexcept {
 }
 
 std::size_t Pty::live_processes() const {
-    return posix::process_group_members(impl_->pid).size();
+    return impl_->remaining().size();
 }
 
 ForegroundInfo Pty::foreground() const {
@@ -385,8 +427,9 @@ void Pty::close() {
     if (impl_->closed)
         return;
     Impl& s = *impl_;
-    // Hang up the shell and let the reader take the last output while programs end.
-    s.signal_group(SIGHUP);
+    s.closing = true;  // a write waiting for room stops
+    // Hang up the terminal's programs and let the reader take the last output while they end.
+    s.signal_all(SIGHUP);
     {
         std::unique_lock lock(s.mutex);
         s.cv.wait_for(lock, kDrainWait, [&] { return s.reader_done; });
@@ -397,12 +440,12 @@ void Pty::close() {
     s.wake();
     if (s.reader.joinable())
         s.reader.join();
-    s.signal_group(SIGKILL);
+    s.signal_all(SIGKILL);
     if (s.waiter.joinable())
         s.waiter.join();
     // SIGKILL is delivered asynchronously; return only when nothing of the terminal still runs.
     const auto deadline = std::chrono::steady_clock::now() + kKillWait;
-    while (!posix::process_group_members(s.pid).empty() && std::chrono::steady_clock::now() < deadline)
+    while (!s.remaining().empty() && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     {
         std::lock_guard lock(s.write_mutex);

@@ -52,6 +52,9 @@ public:
     // users are closed and counted, never returned.
     std::unique_ptr<ByteStream> accept(PeerIdentity* peer = nullptr);
     void stop();
+    // After stop() and once no thread is in accept(): stops listening (new clients are refused)
+    // but leaves the endpoint's file, which a successor may already listen on (host handover).
+    void close_socket();
     [[nodiscard]] std::uint64_t rejected_clients() const noexcept;
     [[nodiscard]] const std::string& endpoint() const noexcept;
 

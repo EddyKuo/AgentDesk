@@ -222,8 +222,13 @@ std::unique_ptr<ByteStream> StreamListener::accept(PeerIdentity* peer) {
         if ((fds[0].revents & POLLIN) == 0)
             continue;
         UniqueFd client(::accept(s.fd.get(), nullptr, nullptr));
-        if (!client.valid())
-            continue;  // the client went away between poll and accept
+        if (!client.valid()) {
+            // Out of descriptors: the pending client stays queued and poll() would report it again
+            // at once, so wait a little instead of spinning. Otherwise the client went away.
+            if (errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM)
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
         posix::set_cloexec(client.get());
         const int one = 1;
         ::setsockopt(client.get(), SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
@@ -245,6 +250,10 @@ void StreamListener::stop() {
         const char b = 1;
         (void)::write(impl_->wake_write.get(), &b, 1);
     }
+}
+
+void StreamListener::close_socket() {
+    impl_->fd.reset();
 }
 
 std::uint64_t StreamListener::rejected_clients() const noexcept {

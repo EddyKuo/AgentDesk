@@ -78,6 +78,10 @@ void Session::wait_for_work(bool& root_exited) {
     }
 }
 
+std::optional<std::uint32_t> Session::recorded_exit_code(std::optional<std::uint32_t> waited) {
+    return waited.value_or(0);
+}
+
 std::string Session::local_path_from_cwd_uri(const std::string& uri) {
     static const std::string local = [] {
         char buf[MAX_COMPUTERNAME_LENGTH + 1]{};

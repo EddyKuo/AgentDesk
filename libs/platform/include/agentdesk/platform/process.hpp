@@ -74,7 +74,9 @@ struct DetachedResult {
     bool dies_with_launcher = false;  // Windows only: breakaway from a kill-on-close job denied
 };
 // A background process that outlives its launcher (agent-host). Its stdio goes to the null device.
-DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vector<std::string>& args);
+// `env_overrides` change its environment only (an empty value removes a variable), never ours.
+DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vector<std::string>& args,
+                              const std::map<std::string, std::string>& env_overrides = {});
 
 // PATH lookup without running anything. A name with a slash is checked as a path.
 std::optional<std::filesystem::path> find_executable(std::string_view name);

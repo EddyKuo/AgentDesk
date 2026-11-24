@@ -129,18 +129,32 @@ int receive_fd(int channel) {
     do {
         n = ::recvmsg(channel, &msg, 0);
     } while (n < 0 && errno == EINTR);
-    if (n != 1)
-        return -1;
+    // Exactly one descriptor is expected; every one that arrived is ours to close otherwise.
+    int fd = -1;
+    bool extra = (msg.msg_flags & MSG_CTRUNC) != 0;
     for (cmsghdr* c = CMSG_FIRSTHDR(&msg); c != nullptr; c = CMSG_NXTHDR(&msg, c)) {
-        if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS &&
-            c->cmsg_len == CMSG_LEN(sizeof(int))) {
-            int fd = -1;
-            std::memcpy(&fd, CMSG_DATA(c), sizeof(int));
-            ::fcntl(fd, F_SETFD, FD_CLOEXEC);
-            return fd;
+        if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS)
+            continue;
+        const std::size_t count = (c->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+        for (std::size_t i = 0; i < count; ++i) {
+            int got = -1;
+            std::memcpy(&got, CMSG_DATA(c) + i * sizeof(int), sizeof(int));
+            if (fd < 0) {
+                fd = got;
+            } else {
+                ::close(got);
+                extra = true;
+            }
         }
     }
-    return -1;
+    if (n != 1 || extra) {
+        if (fd >= 0)
+            ::close(fd);
+        return -1;
+    }
+    if (fd >= 0)
+        ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+    return fd;
 }
 
 std::string one_line(std::string s) {

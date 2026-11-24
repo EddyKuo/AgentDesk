@@ -86,6 +86,23 @@ std::vector<pid_t> process_group_members(pid_t group) {
     return pids;
 }
 
+std::vector<pid_t> terminal_members(dev_t tty) {
+    if (tty == 0)
+        return {};
+    const auto dev = static_cast<std::uint32_t>(tty);
+    const int bytes = ::proc_listpids(PROC_TTY_ONLY, dev, nullptr, 0);
+    if (bytes <= 0)
+        return {};
+    std::vector<pid_t> pids(static_cast<std::size_t>(bytes) / sizeof(pid_t) + 16);
+    const int got = ::proc_listpids(PROC_TTY_ONLY, dev, pids.data(), static_cast<int>(pids.size() * sizeof(pid_t)));
+    if (got <= 0)
+        return {};
+    pids.resize(static_cast<std::size_t>(got) / sizeof(pid_t));
+    std::erase_if(pids, [](pid_t p) { return p <= 0 || is_zombie(p); });
+    std::sort(pids.begin(), pids.end());
+    return pids;
+}
+
 ForegroundInfo describe_process(pid_t pid) {
     ForegroundInfo info;
     info.program = program_name(pid);

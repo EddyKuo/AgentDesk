@@ -260,14 +260,15 @@ RunResult run_capture(const ProcessSpec& spec, std::chrono::milliseconds timeout
     return result;
 }
 
-DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vector<std::string>& args) {
+DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vector<std::string>& args,
+                              const std::map<std::string, std::string>& env_overrides) {
     posix::check_launchable(exe);
     SpawnSetup setup;
     setup.set_flags(POSIX_SPAWN_SETSID);
     posix_spawn_file_actions_addopen(&setup.actions, 0, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_addopen(&setup.actions, 1, "/dev/null", O_WRONLY, 0);
     posix_spawn_file_actions_addopen(&setup.actions, 2, "/dev/null", O_WRONLY, 0);
-    const pid_t pid = do_spawn(exe, args, {}, setup);
+    const pid_t pid = do_spawn(exe, args, env_overrides, setup);
     reap_in_background(pid);  // no zombie while the launcher keeps running
     DetachedResult r;
     r.pid = static_cast<std::uint32_t>(pid);

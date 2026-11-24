@@ -84,7 +84,10 @@ bool Connection::send(const std::string& payload, bool droppable) {
 }
 
 void Connection::close() {
-    closed_ = true;
+    {
+        std::lock_guard lock(mutex_);  // the writer checks closed_ under it: no lost wake-up
+        closed_ = true;
+    }
     cv_.notify_all();
     stream_->cancel();  // wakes the connection thread's read
 }
@@ -165,6 +168,8 @@ void PipeServer::stop() {
         listener_->stop();
     if (acceptor_.joinable())
         acceptor_.join();
+    if (listener_)
+        listener_->close_socket();  // clients now get "refused" at once, not a queue nobody serves
     std::map<std::uint64_t, std::pair<ConnectionPtr, std::thread>> conns;
     {
         std::lock_guard lock(mutex_);
@@ -352,7 +357,10 @@ void PipeClient::reader_loop() {
             }
         }
     }
-    connected_ = false;
+    {
+        std::lock_guard lock(mutex_);  // call() checks connected_ under it: no lost wake-up
+        connected_ = false;
+    }
     cv_.notify_all();
     std::function<void()> handler;
     {

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <thread>
 
@@ -84,32 +85,22 @@ ProcessResult run_process(const std::filesystem::path& exe, const std::vector<st
     return r;
 }
 
+// The variable goes into the child's environment only: changing ours would race with other
+// threads reading it.
 bool spawn_detached(const std::filesystem::path& exe, const std::vector<std::wstring>& args,
                     const std::wstring& env_name, const std::wstring& env_value) {
-    // The child inherits this process's environment: set the one variable around the start.
-    const std::string name = win::to_utf8(env_name);
-    std::optional<std::string> previous;
-    if (!name.empty()) {
-        if (const char* v = std::getenv(name.c_str()); v != nullptr)
-            previous = v;
-        ::setenv(name.c_str(), win::to_utf8(env_value).c_str(), 1);
-    }
+    std::map<std::string, std::string> env;
     std::vector<std::string> a;
-    for (const auto& w : args)
-        a.push_back(win::to_utf8(w));
-    bool ok = true;
     try {
-        platform::spawn_detached(exe, a);
+        if (!env_name.empty())
+            env[win::to_utf8(env_name)] = win::to_utf8(env_value);
+        for (const auto& w : args)
+            a.push_back(win::to_utf8(w));
+        platform::spawn_detached(exe, a, env);
     } catch (const std::exception&) {
-        ok = false;
+        return false;
     }
-    if (!name.empty()) {
-        if (previous)
-            ::setenv(name.c_str(), previous->c_str(), 1);
-        else
-            ::unsetenv(name.c_str());
-    }
-    return ok;
+    return true;
 }
 
 // The system's own copy of a tool: /usr/bin/<name> (curl, tar ship with macOS).
