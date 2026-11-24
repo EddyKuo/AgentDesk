@@ -1,6 +1,6 @@
 ---
 contract_type: PRD
-version: 3.1.0
+version: 3.2.0
 status: approved
 author_agent: PM
 sprint: 11
@@ -10,12 +10,14 @@ skills_used:
   - shared/domain-coding-agents@1.0.0
 upstream_deps:
   - raw_requirement@2026-11-16
-  - docs/design/AgentDesk_Design.md@2.19
-  - sprint/current/status.md@2026-11-20
+  - docs/design/AgentDesk_Design.md@2.20
+  - docs/design/platform-abstraction.md@0.2
+  - sprint/current/status.md@2026-11-24
 downstream_consumers:
   - RD
   - QA
 change_summary: |
+  3.2.0（Minor）：新增 macOS 版（ADR-30，設計文件 v2.20，使用者 2026-11-24 決定 OQ-10）。新增 FR-39（macOS 版）與 FR-40（macOS 的快捷鍵與 Option 鍵）；1.2、第 3 節的平台與安全、第 5 節的假設、第 6 節術語、FR-36 加上 macOS 的對應內容。Windows 的需求、數字與驗收全部不變，只增加不刪除，所以升次版號。跨平台的遠端機器與 macOS 簽章帳號還沒決定，列在設計文件 7.4 的 OQ-11。上一版保存在 `contracts/deprecated/PRD_v3.1.0.md`。
   3.1.0（Minor）：FR-27 加一條驗收：在設定裡打開 mod 前先說明權限，確認才啟用（ADR-29，設計文件 v2.19）；mod 介面相容性規則見設計文件 ADR-29 與 `docs/mods.md`。既有需求不變。
   3.0.0（Major）：移除 AgentDesk 98（ADR-28，設計文件 v2.18，使用者 2026-11-20 要求，準備公開到 GitHub）。FR-27 的內建版面只剩 workspace、terminals 與自訂 JSON，FR-33 拿掉 AgentDesk 98 的圖片與圖示描述；刪除需求內容，依憲法 6.3 升主版號（下游 RD、QA 需重新確認 FR-27、FR-33）。程式、素材與 win98 測試已刪除；`ui.json` 存的 win98 改顯示 workspace。上一版保存在 `contracts/deprecated/PRD_v2.2.0.md`。
   2.2.0（Minor）：FR-27 的 AgentDesk 98 暫時隱藏（ADR-24，設計文件 v2.14，使用者 2026-11-20 要求）。需求內容保留、程式保留，重新開放不需改版；目前可切換的內建版面是 workspace 與 terminals。
@@ -37,7 +39,7 @@ change_summary: |
 
 # Product Requirements Document：AgentDesk
 
-> 本契約鎖定設計文件 **v2.18**，對應產品版本 0.2.0（2.2.0 鎖定 v2.14，2.0.0 鎖定 v2.11，1.3.1 鎖定 v2.5，1.1.0 鎖定 v1.7）。設計文件之後的變更若影響第 2、3、4、8、9 節，必須依 CLAUDE.md Section 6.3 將本契約升版，下游才能採用。上一版保存在 `contracts/deprecated/PRD_v2.2.0.md`。
+> 本契約鎖定設計文件 **v2.20**，對應產品版本 0.2.0（3.1.0 鎖定 v2.19，2.2.0 鎖定 v2.14，2.0.0 鎖定 v2.11，1.3.1 鎖定 v2.5，1.1.0 鎖定 v1.7）。設計文件之後的變更若影響第 2、3、4、8、9 節，必須依 CLAUDE.md Section 6.3 將本契約升版，下游才能採用。上一版保存在 `contracts/deprecated/PRD_v3.1.0.md`。
 
 ## 1. 產品概述
 
@@ -47,7 +49,7 @@ change_summary: |
 AgentDesk 的介面與行為依 herdr-app 的原始碼複刻（ADR-15），用 C++ 重寫，不追求協定相容。
 
 ### 1.2 目標使用者（Persona）
-在 Windows 11 x64 上以一般使用者權限，同時操作兩個以上 coding agent CLI（首發為 Claude Code 與 Codex CLI）的開發者。這些 CLI 由使用者自行安裝並登入（設計文件 1.4）。
+在 Windows 11 x64，或 Apple Silicon 的 macOS 13 以上（v3.2.0，ADR-30），以一般使用者權限同時操作兩個以上 coding agent CLI（首發為 Claude Code 與 Codex CLI）的開發者。這些 CLI 由使用者自行安裝並登入（設計文件 1.4）。
 
 ### 1.3 產品目標（可量化）
 依設計文件 1.5 的基準機：
@@ -64,7 +66,7 @@ AgentDesk 的介面與行為依 herdr-app 的原始碼複刻（ADR-15），用 C
 - MVP 交付時，設計文件 6.2 驗收矩陣（QA-01～QA-22）全數通過，或未通過項目已寫入限制清單並經使用者同意。
 - 沒有任何一次把未知的 Agent 狀態標成 Done（設計文件 5.3）。
 - 第 1.3 節的數值目標全數達成，並附測試報告證據（設計文件 6.3）。
-- 第 8、9 節的需求（FR-20～FR-38）都有自動化測試或實機證據。使用者已在 2026-11-19 完成整體驗收（`sprint/current/status.md`）；還要人工驗收的項目列在設計文件 5.4、5.5。
+- 第 8、9 節的需求（FR-20～FR-38）都有自動化測試或實機證據；第 10 節（FR-39、FR-40）在 macOS 版交付時要有同等證據。使用者已在 2026-11-19 完成整體驗收（`sprint/current/status.md`）；還要人工驗收的項目列在設計文件 5.4、5.5。
 
 ## 2. 功能需求
 
@@ -118,11 +120,12 @@ AgentDesk 的介面與行為依 herdr-app 的原始碼複刻（ADR-15），用 C
 |---|---|---|
 | 效能 | 本契約 1.3 | 設計文件 1.5 |
 | 輸出壓力 | 合成 1 MiB/s 持續 60 秒，host 持續消費 | 設計文件 1.5、3.3 |
-| 安全 | Named Pipe 只允許目前使用者、拒絕遠端；輸出不觸發命令或寫剪貼簿（herdr 預設允許 OSC 52，AgentDesk 不開放） | 設計文件 3.7、3.9、5.6；QA-16、QA-17 |
-| 安全（mod） | 只載入已啟用的 mod；`LoadLibraryExW` 只搜尋 DLL 所在資料夾與 System32；mod 當掉就停用，AgentDesk 照常執行。mod 沒有沙盒，以使用者權限執行 | ADR-17 |
+| 安全 | 本機通道只允許目前使用者：Windows 用 Named Pipe（拒絕遠端），macOS 用 Unix socket（資料夾 0700、socket 0600，連線時以 `getpeereid` 核對 uid）；輸出不觸發命令或寫剪貼簿（herdr 預設允許 OSC 52，AgentDesk 不開放） | 設計文件 3.7、3.9、5.6；QA-16、QA-17 |
+| 安全（mod） | 只載入已啟用的 mod；Windows 的 `LoadLibraryExW` 只搜尋 DLL 所在資料夾與 System32，macOS 以絕對路徑 `dlopen` `mod.dylib`；mod 當掉就停用，AgentDesk 照常執行。mod 沒有沙盒，以使用者權限執行 | ADR-17 |
 | 隱私 | 診斷 log 不記錄輸入文字或完整環境變數 | 設計文件 3.9 |
 | 網路 | 沒有預設伺服器：設定 `AGENTDESK_RELEASES_URL` 才檢查更新，設定 `AGENTDESK_TELEMETRY_URL` 才送使用統計；意見回饋只能複製或存檔，不自動送出 | ADR-18；FR-35、FR-37 |
 | 平台 | Windows 11 x64、一般使用者權限；100%／150%／200% DPI；繁中 IME | 設計文件 1.4；QA-15 |
+| 平台（macOS） | Apple Silicon（arm64）、macOS 13 Ventura 以上、一般使用者權限；Retina 與非 Retina 螢幕；注音輸入法 | ADR-30；FR-39 |
 | 介面 | 介面文字預設 15 px（herdr 為 13），可在設定調整 | ADR-15 |
 | 授權 | 本身 MIT；依賴須與 MIT 相容。herdr-app（Apache-2.0）列在發布包的 THIRD_PARTY_NOTICES 並附授權；隨附字型 Geist、JetBrains Mono（OFL）與 Symbols Nerd Font（MIT） | ADR-10、ADR-15 |
 
@@ -133,10 +136,10 @@ AgentDesk 的介面與行為依 herdr-app 的原始碼複刻（ADR-15），用 C
 
 ## 5. 假設與限制
 - 使用者預先安裝並登入 Claude Code（v2.1.295 以上才有 OSC 7501 狀態）與 Codex CLI；精確版本由 M0 凍結。
-- 開發只用已安裝的 VS 2022 C++ 工具鏈，不另外安裝工具（ADR-11）。
-- 一律使用隨附的 ConPTY（ADR-08 已定案：M0 實測內建版本會丟掉 OSC 7501 查詢回覆），發行包因此多兩個檔案。
+- Windows 開發只用已安裝的 VS 2022 C++ 工具鏈，不另外安裝工具（ADR-11）；macOS 開發可使用 Xcode Command Line Tools 與 vcpkg（ADR-30）。
+- Windows 一律使用隨附的 ConPTY（ADR-08 已定案：M0 實測內建版本會丟掉 OSC 7501 查詢回覆），發行包因此多兩個檔案。macOS 的 PTY 不攔截查詢回覆，不需要隨附元件。
 - 同一目錄的多個 Agent 會改到同一批檔案，只顯示提示，不提供檔案隔離。
-- 遠端機器必須是 Windows、已安裝 AgentDesk，並設好 ssh 金鑰登入（FR-26）。
+- 遠端機器必須是 Windows、已安裝 AgentDesk，並設好 ssh 金鑰登入（FR-26）。macOS 與 Windows 之間能不能互為遠端機器還沒決定（設計文件 7.4 OQ-11）。
 - WSL 的資料夾追蹤只支援 bash（ADR-16）。
 
 ## 6. 術語表
@@ -148,7 +151,8 @@ AgentDesk 的介面與行為依 herdr-app 的原始碼複刻（ADR-15），用 C
 | 分頁 | space 裡的一棵分割面板樹 |
 | 面板 | 分頁裡的一個終端機 |
 | 版面 | 決定顯示哪些區塊的設定（workspace、terminals 與自訂 JSON） |
-| mod | 放在 `mods\<名稱>\mod.dll` 的 C++ DLL 擴充（ADR-17） |
+| mod | 放在 `mods\<名稱>\mod.dll`（macOS 為 `mods/<名稱>/mod.dylib`）的 C++ 擴充（ADR-17、ADR-30）；同一份 mod 要依平台各自編譯 |
+| 平台抽象層 | 把作業系統相依（PTY、子程序、本機通道、系統資訊、視窗外殼）收在固定介面後面的程式層，Windows 與 macOS 各有一份實作（`docs/design/platform-abstraction.md`） |
 | 機器 | 透過 ssh＋`agentctl bridge` 連上的另一台電腦 |
 
 ## 7. Aesthetic Refs
@@ -242,7 +246,8 @@ v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外�
 - Given host 正在跑幾個終端機，使用隨附 ConPTY，When 使用者執行 `agentctl update`，Then 新 host 接手所有 session，終端機裡的程式不中斷；連線會斷，client 重新連上後取得新快照，不把 session 標成 Lost。
 - Given 新 host 在回報 ready 前出錯或逾時（30 秒），When 交接失敗，Then 舊 host 結束新程序並恢復所有 session 照常執行。
 - Given 使用系統內建 ConPTY，When 要求更新 agent-host，Then 回報錯誤，終端機不受影響。
-**驗證**: `HostUpdate.TerminalsKeepRunningThroughAnUpdate`、`HostUpdate.FailedTakeoverKeepsEverything`、`CoreUpdate.*`。
+- Given macOS 上的 host 正在跑幾個終端機，When 使用者執行 `agentctl update`，Then 舊 host 透過 Unix socket 把每個終端機的 PTY 交給新 host，新 host 核對（fd 是 PTY master、程序群組與 session 對得上、root 程序還在且是同一使用者）後接手，終端機裡的程式不中斷（v3.2.0，ADR-30）。接手後的程式結束時若拿不到 exit code，記為 unknown。
+**驗證**: `HostUpdate.TerminalsKeepRunningThroughAnUpdate`、`HostUpdate.FailedTakeoverKeepsEverything`、`CoreUpdate.*`；macOS 版沿用同一組測試情境。
 
 ### FR-37 使用統計（ADR-18）
 **優先級**: P3
@@ -263,3 +268,28 @@ v2.0.0 補上 Given／When／Then；需求欄除了 FR-27 的版面更正之外�
 - Given 使用者移動並調整視窗大小後關閉，When 再次開啟，Then 回到同一個螢幕、位置與大小；關閉時是最大化就以最大化開啟。
 - Given 上次的螢幕已經不在，When 開啟，Then 以上次的大小置中於滑鼠所在的螢幕，而且不超出可用範圍。
 **驗證**: `WindowPlace.*`；實機（status.md 2026-11-20「視窗依螢幕自動調整大小、記住位置」）。
+
+## 10. v3.2.0 新增需求：macOS 版（ADR-30，設計文件 v2.20）
+
+### FR-39 macOS 版
+**優先級**: P1
+**描述**: 使用者決定（2026-11-24，OQ-10）：AgentDesk 出 macOS 版，第一版就包含第 2、8、9 節的全部功能（介面、輸入法、mod、打包、更新、host 熱更新），只支援 Apple Silicon、macOS 13 以上。做法是先在 Windows 上把作業系統相依搬到平台抽象層後面（Windows 行為不變），再補 macOS 實作（`docs/design/platform-abstraction.md`）。只在 Windows 才有意義的功能不移植：WSL 發行版（FR-28）、隨附 ConPTY、PowerShell 與 CMD 的提示字元鉤子；macOS 的 shell 從 `$SHELL` 與 `/etc/shells` 偵測（FR-32）。資料夾對應：`%LOCALAPPDATA%\AgentDesk` 在 macOS 是 `~/Library/Application Support/AgentDesk`，`%USERPROFILE%` 是 `~`。
+**驗收標準**:
+- Given 一台 Apple Silicon、macOS 13 以上的 Mac，When 使用者從 `.app` 啟動 AgentDesk 並在 zsh 裡執行 Claude Code，Then Agent 狀態照 OSC 7501 顯示（不需要隨附元件），第 2 節 US-01～US-07 的驗收照樣成立。
+- Given AgentDesk 正在跑幾個終端機，When 使用者關閉視窗再重開，Then 終端機在背景繼續執行，重開後接回原畫面（US-03）。
+- Given host 意外結束，When 使用者重開 AgentDesk，Then 原本的 session 標成 Lost，不憑舊 PID 接管程序；終端機裡的 shell 因 PTY 關閉而結束。
+- Given 另一個使用者帳號的程式，When 它連線到這個使用者的 host socket，Then 連線被拒絕並計入 rejected。
+- Given 使用者停止一個工作，When 中斷後 5 秒還沒結束、使用者選擇強制終止，Then 該終端機的整個程序群組被結束（US-05）。
+- Given 注音輸入法，When 使用者在終端機裡組字，Then 選字窗出現在游標旁，確定後的文字送進程式。
+- Given Retina 螢幕，When 視窗在 Retina 與非 Retina 螢幕之間移動，Then 文字與格子依螢幕的縮放比例重新繪製，游標不偏移。
+- Given 第 1.3 節的數值目標，When 在 macOS 基準機上量測，Then 同樣達成（基準機規格在 macOS 版交付前由使用者指定）。
+**驗證**: macOS 版的單元與整合測試（POSIX 版 PTY、本機通道、背壓、detach／reattach、OSC 7501）、截圖、使用者實機驗收。Windows 版在重構期間每一步都要通過現有全部測試，截圖基準不變。
+
+### FR-40 macOS 的快捷鍵與 Option 鍵
+**優先級**: P1
+**描述**: 使用者決定（2026-11-24，OQ-10）：照 herdr-app 在 macOS 的行為。macOS 用獨立的預設鍵表（照 herdr-app 的 `defaults/keys.macos.json` 轉寫，以 Cmd 為主，`ctrl-1..9` 選 space），`keys.json` 的和弦語法多一個 `cmd` 修飾鍵（只在 macOS 有效）；設定新增 `option_as_alt`（`auto`、`off`、`on`、`left`、`right`，設定頁的 Keyboard 區，只在 macOS 顯示）。使用者自己的 `keys.json` 照字面解讀，不做 Ctrl／Cmd 自動轉換。終端機裡的 Ctrl 一律照原樣送給程式。
+**驗收標準**:
+- Given macOS 版、預設鍵表，When 使用者按 herdr-app `keys.macos.json` 裡綁定的組合鍵，Then 執行對應命令，按鍵不送進終端機程式（同 FR-22）。
+- Given 終端機有焦點，When 使用者按 Ctrl+C，Then 0x03 送給程式，不被當成複製。
+- Given `option_as_alt` 設為 `left`，When 使用者按左 Option＋B，Then 送出 ESC b；按右 Option＋B 時照 macOS 鍵盤配置輸入字元。
+**驗證**: `Keymap.*` 加 macOS 鍵表的測試；macOS 實機驗收。鍵表內容在動工前逐條對照 herdr-app 原始碼，寫進 `docs/research/herdr-app/`。

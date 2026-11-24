@@ -20,7 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
-| 2.20 | 2026-11-24 | 7.4 新增 OQ-10：是否做 macOS 版，附平台抽象層介面草案 `docs/design/platform-abstraction.md`（草案，不改現行規格） |
+| 2.20 | 2026-11-24 | OQ-10（macOS 版）提出並由使用者決定，新增 ADR-30；平台抽象層介面草案 `docs/design/platform-abstraction.md`；PRD 3.2.0；7.4 新增 OQ-11。現行 Windows 規格不變，技術基線等實作後再改 |
 | 2.19 | 2026-11-20 | ADR-29：開放 mod 前的四項準備（啟用前的安全說明、相容性規則、卡住時的處理說明、`docs/mods.md` 開發指南） |
 | 2.18 | 2026-11-20 | ADR-28：移除 AgentDesk 98（程式、素材、測試與建置步驟），取代 ADR-24 的隱藏做法；2.4、2.8、3.1、3.9、3.10、4.1、5.6 更新 |
 | 2.17 | 2026-11-20 | ADR-27：terminals 版面上方列最左邊加「顯示側欄」按鈕；`sidebar.toggle` 在沒有側欄的版面改為切到有側欄的版面；4.1 更新 |
@@ -794,6 +794,7 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 | ADR-27 | 在 terminals 版面叫出側欄（2026-11-20） | 使用者回報：按 Ctrl+Shift+L 切到 terminals 後，看不到能叫出左側欄的按鈕。terminals 版面本身沒有側欄，ADR-26 的按鈕只在有側欄的版面出現，ADR-25 的齒輪要進設定才能換版面，不夠直接。做法：(1) terminals 上方列最左邊（space 前面）加一個側欄圖示按鈕，樣式同該列其他 31 px 圖示按鈕，提示「Show sidebar」與快捷鍵；(2) `sidebar.toggle`（Ctrl+Shift+B）在沒有側欄節點的版面，改為切到第一個有側欄的版面（內建是 workspace）並確保側欄顯示。所以「顯示側欄」在每個版面都是同一個圖示、同一個快捷鍵；切換時照常顯示「Layout: workspace」提示 |
 | ADR-28 | AgentDesk 98 移除（2026-11-20） | 使用者要求：準備公開到 GitHub，不要在版本庫裡留下模仿 Windows 98 的素材與程式。做法：刪除 `apps/desktop/win98_*.cpp`、`libs/ui` 的 win98 邏輯、`third_party/herdr/win98`（像素字型、圖示、圖片、音效）、`third_party/herdr/layouts/win98.json`、win98 單元測試，以及建置時複製 `win98\`、打包與 THIRD_PARTY_NOTICES 裡的對應項目；內建版面剩 workspace 與 terminals，keys.json 的 `layout:win98` 預設區段與 `win98.*` 命令一併拿掉。`ui.json` 存的版面是 win98 時顯示 workspace，舊格式版面檔的 style win98 讀成 workspace。取代 ADR-24 的隱藏做法 |
 | ADR-29 | 開放 mod 給其他人寫（2026-11-20） | 準備公開到 GitHub，讓別人也能寫 mod。四項準備：(1) 設定 › Mods 打開開關時不直接啟用，先在該列下方說明 mod 以使用者的 Windows 權限執行（能讀寫檔案、啟動程式、在終端機輸入）以及卡住時視窗會停住，按「Turn on」才啟用，每次啟用都會說明；關閉不需確認。(2) 相容性：介面新版本只在結構尾端加成員、不改不刪，AgentDesk 載入 api_version 介於 1 與自己版本之間的 mod（載入前結構清為零，舊 mod 不認得的成員是 NULL），比自己新的 mod 拒絕並在設定頁說明；`mod_sdk.hpp` 也改為只拒絕比標頭舊的 AgentDesk。目前只有版本 1，行為不變。(3) 卡住無法從程式中斷，`mod_api.h`、使用說明與開發指南寫明處理方式：終端機在 agent-host 繼續跑，結束 agent-ui、從 `mods_enabled` 拿掉 mod 再開。(4) 開發指南 `docs/mods.md`（英文）：檔案配置、建置、範例、host 與 mod 的每個呼叫、UI 執行緒規則、相容性、純 C 寫法、發布建議 |
+| ADR-30 | 做 macOS 版（2026-11-24） | 使用者決定（OQ-10）：做 macOS 版，第一版一次做到完整（介面、輸入法、mod、打包）；host 熱更新第一版就要支援（Unix socket `SCM_RIGHTS` 傳 PTY master fd，新 host 逐一核對後接手）；快捷鍵照 herdr-app 的 macOS 行為（`keys.macos.json`、`cmd` 修飾鍵、`option_as_alt`）；只支援 Apple Silicon、最低 macOS 13。ADR-11 放寬：macOS 上可使用 Xcode Command Line Tools 與 vcpkg，Windows 開發環境的限制不變。做法：先在 Windows 上把作業系統相依搬到平台抽象層後面（行為不變，每步測試全綠），再補 macOS 實作，介面與步驟見 `docs/design/platform-abstraction.md`。PRD 契約升為 3.2.0（FR-39、FR-40） |
 | ADR-21 | 程式裡不出現 herdr 的名稱 | 使用者要求（2026-11-19）：執行檔、畫面與跟著發布的檔案只寫 AgentDesk。win98 版面改名 AgentDesk 98；開機、關於與開始選單側邊的「Herdr 98」圖片改由程式用像素字型畫出；Start 與 Update 圖示的 herdr 標誌換成 AgentDesk 的標誌（依 herdr art/generate.ts 的畫法重新產生）；預設主題 id 改為 `preset-<名稱>`，舊設定照樣讀得到。保留的部分：THIRD_PARTY_NOTICES 裡 herdr-app 的授權聲明（Apache-2.0 第 4 條要求）、原始碼註解裡的出處、版本庫的 `third_party/herdr/` |
 
 ### 7.2 主要風險
@@ -842,9 +843,9 @@ POC 基準矩陣：PowerShell 7、Windows PowerShell 5.1、目標 Codex CLI、�
 
 | 編號 | 問題 | 現況 |
 |---|---|---|
-| OQ-10 | 要不要做 macOS 版；要做的話，開發工具（放寬 ADR-11）、第一版範圍、host 熱更新、快捷鍵、支援的硬體與最低版本怎麼定 | 2026-11-24 使用者要求先寫平台抽象層介面草案：`docs/design/platform-abstraction.md`（第 8 節列出要決定的六件事）。決定前不動程式，現行規格仍是 Windows 11 x64 |
+| OQ-11 | macOS 版的兩件事：(1) macOS 與 Windows 能不能互為遠端機器（FR-26 目前限定遠端是 Windows）；(2) 程式碼簽章與公證用哪個 Apple Developer 帳號 | 2026-11-24 寫 PRD 3.2.0 時發現。(1) 擋住 macOS 版的遠端機器功能，(2) 擋住 macOS 版的發布；其他 macOS 工作不受影響 |
 
-先前的 OQ-01～OQ-09 都已決定，結果寫進對應章節，其他文件引用這些編號時可依此查：OQ-01 名稱 AgentDesk、OQ-08 MIT License（ADR-10）；OQ-02 首發 Claude Code 與 Codex CLI；OQ-03 libvterm 0.3.3；OQ-04 隨附 ConPTY 1.24.260710001（ADR-08）；OQ-05 GoogleTest 1.18.0、nlohmann-json 3.12.0；OQ-06 背壓（3.3）；OQ-07 vcpkg manifest（baseline `afa249f`），libvterm 原始碼收錄於 third_party；OQ-09 agent-host 單獨更新時終端機不中斷（ADR-19）。
+先前的 OQ-01～OQ-09 都已決定，結果寫進對應章節，其他文件引用這些編號時可依此查：OQ-01 名稱 AgentDesk、OQ-08 MIT License（ADR-10）；OQ-02 首發 Claude Code 與 Codex CLI；OQ-03 libvterm 0.3.3；OQ-04 隨附 ConPTY 1.24.260710001（ADR-08）；OQ-05 GoogleTest 1.18.0、nlohmann-json 3.12.0；OQ-06 背壓（3.3）；OQ-07 vcpkg manifest（baseline `afa249f`），libvterm 原始碼收錄於 third_party；OQ-09 agent-host 單獨更新時終端機不中斷（ADR-19）；OQ-10 做 macOS 版（ADR-30）。
 
 ## 8. 官方參考資料
 

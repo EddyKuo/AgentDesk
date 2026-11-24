@@ -1,6 +1,6 @@
 # 平台抽象層介面草案（macOS 移植準備）
 
-版本 0.1（草案）｜日期：2026-11-24｜狀態：**未定案**，對應設計文件 7.4 的 OQ-10。使用者決定前，這份文件不改變任何現行規格，Windows 版行為以設計文件 v2.19 為準。
+版本 0.2（草案）｜日期：2026-11-24｜狀態：OQ-10 的方向已由使用者決定（第 8 節、設計文件 ADR-30），介面細節仍是草案。Windows 版行為以設計文件為準，不因這份文件改變。
 
 ## 1. 目的與範圍
 
@@ -373,7 +373,14 @@ HandoverSupport handover_support();
 }  // namespace agentdesk::platform
 ```
 
-建議 macOS 第一版 `handover_support().supported = false`，`host.update` 改為「告知使用者終端機會結束，確認後重啟 host」，要不要這樣做列在 OQ-10（第 8 節第 4 項）。Windows 照現行做法，不受影響。
+使用者決定 macOS 第一版就要支援熱更新（第 8 節第 4 項），`handover_support().supported` 在兩個平台都是 true。macOS 的做法：
+
+1. 舊 host 用 `socketpair` 開私有通道，啟動新 host（`--takeover`），把通道的一端交給它。
+2. 凍結每個 session（reader 停在 parser 的 ground state、輸入清空、不再監看結束），用 `SCM_RIGHTS` 把 PTY master fd 傳過去，連同 root pid、程序群組、session id 與引擎狀態。
+3. 新 host 逐一核對：fd 是 PTY master（`ptsname` 成功）、`tcgetpgrp(fd)` 的群組屬於該 session（`getsid` 等於 root pid）、root pid 還活著且 uid 相同。任何一項不符就整個放棄，舊 host 照常繼續。
+4. 之後的 ready／go 交接順序與 Windows 相同。新 host 不能 `waitpid` 不是自己子程序的 root，改用 kqueue `EVFILT_PROC`／`NOTE_EXIT` 監看結束；exit code 拿不到時記為 unknown，這是和 Windows 的差異，要寫進設計文件。
+
+Windows 照現行做法，不受影響。
 
 ### 5.6 視窗外殼（`apps/desktop/shell/window_shell.hpp`）
 
@@ -439,7 +446,12 @@ int run_shell(const ShellOptions& options);  // main loop; replaces wWinMain's b
 | 檔案拖放 | `WM_DROPFILES` | `NSDraggingDestination` |
 | DPI | `GetDpiForMonitor`、`WM_DPICHANGED` | `backingScaleFactor`、`viewDidChangeBackingProperties` |
 
-`keys.json` 的修飾鍵：在 `Keymap` 加一個邏輯修飾鍵 `Mod`（Windows 對應 Ctrl，macOS 對應 Cmd），預設鍵表改用 `Mod`；使用者自己寫的 `Ctrl+...` 照字面解讀。終端機裡的 Ctrl 一律照原樣送給程式，不轉換。
+快捷鍵照 herdr-app 在 macOS 的做法（第 8 節第 5 項）：herdr-app 有一份獨立的預設鍵表 `defaults/keys.macos.json`，以 Cmd 為主，`ctrl-1..9` 用來選 space；設定另有 macOS 專用的 `option_as_alt`（`"auto"|"off"|"on"|"left"|"right"`，設定頁的 Keyboard 區）。AgentDesk 照做：
+
+- 新增 macOS 專用的預設鍵表（內容照 herdr-app 的 `keys.macos.json` 轉寫，開工前先讀原始碼逐條對照，寫進 `docs/research/herdr-app/`）。
+- `Keymap` 的和弦語法加 `cmd` 修飾鍵，只在 macOS 有效。
+- 設定加 `option_as_alt`，決定 Option 鍵在終端機裡要不要當成 Alt（ESC 前綴）送出。
+- 使用者的 `keys.json` 照字面解讀，不做 Ctrl／Cmd 自動轉換。終端機裡的 Ctrl 一律照原樣送給程式。
 
 ## 6. 對照表：現有程式搬到哪裡
 
@@ -476,17 +488,22 @@ int run_shell(const ShellOptions& options);  // main loop; replaces wWinMain's b
 做完這 8 步，Windows 版的對外行為不變，接著分三步補 macOS 實作：
 
 9. macOS：`Pty`、`Process`、`ByteStream`、`system.hpp`，先讓 `agent-host`、`agentctl`、`pty_run`、`vt_probe` 跑起來，用 `unit_tests` 加新的 POSIX 整合測試驗證背壓、detach／reattach、OSC 7501。
-10. macOS：視窗外殼、輸入法、字型、剪貼簿、快捷鍵。
-11. macOS：mod、打包（`.app`、codesign、notarization）、更新。
+10. macOS：host 熱更新（5.5），沿用 Windows 的 handover 測試情境。
+11. macOS：視窗外殼、輸入法、字型、剪貼簿、快捷鍵（`keys.macos.json`、`option_as_alt`）。
+12. macOS：mod、打包（`.app`、codesign、notarization）、更新。
 
-## 8. 要使用者決定的事（OQ-10）
+第一版做到第 12 步（第 8 節第 3 項）。
 
-1. **要不要做 macOS 版。** 要做的話，設計文件技術基線、PRD 契約（目前 v3.1.0）要依憲法 6.3 升版，並新增一筆 ADR。
-2. **開發工具。** macOS 建置需要 Xcode Command Line Tools（clang、Metal、AppKit 標頭）與 Homebrew 或 vcpkg 的 macOS 環境，ADR-11 目前限定只用 Windows 開發機上已安裝的工具，需要放寬。
-3. **第一版範圍。** 建議先做到第 9 步（host＋CLI，沒有介面），確認 PTY、IPC、背壓在 macOS 上都正常，再開始做介面；或一次做到第 11 步。
-4. **熱更新。** macOS 第一版不支援 handover、改為提示後重啟 host，可以接受嗎？
-5. **快捷鍵。** 預設鍵表在 macOS 用 Cmd 取代 Ctrl（5.6 的 `Mod`），還是照 herdr-app 在 macOS 上的行為？後者要先查 herdr-app 原始碼。
-6. **硬體與版本。** 只支援 Apple Silicon（arm64）還是也要 Intel；最低 macOS 版本（建議 13 Ventura，`POSIX_SPAWN_SETSID` 與 Metal 的需求都滿足）。
+## 8. 使用者的決定（OQ-10，2026-11-24）
+
+| # | 問題 | 決定 | 影響 |
+|---|---|---|---|
+| 1 | 要不要做 macOS 版 | 做 | 設計文件新增 ADR-30；PRD 契約升為 3.2.0（FR-39、FR-40） |
+| 2 | 開發工具 | 放寬 ADR-11：macOS 上可使用 Xcode Command Line Tools（clang、Metal、AppKit 標頭）與 vcpkg | Windows 開發環境的限制不變 |
+| 3 | 第一版範圍 | 一次做到完整版（第 7 節第 12 步） | 包含介面、輸入法、mod、打包 |
+| 4 | host 熱更新 | 第一版就要支援 | 5.5 改為 `SCM_RIGHTS` 方案，排在第 10 步 |
+| 5 | 快捷鍵 | 照 herdr-app 在 macOS 的行為 | 5.6：`keys.macos.json`、`cmd` 修飾鍵、`option_as_alt` |
+| 6 | 硬體與版本 | 只支援 Apple Silicon（arm64），最低 macOS 13 Ventura | preset 只建 `arm64`；CI 用 macOS arm64 runner |
 
 ## 9. 風險
 
@@ -494,6 +511,7 @@ int run_shell(const ShellOptions& options);  // main loop; replaces wWinMain's b
 |---|---|---|
 | macOS 沒有 Job Object，改了程序群組的子孫在 session 結束後可能還活著 | 違反「session 結束時整棵程序樹一起結束」的期望 | 結束時另外列出以 root 為祖先的程序補殺；文件寫明差異 |
 | `imgui_impl_osx` 的輸入法支援不完整 | 注音、日文輸入選字窗位置錯、組字中文字不顯示 | 第 10 步先做輸入法 PoC，不行就自己實作 `NSTextInputClient` |
+| macOS 新 host 無法 `waitpid` 接手的程序 | 熱更新後的 session 結束時拿不到 exit code | 用 `EVFILT_PROC` 監看結束、exit code 記為 unknown；設計文件寫明差異 |
 | 第 2 步改動 Session 的等待方式 | 程序結束時遺漏最後的輸出，或關閉時死結（背壓解除順序） | 保留現有順序：先解除背壓、再 close、再 drain；補壓力測試 |
 | 重構期間 Windows 版退化 | 已驗收的功能壞掉 | 每步獨立 PR、全測試加截圖比對；第 1～8 步不改任何對外行為 |
 | 自繪標題列在 macOS 和系統紅綠燈按鈕衝突 | 版面和 herdr-app 不一致 | 標題列左側讓出 `title_bar_insets()`；細節要查 herdr-app 在 macOS 的做法 |
