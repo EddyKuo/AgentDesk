@@ -1,6 +1,6 @@
 # AgentDesk 詳細設計文件
 
-版本 v3.1｜日期：2026-11-24｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.0.0
+版本 v3.2｜日期：2026-11-24｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.0.0
 技術基線：C++20、Dear ImGui（FreeType 繪字）、libvterm 0.3.3。Windows 11 x64：Win32、DirectX 11、隨附 ConPTY。macOS 13 以上（Apple Silicon）：AppKit、Metal、POSIX pty
 
 > 這份文件依 0.2.0 的程式重寫，描述系統「現在怎麼運作」。需求與驗收在 PRD；這裡寫設計、資料格式、數字與理由。程式與文件不一致時，先查程式，再修文件或列進 12.4。
@@ -11,6 +11,7 @@
 
 | 版本 | 日期 | 變更 |
 |---|---|---|
+| 3.2 | 2026-11-24 | 平台抽象層第 1～8 步完成：Windows 也實作中立介面，過渡用的 `compat/` 拿掉，交接邏輯合為一份（2.1、2.3、5.2、ADR-45）。路徑改由 `ui::path_text` 依路徑本身判斷系統。對外行為不變 |
 | 3.1 | 2026-11-24 | 合併 Windows 端的 v2.27（版面與主題第一、二輪）與 macOS 端的 v3.0。v2.27 的 2.8～2.16 原文搬到 7.16～7.24，內建版面與 style 對照表在 7.25，決策紀錄加入 ADR-32～ADR-41。兩邊編號相撞：macOS 端的 ADR-30、ADR-31 不變，Windows 端的「Mac 風格的視窗按鈕」改為 ADR-42、「AgentDesk Mac 版面」改為 ADR-43。新增 ADR-44（新版面在兩個平台的做法）。合併前的兩份保存在 `docs/archive/AgentDesk_Design_v2.27.md`、`AgentDesk_Design_v3.0.md` |
 | 3.0 | 2026-11-24 | 使用者要求依照現有程式重寫。改為純設計文件：需求與驗收移到 PRD 4.0.0；依程式碼重寫架構、協定、host、UI 與平台差異各章；決策紀錄（第 11 章）照舊保留。舊版 v2.21 與完整的版本紀錄保存在 `docs/archive/AgentDesk_Design_v2.21.md`，v1.0 在 `docs/archive/AgentDesk_Design_v1.0.md` |
 
@@ -94,14 +95,14 @@ flowchart TD
 
 | 路徑 | 內容 |
 |---|---|
-| `apps/desktop` | agent-ui。共用的視窗內容依功能分檔：`app`、`frame`（每幀流程與版面繪製）、`sidebar`、`tab_bar`、`terminals_layout`、`panes`、`files_changes`、`side_panels`、`code_preview`、`overlays`（命令面板、picker、說明、啟動器、改名）、`notices`（通知、peek、更新提示）、`notes`（What's new、意見回饋、確認、結束）、`welcome`、`machine_add`、`worktrees`、`settings_dialog`、`settings_pages`、`settings_store`（ui.json）、`layouts`、`themes`、`programs`、`commands`、`sessions`、`git_cache`、`chrome`。共用宣告在 `app_internal.hpp`、`overlay_kit.hpp`。系統相關：`desktop_os.hpp`、`window_ops.hpp`；Windows 外殼 `main.cpp` 與 `win/`；macOS 外殼 `macos/` |
-| `apps/host` | agent-host 入口：Windows `main.cpp`、macOS `main_posix.cpp` |
+| `apps/desktop` | agent-ui。共用的視窗內容依功能分檔：`app`、`frame`（每幀流程與版面繪製）、`sidebar`、`tab_bar`、`terminals_layout`、`panes`、`files_changes`、`side_panels`、`code_preview`、`overlays`（命令面板、picker、說明、啟動器、改名）、`notices`（通知、peek、更新提示）、`notes`（What's new、意見回饋、確認、結束）、`welcome`、`machine_add`、`worktrees`、`settings_dialog`、`settings_pages`、`settings_store`（ui.json）、`layouts`、`themes`、`programs`、`commands`、`sessions`、`git_cache`、`chrome`。共用宣告在 `app_internal.hpp`、`overlay_kit.hpp`。系統相關：`desktop_os.hpp`、`window_ops.hpp`；Windows 外殼 `win/`（入口 `win/main_win.cpp`）；macOS 外殼 `macos/` |
+| `apps/host` | agent-host 入口：Windows `main_win.cpp`、macOS `main_posix.cpp` |
 | `apps/cli` | agentctl：共用的指令在 `main.cpp`，入口與系統相關部分在 `cli_win.cpp`、`cli_posix.cpp` |
-| `libs/platform` | 平台層。`include/agentdesk/platform/` 是中立介面（`pty.hpp`、`process.hpp`、`ipc_transport.hpp`、`system.hpp`）；`windows/` 是 ConPTY、Job、quoting、背景啟動；`posix/` 是 macOS 實作，`posix/compat/` 是過渡用的同名標頭（2.3） |
+| `libs/platform` | 平台層。`include/agentdesk/platform/` 是兩個平台共用的介面（`pty.hpp`、`process.hpp`、`ipc_transport.hpp`、`system.hpp`、`dynamic_library.hpp`、`text.hpp`）；`windows/`、`posix/` 各是一份實作，CMake 只建其中一份，目標名稱都是 `agentdesk::platform` |
 | `libs/terminal` | VtEngine、OSC 7501 解析與紀錄（`program_status`）、OSC 7 路徑轉換（`cwd_uri`） |
 | `libs/protocol` | 分幀、訊息封包、錯誤碼、畫面編碼 |
-| `libs/ipc` | 本機通道的伺服器與 client、啟動或連上 host、ssh 轉接。宣告不同的 `pipe.hpp` 分放在 `include_win/`、`include_posix/` |
-| `libs/host` | Session、SessionManager、狀態、持久化（store）、git 工具、交接（Windows `handover.cpp`、macOS `handover_posix.cpp`）；系統相關在 `host_os.hpp` 與 `*_win.cpp`／`*_posix.cpp` |
+| `libs/ipc` | 本機通道的伺服器與 client、啟動或連上 host、ssh 轉接。走平台層的位元組串流，兩個平台同一份程式 |
+| `libs/host` | Session、SessionManager、狀態、持久化（store）、git 工具、交接（`handover.cpp`）。系統相關在 `host_os.hpp`（`host_os_win.cpp`、`host_os_posix.cpp`）與 `handover_os.hpp`（`handover_win.cpp`、`handover_posix.cpp`） |
 | `libs/ui` | TerminalView、Workspace、版面引擎（`layout`）、Keymap、keyboard、ModHost（`mods`）、程式表、sprites、字型、連結、剪貼簿、git_info、HostClient、遠端畫面、更新、使用統計、視窗位置。唯一碰 `imgui_internal.h` 的是 `imgui_adapter.cpp` |
 | `libs/modapi`、`mods/` | mod 介面（純 C 的 `mod_api.h`、header-only 的 `mod_sdk.hpp`、SDK 建置檔）與三個範例 mod |
 | `tools/` | 開發與量測工具，不出貨：`vt_probe`（兩平台）、`pty_run`、`session_bench`、`soak`、`qa`、`fetch_conpty`、`make_fixtures`、`package`、`devkit`（後面這些只在 Windows） |
@@ -132,18 +133,18 @@ vcpkg 以 manifest 模式固定 baseline。Windows triplet `x64-windows-static-m
 
    | 內部介面 | 內容 |
    |---|---|
-   | `libs/host/src/host_os.hpp` | 系統錯誤文字、shell 提示鉤子、pid、家目錄 |
-   | `Session`（`session_win.cpp`、`session_posix.cpp`） | actor 怎麼等待與喚醒、啟動與接手 pty、OSC 7 對照的電腦名稱、無法得知的 exit code |
-   | `store_*.cpp`、`git_tools_*.cpp` | 資料資料夾、原子替換、profile 偵測、UUID；不開主控台執行工具 |
-   | `libs/ui/src/*_os.hpp` | `fonts_os`、`keymap_os`、`keyboard_os`、`links_os`、`mods_os`、`updates_os`；`system_process.hpp` |
-   | `apps/desktop/desktop_os.hpp`、`window_ops.hpp` | 開檔、提示音、外觀、日期、資料夾、啟動程式、首次縮放；視窗操作 |
-   | `apps/cli/cli_os.hpp` | 入口、stdin、環境變數、ssh 轉接 |
+   | `libs/host/src/host_os.hpp` | 系統錯誤文字、shell 提示鉤子、工具的尋找與啟動設定、OSC 7 對照的電腦名稱 |
+   | `libs/host/src/handover_os.hpp` | 交接的通道與終端機的傳遞：Windows 用匿名 pipe 加 `DuplicateHandle`，macOS 用 socketpair 加 `SCM_RIGHTS` |
+   | `libs/ui/src/*_os.hpp` | `fonts_os`、`keymap_os`、`keyboard_os`、`links_os`、`mods_os`、`updates_os`；`system_process.hpp`（`system_process_win.cpp`、`system_process_posix.cpp`） |
+   | `apps/desktop/desktop_os.hpp`、`window_ops.hpp` | 開檔、提示音、外觀、日期、程式檔位置、啟動程式、首次縮放；視窗操作 |
+   | `apps/cli/cli_os.hpp` | 入口、stdin、ssh 轉接 |
 
-2. **宣告本身不同的標頭檔**放在 `include_win/`、`include_posix/`（`agentdesk/ipc/pipe.hpp`、`agentdesk/host/handover.hpp`），或平台層各自的 `include/`（`agentdesk/platform/crt.hpp`：在 POSIX 上提供 MSVC 的 `_stricmp`、`gmtime_s` 等名稱），靠 include 路徑挑選。
-3. **過渡用的相容層。** 共用程式仍用 `platform::win` 的名稱（`to_utf8`、`PtyProcess`、`Foreground`、`ConPtyApi`）；macOS 上由 `libs/platform/posix/compat/` 提供同名標頭，接到中立介面。等 Windows 端也改用中立介面（`docs/design/platform-abstraction.md` 第 1～8 步），這一層就拿掉。
-4. 剩下的 `#ifdef` 只有兩處：中立介面裡 POSIX 專用的成員（`Pty` 的交接方法、`ProcessSpec::stderr_fd`），以及給第三方用的 `mod_sdk.hpp` 匯出巨集。
+2. **系統能力走平台層的中立介面**（`libs/platform/include`）：pty、子程序、本機串流、資料夾與雜湊、動態函式庫、文字轉換。介面上沒有 HANDLE、HWND、fd，字串一律 UTF-8，路徑用 `std::filesystem::path`；差異寫成能力（`pty_capabilities()`），不散在呼叫端。
+3. **宣告本身不同的標頭檔**只剩兩個，同名放在 `windows/include`、`posix/include`，靠 include 路徑挑選：`crt.hpp`（在 POSIX 上提供 MSVC 的 `_stricmp`、`gmtime_s` 等名稱）與 `pty_handles.hpp`（交接時一個終端機要傳什麼）。
+4. **屬於別台機器的路徑不經過 `std::filesystem`。** 遠端機器可能是另一個系統，`ui::path_text` 由路徑本身判斷是 Windows 或 POSIX，再接路徑、換分隔符。git 在兩個系統都印 `/`，不能一律換成 `\`。
+5. 剩下的 `#ifdef` 只有給第三方用的 `mod_sdk.hpp` 匯出巨集。
 
-原本整份都是 Win32 的檔案（`apps/desktop/main.cpp`、`apps/host/main.cpp`、`libs/ipc/src/pipe.cpp`、`host_launcher.cpp`、`libs/host/src/handover.cpp`）留在原位。
+ctest 的 `PlatformBoundaries`（`cmake/CheckPlatformBoundaries.cmake`）檢查共用檔案沒有引用 `<windows.h>`、`platform/win/`、POSIX 系統標頭，也沒有用 `#if` 問平台。檔名或資料夾標明平台的（`*_win.cpp`、`win/`、`*_posix.cpp`、`macos/`）不在此限。
 
 ### 2.4 建置與測試
 
@@ -405,7 +406,7 @@ macOS 上每個 shell 另外取得 `TERM=xterm-256color`、`COLORTERM=truecolor`
 3. 以 120 秒逾時呼叫 `host.update`；失敗時把 `.old` 換回。
 4. 等最多 15 秒，直到新的實例 id 在端點上回應 hello。
 
-host 端（`handover.cpp`、`handover_posix.cpp`）：
+host 端（流程與狀態格式在 `handover.cpp`，通道與終端機的傳遞在 `handover_win.cpp`、`handover_posix.cpp`）：
 
 ```mermaid
 sequenceDiagram
@@ -1102,6 +1103,7 @@ macOS（0.2.0，Debug）：240 個測試通過。Windows 的最近一次完整�
 | ADR-42 | Mac 風格的視窗按鈕（2026-11-20） | 使用者要求換成 Mac 風格，並要求查過 UI 設計、風格可以一樣但不能抄。調查：macOS 的設計原則是標題列與工具列合一、側欄從頂端延伸到底且選取用圓角、視窗按鈕是左上三顆圓鈕並有一般、懸停、非作用中三種狀態（Apple HIG 側欄頁、WWDC25「Designing for macOS」）。AgentDesk 依 herdr 複刻，herdr 本身就照 macOS 設計，側欄、圓角與膠囊分頁已具備；差的是視窗按鈕，所以照 herdr-app 在 macOS 上的版面規則做：按鈕位置取版面的 `traffic_lights`（workspace [12, 16]、terminals [16, 18]），品牌列左側讓出 76 px，窄欄寬 76 px 且只放按鈕（展開用窄欄底部的 »），分頁列與 terminals 上方列從按鈕之後開始（分別留 12、10 px），右上角不畫 Windows 式按鈕。按鈕由 AgentDesk 自己畫，不用 Apple 的素材、字型或色碼：直徑 12、間距 8，自訂的紅、琥珀、綠，滑鼠在這組按鈕上時才顯示 ×、−、＋，視窗非作用中時改用框線色，按下時變暗；點擊區延伸到間距的一半。新設定 `window_buttons`（`mac` 預設、`windows`），設定 › Look 的「Window buttons」切換；舊的 `ui.json` 沒有這個鍵，所以一律改為 Mac 式 |
 | ADR-43 | AgentDesk Mac 版面（2026-11-20） | 使用者要把原本 AgentDesk 98 的想法改成 Mac 風格的版面。herdr-app 沒有對應的版面，所以是 AgentDesk 自己的設計，不抄 Apple：不用 Apple 的標誌、字型、SF Symbols、桌布、圖示，也不照抄 Apple 規格裡的色碼；用隨附的 Geist、Nerd Font 字形、程式表圖示、程式畫的圖形與從主題推算的顏色。組成：選單列（AgentDesk 選單與 File、Edit、View、Window、Help，每列都是現有命令；右側時鐘與 Agent 狀態）、桌布、放目前分頁的浮動視窗、spaces 與分頁的 Dock（滑鼠指到時放大）。版面檔是我們的 `libs/ui/layouts/mac.json`，由版面引擎排位置，建置時和 herdr 的兩個檔案一起編進程式。視窗標題列的紅、黃、綠圓鈕不關閉程式：紅、黃把分頁收進 Dock（`tab.settle`），綠色填滿桌面（新命令 `window.fill`）。原因：Agent 關掉就停了，一不小心按到紅鈕不該結束正在跑的工作，收起來的分頁在 Dock 上一點就回來；真的要關閉用 File › Close tab 或 Dock 右鍵選單。通知改到右上角，避免蓋住 Dock。`tab.goto` 列入已知命令（Window 選單與 Dock 用它選分頁）。7.16 |
 | ADR-44 | 新版面在兩個平台的做法（2026-11-24） | 合併 Windows 端的版面與 macOS 端時的決定：(1) 視窗按鈕：macOS 保留系統的紅綠燈，AgentDesk 不畫自己的按鈕（`mac_window_buttons()`、`windows_window_buttons()` 都看 `window_draws_own_buttons()`），設定裡的「Window buttons」只在 Windows 出現；各版面頂端列靠 `clear_of_traffic_lights()` 讓開系統按鈕。(2) 系統呼叫：本機時間與時區、減少動畫、高對比、環境變數、取代檔案失敗的原因都加到 `desktop_os.hpp`，兩個平台各自實作。(3) 快捷鍵：macOS 的新版面切換鍵用 Cmd 加 Windows 的字母，單一版面的按鍵用 Cmd+Option，因為單獨的 Option 會輸入字元；寫死按鍵的測試分到 `tests/unit/win/` 與 `tests/unit/posix/`。(4) 編號：macOS 端的 ADR-30、ADR-31、FR-39、FR-40 有 62 個檔案引用，所以改 Windows 端的編號 | 使用者 2026-11-24 要求合併且不能改壞 macOS。macOS 端還沒有編譯過合併後的程式（12.2） |
+| ADR-45 | Windows 端改用中立的平台介面（2026-11-24） | 完成 `docs/design/platform-abstraction.md` 第 1～8 步。(1) `Session` 不再等原生 handle：根程序結束由 `Pty` 的回呼通知，actor 只等自己的佇列；Windows 用 `RegisterWaitForSingleObject`。(2) 隨附 ConPTY 的選擇收進平台層（`win::pty_conpty()`），`HostConfig`、`SessionConfig` 不再帶 `ConPtyApi`。(3) 一般子程序合為 `platform::Process`；host 的 git 與更新用的工具不放進 kill-on-close Job（`git gc` 之類會留在背景）。(4) Named Pipe 的安全設定與雙向身分檢查照舊，只是搬進 `StreamListener`。(5) 交接流程合為一份。(6) `FolderWatch` 與 `WindowHost` 不做成共用介面，沿用原本的做法，因為 macOS 端無法在這裡驗證。(7) 每一步一個 commit，合成一個 PR | 使用者 2026-11-24 要求完成審查列出的所有項目。對外行為、協定與檔案格式不變；macOS 端還沒有在實機編譯過（12.2） |
 
 ADR-14、ADR-24 已被取代（見表內說明），保留供查閱。表中提到的「設計文件 2.4」等章節編號是 v2.21 的，對照舊版 `docs/archive/AgentDesk_Design_v2.21.md`。
 
@@ -1149,8 +1151,6 @@ OQ-01～OQ-10 已決定：OQ-01 名稱 AgentDesk、OQ-08 MIT License（ADR-10）
 
 | 項目 | 說明 |
 |---|---|
-| 交接邏輯兩份 | `handover.cpp` 與 `handover_posix.cpp` 的流程、狀態格式相同，只差傳輸方式；應抽出共用的流程，傳輸放在平台介面後面。合併後 Windows 可以編譯，尚未動工 |
-| 過渡相容層 | `libs/platform/posix/compat/` 等 Windows 端改用中立介面後拿掉（`docs/design/platform-abstraction.md` 第 1～8 步） |
 | reader join 沒有逾時 | 子程序結束後若還有孫程序開著它的輸出，`run_tool`（host 的 git）與 UI 的 `run_process` 會一直等 |
 | 交接途中 session 剛好結束 | macOS 上凍結後、新 host 接手前，有程式剛好結束時整次交接失敗；應把該 session 降為「已結束、只保留畫面」 |
 | OSC 7501 的 RIS 規則 | libvterm 不通知 RIS，沒有實作 |

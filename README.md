@@ -146,14 +146,14 @@ Everything compiles with warnings as errors (`/W4 /permissive- /WX`, or `-Wall -
 
 ## Repository layout
 
-One source tree serves both platforms. Shared code has no platform `#ifdef`s: what differs sits behind small internal interfaces (`*_os.hpp`), implemented in `*_win.cpp` or `win/` for Windows and `*_posix.cpp` or `macos/` for macOS, and each folder's CMakeLists picks the right files. Headers whose declarations differ live in `include_win/` and `include_posix/`.
+One source tree serves both platforms. Shared code has no platform `#ifdef`s: what differs sits behind small internal interfaces (`*_os.hpp`), implemented in `*_win.cpp` or `win/` for Windows and `*_posix.cpp` or `macos/` for macOS, and each folder's CMakeLists picks the right files. System services go through the shared interfaces of `libs/platform`, and a ctest check keeps shared files free of any one system.
 
 | Path | Contents |
 |---|---|
-| `apps/desktop` | agent-ui: the shared window contents; the Win32/DX11 shell (`main.cpp`, `win/`) and the AppKit/Metal shell (`macos/`) |
-| `apps/host` | agent-host entry points (`main.cpp`, `main_posix.cpp`) |
+| `apps/desktop` | agent-ui: the shared window contents; the Win32/DX11 shell (`win/`) and the AppKit/Metal shell (`macos/`) |
+| `apps/host` | agent-host entry points (`main_win.cpp`, `main_posix.cpp`) |
 | `apps/cli` | agentctl: shared commands plus `cli_win.cpp` / `cli_posix.cpp` |
-| `libs/platform` | Platform layer: neutral interfaces, the Windows implementation (ConPTY, Job, quoting) and the POSIX one (pty, posix_spawn, Unix sockets) |
+| `libs/platform` | Platform layer: shared interfaces, the Windows implementation (ConPTY, Job, Named Pipes) and the POSIX one (pty, posix_spawn, Unix sockets) |
 | `libs/terminal` | `VtEngine` (libvterm wrapper, snapshots, history, key encoding), OSC 7501 parsing |
 | `libs/protocol`, `libs/ipc` | IPC framing, messages, error codes, screen encoding; the local channel and the ssh relay |
 | `libs/host` | `Session` actor, `SessionManager` (the protocol), persistence, git tools, agent-host handover |

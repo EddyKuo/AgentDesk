@@ -79,8 +79,10 @@ int wmain(int argc, wchar_t** argv) {
 
         const Json a = dk::read_json(r1);
         const Json b = dk::read_json(r2);
+        // By id: a session has a name only when someone gave it one.
+        const std::wstring id = dk::wide(dk::field(first_session(a), "id").get<std::string>());
         const std::vector<long long> numbers = counter_numbers(Json::parse(
-            dk::run(ctl, {L"--pipe", pipe, L"read", L"counter", L"--lines", L"200", L"--json"}).out));
+            dk::run(ctl, {L"--pipe", pipe, L"read", id, L"--lines", L"200", L"--json"}).out));
         int gaps = 0;
         for (std::size_t i = 1; i < numbers.size(); ++i) {
             if (numbers[i] != numbers[i - 1] + 1)

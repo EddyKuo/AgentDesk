@@ -146,14 +146,14 @@ build/<preset>/tests/unit_tests --gtest_filter='VtEngine.*'
 
 ## 原始碼結構
 
-兩個平台共用一份原始碼。共用的程式沒有平台 `#ifdef`：不同的部分放在小的內部介面（`*_os.hpp`）後面，Windows 的實作在 `*_win.cpp` 或 `win/`，macOS 的在 `*_posix.cpp` 或 `macos/`，由各資料夾的 CMakeLists 挑選。宣告不同的標頭檔放在 `include_win/` 與 `include_posix/`。
+兩個平台共用一份原始碼。共用的程式沒有平台 `#ifdef`：不同的部分放在小的內部介面（`*_os.hpp`）後面，Windows 的實作在 `*_win.cpp` 或 `win/`，macOS 的在 `*_posix.cpp` 或 `macos/`，由各資料夾的 CMakeLists 挑選。系統能力走 `libs/platform` 的共用介面，ctest 會檢查共用檔案不依賴任何一個系統。
 
 | 路徑 | 內容 |
 |---|---|
-| `apps/desktop` | agent-ui：共用的視窗內容；Win32／DX11 外殼（`main.cpp`、`win/`）與 AppKit／Metal 外殼（`macos/`） |
-| `apps/host` | agent-host 的入口（`main.cpp`、`main_posix.cpp`） |
+| `apps/desktop` | agent-ui：共用的視窗內容；Win32／DX11 外殼（`win/`）與 AppKit／Metal 外殼（`macos/`） |
+| `apps/host` | agent-host 的入口（`main_win.cpp`、`main_posix.cpp`） |
 | `apps/cli` | agentctl：共用的指令，加上 `cli_win.cpp`／`cli_posix.cpp` |
-| `libs/platform` | 平台層：中立介面、Windows 實作（ConPTY、Job、quoting）與 POSIX 實作（pty、posix_spawn、Unix socket） |
+| `libs/platform` | 平台層：共用介面、Windows 實作（ConPTY、Job、Named Pipe）與 POSIX 實作（pty、posix_spawn、Unix socket） |
 | `libs/terminal` | `VtEngine`（libvterm 封裝、快照、歷史、按鍵編碼）、OSC 7501 解析 |
 | `libs/protocol`、`libs/ipc` | IPC 分幀、訊息、錯誤碼、畫面編碼；本機通道與 ssh 轉接 |
 | `libs/host` | `Session` actor、`SessionManager`（協定）、資料保存、git 工具、agent-host 交接 |

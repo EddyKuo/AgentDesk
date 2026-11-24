@@ -42,8 +42,9 @@ macOS（ADR-30，設計文件第 9 章）：
 - 建置 `scripts/build.sh clang-macos-arm64-debug all`（vcpkg 在 `~/vcpkg`，triplet `arm64-osx-agentdesk`）；打包 `scripts/package_macos.sh`（`.app` 與 zip）；截圖 `agent-ui --screenshot <png> --exit-after-ms N`。
 - 兩個平台共用一份原始碼，差異在建置時分開：共用的 `.cpp` 不寫 `#ifdef _WIN32`。
 - 各平台不同的部分放在內部介面（`*_os.hpp`，例如 `libs/host/src/host_os.hpp`、`apps/desktop/desktop_os.hpp`）後面，實作分成 `*_win.cpp`／`win/` 與 `*_posix.cpp`／`macos/`，由各資料夾的 CMakeLists 依平台挑選。
-- 宣告不同的標頭檔放在 `include_win/`、`include_posix/`（`agentdesk/ipc/pipe.hpp`、`agentdesk/host/handover.hpp`、`agentdesk/platform/crt.hpp`），靠 include 路徑挑選。
-- macOS 的平台層在 `libs/platform/posix/`（含過渡用的 `compat/`）。
+- 系統能力（pty、子程序、本機串流、資料夾、雜湊、動態函式庫、文字轉換）走 `libs/platform/include` 的中立介面，`libs/platform/windows`、`libs/platform/posix` 各一份實作。ctest 的 `PlatformBoundaries` 會擋下共用檔案引用系統標頭或用 `#if` 問平台。
+- 可能屬於別台機器的路徑用 `ui::path_text`，不要自己換 `/` 與 `\`。
+- 沒有 Mac 時，可用 WSL 的 g++ 對共用與 POSIX 程式做 `-fsyntax-only` 檢查（Apple 標頭要自備替身）；不能取代實機建置。
 
 不要用自動化腳本反覆啟動又強制結束實際的 Claude Code：它會把這當成全螢幕渲染器故障，自行關掉該模式。渲染檢查用 PowerShell 或 vt_probe。
 
@@ -51,7 +52,7 @@ macOS（ADR-30，設計文件第 9 章）：
 
 | 檔案 | 內容 |
 |---|---|
-| `docs/design/AgentDesk_Design.md` | 唯一權威的詳細設計（目前 v3.1）：架構、協定、host、UI、平台差異、驗收矩陣、ADR（第 11 章）、待決事項（12.3）。改設計就改這份，並在檔頭版本紀錄加一列；舊版與完整的版本紀錄在 `docs/archive/`（合併前的兩份是 v2.27 與 v3.0） |
+| `docs/design/AgentDesk_Design.md` | 唯一權威的詳細設計（目前 v3.2）：架構、協定、host、UI、平台差異、驗收矩陣、ADR（第 11 章）、待決事項（12.3）。改設計就改這份，並在檔頭版本紀錄加一列；舊版與完整的版本紀錄在 `docs/archive/`（合併前的兩份是 v2.27 與 v3.0） |
 | `contracts/approved/PRD.md` | PRD 契約 v5.0.0（鎖定設計文件 v3.1）：需求、驗收、已知落差（第 7 節）。需求變更要依憲法 6.3 升版 |
 | `docs/design/ideas.md`、`docs/design/ideas/` | 版面與主題的構想清單、各項設計規格與實作紀錄（`IMPL-*.md`）。第一輪 A1～A4、B1～B3、T2～T5 已實作（設計文件 7.17～7.20、ADR-32～ADR-35）；第二輪的共用設計規則、版面收斂、Stage、Inbox、Pair、Garden 已實作（7.17、7.19、7.21～7.24、ADR-37～ADR-41，紀錄在 `IMPL-round2-*.md`）；T1 尚未 |
 | `docs/design/use-cases.md`、`docs/design/design-concept.md` | Use case（UC-01～UC-21）與設計概念（給新加入的開發者） |
@@ -69,13 +70,14 @@ macOS（ADR-30，設計文件第 9 章）：
 
 | 路徑 | 內容 |
 |---|---|
-| `libs/platform/windows` | `PtyProcess`（ConPTY＋Job＋reader 執行緒）、argv quoting、ConPTY 載入、RAII handle |
-| `libs/platform/posix` | macOS 的 pty（`posix_openpt`＋`fork`，根程序結束以 kqueue 監看）、過渡用的 `compat/`（沿用 `platform::win` 的名稱） |
+| `libs/platform/include` | 兩個平台共用的介面：`pty.hpp`、`process.hpp`、`ipc_transport.hpp`、`system.hpp`、`dynamic_library.hpp`、`text.hpp` |
+| `libs/platform/windows` | Windows 實作：`PtyProcess`（ConPTY＋Job＋reader 執行緒）、`Process`、Named Pipe 串流、argv quoting、ConPTY 載入、RAII handle |
+| `libs/platform/posix` | macOS 實作：pty（`posix_openpt`＋`fork`，根程序結束以 kqueue 監看）、`posix_spawn`、Unix socket |
 | `libs/terminal` | `VtEngine`（libvterm 封裝、快照、歷史、按鍵編碼）、OSC 7501 解析與紀錄 |
 | `libs/protocol` | IPC 分幀（4-byte LE＋UTF-8 JSON）、訊息封包、錯誤碼、畫面編碼 |
 | `libs/host` | `Session` actor（程序＋引擎＋狀態），M1 的 host 由它組成；`state_timeline` 是 Timeline 用的狀態歷史（只記時間與狀態，`session.timeline`） |
 | `libs/ui` | `TerminalView`（字元格、輸入、IME、選取、搜尋、捲動）、`Workspace`（space／分頁／分割樹、注意力）、`Keymap`、`ModHost`（載入 C++ DLL mod，ImGui 無關）、`git_info`、`HostClient`、唯一碰 `imgui_internal.h` 的 `imgui_adapter.cpp`；版面與主題的純邏輯：`layout_styles`（mod → style 對照表、好玩的版面、被拿掉版面的替代）、`design_tokens`（共用的間距、圓角、字級、陰影、動畫數值）、`terminals_options`、`stage`、`inbox`、`pair`、`garden`、`mission`（Stage 與 Garden 共用的畫面末行與訊息清理）、`focus_mode`、`review`、`timeline`、`classic_layout`、`layout_tips`、`color_math`、`theme_file`、`schedule`、`ambient`。版面檔在 `libs/ui/layouts/`，AgentDesk 隨附的主題檔在 `libs/ui/themes/`（建置時複製到 `themes\`） |
-| `apps/desktop` | `agent-ui`：`main.cpp` 是 Win32／DX11 外殼（macOS 是 `macos/main_macos.mm`）（自繪標題列：`WM_NCCALCSIZE`／`WM_NCHITTEST`）與崩潰記錄，`app.cpp` 是 `App` 的建構與對外介面；介面依功能分檔（`sidebar.cpp`、`tab_bar.cpp`、`panes.cpp`、`files_changes.cpp`、`commands.cpp`、`settings_dialog.cpp`、`welcome.cpp`、`frame.cpp` 等，清單見設計文件 2.1），AgentDesk Mac 版面在 `mac_layout.cpp`（規則在 `libs/ui` 的 `mac_layout.cpp`，版面檔 `libs/ui/layouts/mac.json`）。其他版面與功能：`stage_layout.cpp`、`inbox_layout.cpp`、`pair_layout.cpp`、`garden_layout.cpp`、`focus_mode.cpp`、`review_layout.cpp`、`timeline.cpp`、`state_card.cpp`（狀態卡、空白狀態、版面頂端列共用的按鈕），風格版面由 `style_layouts.cpp` 分派給 `terminals_options.cpp`、`stage_layout.cpp`、`pair_layout.cpp`、`classic_layout.cpp`、`garden_layout.cpp`；共用設計規則的螢幕端（`tok::`：間距、字級、陰影、動畫與減少動畫、空白狀態插圖）在 `ui_tokens.hpp`／`ui_tokens.cpp`，新畫面一律用它，不自己寫像素數字；主題相關是 `appearance.cpp`、`ambient.cpp`、`theme_suggest.cpp`、`theme_commands.cpp`、`theme_editor.cpp`（設計文件 7.17～7.24）。共用宣告在 `app_internal.hpp`（`detail` 命名空間） |
+| `apps/desktop` | `agent-ui`：`win/main_win.cpp` 是 Win32／DX11 外殼（macOS 是 `macos/main_macos.mm`）（自繪標題列：`WM_NCCALCSIZE`／`WM_NCHITTEST`）與崩潰記錄，`app.cpp` 是 `App` 的建構與對外介面；介面依功能分檔（`sidebar.cpp`、`tab_bar.cpp`、`panes.cpp`、`files_changes.cpp`、`commands.cpp`、`settings_dialog.cpp`、`welcome.cpp`、`frame.cpp` 等，清單見設計文件 2.1），AgentDesk Mac 版面在 `mac_layout.cpp`（規則在 `libs/ui` 的 `mac_layout.cpp`，版面檔 `libs/ui/layouts/mac.json`）。其他版面與功能：`stage_layout.cpp`、`inbox_layout.cpp`、`pair_layout.cpp`、`garden_layout.cpp`、`focus_mode.cpp`、`review_layout.cpp`、`timeline.cpp`、`state_card.cpp`（狀態卡、空白狀態、版面頂端列共用的按鈕），風格版面由 `style_layouts.cpp` 分派給 `terminals_options.cpp`、`stage_layout.cpp`、`pair_layout.cpp`、`classic_layout.cpp`、`garden_layout.cpp`；共用設計規則的螢幕端（`tok::`：間距、字級、陰影、動畫與減少動畫、空白狀態插圖）在 `ui_tokens.hpp`／`ui_tokens.cpp`，新畫面一律用它，不自己寫像素數字；主題相關是 `appearance.cpp`、`ambient.cpp`、`theme_suggest.cpp`、`theme_commands.cpp`、`theme_editor.cpp`（設計文件 7.17～7.24）。共用宣告在 `app_internal.hpp`（`detail` 命名空間） |
 | `third_party/fonts`、`third_party/herdr` | 隨附字型（Geist、JetBrains Mono、Symbols Nerd Font）與 herdr 的授權、提示音；建置時複製到執行檔旁的 `fonts\`、`sounds\` |
 | `libs/modapi`、`mods/` | mod 介面（純 C 的 `mod_api.h` 與 header-only 的 `mod_sdk.hpp`，ADR-17）與三個範例 mod（各自編成 `mods\<名稱>\mod.dll`，隨 zip 附上 SDK） |
 | `tools/` | 開發與量測工具（不出貨） |
