@@ -1,5 +1,6 @@
 // libs/ipc: Named Pipe transport (S2-1, QA-17).
 #include "agentdesk/ipc/pipe.hpp"
+#include "agentdesk/platform/text.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -17,10 +18,10 @@ using namespace agentdesk;
 
 namespace {
 
-std::wstring unique_name() {
+std::string unique_name() {
     static std::atomic<int> n{0};
-    return L"\\\\.\\pipe\\AgentDeskTest-" + std::to_wstring(::GetCurrentProcessId()) + L"-" +
-           std::to_wstring(++n);
+    return "\\\\.\\pipe\\AgentDeskTest-" + std::to_string(::GetCurrentProcessId()) + "-" +
+           std::to_string(++n);
 }
 
 // Echo server: answers every request with {"echo": params}.
@@ -40,8 +41,8 @@ ipc::ServerHandlers echo_handlers() {
 }  // namespace
 
 TEST(Pipe, NamesIncludeUserSidAndSession) {
-    EXPECT_NE(ipc::default_pipe_name().find(ipc::current_user_sid()), std::wstring::npos);
-    EXPECT_NE(ipc::default_mutex_name().find(L"Local\\AgentDesk-host-"), std::wstring::npos);
+    EXPECT_NE(ipc::default_pipe_name().find(ipc::current_user_sid()), std::string::npos);
+    EXPECT_NE(ipc::default_mutex_name().find("Local\\AgentDesk-host-"), std::string::npos);
 }
 
 TEST(Pipe, RequestResponseRoundTrip) {
@@ -114,7 +115,7 @@ TEST(Pipe, OversizedFrameDisconnectsClient) {
     h.on_close = [&](const ipc::ConnectionPtr&) { ++closed; };
     ipc::PipeServer server(name, h);
     HANDLE raw =
-        ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
     ASSERT_NE(raw, INVALID_HANDLE_VALUE);
     const unsigned char hdr[4] = {0xFF, 0xFF, 0xFF, 0x7F};
     DWORD written = 0;
@@ -142,7 +143,7 @@ TEST(Pipe, DroppableMessagesRespectSendBudget) {
     };
     ipc::PipeServer server(name, h);
     HANDLE raw =
-        ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
     ASSERT_NE(raw, INVALID_HANDLE_VALUE);
     const std::string req = protocol::encode_frame(R"({"v":1,"id":"a","method":"go"})");
     DWORD written = 0;
@@ -174,7 +175,7 @@ TEST(Pipe, StopDoesNotWaitForAClientThatStoppedReading) {
     };
     auto server = std::make_unique<ipc::PipeServer>(name, h);
     HANDLE raw =
-        ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
     ASSERT_NE(raw, INVALID_HANDLE_VALUE);
     const std::string req = protocol::encode_frame(R"({"v":1,"id":"a","method":"go"})");
     DWORD written = 0;

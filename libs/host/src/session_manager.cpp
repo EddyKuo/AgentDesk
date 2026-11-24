@@ -12,12 +12,11 @@
 
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 #include "host_os.hpp"
 
 namespace agentdesk::host {
 
-namespace win = platform::win;
 using protocol::ErrorCode;
 using protocol::Json;
 using protocol::Request;
@@ -128,7 +127,7 @@ std::uint8_t mods_from_json(const Json& j) {
 
 std::u32string utf8_to_u32(const std::string& s) {
     std::u32string out;
-    const std::wstring w = win::to_wide(s);
+    const std::wstring w = platform::to_wide(s);
     for (std::size_t i = 0; i < w.size(); ++i) {
         char32_t c = w[i];
         if (c >= 0xD800 && c <= 0xDBFF && i + 1 < w.size()) {
@@ -170,7 +169,7 @@ std::optional<std::filesystem::path> absolute_path_param(const Request& req, con
     const std::string p = req.params.value(key, "");
     if (p.empty() || has_control_chars(p))
         return std::nullopt;
-    std::filesystem::path path(win::to_wide(p));
+    std::filesystem::path path(platform::to_wide(p));
     if (!path.is_absolute())
         return std::nullopt;
     return path;
@@ -544,7 +543,7 @@ Response SessionManager::do_fs_list(const Request& req) {
     std::filesystem::directory_iterator it(*dir, std::filesystem::directory_options::skip_permission_denied,
                                            ec);
     for (; !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
-        const std::string name = win::to_utf8(it->path().filename().native());
+        const std::string name = platform::to_utf8(it->path().filename().native());
         if (name == ".git")
             continue;
         if (entries.size() >= max) {
@@ -588,7 +587,7 @@ Response SessionManager::do_git_run(const Request& req) {
     for (const auto& x : a) {
         if (!x.is_string() || has_control_chars(x.get<std::string>()))
             return bad(req, "args must be plain strings");
-        args.push_back(win::to_wide(x.get<std::string>()));
+        args.push_back(platform::to_wide(x.get<std::string>()));
     }
     if (const char* why = refuse_git_args(args))
         return bad(req, why);
@@ -621,7 +620,7 @@ Response SessionManager::do_worktree_add(const Request& req) {
     std::string path = req.params.value("path", "");
     if (repo.empty() || branch.empty() || has_control_chars(branch) || branch.starts_with("-"))
         return bad(req, "repo and branch are required; branch may not start with '-'");
-    const std::filesystem::path repo_path(win::to_wide(repo));
+    const std::filesystem::path repo_path(platform::to_wide(repo));
     std::error_code ec;
     if (!std::filesystem::is_directory(repo_path, ec))
         return protocol::fail(req.id, ErrorCode::kBadRequest, "repo folder does not exist: " + repo);
@@ -630,8 +629,8 @@ Response SessionManager::do_worktree_add(const Request& req) {
         const auto p = default_worktree_path(base, repo_path, branch).u8string();
         path.assign(p.begin(), p.end());
     }
-    const std::wstring wbranch = win::to_wide(branch);
-    const std::wstring wpath = win::to_wide(path);
+    const std::wstring wbranch = platform::to_wide(branch);
+    const std::wstring wpath = platform::to_wide(path);
     // A branch that exists is checked out; a new one starts from HEAD. Existence is asked of git, never read
     // from its (translated) messages.
     const auto known = run_tool(
@@ -908,7 +907,7 @@ Response SessionManager::do_hello(const Request& req) {
                  // Self-update (design doc 7.4 OQ-09): the hosts whose sessions this one took
                  // over (a client keeps those sessions), and where it runs from (agentctl update).
                  {"succeeds", config_.succeeds},
-                 {"host_exe", win::to_utf8(ipc::sibling_executable(L"agent-host.exe").native())},
+                 {"host_exe", platform::to_utf8(ipc::sibling_executable(L"agent-host.exe").native())},
                  {"capabilities",
                   {{"osc7501", config_.conpty.bundled}, {"bundled_conpty", config_.conpty.bundled}}}});
 }
@@ -945,17 +944,17 @@ SessionConfig new_session_config(const HostConfig& host, const Profile& profile,
     sc.spec.executable = profile.executable;
     sc.spec.args = profile.args;
     for (const auto& a : p.value("args", Json::array()))
-        sc.spec.args.push_back(win::to_wide(a.get<std::string>()));
+        sc.spec.args.push_back(a.get<std::string>());
     detail::add_folder_hook(sc.spec);
-    sc.spec.cwd = win::to_wide(cwd);  // never silently replaced (design doc 4.2)
+    sc.spec.cwd = platform::to_wide(cwd);  // never silently replaced (design doc 4.2)
     const int cols = std::clamp(p.value("cols", 120), 2, 1000);
     const int rows = std::clamp(p.value("rows", 40), 1, 500);
     sc.spec.size = {static_cast<short>(cols), static_cast<short>(rows)};
     sc.engine.cols = cols;
     sc.engine.rows = rows;
-    sc.spec.env_overrides[L"AGENTDESK_SESSION_ID"] = win::to_wide(session_id);
-    sc.spec.env_overrides[L"AGENTDESK_CTL"] = host.ctl_path.wstring();
-    sc.spec.env_overrides[L"AGENTDESK_PIPE"] = host.pipe_name;
+    sc.spec.env_overrides["AGENTDESK_SESSION_ID"] = session_id;
+    sc.spec.env_overrides["AGENTDESK_CTL"] = platform::to_utf8(host.ctl_path.native());
+    sc.spec.env_overrides["AGENTDESK_PIPE"] = host.pipe_name;
     return sc;
 }
 

@@ -17,7 +17,7 @@ bool builtin_command(std::string_view name) {
 // A "<mod>.<command>" name whose mod folder exists in <data>\mods.
 bool mod_folder_exists(std::string_view mod) {
     std::error_code ec;
-    return std::filesystem::is_directory(data_dir() / L"mods" / win::to_wide(std::string(mod)), ec);
+    return std::filesystem::is_directory(data_dir() / L"mods" / platform::to_wide(std::string(mod)), ec);
 }
 
 }  // namespace
@@ -65,7 +65,7 @@ host::ToolResult git_at(App::State& s, const std::string& machine, const std::st
                         std::vector<std::wstring> args,
                         std::chrono::seconds timeout = std::chrono::seconds(30)) {
     if (machine.empty()) {
-        const std::filesystem::path p(win::to_wide(cwd));
+        const std::filesystem::path p(platform::to_wide(cwd));
         args.insert(args.begin(), {L"git", L"-C", p.wstring()});
         return host::run_tool(args, p, timeout);
     }
@@ -127,11 +127,11 @@ WorktreeRisk worktree_risk(App::State& s, const std::string& machine, const std:
         }
         const std::string parent_dir = ui::path_text::join(top, parent);
         const std::string inner = parent.empty() ? path : path.substr(parent.size() + 1);
-        const auto pinned = git_at(s, machine, parent_dir, {L"rev-parse", L"HEAD:" + win::to_wide(inner)});
+        const auto pinned = git_at(s, machine, parent_dir, {L"rev-parse", L"HEAD:" + platform::to_wide(inner)});
         std::vector<std::wstring> args = {L"rev-list", L"-n1", L"--all", L"--not", L"--remotes"};
         const std::string pin = git_ok(pinned) ? trimmed(pinned.output) : std::string();
         if (!pin.empty())
-            args.push_back(win::to_wide(pin));
+            args.push_back(platform::to_wide(pin));
         const auto local = git_at(s, machine, ui::path_text::join(top, path), args);
         if (!git_ok(local) || !trimmed(local.output).empty())
             r.unpushed.push_back(path);  // a check that failed counts as at risk
@@ -715,7 +715,7 @@ std::string remove_worktree(App::State& s, const std::string& arg, bool force) {
     std::vector<std::wstring> argv = {L"worktree", L"remove"};
     if (force)
         argv.push_back(L"--force");
-    argv.push_back(win::to_wide(top));
+    argv.push_back(platform::to_wide(top));
     // Removing a worktree with large submodules can take minutes.
     const auto r = git_at(s, machine, main, argv, std::chrono::seconds(600));
     s.git.invalidate(top);
@@ -1001,7 +1001,7 @@ std::string clone_layout(App::State& s, const std::string& arg) {
     save_layout_state(*it);
     std::error_code ec;
     std::filesystem::create_directories(layouts_dir(), ec);
-    const auto dest = layouts_dir() / win::to_wide(to + ".json");
+    const auto dest = layouts_dir() / platform::to_wide(to + ".json");
     if (std::filesystem::exists(dest, ec) ||
         std::any_of(s.layouts.begin(), s.layouts.end(), [&](const LayoutSpec& l) { return l.name == to; }))
         return "cannot clone layout: " + data_file_text("layouts", to + ".json") + " is already there";
@@ -1044,7 +1044,7 @@ std::string reset_layout(App::State& s, const std::string& arg) {
         std::filesystem::path to;
         for (int i = 1;; ++i) {
             to = f;
-            to += win::to_wide(".old-" + std::to_string(stamp) + (i == 1 ? "" : "-" + std::to_string(i)));
+            to += platform::to_wide(".old-" + std::to_string(stamp) + (i == 1 ? "" : "-" + std::to_string(i)));
             if (!std::filesystem::exists(to, ec))
                 break;
         }
@@ -1070,7 +1070,7 @@ void clone_mod(App::State& s, const std::string& arg) {
         return;
     }
     const auto dir = data_dir() / L"mods";
-    const auto src = dir / win::to_wide(arg);
+    const auto src = dir / platform::to_wide(arg);
     std::error_code ec;
     if (arg.find_first_of("/\\:") != std::string::npos || arg == "." || arg == ".." ||
         !std::filesystem::is_directory(src, ec)) {
@@ -1078,9 +1078,9 @@ void clone_mod(App::State& s, const std::string& arg) {
         return;
     }
     std::string to = arg + "-copy";
-    for (int n = 2; std::filesystem::exists(dir / win::to_wide(to), ec); ++n)
+    for (int n = 2; std::filesystem::exists(dir / platform::to_wide(to), ec); ++n)
         to = arg + "-copy-" + std::to_string(n);
-    std::filesystem::copy(src, dir / win::to_wide(to), std::filesystem::copy_options::recursive, ec);
+    std::filesystem::copy(src, dir / platform::to_wide(to), std::filesystem::copy_options::recursive, ec);
     if (ec)
         s.toast("Could not duplicate " + arg, ec.message(), "", g_pal->needs_you);
     else

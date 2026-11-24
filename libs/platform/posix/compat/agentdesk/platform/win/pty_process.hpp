@@ -28,9 +28,9 @@ struct PtySize {
 
 struct PtySpawnSpec {
     std::filesystem::path executable;
-    std::vector<std::wstring> args;
+    std::vector<std::string> args;
     std::filesystem::path cwd;
-    std::map<std::wstring, std::wstring> env_overrides;
+    std::map<std::string, std::string> env_overrides;
     PtySize size;
 };
 

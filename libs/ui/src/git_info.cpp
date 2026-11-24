@@ -7,7 +7,7 @@
 #include <map>
 #include <sstream>
 
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::ui {
 
@@ -31,7 +31,7 @@ struct Found {
 
 Found lookup(const std::string& dir_utf8) {
     std::error_code ec;
-    fs::path dir(agentdesk::platform::win::to_wide(dir_utf8));
+    fs::path dir(agentdesk::platform::to_wide(dir_utf8));
     for (int depth = 0; depth < 32 && !dir.empty(); ++depth) {
         const fs::path git = dir / L".git";
         fs::path head;
@@ -44,7 +44,7 @@ Found lookup(const std::string& dir_utf8) {
                 std::string target = line.substr(7);
                 while (!target.empty() && target.front() == ' ')
                     target.erase(target.begin());
-                fs::path gd(agentdesk::platform::win::to_wide(target));
+                fs::path gd(agentdesk::platform::to_wide(target));
                 if (gd.is_relative())
                     gd = dir / gd;
                 head = gd / L"HEAD";

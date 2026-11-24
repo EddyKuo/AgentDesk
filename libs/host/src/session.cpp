@@ -5,13 +5,12 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 #include "agentdesk/terminal/bytes.hpp"
 #include "agentdesk/terminal/cwd_uri.hpp"
 
 namespace agentdesk::host {
 
-namespace win = platform::win;
 using Clock = std::chrono::steady_clock;
 
 namespace {

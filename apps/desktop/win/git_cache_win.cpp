@@ -54,7 +54,7 @@ void GitCache::watch_loop(std::stop_token st) {
                     continue;
                 std::wstring wide;
                 try {  // git printed it: not always valid UTF-8; such a folder is not watched
-                    wide = win::to_wide(dir);
+                    wide = platform::to_wide(dir);
                 } catch (const std::exception&) {
                     continue;
                 }

@@ -26,7 +26,7 @@
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/ipc_transport.hpp"
 #include "agentdesk/platform/win/conpty_api.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 
 namespace {
 
@@ -44,7 +44,7 @@ void log_line(const std::filesystem::path& dir, const std::string& line) {
 }
 
 // The old host's socket closes just before it says "go"; give the endpoint a moment.
-std::unique_ptr<ipc::PipeServer> serve(const std::wstring& name, const ipc::ServerHandlers& handlers,
+std::unique_ptr<ipc::PipeServer> serve(const std::string& name, const ipc::ServerHandlers& handlers,
                                        bool after_takeover) {
     for (int attempt = 0;; ++attempt) {
         try {
@@ -58,7 +58,7 @@ std::unique_ptr<ipc::PipeServer> serve(const std::wstring& name, const ipc::Serv
 }
 
 struct HostArgs {
-    std::wstring pipe_name;
+    std::string pipe_name;
     std::filesystem::path data_dir;
     std::uint32_t takeover_from = 0;  // the old host's pid, or 0
     bool version = false;
@@ -69,7 +69,7 @@ HostArgs parse_command_line(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--pipe" && i + 1 < argc)
-            a.pipe_name = win::to_wide(argv[++i]);
+            a.pipe_name = argv[++i];
         else if (arg == "--data-dir" && i + 1 < argc)
             a.data_dir = argv[++i];
         else if (arg == "--takeover" && i + 1 < argc)
@@ -154,7 +154,7 @@ int main(int argc, char** argv) {
     std::signal(SIGHUP, SIG_IGN);
 
     const bool custom_pipe = !args.pipe_name.empty();
-    const std::wstring pipe_name = custom_pipe ? args.pipe_name : ipc::default_pipe_name();
+    const std::string pipe_name = custom_pipe ? args.pipe_name : ipc::default_pipe_name();
     const std::filesystem::path data_dir = resolve_data_dir(args.data_dir);
     std::filesystem::create_directories(data_dir);
     const bool taking_over = args.takeover_from != 0;
@@ -162,7 +162,7 @@ int main(int argc, char** argv) {
     // One host per user (design doc 2.2 step 2). A second one just exits; its launcher then
     // connects to the existing host. A host taking over from the running one waits for its lock.
     const std::string lock_name =
-        custom_pipe ? "host-test-" + std::to_string(std::hash<std::wstring>{}(pipe_name)) : "host";
+        custom_pipe ? "host-test-" + std::to_string(std::hash<std::string>{}(pipe_name)) : "host";
     std::unique_ptr<platform::InstanceLock> instance = platform::InstanceLock::try_acquire(lock_name);
     if (!instance && !taking_over)
         return 0;

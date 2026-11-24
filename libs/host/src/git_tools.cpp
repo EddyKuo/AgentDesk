@@ -10,11 +10,10 @@
 #include <thread>
 
 #include "agentdesk/platform/win/command_line.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::host {
 
-namespace win = agentdesk::platform::win;
 
 std::string ToolResult::message() const {
     const std::string& m = error.find_first_not_of(" \t\r\n") != std::string::npos ? error : output;

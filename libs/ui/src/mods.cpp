@@ -12,7 +12,7 @@
 #include <sstream>
 
 #include "agentdesk/mod_api.h"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::ui {
 
@@ -188,7 +188,7 @@ void api_exec(void* ctx, const char* const* argv, int argc) {
     std::vector<std::wstring> a;
     for (int i = 0; i < argc && i < 64; ++i)
         if (argv[i] != nullptr)
-            a.push_back(platform::win::to_wide(argv[i]));
+            a.push_back(platform::to_wide(argv[i]));
     if (!a.empty())
         ModHostAccess::output(*ModHost::Mod::of(ctx).host).execs.push_back(std::move(a));
 }

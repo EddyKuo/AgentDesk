@@ -42,7 +42,7 @@
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 #include "agentdesk/ui/chrome_logic.hpp"
 #include "agentdesk/ui/focus_mode.hpp"
 #include "agentdesk/ui/color_math.hpp"
@@ -79,7 +79,6 @@ namespace detail {}
 using namespace detail;
 
 namespace detail {
-namespace win = agentdesk::platform::win;
 namespace ipc = agentdesk::ipc;
 using Json = nlohmann::json;
 using Clock = std::chrono::steady_clock;

@@ -93,7 +93,7 @@ private:
 
 struct HostClientOptions {
     std::filesystem::path host_exe;
-    std::wstring pipe_name;
+    std::string pipe_name;
     std::function<void()> wake;  // called from background threads when something changed
     // Another machine: connects through a stream command (ssh ... agentctl bridge) instead of
     // the local pipe; never starts a local host.

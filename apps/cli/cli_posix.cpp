@@ -11,17 +11,16 @@
 
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/ipc_transport.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 #include "cli_os.hpp"
 
 // The arguments arrive as UTF-8; the shared code takes them as wide strings, as on Windows.
 int main(int argc, char** argv_utf8) {
-    namespace win = agentdesk::platform::win;
     std::signal(SIGPIPE, SIG_IGN);  // the bridge's ssh peer may go away: EPIPE, not death
     std::vector<std::wstring> wide;
     try {
         for (int i = 0; i < argc; ++i)
-            wide.push_back(win::to_wide(argv_utf8[i]));
+            wide.push_back(agentdesk::platform::to_wide(argv_utf8[i]));
     } catch (const std::exception&) {
         std::fputs("agentctl: an argument is not valid UTF-8\n", stderr);
         return 2;  // bad arguments
@@ -35,11 +34,10 @@ int main(int argc, char** argv_utf8) {
 
 namespace agentdesk::cli::os {
 
-namespace win = platform::win;
 using namespace std::chrono_literals;
 
 std::string env(const wchar_t* name) {
-    const char* v = std::getenv(win::to_utf8(name).c_str());
+    const char* v = std::getenv(platform::to_utf8(name).c_str());
     return v != nullptr ? std::string(v) : std::string();
 }
 
@@ -52,7 +50,7 @@ std::string read_stdin(std::size_t max) {
     return input;
 }
 
-bool bridge_stdio(const std::wstring& pipe) {
+bool bridge_stdio(const std::string& pipe) {
     std::unique_ptr<platform::ByteStream> p = ipc::open_raw_pipe(pipe, 10s);
     if (!p)
         return false;

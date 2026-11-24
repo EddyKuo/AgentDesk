@@ -46,7 +46,7 @@ HANDLE handle_arg(const std::wstring& s, std::size_t& at) {
 }
 
 // The old host's pipe instances close just before it says "go"; give the name a moment.
-std::unique_ptr<ipc::PipeServer> serve(const std::wstring& name, const ipc::ServerHandlers& handlers,
+std::unique_ptr<ipc::PipeServer> serve(const std::string& name, const ipc::ServerHandlers& handlers,
                                        bool after_takeover) {
     for (int attempt = 0;; ++attempt) {
         try {
@@ -60,7 +60,7 @@ std::unique_ptr<ipc::PipeServer> serve(const std::wstring& name, const ipc::Serv
 }
 
 struct HostArgs {
-    std::wstring pipe_name;
+    std::string pipe_name;
     std::filesystem::path data_dir;
     std::wstring takeover;  // "IN,OUT,OLD" handle values from the old host, or empty
     bool version = false;
@@ -73,7 +73,7 @@ HostArgs parse_command_line() {
     for (int i = 1; argv != nullptr && i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--pipe" && i + 1 < argc)
-            a.pipe_name = argv[++i];
+            a.pipe_name = win::to_utf8(argv[++i]);
         else if (arg == L"--data-dir" && i + 1 < argc)
             a.data_dir = argv[++i];
         else if (arg == L"--takeover" && i + 1 < argc)
@@ -155,7 +155,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (args.version)
         return print_version();
     const bool custom_pipe = !args.pipe_name.empty();
-    const std::wstring pipe_name = custom_pipe ? args.pipe_name : ipc::default_pipe_name();
+    const std::string pipe_name = custom_pipe ? args.pipe_name : ipc::default_pipe_name();
     const std::filesystem::path data_dir = resolve_data_dir(args.data_dir);
     std::filesystem::create_directories(data_dir);
     const bool taking_over = !args.takeover.empty();
@@ -164,8 +164,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     // its launcher then connects to the existing host. A host taking over from the running one
     // shares the name until that one exits.
     const std::wstring mutex_name =
-        custom_pipe ? L"Local\\AgentDesk-host-test-" + std::to_wstring(std::hash<std::wstring>{}(pipe_name))
-                    : ipc::default_mutex_name();
+        custom_pipe ? L"Local\\AgentDesk-host-test-" + std::to_wstring(std::hash<std::wstring>{}(win::to_wide(pipe_name)))
+                    : win::to_wide(ipc::default_mutex_name());
     win::UniqueHandle instance(::CreateMutexW(nullptr, FALSE, mutex_name.c_str()));
     if (!instance || (::GetLastError() == ERROR_ALREADY_EXISTS && !taking_over))
         return 0;

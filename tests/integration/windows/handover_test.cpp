@@ -77,7 +77,7 @@ TEST(Handover, PseudoConsoleMovesToAnotherOwner) {
     Collected first;
     win::PtySpawnSpec spec;
     spec.executable = AGENTDESK_VT_PROBE;
-    spec.args = {L"counter"};
+    spec.args = {"counter"};
     spec.cwd = std::filesystem::temp_directory_path();
     auto a = win::PtyProcess::spawn(api, spec, [&](std::span<const char> b) { first.add(b); });
     ASSERT_TRUE(wait_until([&] { return first.get().find("COUNT 3") != std::string::npos; }, 10s));
@@ -124,7 +124,7 @@ TEST(Handover, AdoptRefusesHandlesThatDoNotBelongTogether) {
     Collected out;
     win::PtySpawnSpec spec;
     spec.executable = AGENTDESK_VT_PROBE;
-    spec.args = {L"counter"};
+    spec.args = {"counter"};
     spec.cwd = std::filesystem::temp_directory_path();
     auto a = win::PtyProcess::spawn(api, spec, [&](std::span<const char> b) { out.add(b); });
     ASSERT_TRUE(a->pause_reader(2s));
@@ -154,7 +154,7 @@ agentdesk::host::SessionConfig counter_config() {
     agentdesk::host::SessionConfig c;
     c.api = bundled();
     c.spec.executable = AGENTDESK_VT_PROBE;
-    c.spec.args = {L"counter"};
+    c.spec.args = {"counter"};
     c.spec.cwd = std::filesystem::temp_directory_path();
     c.spec.size = {60, 8};
     c.engine.rows = 8;
@@ -285,7 +285,7 @@ protected:
         std::filesystem::remove_all(data_dir_, ec);
     }
     std::unique_ptr<ipc::PipeClient> connect(std::chrono::milliseconds t = 10s) {
-        auto c = ipc::PipeClient::connect(pipe_, t);
+        auto c = ipc::PipeClient::connect(agentdesk::platform::to_utf8(pipe_), t);
         if (c && !c->call("hello", {{"version", 1}}, 5s))
             return nullptr;
         return c;
@@ -345,7 +345,7 @@ TEST_F(HostUpdate, TerminalsKeepRunningThroughAnUpdate) {
     // The UI's own client, as agent-ui uses it.
     ui::HostClientOptions o;
     o.host_exe = AGENTDESK_HOST_EXE;
-    o.pipe_name = pipe_;
+    o.pipe_name = agentdesk::platform::to_utf8(pipe_);
     ui::HostClient ui_client(o);
     std::shared_ptr<ui::RemoteSession> view;
     ASSERT_TRUE(wait_until(
@@ -467,7 +467,7 @@ TEST(Handover, InboxConPtyRefuses) {
     const auto api = win::load_system_conpty();
     win::PtySpawnSpec spec;
     spec.executable = AGENTDESK_VT_PROBE;
-    spec.args = {L"counter"};
+    spec.args = {"counter"};
     spec.cwd = std::filesystem::temp_directory_path();
     auto a = win::PtyProcess::spawn(api, spec, [](std::span<const char>) {});
     std::string why;

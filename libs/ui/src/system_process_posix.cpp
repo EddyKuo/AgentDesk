@@ -11,19 +11,18 @@
 #include <unistd.h>
 
 #include "agentdesk/platform/process.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 #include "system_process.hpp"
 
 namespace agentdesk::ui::detail {
 
-namespace win = agentdesk::platform::win;
 
 std::string to_utf8(const std::wstring& w) {
-    return win::to_utf8(w);
+    return platform::to_utf8(w);
 }
 
 std::wstring to_wide(const std::string& s) {
-    return win::to_wide(s);
+    return platform::to_wide(s);
 }
 
 ProcessResult run_process(const std::filesystem::path& exe, const std::vector<std::wstring>& args,
@@ -35,7 +34,7 @@ ProcessResult run_process(const std::filesystem::path& exe, const std::vector<st
     platform::ProcessSpec spec;
     spec.executable = exe;
     for (const auto& a : args)
-        spec.args.push_back(win::to_utf8(a));
+        spec.args.push_back(platform::to_utf8(a));
     spec.pipe_stdin = true;
     spec.pipe_stdout = true;
     spec.stderr_fd = err_pipe[1];
@@ -93,9 +92,9 @@ bool spawn_detached(const std::filesystem::path& exe, const std::vector<std::wst
     std::vector<std::string> a;
     try {
         if (!env_name.empty())
-            env[win::to_utf8(env_name)] = win::to_utf8(env_value);
+            env[platform::to_utf8(env_name)] = platform::to_utf8(env_value);
         for (const auto& w : args)
-            a.push_back(win::to_utf8(w));
+            a.push_back(platform::to_utf8(w));
         platform::spawn_detached(exe, a, env);
     } catch (const std::exception&) {
         return false;
@@ -105,18 +104,18 @@ bool spawn_detached(const std::filesystem::path& exe, const std::vector<std::wst
 
 // The system's own copy of a tool: /usr/bin/<name> (curl, tar ship with macOS).
 std::filesystem::path system32_exe(std::wstring_view name) {
-    return std::filesystem::path("/usr/bin") / win::to_utf8(name);
+    return std::filesystem::path("/usr/bin") / platform::to_utf8(name);
 }
 
 std::optional<std::wstring> env_var(const wchar_t* name) {
-    const char* v = std::getenv(win::to_utf8(name).c_str());
+    const char* v = std::getenv(platform::to_utf8(name).c_str());
     if (v == nullptr)
         return std::nullopt;
-    return win::to_wide(v);
+    return platform::to_wide(v);
 }
 
 void unset_env_var(const wchar_t* name) {
-    ::unsetenv(win::to_utf8(name).c_str());
+    ::unsetenv(platform::to_utf8(name).c_str());
 }
 
 const char* os_name() {

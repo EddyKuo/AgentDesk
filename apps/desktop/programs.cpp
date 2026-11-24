@@ -65,7 +65,7 @@ ui::Program program_of_profile(const std::string& executable, const std::string&
 std::filesystem::path program_icon_file(const ui::Program& p) {
     if (p.icon.empty())
         return {};
-    const auto rel = win::to_wide(p.icon);
+    const auto rel = platform::to_wide(p.icon);
     std::error_code ec;
     if (const auto mine = data_dir() / rel; std::filesystem::is_regular_file(mine, ec))
         return mine;

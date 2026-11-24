@@ -6,11 +6,10 @@
 #include <algorithm>
 
 #include "agentdesk/ipc/host_launcher.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::ui {
 
-namespace win = platform::win;
 using protocol::Json;
 using namespace std::chrono_literals;
 

@@ -117,7 +117,7 @@ void after_update();
 // ---- agent-host's own update (design doc 7.4 OQ-09)
 // The pipe this window talks to ("" = the default one): `agentctl update` (agentctl.exe beside
 // agent-ui) updates that agent-host.
-void set_pipe(std::wstring pipe);
+void set_pipe(std::string pipe);
 // `agentctl update` in the background; the terminals keep running (agent-host hands them to the
 // new one) and the window reconnects.
 void update_core();

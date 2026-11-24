@@ -30,7 +30,7 @@ void SidePanels::run(std::stop_token st) {
             try {
                 if (!want.empty())
                     change = ::FindFirstChangeNotificationW(
-                        win::to_wide(want).c_str(), TRUE,
+                        platform::to_wide(want).c_str(), TRUE,
                         FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
                             FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE);
             } catch (const std::exception&) {  // not watched; the 10 s refresh still runs

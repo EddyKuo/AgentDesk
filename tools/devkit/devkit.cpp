@@ -214,7 +214,7 @@ std::wstring process_image_path(DWORD pid) {
 }
 
 DWORD host_pid(const std::wstring& pipe) {
-    auto client = ipc::PipeClient::connect(pipe, 2s);
+    auto client = ipc::PipeClient::connect(agentdesk::platform::win::to_utf8(pipe), 2s);
     if (!client)
         return 0;
     const auto hello = client->call("hello", {{"version", 1}, {"client", "agentdesk-devtools"}});

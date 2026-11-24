@@ -11,7 +11,7 @@
 
 #include "agentdesk/platform/crt.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::host {
 
@@ -50,11 +50,10 @@ std::optional<nlohmann::json> read_json_with_backup(const std::filesystem::path&
 }
 
 nlohmann::json to_json(const Profile& p) {
-    nlohmann::json args = nlohmann::json::array();
-    for (const auto& a : p.args)
-        args.push_back(win::to_utf8(a));
-    return {
-        {"id", p.id}, {"name", p.name}, {"executable", win::to_utf8(p.executable.native())}, {"args", args}};
+    return {{"id", p.id},
+            {"name", p.name},
+            {"executable", platform::to_utf8(p.executable.native())},
+            {"args", p.args}};
 }
 
 // Throws (nlohmann::json::exception, std::system_error) on a damaged entry; callers skip it.
@@ -62,9 +61,9 @@ Profile profile_from_json(const nlohmann::json& j) {
     Profile p;
     p.id = j.at("id").get<std::string>();
     p.name = j.value("name", p.id);
-    p.executable = win::to_wide(j.at("executable").get<std::string>());
+    p.executable = platform::to_wide(j.at("executable").get<std::string>());
     for (const auto& a : j.value("args", nlohmann::json::array()))
-        p.args.push_back(win::to_wide(a.get<std::string>()));
+        p.args.push_back(a.get<std::string>());
     return p;
 }
 
@@ -75,7 +74,7 @@ std::optional<std::string> validate_profile(const Profile& p) {
         return "batch launchers (.cmd/.bat) need the shell launcher adapter, which is not available yet";
     }
     if (!win::is_launchable_file(p.executable.wstring())) {
-        return "executable not found: " + win::to_utf8(p.executable.native());
+        return "executable not found: " + platform::to_utf8(p.executable.native());
     }
     return std::nullopt;
 }

@@ -13,7 +13,7 @@
 #include <system_error>
 #include <thread>
 
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 #include "links_os.hpp"
 #include "system_process.hpp"
 
@@ -139,7 +139,7 @@ bool path_exists(const fs::path& p) {
 
 fs::path to_path(const std::string& utf8) {
     try {
-        return fs::path(platform::win::to_wide(utf8));
+        return fs::path(platform::to_wide(utf8));
     } catch (const std::exception&) {
         return {};
     }
@@ -147,7 +147,7 @@ fs::path to_path(const std::string& utf8) {
 
 std::string from_path(const fs::path& p) {
     try {
-        return platform::win::to_utf8(p.native());
+        return platform::to_utf8(p.native());
     } catch (const std::exception&) {
         return {};
     }

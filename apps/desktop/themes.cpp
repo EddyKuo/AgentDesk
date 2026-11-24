@@ -256,7 +256,7 @@ bool is_user_theme(const std::string& id) {
 std::string reload_theme(const std::string& name) {
     if (!g_themes_loaded)
         load_theme_files();
-    const auto file = data_dir() / L"themes" / win::to_wide(name + ".json");
+    const auto file = data_dir() / L"themes" / platform::to_wide(name + ".json");
     std::string why;
     const auto t = ui::theme::parse(read_text_file(file), &why);
     if (!t)

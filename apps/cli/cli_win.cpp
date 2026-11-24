@@ -37,7 +37,7 @@ std::string read_stdin(std::size_t max) {
     return input;
 }
 
-bool bridge_stdio(const std::wstring& pipe) {
+bool bridge_stdio(const std::string& pipe) {
     win::UniqueHandle p = ipc::open_raw_pipe(pipe, 10s);
     if (!p)
         return false;

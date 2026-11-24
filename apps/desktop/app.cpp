@@ -47,12 +47,12 @@ std::tuple<std::vector<std::string>, std::size_t, std::size_t> mod_kinds(const s
     std::size_t custom = 0;
     for (const auto& name : names) {
         std::error_code ec;
-        const auto from = shipped / win::to_wide(name);
+        const auto from = shipped / platform::to_wide(name);
         if (!std::filesystem::is_regular_file(from / L"mod.dll", ec)) {
             ++custom;
             continue;
         }
-        const auto have = data_dir() / L"mods" / win::to_wide(name);
+        const auto have = data_dir() / L"mods" / platform::to_wide(name);
         bool same = true;
         for (const wchar_t* f : {L"mod.dll", L"mod.json"}) {
             bool a_ok = false;
@@ -267,7 +267,7 @@ void start_remotes(App::State& s) {
             if (cfg.target.rfind("pipe:", 0) == 0) {
                 return ipc::connect_over_command(
                     {ipc::sibling_executable(L"agentctl.exe").wstring(), L"--pipe",
-                     win::to_wide(cfg.target.substr(5)), L"--no-start", L"bridge"},
+                     platform::to_wide(cfg.target.substr(5)), L"--no-start", L"bridge"},
                     std::chrono::seconds(10));
             }
             return ipc::connect_over_command(ipc::ssh_bridge_argv(cfg.target, cfg.ctl),

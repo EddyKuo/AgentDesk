@@ -148,7 +148,7 @@ void SidePanels::commit() {
     post(Panel::kChanges, [this, mc = changes_machine, top = repo_top, msg] {
         auto r = git_run(mc, top, {L"add", L"-A"});
         if (r.started && r.exit_code == 0)
-            r = git_run(mc, top, {L"commit", L"-m", win::to_wide(msg)});
+            r = git_run(mc, top, {L"commit", L"-m", platform::to_wide(msg)});
         std::lock_guard l(mutex);
         committing = false;
         if (r.started && r.exit_code == 0) {
@@ -190,7 +190,7 @@ std::pair<std::vector<SidePanels::FileEntry>, bool> SidePanels::list_folder(cons
         return {out, more};
     }
     std::error_code ec;
-    std::filesystem::directory_iterator it(win::to_wide(ui::path_text::join(root, rel)),
+    std::filesystem::directory_iterator it(platform::to_wide(ui::path_text::join(root, rel)),
                                            std::filesystem::directory_options::skip_permission_denied, ec);
     for (; !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
         const std::string name = safe::utf8_lossy(it->path().filename().wstring());
@@ -211,7 +211,7 @@ host::ToolResult SidePanels::git_run(const std::string& mc, const std::string& c
                                      std::vector<std::wstring> args) {
     if (!mc.empty())
         return remote_git(remote, mc, cwd, args);
-    const std::filesystem::path p(win::to_wide(cwd));
+    const std::filesystem::path p(platform::to_wide(cwd));
     args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-c", L"core.fsmonitor=false", L"-c",
                                L"diff.autoRefreshIndex=false", L"-C", p.wstring()});
     return host::run_tool(args, p, std::chrono::seconds(60));
@@ -282,7 +282,7 @@ void SidePanels::load_files(const std::string& mc, const std::string& root, std:
         auto [entries, more] = list_folder(mc, root, rel, &failed);
         if (rel.empty() && entries.empty()) {
             std::error_code ec;
-            if (failed || (mc.empty() && !std::filesystem::is_directory(win::to_wide(root), ec)))
+            if (failed || (mc.empty() && !std::filesystem::is_directory(platform::to_wide(root), ec)))
                 error = mc.empty() ? "Cannot list this folder" : "Cannot list this folder on " + mc;
         }
         limited = limited || more || total + entries.size() > kTotal;
@@ -351,7 +351,7 @@ bool SidePanels::read_text(const std::string& mc, const std::string& path, std::
         return true;
     }
     std::error_code ec;
-    const auto size = std::filesystem::file_size(win::to_wide(path), ec);
+    const auto size = std::filesystem::file_size(platform::to_wide(path), ec);
     if (ec) {
         message = "This file is no longer available";
         return false;
@@ -360,7 +360,7 @@ bool SidePanels::read_text(const std::string& mc, const std::string& path, std::
         message = "Cannot preview this file (binary, too large, or unreadable)";
         return false;
     }
-    std::ifstream in(std::filesystem::path(win::to_wide(path)), std::ios::binary);
+    std::ifstream in(std::filesystem::path(platform::to_wide(path)), std::ios::binary);
     out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
     if (out.find('\0') != std::string::npos) {
         message = "Binary file \xC2\xB7 no text preview";
@@ -549,7 +549,7 @@ void SidePanels::load_diff(const std::string& mc, const std::string& top, const 
             args.push_back(L"HEAD");
         for (const wchar_t* a : {L"--no-ext-diff", L"--no-textconv", L"--no-color", L"--"})
             args.push_back(a);
-        args.push_back(win::to_wide(c.path));
+        args.push_back(platform::to_wide(c.path));
         const std::string out = git_out(mc, top, args, &ok);
         if (!ok) {
             message = "Cannot preview this diff (too large or unreadable)";

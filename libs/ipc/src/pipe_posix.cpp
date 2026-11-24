@@ -9,11 +9,9 @@
 
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/system.hpp"
-#include "agentdesk/platform/win/error.hpp"
 
 namespace agentdesk::ipc {
 
-namespace win = platform::win;
 
 namespace {
 
@@ -21,17 +19,16 @@ constexpr std::size_t kIoBuffer = 64 * 1024;
 
 // A name with a slash is the socket's path; a bare name (--pipe NAME, as on Windows) is a socket
 // in the per-user runtime folder.
-std::string endpoint_of(const std::wstring& name) {
-    const std::string n = win::to_utf8(name);
-    if (n.find('/') != std::string::npos)
-        return n;
-    return (platform::runtime_dir() / (n + ".sock")).string();
+std::string endpoint_of(const std::string& name) {
+    if (name.find('/') != std::string::npos)
+        return name;
+    return (platform::runtime_dir() / (name + ".sock")).string();
 }
 
 }  // namespace
 
-std::wstring current_user_sid() {
-    return std::to_wstring(::geteuid());
+std::string current_user_sid() {
+    return std::to_string(::geteuid());
 }
 
 std::uint32_t current_session_id() {
@@ -41,12 +38,12 @@ std::uint32_t current_session_id() {
     return 0;
 }
 
-std::wstring default_pipe_name() {
-    return win::to_wide(platform::default_endpoint());
+std::string default_pipe_name() {
+    return platform::default_endpoint();
 }
 
-std::wstring default_mutex_name() {
-    return L"host";
+std::string default_mutex_name() {
+    return "host";
 }
 
 // ---------------------------------------------------------------- Connection
@@ -152,7 +149,7 @@ void Connection::run(const ServerHandlers& handlers) {
 
 // ---------------------------------------------------------------- PipeServer
 
-PipeServer::PipeServer(std::wstring name, ServerHandlers handlers)
+PipeServer::PipeServer(std::string name, ServerHandlers handlers)
     : name_(std::move(name)), handlers_(std::move(handlers)) {
     listener_ = platform::StreamListener::listen(endpoint_of(name_));
     acceptor_ = std::thread([this] { accept_loop(); });
@@ -229,12 +226,12 @@ void PipeServer::accept_loop() {
 
 // ---------------------------------------------------------------- PipeClient
 
-std::unique_ptr<platform::ByteStream> open_raw_pipe(const std::wstring& name,
+std::unique_ptr<platform::ByteStream> open_raw_pipe(const std::string& name,
                                                     std::chrono::milliseconds timeout) {
     return platform::connect_stream(endpoint_of(name), timeout);
 }
 
-std::unique_ptr<PipeClient> PipeClient::connect(const std::wstring& name, std::chrono::milliseconds timeout) {
+std::unique_ptr<PipeClient> PipeClient::connect(const std::string& name, std::chrono::milliseconds timeout) {
     auto stream = open_raw_pipe(name, timeout);
     if (!stream)
         return nullptr;

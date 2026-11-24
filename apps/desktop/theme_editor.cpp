@@ -50,7 +50,7 @@ std::vector<std::string> builtin_ids() {
 }
 
 std::filesystem::path user_theme_file(const std::string& name) {
-    return data_dir() / L"themes" / win::to_wide(name + ".json");
+    return data_dir() / L"themes" / platform::to_wide(name + ".json");
 }
 
 void rebuild() {

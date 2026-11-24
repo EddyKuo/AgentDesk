@@ -28,11 +28,11 @@
 
 namespace agentdesk::ipc {
 
-std::wstring current_user_sid();
+std::string current_user_sid();
 DWORD current_session_id();
 // \\.\pipe\AgentDesk-<SID>-s<session>  and  Local\AgentDesk-host-<SID>-s<session>
-std::wstring default_pipe_name();
-std::wstring default_mutex_name();
+std::string default_pipe_name();
+std::string default_mutex_name();
 
 inline constexpr std::size_t kClientSendBudget = 4u * 1024u * 1024u;  // design doc 3.3
 inline constexpr std::size_t kClientHardLimit = 16u * 1024u * 1024u;  // beyond: disconnect
@@ -83,13 +83,13 @@ private:
 class PipeServer {
 public:
     // Throws std::system_error(ERROR_ACCESS_DENIED) when another process owns the name.
-    PipeServer(std::wstring name, ServerHandlers handlers);
+    PipeServer(std::string name, ServerHandlers handlers);
     ~PipeServer();
     PipeServer(const PipeServer&) = delete;
     PipeServer& operator=(const PipeServer&) = delete;
 
     void stop();
-    [[nodiscard]] const std::wstring& name() const noexcept { return name_; }
+    [[nodiscard]] const std::string& name() const noexcept { return name_; }
     [[nodiscard]] std::size_t connection_count() const;
     [[nodiscard]] std::uint64_t rejected_clients() const noexcept { return rejected_; }
 
@@ -97,7 +97,7 @@ private:
     void accept_loop();
     platform::win::UniqueHandle create_instance(bool first);
 
-    std::wstring name_;
+    std::string name_;
     ServerHandlers handlers_;
     platform::win::UniqueHandle stop_event_;
     platform::win::UniqueHandle next_instance_;
@@ -111,11 +111,11 @@ private:
 // Client side. A reader thread matches responses to requests by id; events go to on_event.
 // Opens the host pipe (same owner checks as PipeClient::connect) as a raw overlapped handle,
 // for agentctl bridge which relays bytes without parsing them. Invalid handle on failure.
-platform::win::UniqueHandle open_raw_pipe(const std::wstring& name, std::chrono::milliseconds timeout);
+platform::win::UniqueHandle open_raw_pipe(const std::string& name, std::chrono::milliseconds timeout);
 
 class PipeClient {
 public:
-    static std::unique_ptr<PipeClient> connect(const std::wstring& name, std::chrono::milliseconds timeout);
+    static std::unique_ptr<PipeClient> connect(const std::string& name, std::chrono::milliseconds timeout);
     // Takes over a connected stream opened with FILE_FLAG_OVERLAPPED: reads from `read`, writes
     // to `write` (a stream to another machine's host through ssh; the far end checks its own
     // pipe). `write` may be empty when one duplex handle does both.

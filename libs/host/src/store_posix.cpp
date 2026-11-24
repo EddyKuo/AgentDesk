@@ -5,11 +5,10 @@
 #include "agentdesk/host/store.hpp"
 #include "agentdesk/platform/process.hpp"
 #include "agentdesk/platform/system.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::host {
 
-namespace win = platform::win;
 
 // macOS (ADR-30): ~/Library/Application Support/AgentDesk.
 std::filesystem::path default_data_dir() {
@@ -48,10 +47,7 @@ std::vector<Profile> detect_default_profiles() {
     add_program("claude-native", "Claude Code", "claude");
     add_program("codex-native", "Codex CLI", "codex");
     for (const auto& shell : platform::detect_shells()) {
-        Profile p{shell.id, shell.name, shell.executable, {}};
-        for (const auto& a : shell.args)
-            p.args.push_back(win::to_wide(a));
-        out.push_back(std::move(p));
+        out.push_back({shell.id, shell.name, shell.executable, shell.args});
     }
     return out;
 }

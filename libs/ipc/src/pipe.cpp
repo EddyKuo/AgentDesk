@@ -51,7 +51,7 @@ bool pid_belongs_to_current_user(DWORD pid) {
     if (!process)
         return false;
     try {
-        return process_user_sid(process.get()) == current_user_sid();
+        return win::to_utf8(process_user_sid(process.get())) == current_user_sid();
     } catch (const std::system_error&) {
         return false;
     }
@@ -66,8 +66,8 @@ UniqueHandle make_event(bool manual_reset) {
 
 }  // namespace
 
-std::wstring current_user_sid() {
-    static const std::wstring sid = process_user_sid(nullptr);
+std::string current_user_sid() {
+    static const std::string sid = win::to_utf8(process_user_sid(nullptr));
     return sid;
 }
 
@@ -77,12 +77,12 @@ DWORD current_session_id() {
     return id;
 }
 
-std::wstring default_pipe_name() {
-    return L"\\\\.\\pipe\\AgentDesk-" + current_user_sid() + L"-s" + std::to_wstring(current_session_id());
+std::string default_pipe_name() {
+    return "\\\\.\\pipe\\AgentDesk-" + current_user_sid() + "-s" + std::to_string(current_session_id());
 }
 
-std::wstring default_mutex_name() {
-    return L"Local\\AgentDesk-host-" + current_user_sid() + L"-s" + std::to_wstring(current_session_id());
+std::string default_mutex_name() {
+    return "Local\\AgentDesk-host-" + current_user_sid() + "-s" + std::to_string(current_session_id());
 }
 
 // ------------------------------------------------------------------ Connection
@@ -222,7 +222,7 @@ void Connection::run(const ServerHandlers& handlers) {
 // ------------------------------------------------------------------ PipeServer
 
 UniqueHandle PipeServer::create_instance(bool first) {
-    const std::wstring sddl = L"D:P(A;;GA;;;SY)(A;;GA;;;" + current_user_sid() + L")";
+    const std::wstring sddl = L"D:P(A;;GA;;;SY)(A;;GA;;;" + win::to_wide(current_user_sid()) + L")";
     PSECURITY_DESCRIPTOR sd_raw = nullptr;
     if (!::ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1, &sd_raw,
                                                                 nullptr)) {
@@ -234,13 +234,13 @@ UniqueHandle PipeServer::create_instance(bool first) {
         PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0);
     const DWORD mode = PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS;
     HANDLE h =
-        ::CreateNamedPipeW(name_.c_str(), open, mode, PIPE_UNLIMITED_INSTANCES, kIoBuffer, kIoBuffer, 0, &sa);
+        ::CreateNamedPipeW(win::to_wide(name_).c_str(), open, mode, PIPE_UNLIMITED_INSTANCES, kIoBuffer, kIoBuffer, 0, &sa);
     if (h == INVALID_HANDLE_VALUE)
         win::throw_last_error("CreateNamedPipeW");
     return UniqueHandle(h);
 }
 
-PipeServer::PipeServer(std::wstring name, ServerHandlers handlers)
+PipeServer::PipeServer(std::string name, ServerHandlers handlers)
     : name_(std::move(name)), handlers_(std::move(handlers)), stop_event_(make_event(true)) {
     next_instance_ = create_instance(true);  // ERROR_ACCESS_DENIED: someone else owns the name
     acceptor_ = std::thread([this] { accept_loop(); });
@@ -361,12 +361,13 @@ std::unique_ptr<PipeClient> PipeClient::adopt(UniqueHandle read, UniqueHandle wr
     return c;
 }
 
-UniqueHandle open_raw_pipe(const std::wstring& name, std::chrono::milliseconds timeout) {
+UniqueHandle open_raw_pipe(const std::string& name, std::chrono::milliseconds timeout) {
+    const std::wstring wide = win::to_wide(name);
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
         // SECURITY_IDENTIFICATION: the server may identify us but not act as us.
         HANDLE h =
-            ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+            ::CreateFileW(wide.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                           FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr);
         if (h != INVALID_HANDLE_VALUE) {
             UniqueHandle pipe(h);
@@ -382,13 +383,13 @@ UniqueHandle open_raw_pipe(const std::wstring& name, std::chrono::milliseconds t
             return {};
         const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
         if (err == ERROR_PIPE_BUSY)
-            ::WaitNamedPipeW(name.c_str(), static_cast<DWORD>(std::min<long long>(left, 1000)));
+            ::WaitNamedPipeW(wide.c_str(), static_cast<DWORD>(std::min<long long>(left, 1000)));
         else
             ::Sleep(static_cast<DWORD>(std::min<long long>(left, 50)));  // not created yet
     }
 }
 
-std::unique_ptr<PipeClient> PipeClient::connect(const std::wstring& name, std::chrono::milliseconds timeout) {
+std::unique_ptr<PipeClient> PipeClient::connect(const std::string& name, std::chrono::milliseconds timeout) {
     UniqueHandle pipe = open_raw_pipe(name, timeout);
     if (!pipe)
         return nullptr;

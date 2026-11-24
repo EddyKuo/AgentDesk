@@ -336,7 +336,7 @@ public:
             ::CloseHandle(pi.hThread);
             ::CloseHandle(pi.hProcess);
         }
-        client = agentdesk::ipc::PipeClient::connect(pipe, std::chrono::seconds(10));
+        client = agentdesk::ipc::PipeClient::connect(agentdesk::platform::to_utf8(pipe), std::chrono::seconds(10));
         if (!client)
             return;
         client->call("hello", {{"version", 1}});
@@ -348,7 +348,7 @@ public:
             session = r->result->value("session_id", "");
     }
     ~HostInstall() {
-        if (auto c = agentdesk::ipc::PipeClient::connect(pipe, std::chrono::seconds(2)))
+        if (auto c = agentdesk::ipc::PipeClient::connect(agentdesk::platform::to_utf8(pipe), std::chrono::seconds(2)))
             c->call("host.shutdown", {{"stop_sessions", true}}, std::chrono::seconds(5));
         client.reset();
         ::Sleep(500);
@@ -357,14 +357,14 @@ public:
         fs::remove_all(data, ec);
     }
     Json hello() {
-        auto c = agentdesk::ipc::PipeClient::connect(pipe, std::chrono::seconds(10));
+        auto c = agentdesk::ipc::PipeClient::connect(agentdesk::platform::to_utf8(pipe), std::chrono::seconds(10));
         if (!c)
             return {};
         const auto r = c->call("hello", {{"version", 1}});
         return r && r->result ? *r->result : Json();
     }
     Json get() {
-        auto c = agentdesk::ipc::PipeClient::connect(pipe, std::chrono::seconds(10));
+        auto c = agentdesk::ipc::PipeClient::connect(agentdesk::platform::to_utf8(pipe), std::chrono::seconds(10));
         if (!c)
             return {};
         c->call("hello", {{"version", 1}});
@@ -440,7 +440,7 @@ TEST(CoreUpdate, UpdateCoreGoesFromUpdatingToDoneOrError) {
     const std::string have = up::host_version_of(AGENTDESK_HOST_EXE).value_or("");
     // agentctl update runs from agent-ui's folder: here, the install folder.
     up::configure({have, install.dir / L"agent-ui.exe", install.data, {}});
-    up::set_pipe(install.pipe);
+    up::set_pipe(agentdesk::platform::to_utf8(install.pipe));
     up::set_core(have, std::nullopt);
     const std::string next = read(AGENTDESK_HOST_NEXT_EXE);
     const auto wait_done = [] {
@@ -473,5 +473,5 @@ TEST(CoreUpdate, UpdateCoreGoesFromUpdatingToDoneOrError) {
         EXPECT_EQ(install.hello().value("host_version", ""), "99.0.0");
         EXPECT_EQ(install.get().value("process_state", ""), "Running");
     }
-    up::set_pipe(L"");
+    up::set_pipe("");
 }

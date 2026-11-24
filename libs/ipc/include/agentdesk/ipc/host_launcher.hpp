@@ -26,7 +26,7 @@ struct HostConnection {
 
 // Connects to agent-host.exe, starting it (detached) when it is not running, then performs
 // the hello handshake. Returns an empty client when the host cannot be reached in time.
-HostConnection connect_or_start_host(const std::filesystem::path& host_exe, const std::wstring& pipe_name,
+HostConnection connect_or_start_host(const std::filesystem::path& host_exe, const std::string& pipe_name,
                                      std::chrono::milliseconds timeout, bool allow_start = true);
 
 // Connects through a command whose stdin/stdout carry the protocol, e.g.

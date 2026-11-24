@@ -11,7 +11,7 @@ host::ToolResult remote_git(const RemoteCall& remote, const std::string& machine
     host::ToolResult r;
     Json a = Json::array();
     for (const auto& x : args)
-        a.push_back(win::to_utf8(x));
+        a.push_back(platform::to_utf8(x));
     if (const auto res =
             remote ? remote(machine, "git.run", Json{{"cwd", cwd}, {"args", a}}) : std::nullopt) {
         r.started = true;
@@ -175,7 +175,7 @@ int untracked_lines(const std::filesystem::path& top, const std::vector<std::str
         if (++n > 200)
             break;
         std::error_code ec;
-        const auto p = top / std::filesystem::path(win::to_wide(rel));
+        const auto p = top / std::filesystem::path(platform::to_wide(rel));
         if (!std::filesystem::is_regular_file(p, ec) || std::filesystem::file_size(p, ec) > (1u << 20))
             continue;
         std::ifstream in(p, std::ios::binary);
@@ -193,7 +193,7 @@ GitInfo GitCache::query(const std::string& key, bool changes) {
     GitInfo g;
     const std::string machine = machine_of(key);
     const std::string dir = dir_of(key);
-    const std::filesystem::path cwd(win::to_wide(dir));
+    const std::filesystem::path cwd(platform::to_wide(dir));
     std::error_code ec;
     if (machine.empty() && !std::filesystem::is_directory(cwd, ec))
         return g;
@@ -219,9 +219,9 @@ GitInfo GitCache::query(const std::string& key, bool changes) {
     g.top = pt::native(lines[0]);
     g.common_dir = pt::resolve(dir, lines[1]);
     if (machine.empty()) {
-        const auto real = std::filesystem::weakly_canonical(std::filesystem::path(win::to_wide(g.common_dir)), ec);
+        const auto real = std::filesystem::weakly_canonical(std::filesystem::path(platform::to_wide(g.common_dir)), ec);
         if (!ec)
-            g.common_dir = pt::native(win::to_utf8(real.native()));
+            g.common_dir = pt::native(platform::to_utf8(real.native()));
     }
     g.common_top = pt::parent(g.common_dir);
     g.worktree = _stricmp(g.common_top.c_str(), g.top.c_str()) != 0;
@@ -244,7 +244,7 @@ GitInfo GitCache::query(const std::string& key, bool changes) {
             if (d.started && d.exit_code == 0)
                 add_numstat(d.output, g.lines_added, g.lines_removed);
             if (machine.empty() && !untracked.empty())
-                g.lines_added += untracked_lines(std::filesystem::path(win::to_wide(g.top)), untracked);
+                g.lines_added += untracked_lines(std::filesystem::path(platform::to_wide(g.top)), untracked);
         }
     }
     return g;

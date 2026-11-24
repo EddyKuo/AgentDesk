@@ -65,7 +65,7 @@ nlohmann::json memory() {
 }
 
 host::SessionConfig probe_config(const win::ConPtyApi& api, const std::filesystem::path& probe,
-                                 std::vector<std::wstring> args) {
+                                 std::vector<std::string> args) {
     host::SessionConfig c;
     c.api = api;
     c.spec.executable = probe;
@@ -119,7 +119,7 @@ nlohmann::json run_flood(const win::ConPtyApi& api, const std::filesystem::path&
                          long long rate) {
     const auto start = Clock::now();
     auto session = host::Session::start(
-        probe_config(api, probe, {L"flood", std::to_wstring(seconds), std::to_wstring(rate)}));
+        probe_config(api, probe, {"flood", std::to_string(seconds), std::to_string(rate)}));
     const auto code = session->wait_exit(std::chrono::seconds(seconds * 3 + 30));
     const auto elapsed = std::chrono::duration<double>(Clock::now() - start).count();
     const auto info = session->info();
@@ -158,7 +158,7 @@ nlohmann::json run_flood(const win::ConPtyApi& api, const std::filesystem::path&
 nlohmann::json run_cycles(const win::ConPtyApi& api, const std::filesystem::path& probe, int cycles) {
     nlohmann::json samples = nlohmann::json::array();
     {
-        auto warm = host::Session::start(probe_config(api, probe, {L"echo"}));
+        auto warm = host::Session::start(probe_config(api, probe, {"echo"}));
         warm->force_stop();
         warm->wait_exit(5s);
     }
@@ -166,7 +166,7 @@ nlohmann::json run_cycles(const win::ConPtyApi& api, const std::filesystem::path
     const DWORD t0 = thread_count();
     const auto start = Clock::now();
     for (int i = 1; i <= cycles; ++i) {
-        auto s = host::Session::start(probe_config(api, probe, {L"echo"}));
+        auto s = host::Session::start(probe_config(api, probe, {"echo"}));
         s->force_stop();
         s->wait_exit(5s);
         s.reset();
@@ -208,7 +208,7 @@ nlohmann::json run_echo_latency(const win::ConPtyApi& api, int rounds) {
     wchar_t sys[MAX_PATH]{};
     const UINT n = ::GetSystemDirectoryW(sys, MAX_PATH);
     c.spec.executable = std::filesystem::path(std::wstring(sys, n)) / L"cmd.exe";
-    c.spec.args = {L"/d", L"/q"};
+    c.spec.args = {"/d", "/q"};
     c.spec.cwd = std::filesystem::temp_directory_path();
     c.spec.size = {250, 30};
     c.engine.rows = 30;

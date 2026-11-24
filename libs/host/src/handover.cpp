@@ -105,14 +105,14 @@ HANDLE handle_from(std::uint64_t v) {
 
 // The new agent-host, with three handles it inherits and nothing else: the two ends of the
 // handover pipes and SYNCHRONIZE on this process.
-win::UniqueHandle spawn_successor(const std::filesystem::path& exe, const std::wstring& pipe_name,
+win::UniqueHandle spawn_successor(const std::filesystem::path& exe, const std::string& pipe_name,
                                   const std::filesystem::path& data_dir, HANDLE child_in, HANDLE child_out,
                                   HANDLE self_for_child) {
     std::wstring takeover = std::to_wstring(handle_value(child_in)) + L"," +
                             std::to_wstring(handle_value(child_out)) + L"," +
                             std::to_wstring(handle_value(self_for_child));
     const std::vector<std::wstring> args = {L"--takeover", takeover,      L"--pipe",
-                                            pipe_name,     L"--data-dir", data_dir.native()};
+                                            win::to_wide(pipe_name), L"--data-dir", data_dir.native()};
     std::wstring cmdline = win::build_command_line(exe.native(), args);
     HANDLE inherit[3] = {child_in, child_out, self_for_child};
     win::AttributeList attrs(1);

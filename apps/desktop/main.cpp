@@ -362,7 +362,7 @@ struct DevOptions {
     std::string start_profile;
     long long exit_after_ms = 0;
     std::filesystem::path report;
-    std::wstring pipe;
+    std::string pipe;
     std::vector<std::string> run;
     std::string input;
 };
@@ -380,7 +380,7 @@ DevOptions parse_dev_options() {
         else if (a == L"--report" && i + 1 < argc)
             o.report = argv[++i];
         else if (a == L"--pipe" && i + 1 < argc)
-            o.pipe = argv[++i];
+            o.pipe = win::to_utf8(argv[++i]);
         else if (a == L"--input" && i + 1 < argc)
             o.input = win::to_utf8(argv[++i]);
         else if (a == L"--run" && i + 1 < argc) {

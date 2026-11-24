@@ -27,7 +27,7 @@
 #include "agentdesk/host/handover.hpp"
 #include "agentdesk/host/session_manager.hpp"
 #include "agentdesk/platform/system.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 #include "agentdesk/terminal/bytes.hpp"
 
 extern char** environ;  // NOLINT(readability-redundant-declaration): not declared by unistd.h on macOS
@@ -169,10 +169,10 @@ bool process_alive(pid_t pid) {
 
 // The new agent-host with its end of the channel as fd 3 and nothing else inherited, in its own
 // session (it outlives us), started in the home folder so updates can replace the program.
-pid_t spawn_successor(const std::filesystem::path& exe, const std::wstring& pipe_name,
+pid_t spawn_successor(const std::filesystem::path& exe, const std::string& pipe_name,
                       const std::filesystem::path& data_dir, int child_end) {
     std::vector<std::string> argv_strings = {
-        exe.string(), "--takeover",     std::to_string(::getpid()), "--pipe", win::to_utf8(pipe_name),
+        exe.string(), "--takeover",     std::to_string(::getpid()), "--pipe", pipe_name,
         "--data-dir", data_dir.string()};
     std::vector<char*> argv;
     for (auto& a : argv_strings)
@@ -259,7 +259,7 @@ Response SessionManager::do_update(const Request& req) {
     if (!update_lock.owns_lock() || handed_over_)
         return protocol::fail(req.id, ErrorCode::kOverloaded, "agent-host is updating", true);
     const std::string exe_param = req.params.value("exe", "");
-    const std::filesystem::path exe(win::to_wide(exe_param));
+    const std::filesystem::path exe(platform::to_wide(exe_param));
     std::error_code ec;
     if (exe_param.empty() || !exe.is_absolute() || !std::filesystem::is_regular_file(exe, ec))
         return protocol::fail(req.id, ErrorCode::kBadRequest,

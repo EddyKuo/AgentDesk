@@ -8,11 +8,10 @@
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/platform/process.hpp"
 #include "agentdesk/platform/system.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::host {
 
-namespace win = agentdesk::platform::win;
 
 // No WSL on macOS.
 bool is_wsl_path(const std::wstring& /*path*/) {
@@ -26,7 +25,7 @@ ToolResult run_tool(const std::vector<std::wstring>& argv, const std::filesystem
     ToolResult r;
     if (argv.empty())
         return r;
-    const std::string name = win::to_utf8(argv[0]);
+    const std::string name = platform::to_utf8(argv[0]);
     const auto exe = name.find('/') != std::string::npos ? platform::find_executable(name)
                                                          : platform::find_on_login_path(name);
     if (!exe)
@@ -39,7 +38,7 @@ ToolResult run_tool(const std::vector<std::wstring>& argv, const std::filesystem
     if (exe->filename() == "git")  // the same safe.directory override as on Windows
         spec.args = {"-c", "safe.directory=*"};
     for (std::size_t i = 1; i < argv.size(); ++i)
-        spec.args.push_back(win::to_utf8(argv[i]));
+        spec.args.push_back(platform::to_utf8(argv[i]));
     spec.cwd = cwd;
     spec.stderr_fd = err_pipe[1];
     if (const std::string path = platform::login_path(); !path.empty())

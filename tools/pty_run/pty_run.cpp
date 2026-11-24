@@ -42,7 +42,7 @@ struct Options {
     std::chrono::milliseconds quiet_exit{0};  // 0 = wait for the program to exit
     std::vector<ScriptStep> script;
     std::filesystem::path program;
-    std::vector<std::wstring> args;
+    std::vector<std::string> args;
 };
 
 std::string unescape(std::string_view s) {
@@ -119,7 +119,7 @@ Options parse(int argc, wchar_t** argv) {
         throw std::invalid_argument("missing -- program");
     o.program = argv[i++];
     for (; i < argc; ++i)
-        o.args.emplace_back(argv[i]);
+        o.args.push_back(win::to_utf8(argv[i]));
     return o;
 }
 

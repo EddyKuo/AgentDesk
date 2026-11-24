@@ -10,13 +10,12 @@
 
 #include "agentdesk/platform/process.hpp"
 #include "agentdesk/platform/system.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 #include "agentdesk/ui/window_place.hpp"
 #include "desktop_os.hpp"
 
 namespace agentdesk::desktop::os {
 
-namespace win = platform::win;
 
 namespace {
 
@@ -157,12 +156,12 @@ void start_detached(const std::vector<std::wstring>& argv) {
     if (argv.empty())
         return;
     try {
-        const auto exe = platform::find_on_login_path(win::to_utf8(argv[0]));
+        const auto exe = platform::find_on_login_path(platform::to_utf8(argv[0]));
         if (!exe)
             return;
         std::vector<std::string> args;
         for (std::size_t i = 1; i < argv.size(); ++i)
-            args.push_back(win::to_utf8(argv[i]));
+            args.push_back(platform::to_utf8(argv[i]));
         platform::spawn_detached(*exe, args);
     } catch (const std::exception&) {
     }

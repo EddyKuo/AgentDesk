@@ -52,7 +52,7 @@ void write_json_atomic(const std::filesystem::path& file, const nlohmann::json& 
 std::vector<Profile> detect_default_profiles() {
     std::vector<Profile> out;
     const auto add = [&](const char* id, const char* name, const wchar_t* exe,
-                         std::vector<std::wstring> args = {}) {
+                         std::vector<std::string> args = {}) {
         wchar_t buf[MAX_PATH]{};
         if (::SearchPathW(nullptr, exe, L".exe", MAX_PATH, buf, nullptr) > 0) {
             out.push_back({id, name, buf, std::move(args)});
@@ -60,8 +60,8 @@ std::vector<Profile> detect_default_profiles() {
     };
     add("claude-native", "Claude Code", L"claude.exe");
     add("codex-native", "Codex CLI", L"codex.exe");
-    add("pwsh", "PowerShell 7", L"pwsh.exe", {L"-NoLogo"});
-    add("powershell", "Windows PowerShell", L"powershell.exe", {L"-NoLogo"});
+    add("pwsh", "PowerShell 7", L"pwsh.exe", {"-NoLogo"});
+    add("powershell", "Windows PowerShell", L"powershell.exe", {"-NoLogo"});
     add("cmd", "Command Prompt", L"cmd.exe");
     for (auto& p : detect_wsl_profiles())
         out.push_back(std::move(p));
@@ -93,7 +93,7 @@ std::vector<Profile> detect_wsl_profiles() {
         if (distro.empty() || distro.starts_with(L"docker-desktop"))
             continue;
         const std::string u = win::to_utf8(distro);
-        out.push_back({"wsl-" + u, u + " (WSL)", exe, {L"-d", distro}});
+        out.push_back({"wsl-" + u, u + " (WSL)", exe, {"-d", u}});
     }
     ::RegCloseKey(root);
     std::sort(out.begin(), out.end(), [](const Profile& a, const Profile& b) { return a.id < b.id; });

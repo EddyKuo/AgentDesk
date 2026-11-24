@@ -10,11 +10,10 @@
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/platform/process.hpp"
 #include "agentdesk/platform/system.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::ipc {
 
-namespace win = platform::win;
 
 namespace {
 
@@ -33,20 +32,20 @@ void take_hello(HostConnection& out, const protocol::Json& result) {
 }  // namespace
 
 std::filesystem::path sibling_executable(const wchar_t* file_name) {
-    std::string name = win::to_utf8(file_name);
+    std::string name = platform::to_utf8(file_name);
     if (name.size() > 4 && name.ends_with(".exe"))
         name.resize(name.size() - 4);
     return platform::executable_path().parent_path() / name;
 }
 
-HostConnection connect_or_start_host(const std::filesystem::path& host_exe, const std::wstring& pipe_name,
+HostConnection connect_or_start_host(const std::filesystem::path& host_exe, const std::string& pipe_name,
                                      std::chrono::milliseconds timeout, bool allow_start) {
     HostConnection out;
     out.client = PipeClient::connect(pipe_name, std::chrono::milliseconds(300));
     if (!out.client && allow_start) {
         std::vector<std::string> args;
         if (pipe_name != default_pipe_name())
-            args = {"--pipe", win::to_utf8(pipe_name)};
+            args = {"--pipe", pipe_name};
         try {
             platform::spawn_detached(host_exe, args);
             out.started_host = true;
@@ -96,7 +95,7 @@ HostConnection connect_over_command(const std::vector<std::wstring>& argv,
         out.error = "no command";
         return out;
     }
-    const std::string name = win::to_utf8(argv[0]);
+    const std::string name = platform::to_utf8(argv[0]);
     const auto exe = platform::find_executable(name);
     if (!exe) {
         out.error = name + " was not found";
@@ -114,7 +113,7 @@ HostConnection connect_over_command(const std::vector<std::wstring>& argv,
     platform::ProcessSpec spec;
     spec.executable = *exe;
     for (std::size_t i = 1; i < argv.size(); ++i)
-        spec.args.push_back(win::to_utf8(argv[i]));
+        spec.args.push_back(platform::to_utf8(argv[i]));
     spec.pipe_stdin = true;
     spec.pipe_stdout = true;
     spec.stderr_fd = err_pipe[1];
@@ -168,8 +167,8 @@ std::vector<std::wstring> ssh_bridge_argv(const std::string& target, const std::
             L"ServerAliveInterval=15",
             L"-o",
             L"ConnectTimeout=10",
-            win::to_wide(target),
-            win::to_wide(remote_ctl.empty() ? std::string("agentctl") : remote_ctl),
+            platform::to_wide(target),
+            platform::to_wide(remote_ctl.empty() ? std::string("agentctl") : remote_ctl),
             L"bridge"};
 }
 

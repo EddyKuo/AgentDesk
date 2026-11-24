@@ -24,7 +24,7 @@ win::ConPtyApi best_conpty() {
     return win::load_conpty(std::filesystem::path(AGENTDESK_BUNDLED_CONPTY_DIR));
 }
 
-SessionConfig probe_config(std::wstring mode) {
+SessionConfig probe_config(std::string mode) {
     SessionConfig c;
     c.api = best_conpty();
     c.spec.executable = AGENTDESK_VT_PROBE;
@@ -59,7 +59,7 @@ bool screen_contains(const Session& s, const std::string& needle) {
 }  // namespace
 
 TEST(Session, StartsRunningAndExitsWithCode) {
-    auto s = Session::start(probe_config(L"report"));
+    auto s = Session::start(probe_config("report"));
     EXPECT_NE(s->info().pid, 0u);
     const auto code = s->wait_exit(15s);
     ASSERT_TRUE(code.has_value());
@@ -70,7 +70,7 @@ TEST(Session, StartsRunningAndExitsWithCode) {
 
 // QA-08/QA-22: OSC 7501 drives agent state; process exit drops blocked -> Unknown, last kept.
 TEST(Session, Osc7501StateThenUnknownAfterExitKeepsLastState) {
-    auto s = Session::start(probe_config(L"report"));
+    auto s = Session::start(probe_config("report"));
     ASSERT_TRUE(s->wait_exit(15s).has_value());
     const auto info = s->info();
     EXPECT_EQ(info.agent.state, AgentState::kUnknown);
@@ -80,7 +80,7 @@ TEST(Session, Osc7501StateThenUnknownAfterExitKeepsLastState) {
 
 // QA-09: a child that ignores Ctrl+C -> still running after the grace period -> force stop.
 TEST(Session, InterruptGracePeriodThenForceStop) {
-    auto config = probe_config(L"echo");  // raw input mode: 0x03 is just a byte to the probe
+    auto config = probe_config("echo");  // raw input mode: 0x03 is just a byte to the probe
     config.interrupt_grace = 300ms;
     auto s = Session::start(config);
     std::this_thread::sleep_for(300ms);
@@ -94,7 +94,7 @@ TEST(Session, InterruptGracePeriodThenForceStop) {
 }
 
 TEST(Session, TextInputIsEncodedByEngine) {
-    auto s = Session::start(probe_config(L"echo"));
+    auto s = Session::start(probe_config("echo"));
     std::this_thread::sleep_for(300ms);
     s->send(TextInput{U"hi測\r"});
     ASSERT_TRUE(wait_until([&] { return screen_contains(*s, "PROBE-ECHO:6869e6b8ac0d"); }, 10s));
@@ -104,7 +104,7 @@ TEST(Session, TextInputIsEncodedByEngine) {
 
 // QA-19 (host side): stale or replayed seq values from one source never override newer state.
 TEST(Session, ReportStateIgnoresStaleSeq) {
-    auto s = Session::start(probe_config(L"echo"));
+    auto s = Session::start(probe_config("echo"));
     s->report_state("codex-hook", 100, AgentState::kWorking);
     s->report_state("codex-hook", 99, AgentState::kIdle);   // stale
     s->report_state("codex-hook", 100, AgentState::kDone);  // replay
@@ -120,7 +120,7 @@ TEST(Session, ReportStateIgnoresStaleSeq) {
 }
 
 TEST(Session, ResizeChangesSnapshotSizeAndGeneration) {
-    auto s = Session::start(probe_config(L"echo"));
+    auto s = Session::start(probe_config("echo"));
     const auto gen = s->snapshot()->generation;
     s->resize(30, 100);
     ASSERT_TRUE(wait_until([&] { return s->snapshot()->cols == 100 && s->snapshot()->rows == 30; }, 5s));
@@ -130,7 +130,7 @@ TEST(Session, ResizeChangesSnapshotSizeAndGeneration) {
 
 // QA-07: with no structured source, silence never turns into Done (or anything else).
 TEST(Session, SilenceWithoutSourceStaysUnknown) {
-    auto s = Session::start(probe_config(L"echo"));
+    auto s = Session::start(probe_config("echo"));
     std::this_thread::sleep_for(1500ms);
     const auto info = s->info();
     EXPECT_EQ(info.process_state, ProcessState::kRunning);
@@ -141,8 +141,8 @@ TEST(Session, SilenceWithoutSourceStaysUnknown) {
 
 // OQ-06 backpressure: a tiny queue forces the reader to pause; every line still arrives in order.
 TEST(Session, BackpressureNeverDropsOutput) {
-    auto config = probe_config(L"flood");
-    config.spec.args = {L"flood", L"2", L"2097152"};  // 2 s at 2 MiB/s
+    auto config = probe_config("flood");
+    config.spec.args = {"flood", "2", "2097152"};  // 2 s at 2 MiB/s
     config.output_queue_limit = 4 * 1024;
     auto s = Session::start(config);
     ASSERT_TRUE(s->wait_exit(60s).has_value());
@@ -173,7 +173,7 @@ TEST(Session, BackpressureNeverDropsOutput) {
 }
 
 TEST(Session, StartFailureIsReported) {
-    auto config = probe_config(L"echo");
+    auto config = probe_config("echo");
     config.spec.executable = L"C:\\nowhere\\missing.exe";
     EXPECT_THROW(Session::start(config), std::system_error);
 }

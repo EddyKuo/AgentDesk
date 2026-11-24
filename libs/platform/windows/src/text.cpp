@@ -1,10 +1,14 @@
 // Strict UTF-8 / UTF-16 conversion (invalid input throws instead of being replaced).
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 
 #include <limits>
 #include <stdexcept>
 
-namespace agentdesk::platform::win {
+#include "agentdesk/platform/win/error.hpp"
+
+namespace agentdesk::platform {
+
+using win::throw_last_error;
 
 std::string to_utf8(std::wstring_view text) {
     if (text.empty()) {
@@ -47,4 +51,4 @@ std::wstring to_wide(std::string_view utf8) {
     return out;
 }
 
-}  // namespace agentdesk::platform::win
+}  // namespace agentdesk::platform

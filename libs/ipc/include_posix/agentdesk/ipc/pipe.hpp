@@ -1,7 +1,7 @@
 #pragma once
 
 // Local IPC on macOS (ADR-30): the interface of the Windows pipe.hpp (libs/ipc/include_win) over Unix domain sockets
-// (platform::StreamListener / ByteStream). Endpoint names stay std::wstring so shared callers
+// (platform::StreamListener / ByteStream). Endpoint names stay std::string so shared callers
 // build unchanged; on macOS a name is the socket's path. Same-user only, checked on both ends; a
 // control channel, not an isolation boundary against malware running as the same user.
 
@@ -26,12 +26,12 @@
 
 namespace agentdesk::ipc {
 
-std::wstring current_user_sid();     // the uid as text (there are no SIDs)
+std::string current_user_sid();     // the uid as text (there are no SIDs)
 std::uint32_t current_session_id();  // the audit session id
 // <per-user temp dir>/AgentDesk/host.sock
-std::wstring default_pipe_name();
+std::string default_pipe_name();
 // Name of agent-host's instance lock (platform::InstanceLock).
-std::wstring default_mutex_name();
+std::string default_mutex_name();
 
 inline constexpr std::size_t kClientSendBudget = 4u * 1024u * 1024u;  // design doc 3.3
 inline constexpr std::size_t kClientHardLimit = 16u * 1024u * 1024u;  // beyond: disconnect
@@ -81,20 +81,20 @@ private:
 class PipeServer {
 public:
     // Throws std::system_error(EADDRINUSE) when a live server owns the name.
-    PipeServer(std::wstring name, ServerHandlers handlers);
+    PipeServer(std::string name, ServerHandlers handlers);
     ~PipeServer();
     PipeServer(const PipeServer&) = delete;
     PipeServer& operator=(const PipeServer&) = delete;
 
     void stop();
-    [[nodiscard]] const std::wstring& name() const noexcept { return name_; }
+    [[nodiscard]] const std::string& name() const noexcept { return name_; }
     [[nodiscard]] std::size_t connection_count() const;
     [[nodiscard]] std::uint64_t rejected_clients() const noexcept;
 
 private:
     void accept_loop();
 
-    std::wstring name_;
+    std::string name_;
     ServerHandlers handlers_;
     std::unique_ptr<platform::StreamListener> listener_;
     std::thread acceptor_;
@@ -106,12 +106,12 @@ private:
 
 // The host endpoint as a raw stream, for agentctl bridge which relays bytes without parsing them.
 // nullptr on failure.
-std::unique_ptr<platform::ByteStream> open_raw_pipe(const std::wstring& name,
+std::unique_ptr<platform::ByteStream> open_raw_pipe(const std::string& name,
                                                     std::chrono::milliseconds timeout);
 
 class PipeClient {
 public:
-    static std::unique_ptr<PipeClient> connect(const std::wstring& name, std::chrono::milliseconds timeout);
+    static std::unique_ptr<PipeClient> connect(const std::string& name, std::chrono::milliseconds timeout);
     // Takes over a connected stream (a child's stdio for ssh bridges).
     static std::unique_ptr<PipeClient> adopt(std::unique_ptr<platform::ByteStream> stream);
     ~PipeClient();

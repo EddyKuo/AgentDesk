@@ -33,9 +33,10 @@ struct PtySize {
 
 struct PtySpawnSpec {
     std::filesystem::path executable;  // must be an .exe; batch files are rejected
-    std::vector<std::wstring> args;
-    std::filesystem::path cwd;                           // must exist; never silently replaced
-    std::map<std::wstring, std::wstring> env_overrides;  // merged over the current environment
+    std::vector<std::string> args;     // UTF-8, argv[1..]
+    std::filesystem::path cwd;         // must exist; never silently replaced
+    // UTF-8; merged over the current environment, an empty value removes the variable
+    std::map<std::string, std::string> env_overrides;
     PtySize size;
 };
 

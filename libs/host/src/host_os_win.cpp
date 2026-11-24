@@ -1,6 +1,7 @@
 // host_os.hpp on Windows: system error text, the shells' folder hooks (PowerShell, cmd, WSL).
 #include <windows.h>
 
+#include <cctype>
 #include <cwctype>
 #include <memory>
 #include <system_error>
@@ -51,23 +52,23 @@ namespace {
 // A ~/.bashrc that assigns PROMPT_COMMAND, or zsh/fish, replaces it; then the folder is unknown.
 void add_wsl_folder_hook(platform::win::PtySpawnSpec& spec) {
     for (const auto& a : spec.args)
-        if (a == L"-e" || a == L"--exec" || a == L"--")
+        if (a == "-e" || a == "--exec" || a == "--")
             return;
     // OSC 133 A too: the prompt is back, so the program that ran before it (an agent) has ended.
-    spec.env_overrides[L"PROMPT_COMMAND"] =
-        L"printf '\\033]133;A\\007\\033]7;file://%s%s\\007' \"$WSL_DISTRO_NAME\" \"$PWD\"";
-    std::wstring wslenv;
-    if (const auto it = spec.env_overrides.find(L"WSLENV"); it != spec.env_overrides.end()) {
+    spec.env_overrides["PROMPT_COMMAND"] =
+        "printf '\\033]133;A\\007\\033]7;file://%s%s\\007' \"$WSL_DISTRO_NAME\" \"$PWD\"";
+    std::string wslenv;
+    if (const auto it = spec.env_overrides.find("WSLENV"); it != spec.env_overrides.end()) {
         wslenv = it->second;
     } else {
         wchar_t buf[4096]{};
         const DWORD n = ::GetEnvironmentVariableW(L"WSLENV", buf, 4096);
         if (n > 0 && n < 4096)
-            wslenv.assign(buf, n);
+            wslenv = win::to_utf8(std::wstring_view(buf, n));
     }
-    if (wslenv.find(L"PROMPT_COMMAND") == std::wstring::npos)
-        wslenv += (wslenv.empty() ? L"" : L":") + std::wstring(L"PROMPT_COMMAND/u");
-    spec.env_overrides[L"WSLENV"] = wslenv;
+    if (wslenv.find("PROMPT_COMMAND") == std::string::npos)
+        wslenv += (wslenv.empty() ? "" : ":") + std::string("PROMPT_COMMAND/u");
+    spec.env_overrides["WSLENV"] = wslenv;
 }
 
 std::wstring to_lower(std::wstring s) {
@@ -95,25 +96,27 @@ void add_folder_hook(platform::win::PtySpawnSpec& spec) {
         const DWORD n = ::GetEnvironmentVariableW(L"PROMPT", buf, 1024);
         const std::wstring own = n > 0 && n < 1024 ? std::wstring(buf, n) : std::wstring(L"$P$G");
         if (own.find(L"]133;A") == std::wstring::npos)
-            spec.env_overrides[L"PROMPT"] = L"$E]133;A$E\\" + own;
+            spec.env_overrides["PROMPT"] = "$E]133;A$E\\" + win::to_utf8(own);
         return;
     }
     if (exe != L"pwsh.exe" && exe != L"powershell.exe")
         return;
     for (const auto& a : spec.args) {
-        const std::wstring l = to_lower(a);
-        if (l == L"-command" || l == L"-c" || l == L"-file" || l == L"-f" || l == L"-encodedcommand" ||
-            l == L"-ec" || l == L"-noninteractive")
+        std::string l = a;
+        for (auto& c : l)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (l == "-command" || l == "-c" || l == "-file" || l == "-f" || l == "-encodedcommand" || l == "-ec" ||
+            l == "-noninteractive")
             return;
     }
-    spec.args.push_back(L"-NoExit");
-    spec.args.push_back(L"-Command");
+    spec.args.push_back("-NoExit");
+    spec.args.push_back("-Command");
     spec.args.push_back(
-        L"$global:__agentdesk_prompt = $function:prompt; "
-        L"function global:prompt { [Console]::Write([char]27 + ']133;A' + [char]7); "
-        L"$r = & $global:__agentdesk_prompt; "
-        L"try { $l = Get-Location; if ($l.Provider.Name -eq 'FileSystem') "
-        L"{ [Environment]::CurrentDirectory = $l.ProviderPath } } catch {}; $r }");
+        "$global:__agentdesk_prompt = $function:prompt; "
+        "function global:prompt { [Console]::Write([char]27 + ']133;A' + [char]7); "
+        "$r = & $global:__agentdesk_prompt; "
+        "try { $l = Get-Location; if ($l.Provider.Name -eq 'FileSystem') "
+        "{ [Environment]::CurrentDirectory = $l.ProviderPath } } catch {}; $r }");
 }
 
 std::uint32_t current_pid() {

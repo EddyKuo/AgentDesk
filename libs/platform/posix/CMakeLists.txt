@@ -2,6 +2,7 @@
 # docs/design/platform-abstraction.md 5).
 agentdesk_library(agentdesk_platform
     src/posix_util.cpp
+    src/text.cpp
     src/pty_posix.cpp
     src/proc_info_macos.cpp
     src/process_posix.cpp

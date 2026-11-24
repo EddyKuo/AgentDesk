@@ -28,7 +28,7 @@ struct Profile {
     std::string id;
     std::string name;
     std::filesystem::path executable;
-    std::vector<std::wstring> args;
+    std::vector<std::string> args;  // UTF-8
 };
 
 nlohmann::json to_json(const Profile& p);
