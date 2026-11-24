@@ -38,7 +38,7 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 - `qa\*.exe`：QA-05、QA-07、QA-10（`qa05_ui_detach.exe`、`qa07_silence.exe`、`qa10_ui_host_crash.exe`）、`screenshot_ui.exe`（隔離的 host 加 PrintWindow 截圖與 report，用來檢查渲染）、`smoke_zip.exe`；發布用 `agentdesk_package.exe`（先建 Release）
 - `fetch_conpty.exe`（隨附 ConPTY）、`make_fixtures.exe`（重產 `tests\fixtures\bytes`）
 
-macOS（ADR-30，設計文件 3.11）：`scripts/build.sh clang-macos-arm64-debug all`（vcpkg 在 `~/vcpkg`，triplet `arm64-osx-agentdesk`）、`scripts/package_macos.sh`（`.app` 與 zip）。macOS 的程式在 `libs/platform/posix/`（含過渡用的 `compat/`）、`*_posix.cpp`、`apps/desktop/macos/`；共用程式的 Win32 段落用 `#ifdef _WIN32` 隔開，Windows 的寫法不動。截圖用 `agent-ui --screenshot <png> --exit-after-ms N`。
+macOS（ADR-30，設計文件 3.11）：`scripts/build.sh clang-macos-arm64-debug all`（vcpkg 在 `~/vcpkg`，triplet `arm64-osx-agentdesk`）、`scripts/package_macos.sh`（`.app` 與 zip）。兩個平台共用一份原始碼，差異在建置時分開：共用的 `.cpp` 不寫 `#ifdef _WIN32`，各平台不同的部分放在內部介面（`*_os.hpp`，例如 `libs/host/src/host_os.hpp`、`apps/desktop/desktop_os.hpp`）後面，實作分成 `*_win.cpp`／`win/` 與 `*_posix.cpp`／`macos/`，由各資料夾的 CMakeLists 依平台挑選。宣告不同的標頭檔放在 `include_win/`、`include_posix/`（`agentdesk/ipc/pipe.hpp`、`agentdesk/host/handover.hpp`、`agentdesk/platform/crt.hpp`），靠 include 路徑挑選。macOS 的平台層在 `libs/platform/posix/`（含過渡用的 `compat/`）。截圖用 `agent-ui --screenshot <png> --exit-after-ms N`。
 
 不要用自動化腳本反覆啟動又強制結束實際的 Claude Code：它會把這當成全螢幕渲染器故障，自行關掉該模式。渲染檢查用 PowerShell 或 vt_probe。
 

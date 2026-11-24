@@ -521,10 +521,11 @@ int run_shell(const ShellOptions& options);  // main loop; replaces wWinMain's b
 
 macOS 部分（第 9～12 步）已在分支 `feature/sprint-11/macos-port` 完成，平台差異對照寫在設計文件 3.11，完成狀態與待人工驗收的項目在設計文件 5.8。和這份草案不同的地方：
 
-- **Windows 先行的第 1～8 步還沒做。** 為了讓 Windows 程式不用動、之後和 Windows 端的修改合併時少衝突，共用程式暫時沿用 `platform::win` 的名稱：macOS 上由 `libs/platform/posix/compat/` 提供同名的標頭檔，接到第 5 節的中立介面。真正只屬於 Win32 的段落用 `#ifdef _WIN32` 隔開，整個檔案都是 Win32 的另外寫一份 macOS 版（`*_posix.cpp`、`apps/desktop/macos/`）。第 1～8 步做完時，這一層就拿掉。
+- **Windows 先行的第 1～8 步還沒做。** 為了讓 Windows 程式少動、之後和 Windows 端的修改合併時少衝突，共用程式暫時沿用 `platform::win` 的名稱：macOS 上由 `libs/platform/posix/compat/` 提供同名的標頭檔，接到第 5 節的中立介面。第 1～8 步做完時，這一層就拿掉。
+- **平台差異在建置時分開（2026-11-24 重構）。** 共用的 `.cpp` 不再有 `#ifdef _WIN32`。各模組不同的部分放在小的內部介面後面（`host_os.hpp`、`fonts_os.hpp`、`keymap_os.hpp`、`keyboard_os.hpp`、`links_os.hpp`、`mods_os.hpp`、`updates_os.hpp`、`apps/desktop/desktop_os.hpp`、`apps/cli/cli_os.hpp`），實作分成 `*_win.cpp`（或 `win/`）與 `*_posix.cpp`（或 `macos/`），由 CMake 挑選。宣告本身不同的標頭檔放在 `include_win/`、`include_posix/`，靠 include 路徑挑選。剩下的 `#ifdef` 只有第 5 節中立介面裡 POSIX 專用的成員，以及給第三方用的 `mod_sdk.hpp` 匯出巨集。原本整份是 Win32 的檔案（`pipe.cpp`、`handover.cpp`、`apps/host/main.cpp`、`apps/desktop/main.cpp`）留在原位，方便合併。
 - **5.1**：`Pty` 多了熱更新用的 `read_available`、`handover_fd`、`release_after_handover`、`adopt`（只在 POSIX 上有）。root 程序結束一律用 kqueue 監看，熱更新時才能停止監看還在執行的程式。
 - **5.2**：`ProcessSpec` 多了 `stderr_fd`（POSIX），讓 ssh 和 git 的 stderr 可以分開收。
 - **5.3**：`--pipe` 名稱不含 `/` 時，對應到 runtime 資料夾裡的 `<名稱>.sock`。
-- **5.4**：多了 `runtime_dir()`、`login_path()`、`find_on_login_path()`；`FolderWatch` 沒有做成共用介面，git 與 Files／Changes 的監看在 macOS 上改用輪詢修改時間（`git_cache.cpp`、`side_panels.cpp`）。
-- **5.6**：`WindowHost` 沒有做成虛擬介面，改成 `apps/desktop/window_ops.hpp` 的幾個函式（Windows 是原本的 Win32 呼叫，macOS 由外殼實作）。
+- **5.4**：多了 `runtime_dir()`、`login_path()`、`find_on_login_path()`；`FolderWatch` 沒有做成共用介面，git 與 Files／Changes 的監看在 macOS 上改用輪詢修改時間（`macos/git_cache_macos.cpp`、`macos/side_panels_macos.cpp`）。
+- **5.6**：`WindowHost` 沒有做成虛擬介面，改成 `apps/desktop/window_ops.hpp` 的幾個函式（Windows 在 `win/window_ops_win.cpp`，macOS 由外殼 `macos/main_macos.mm` 實作）。
 
