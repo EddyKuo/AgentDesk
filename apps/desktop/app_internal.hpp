@@ -37,6 +37,7 @@
 #include <imgui.h>
 
 #include "agentdesk/platform/crt.hpp"
+#include "agentdesk/platform/system.hpp"
 #include "desktop_os.hpp"
 
 #include "agentdesk/host/git_tools.hpp"
@@ -243,6 +244,12 @@ struct Settings {
 };
 // %AGENTDESK_DATA_DIR%, else %LOCALAPPDATA%\AgentDesk; created when missing.
 std::filesystem::path data_dir();
+// The person's home folder; empty when unknown. Moves `tmp` over `target` in one step; false when
+// that failed, with the reason in `why`. An environment variable; empty when unset.
+std::filesystem::path home_dir();
+bool replace_file(const std::filesystem::path& tmp, const std::filesystem::path& target,
+                  std::error_code* why = nullptr);
+std::string env(const char* name);
 // The folder agent-ui.exe is in (fonts\, sounds\, programs\, themes\, mods\ ship there).
 std::filesystem::path exe_dir();
 std::pair<std::string, std::string> layout_theme_pair(const Settings& st);

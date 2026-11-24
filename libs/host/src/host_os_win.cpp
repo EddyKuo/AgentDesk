@@ -134,10 +134,6 @@ void prepare_tool(platform::ProcessSpec& spec) {
         spec.args.insert(spec.args.begin(), {"-c", "safe.directory=*"});
 }
 
-std::uint32_t current_pid() {
-    return ::GetCurrentProcessId();
-}
-
 std::string local_path_from_cwd_uri(const std::string& uri) {
     static const std::string local = [] {
         char buf[MAX_COMPUTERNAME_LENGTH + 1]{};
@@ -145,12 +141,6 @@ std::string local_path_from_cwd_uri(const std::string& uri) {
         return ::GetComputerNameA(buf, &n) ? std::string(buf, n) : std::string();
     }();
     return terminal::windows_path_from_cwd_uri(uri, local);
-}
-
-std::filesystem::path home_dir() {
-    wchar_t home[MAX_PATH]{};
-    const DWORD n = ::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
-    return std::filesystem::path(std::wstring(home, n));
 }
 
 }  // namespace agentdesk::host::detail

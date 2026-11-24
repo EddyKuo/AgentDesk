@@ -196,7 +196,7 @@ std::string write_file_atomically(const std::filesystem::path& path, const std::
             return "Couldn't write the file (is the disk full or the folder read-only?)";
         }
     }
-    if (std::error_code why; !os::replace_file(tmp, path, &why)) {
+    if (std::error_code why; !replace_file(tmp, path, &why)) {
         std::filesystem::remove(tmp, ec);
         return why.message();
     }

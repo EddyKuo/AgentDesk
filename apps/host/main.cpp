@@ -24,6 +24,7 @@
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/ipc_transport.hpp"
 #include "agentdesk/platform/pty.hpp"
+#include "agentdesk/platform/system.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/platform/win/unique_handle.hpp"
 
@@ -99,9 +100,7 @@ int print_version() {
 std::filesystem::path resolve_data_dir(std::filesystem::path given) {
     if (!given.empty())
         return given;
-    wchar_t buf[MAX_PATH]{};
-    const DWORD n = ::GetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", buf, MAX_PATH);
-    return n > 0 && n < MAX_PATH ? std::filesystem::path(std::wstring(buf, n)) : host::default_data_dir();
+    return agentdesk::platform::data_dir();
 }
 
 // The new host's side of host.update: adopts the old host's sessions and waits for its "go".

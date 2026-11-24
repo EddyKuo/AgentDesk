@@ -41,20 +41,11 @@ struct LocalTime {
 LocalTime local_time();
 // The local date and time as YYYYmmdd-HHMMSS, for file names.
 std::string local_file_stamp();
-// Moves `tmp` over `target` in one step; false when that failed, with the reason in `why`.
-bool replace_file(const std::filesystem::path& tmp, const std::filesystem::path& target,
-                  std::error_code* why = nullptr);
-// An environment variable (UTF-8); empty when unset.
-std::string env(const char* name);
-// The person's home folder; empty when unknown.
-std::filesystem::path home_dir();
 // A program a mod asked to start: argv[0] looked up on the PATH, never through a shell, without a
 // window, not waited for.
 void start_detached(const std::vector<std::wstring>& argv);
 // The files a wildcard in `pattern`'s last component matches (ssh's Include).
 std::vector<std::filesystem::path> matching_files(const std::filesystem::path& pattern);
-// AGENTDESK_DATA_DIR, else the system's per-user application data folder; created when missing.
-std::filesystem::path data_dir();
 // Where the program's files are (fonts, sounds, programs, themes, mods): the executable's folder,
 // or the app bundle's Resources.
 std::filesystem::path program_files_dir();

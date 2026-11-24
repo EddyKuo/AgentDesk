@@ -87,20 +87,12 @@ void prepare_tool(platform::ProcessSpec& spec) {
         spec.env_overrides["PATH"] = path;
 }
 
-std::uint32_t current_pid() {
-    return static_cast<std::uint32_t>(::getpid());
-}
-
 std::string local_path_from_cwd_uri(const std::string& uri) {
     static const std::string local = [] {
         char buf[256]{};
         return ::gethostname(buf, sizeof(buf) - 1) == 0 ? std::string(buf) : std::string();
     }();
     return terminal::posix_path_from_cwd_uri(uri, local);
-}
-
-std::filesystem::path home_dir() {
-    return platform::home_dir();
 }
 
 }  // namespace agentdesk::host::detail

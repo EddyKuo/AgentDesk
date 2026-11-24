@@ -413,7 +413,7 @@ bool look_terminals(App::State& s) {
         std::snprintf(buf, sizeof buf, "%s", s.settings.worktree_dir.c_str());
     // The default as this system writes it (home folder, its own separator).
     static const std::string default_note = [] {
-        const auto u8 = (os::home_dir() / ".agentdesk" / "worktrees").u8string();
+        const auto u8 = (home_dir() / ".agentdesk" / "worktrees").u8string();
         return "Empty: " + std::string(u8.begin(), u8.end());
     }();
     settings_row(s, "Worktrees folder", default_note.c_str(), px(260), ImGui::GetFrameHeight());

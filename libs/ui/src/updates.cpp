@@ -12,6 +12,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "agentdesk/platform/system.hpp"
 #include "agentdesk/protocol/frame.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "system_process.hpp"
@@ -20,6 +21,14 @@
 namespace agentdesk::ui::updates {
 
 namespace fs = std::filesystem;
+
+std::string sha256(std::string_view bytes) {
+    try {
+        return platform::sha256_hex(bytes);
+    } catch (const std::exception&) {
+        return {};  // matches no checksum
+    }
+}
 using Json = nlohmann::json;
 using detail::read_file;
 using detail::trim;

@@ -1,6 +1,6 @@
 #pragma once
 
-// Host-owned settings files (design doc 3.9): %LOCALAPPDATA%\AgentDesk\{profiles,sessions}.json,
+// Host-owned settings files (design doc 3.9): profiles.json and sessions.json in the data folder,
 // schema_version 1, written to a temp file and atomically replaced, keeping one backup.
 
 #include <cstdint>
@@ -16,9 +16,7 @@ namespace agentdesk::host {
 
 inline constexpr int kSchemaVersion = 1;
 
-std::filesystem::path default_data_dir();  // %LOCALAPPDATA%\AgentDesk (created on demand)
-
-// Atomic write: <file>.tmp -> ReplaceFile/MoveFileEx; previous content kept as <file>.bak.
+// Atomic write: <file>.tmp replaces it in one step; previous content kept as <file>.bak.
 void write_json_atomic(const std::filesystem::path& file, const nlohmann::json& doc);
 // nullopt when missing. Corrupt content falls back to <file>.bak; when that is unusable too the
 // damaged file is renamed to <file>.corrupt-<UTC time> and nullopt is returned (start from defaults).

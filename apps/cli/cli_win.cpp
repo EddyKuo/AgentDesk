@@ -20,12 +20,6 @@ namespace agentdesk::cli::os {
 namespace win = platform::win;
 using namespace std::chrono_literals;
 
-std::string env(const wchar_t* name) {
-    wchar_t buf[512]{};
-    const DWORD n = ::GetEnvironmentVariableW(name, buf, 512);
-    return n > 0 && n < 512 ? win::to_utf8(std::wstring(buf, n)) : std::string();
-}
-
 std::string read_stdin(std::size_t max) {
     std::string input;
     HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);

@@ -9,6 +9,8 @@
 #include <sstream>
 #include <thread>
 
+#include "agentdesk/platform/system.hpp"
+
 namespace agentdesk::ui::detail {
 
 ProcessResult run_process(const std::filesystem::path& exe, const std::vector<std::wstring>& args,
@@ -70,6 +72,24 @@ bool spawn_detached(const std::filesystem::path& exe, const std::vector<std::wst
     for (const auto& w : args)
         a.push_back(to_utf8(w));
     return start_in_background(exe, a, env);
+}
+
+std::optional<std::wstring> env_var(const wchar_t* name) {
+    const auto v = platform::env_var(to_utf8(name));
+    if (!v)
+        return std::nullopt;
+    return to_wide(*v);
+}
+
+void unset_env_var(const wchar_t* name) {
+    platform::unset_env_var(to_utf8(name));
+}
+
+std::optional<std::wstring> home_folder() {
+    const auto home = platform::home_dir();
+    if (home.empty())
+        return std::nullopt;
+    return home.wstring();
 }
 
 std::string trim(std::string_view s) {

@@ -25,6 +25,7 @@
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/ipc_transport.hpp"
+#include "agentdesk/platform/system.hpp"
 #include "agentdesk/platform/text.hpp"
 
 namespace {
@@ -82,8 +83,7 @@ HostArgs parse_command_line(int argc, char** argv) {
 std::filesystem::path resolve_data_dir(std::filesystem::path given) {
     if (!given.empty())
         return given;
-    const char* env = std::getenv("AGENTDESK_DATA_DIR");
-    return env != nullptr && *env != '\0' ? std::filesystem::path(env) : host::default_data_dir();
+    return platform::data_dir();
 }
 
 // The new host's side of host.update: adopts the old host's sessions and waits for its "go".

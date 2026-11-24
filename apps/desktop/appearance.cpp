@@ -20,7 +20,7 @@ sch::LocalNow local_now() {
     n.minute = t.hour * 60 + t.minute;
     n.utc_offset = t.utc_offset;
     n.std_offset = t.std_offset;
-    if (const std::string set = os::env("AGENTDESK_NOW"); set.size() >= 16 && set.size() < 32) {
+    if (const std::string set = env("AGENTDESK_NOW"); set.size() >= 16 && set.size() < 32) {
         int y = 0, mo = 0, d = 0, h = 0, mi = 0;
         if (sscanf_s(set.c_str(), "%d-%d-%dT%d:%d", &y, &mo, &d, &h, &mi) == 5 && mo >= 1 && mo <= 12 &&
             d >= 1 && d <= 31 && h >= 0 && h < 24 && mi >= 0 && mi < 60) {

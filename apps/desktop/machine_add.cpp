@@ -145,7 +145,7 @@ std::vector<std::pair<std::string, std::string>> SshConfigReader::hosts() const 
 }
 
 std::vector<std::pair<std::string, std::string>> ssh_config_hosts() {
-    const std::filesystem::path home = os::home_dir();
+    const std::filesystem::path home = home_dir();
     if (home.empty())
         return {};
     SshConfigReader reader(home);

@@ -12,6 +12,7 @@
 #include <sstream>
 
 #include "agentdesk/mod_api.h"
+#include "agentdesk/platform/dynamic_library.hpp"
 #include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::ui {
@@ -113,12 +114,15 @@ std::vector<ModPanel> parse_mod_panels(const std::string& mod, const std::string
     return out;
 }
 
+// A mod's library in its folder: mod.dll, mod.dylib.
+static const std::string kLibrary = platform::library_file("mod");
+
 // ------------------------------------------------------------------ one mod = one DLL
 struct ModHost::Mod {
     ModHost* host = nullptr;
     ModInfo info;
     std::filesystem::path folder;
-    void* dll = nullptr;  // mods_os::load_library
+    std::unique_ptr<platform::DynamicLibrary> dll;
     agentdesk_host api{};
     agentdesk_mod mod{};
     bool ready = false;    // init succeeded and not crashed since
@@ -128,11 +132,11 @@ struct ModHost::Mod {
     std::string scratch;  // sessions() / setting() result, valid during one call
 
     ~Mod() {
-        if (dll == nullptr || crashed)
-            return;  // a mod that crashed may have left state behind: keep its code mapped
-        if (ready && mod.destroy != nullptr && seh_destroy(&mod) != 0)
-            return;
-        mods_os::unload_library(dll);
+        // A mod that crashed may have left state behind: its code stays mapped (never unloaded).
+        if (dll != nullptr && !crashed && ready && mod.destroy != nullptr && seh_destroy(&mod) != 0)
+            crashed = true;
+        if (crashed)
+            (void)dll.release();
     }
 
     void fail(Code code) {
@@ -219,14 +223,14 @@ const char* api_setting(void* ctx, const char* key) {
 // kept in m.info.error; success sets m.ready.
 void start_mod(ModHost::Mod& m) {
     std::string error;
-    m.dll = mods_os::load_library(m.folder, &error);
+    m.dll = platform::DynamicLibrary::load(m.folder / kLibrary, &error);
     if (m.dll == nullptr) {
         m.info.error = error;
         return;
     }
-    const auto init = reinterpret_cast<agentdesk_mod_init_fn>(mods_os::find_symbol(m.dll, "agentdesk_mod_init"));
+    const auto init = reinterpret_cast<agentdesk_mod_init_fn>(m.dll->symbol("agentdesk_mod_init"));
     if (init == nullptr) {
-        m.info.error = std::string(mods_os::library_file()) + " does not export agentdesk_mod_init";
+        m.info.error = kLibrary + " does not export agentdesk_mod_init";
         return;
     }
     m.api = {AGENTDESK_MOD_API_VERSION, &m,           api_run,    api_send, api_notify, api_exec,
@@ -269,7 +273,7 @@ void ModHost::load(const std::set<std::string>& enabled) {
             folders.push_back(e.path());
     std::sort(folders.begin(), folders.end());
     for (const auto& f : folders) {
-        const bool has_dll = std::filesystem::is_regular_file(f / mods_os::library_file(), ec);
+        const bool has_dll = std::filesystem::is_regular_file(f / kLibrary, ec);
         const bool old_lua = std::filesystem::is_regular_file(f / L"main.lua", ec);
         if (!has_dll && !old_lua)
             continue;

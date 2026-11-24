@@ -12,6 +12,7 @@
 
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
+#include "agentdesk/platform/system.hpp"
 #include "agentdesk/platform/text.hpp"
 #include "host_os.hpp"
 
@@ -204,7 +205,7 @@ void log_skipped_entry(const std::filesystem::path& data_dir, std::string_view f
                        const std::exception& e) {
     try {
         std::ofstream(data_dir / L"host.log", std::ios::app)
-            << iso8601_now() << " pid=" << detail::current_pid() << " skipped " << file << " entry "
+            << iso8601_now() << " pid=" << platform::current_pid() << " skipped " << file << " entry "
             << index << " ("
             << (dynamic_cast<const Json::exception*>(&e) != nullptr ? "malformed" : "unreadable") << ")\n";
     } catch (const std::exception&) {
@@ -625,7 +626,7 @@ Response SessionManager::do_worktree_add(const Request& req) {
     if (!std::filesystem::is_directory(repo_path, ec))
         return protocol::fail(req.id, ErrorCode::kBadRequest, "repo folder does not exist: " + repo);
     if (path.empty()) {
-        const auto base = detail::home_dir() / ".agentdesk" / "worktrees";
+        const auto base = platform::home_dir() / ".agentdesk" / "worktrees";
         const auto p = default_worktree_path(base, repo_path, branch).u8string();
         path.assign(p.begin(), p.end());
     }
@@ -903,7 +904,7 @@ Response SessionManager::do_hello(const Request& req) {
         req.id, {{"version", protocol::kProtocolVersion},
                  {"host_instance_id", config_.host_instance_id},
                  {"host_version", config_.host_version},
-                 {"host_pid", detail::current_pid()},
+                 {"host_pid", platform::current_pid()},
                  // Self-update (design doc 7.4 OQ-09): the hosts whose sessions this one took
                  // over (a client keeps those sessions), and where it runs from (agentctl update).
                  {"succeeds", config_.succeeds},

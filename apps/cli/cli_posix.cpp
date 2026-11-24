@@ -36,11 +36,6 @@ namespace agentdesk::cli::os {
 
 using namespace std::chrono_literals;
 
-std::string env(const wchar_t* name) {
-    const char* v = std::getenv(platform::to_utf8(name).c_str());
-    return v != nullptr ? std::string(v) : std::string();
-}
-
 std::string read_stdin(std::size_t max) {
     std::string input;
     char buf[4096];

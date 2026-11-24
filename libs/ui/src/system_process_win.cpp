@@ -55,18 +55,6 @@ std::filesystem::path system32_exe(std::wstring_view name) {
     return std::filesystem::path(std::wstring(root, n)) / L"System32" / file;
 }
 
-std::optional<std::wstring> env_var(const wchar_t* name) {
-    const DWORD n = ::GetEnvironmentVariableW(name, nullptr, 0);
-    if (n == 0)
-        return std::nullopt;
-    std::wstring v(n, L'\0');
-    v.resize(::GetEnvironmentVariableW(name, v.data(), n));
-    return v;
-}
-
-void unset_env_var(const wchar_t* name) {
-    ::SetEnvironmentVariableW(name, nullptr);
-}
 
 const char* os_name() {
     return "windows";
@@ -74,10 +62,6 @@ const char* os_name() {
 
 const char* cpu_arch() {
     return "x86_64";
-}
-
-std::optional<std::wstring> home_folder() {
-    return env_var(L"USERPROFILE");
 }
 
 }  // namespace agentdesk::ui::detail

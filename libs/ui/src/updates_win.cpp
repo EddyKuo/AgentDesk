@@ -1,9 +1,7 @@
-// updates_os.hpp on Windows, with sha256 (CNG), target and find_root.
+// updates_os.hpp on Windows, with target and find_root.
 #include <windows.h>
 
 #include <algorithm>
-
-#include <bcrypt.h>
 
 #include "agentdesk/ui/updates.hpp"
 #include "system_process.hpp"
@@ -13,39 +11,10 @@ namespace agentdesk::ui::updates {
 
 namespace fs = std::filesystem;
 
-std::string sha256(std::string_view bytes) {
-    BCRYPT_ALG_HANDLE alg = nullptr;
-    std::string out;
-    if (::BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0)
-        return out;
-    unsigned char digest[32]{};
-    BCRYPT_HASH_HANDLE hash = nullptr;
-    if (::BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) == 0) {
-        // BCryptHashData takes a ULONG length: feed large inputs in 1 GiB pieces.
-        std::size_t at = 0;
-        do {
-            const ULONG n = static_cast<ULONG>(std::min<std::size_t>(bytes.size() - at, 1u << 30));
-            ::BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<char*>(bytes.data() + at)), n, 0);
-            at += n;
-        } while (at < bytes.size());
-        ::BCryptFinishHash(hash, digest, sizeof digest, 0);
-        ::BCryptDestroyHash(hash);
-        static constexpr char kHex[] = "0123456789abcdef";
-        for (unsigned char b : digest) {
-            out += kHex[b >> 4];
-            out += kHex[b & 15];
-        }
-    }
-    ::BCryptCloseAlgorithmProvider(alg, 0);
-    return out;
-}
-
 std::string target() {
     return "windows-x86_64";
 }
 
-// An install is the folder unpacked from the portable zip, recognised by the
-// THIRD_PARTY_NOTICES.md it holds; a build folder has none.
 // An install is the folder unpacked from the portable zip, recognised by the
 // THIRD_PARTY_NOTICES.md it holds; a build folder has none.
 std::optional<fs::path> find_root(const fs::path& exe) {

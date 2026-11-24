@@ -134,7 +134,7 @@ bool path_within(const std::string& p, const std::string& dir) {
 
 std::string display_path(const std::string& cwd) {
     static const std::string home = [] {
-        const auto u8 = os::home_dir().u8string();
+        const auto u8 = home_dir().u8string();
         return std::string(u8.begin(), u8.end());
     }();
     if (path_within(cwd, home))

@@ -1,8 +1,7 @@
-// updates_os.hpp on macOS (ADR-30), with sha256 (CommonCrypto), target and find_root. The
+// updates_os.hpp on macOS (ADR-30), with target and find_root. The
 // install is the AgentDesk.app bundle.
 #include <algorithm>
 
-#include <CommonCrypto/CommonDigest.h>
 #include <strings.h>
 #include <unistd.h>
 
@@ -13,26 +12,6 @@
 namespace agentdesk::ui::updates {
 
 namespace fs = std::filesystem;
-
-std::string sha256(std::string_view bytes) {
-    CC_SHA256_CTX ctx;
-    CC_SHA256_Init(&ctx);
-    std::size_t at = 0;
-    while (at < bytes.size()) {
-        const auto n = static_cast<CC_LONG>(std::min<std::size_t>(bytes.size() - at, 1u << 30));
-        CC_SHA256_Update(&ctx, bytes.data() + at, n);
-        at += n;
-    }
-    unsigned char digest[CC_SHA256_DIGEST_LENGTH]{};
-    CC_SHA256_Final(digest, &ctx);
-    static constexpr char kHex[] = "0123456789abcdef";
-    std::string out;
-    for (unsigned char b : digest) {
-        out += kHex[b >> 4];
-        out += kHex[b & 15];
-    }
-    return out;
-}
 
 std::string target() {
     return "darwin-aarch64";

@@ -22,6 +22,7 @@
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/crt.hpp"
+#include "agentdesk/platform/system.hpp"
 #include "agentdesk/platform/text.hpp"
 #include "agentdesk/protocol/messages.hpp"
 #include "agentdesk/ui/updates.hpp"
@@ -153,8 +154,9 @@ std::optional<int> call(Ctx& ctx, const std::string& method, Json params, Json& 
     return std::nullopt;
 }
 
-std::string env(const wchar_t* name) {
-    return agentdesk::cli::os::env(name);
+// An environment variable; "" when unset.
+std::string env(const char* name) {
+    return platform::env_var(name).value_or(std::string());
 }
 
 Json labels_json(const std::vector<std::string>& list) {
@@ -204,7 +206,7 @@ int cmd_run(Ctx& ctx) {
     // Run from inside a session: that session is the parent (a sub-agent), unless --no-parent.
     if (const auto p = ctx.args.opt("--parent"))
         params["parent"] = *p;
-    else if (const auto self = env(L"AGENTDESK_SESSION_ID"); !self.empty() && !ctx.args.has("--no-parent"))
+    else if (const auto self = env("AGENTDESK_SESSION_ID"); !self.empty() && !ctx.args.has("--no-parent"))
         params["parent"] = self;
     if (!ctx.args.labels.empty())
         params["labels"] = labels_json(ctx.args.labels);
@@ -438,7 +440,7 @@ int cmd_wait(Ctx& ctx) {
 
 // From inside a sub-agent: report text to the session that started it (or --to).
 int cmd_report(Ctx& ctx) {
-    std::string from = ctx.args.opt("--from").value_or(env(L"AGENTDESK_SESSION_ID"));
+    std::string from = ctx.args.opt("--from").value_or(env("AGENTDESK_SESSION_ID"));
     if (from.empty())
         throw std::invalid_argument("report runs inside an AgentDesk session (or pass --from)");
     std::string text;
@@ -517,8 +519,8 @@ int cmd_shutdown(Ctx& ctx) {
 // person's approval prompt, which AgentDesk must never do. Never starts a host; gives up fast.
 int run_hook() {
     const std::string input = agentdesk::cli::os::read_stdin(1024 * 1024);
-    const std::string session = env(L"AGENTDESK_SESSION_ID");
-    const std::string pipe = env(L"AGENTDESK_PIPE");
+    const std::string session = env("AGENTDESK_SESSION_ID");
+    const std::string pipe = env("AGENTDESK_PIPE");
     if (session.empty() || pipe.empty())
         return kOk;  // not inside an AgentDesk session
     const auto evt = Json::parse(input, nullptr, false);
@@ -682,7 +684,7 @@ const char* kUsage =
 std::string session_pipe(const Ctx& ctx) {
     if (const auto p = ctx.args.opt("--pipe"))
         return *p;
-    if (const std::string p = env(L"AGENTDESK_PIPE"); !p.empty())
+    if (const std::string p = env("AGENTDESK_PIPE"); !p.empty())
         return p;
     return ipc::default_pipe_name();
 }

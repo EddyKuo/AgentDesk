@@ -1,8 +1,6 @@
-// mods_os.hpp on macOS (ADR-30): mod.dylib loaded by absolute path, calls guarded by fault signals.
+// mods_os.hpp on macOS (ADR-30): calls guarded by fault signals.
 #include <csetjmp>
 #include <csignal>
-
-#include <dlfcn.h>
 
 #include "mods_os.hpp"
 
@@ -82,28 +80,6 @@ Code seh_copy(const char* s, std::size_t max, char* buf, std::size_t* len) {
         }
         *len = n;
     });
-}
-
-const char* library_file() {
-    return "mod.dylib";
-}
-
-// Its symbols stay private to it.
-void* load_library(const std::filesystem::path& folder, std::string* error) {
-    void* dll = ::dlopen((folder / "mod.dylib").c_str(), RTLD_NOW | RTLD_LOCAL);
-    if (dll == nullptr) {
-        const char* why = ::dlerror();
-        *error = std::string("cannot load mod.dylib (") + (why != nullptr ? why : "unknown error") + ")";
-    }
-    return dll;
-}
-
-void* find_symbol(void* library, const char* name) {
-    return ::dlsym(library, name);
-}
-
-void unload_library(void* library) {
-    ::dlclose(library);
 }
 
 }  // namespace agentdesk::ui::mods_os

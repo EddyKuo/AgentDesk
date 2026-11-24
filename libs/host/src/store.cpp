@@ -11,10 +11,52 @@
 
 #include "agentdesk/platform/crt.hpp"
 #include "agentdesk/platform/process.hpp"
+#include "agentdesk/platform/system.hpp"
 #include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::host {
 
+
+void write_json_atomic(const std::filesystem::path& file, const nlohmann::json& doc) {
+    const auto tmp = std::filesystem::path(file).concat(L".tmp");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out)
+            throw std::runtime_error("cannot write " + platform::to_utf8(tmp.native()));
+        out << doc.dump(2) << '\n';
+        out.flush();
+        if (!out)
+            throw std::runtime_error("write failed: " + platform::to_utf8(tmp.native()));
+    }
+    platform::replace_file_atomically(tmp, file, std::filesystem::path(file).concat(L".bak"));
+}
+
+// Claude Code and Codex when installed, then the system's shells. Programs are looked up the way a
+// login shell finds them.
+std::vector<Profile> detect_default_profiles() {
+    std::vector<Profile> out;
+    const auto add_program = [&](const char* id, const char* name, const char* program) {
+        if (const auto p = platform::find_on_login_path(program))
+            out.push_back({id, name, *p, {}});
+    };
+    add_program("claude-native", "Claude Code", "claude");
+    add_program("codex-native", "Codex CLI", "codex");
+    for (const auto& s : platform::detect_shells())
+        out.push_back({s.id, s.name, s.executable, s.args});
+    return out;
+}
+
+std::vector<Profile> detect_wsl_profiles() {
+    std::vector<Profile> out;
+    for (const auto& s : platform::detect_shells())
+        if (s.id.starts_with("wsl-"))
+            out.push_back({s.id, s.name, s.executable, s.args});
+    return out;
+}
+
+std::string new_uuid() {
+    return platform::new_uuid();
+}
 
 std::optional<nlohmann::json> read_json_with_backup(const std::filesystem::path& file) {
     auto try_read = [](const std::filesystem::path& p) -> std::optional<nlohmann::json> {

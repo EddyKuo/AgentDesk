@@ -28,12 +28,7 @@ std::optional<std::filesystem::path> find_tool(const std::string& name);
 // What this system's helper programs need: environment, git's ownership check, process tree.
 void prepare_tool(platform::ProcessSpec& spec);
 
-std::uint32_t current_pid();
-
 // The local folder an OSC 7 URI names, or "" when it is another machine's.
 std::string local_path_from_cwd_uri(const std::string& uri);
-
-// The person's home folder (worktrees go in ~/.agentdesk/worktrees).
-std::filesystem::path home_dir();
 
 }  // namespace agentdesk::host::detail

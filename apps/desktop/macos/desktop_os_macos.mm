@@ -134,23 +134,6 @@ std::string local_file_stamp() {
     return name;
 }
 
-bool replace_file(const std::filesystem::path& tmp, const std::filesystem::path& target, std::error_code* why) {
-    std::error_code ec;
-    std::filesystem::rename(tmp, target, ec);  // rename(2) replaces the target in one step
-    if (why != nullptr)
-        *why = ec;
-    return !ec;
-}
-
-std::string env(const char* name) {
-    const char* v = std::getenv(name);
-    return v != nullptr ? std::string(v) : std::string();
-}
-
-std::filesystem::path home_dir() {
-    return platform::home_dir();
-}
-
 // Looked up on the login shell's PATH, started in its own session.
 void start_detached(const std::vector<std::wstring>& argv) {
     if (argv.empty())
@@ -175,15 +158,6 @@ std::vector<std::filesystem::path> matching_files(const std::filesystem::path& p
         if (!e.is_directory(ec) && ::fnmatch(pattern.c_str(), e.path().filename().c_str(), 0) == 0)
             found.push_back(e.path());
     return found;
-}
-
-// AGENTDESK_DATA_DIR, else ~/Library/Application Support/AgentDesk.
-std::filesystem::path data_dir() {
-    try {
-        return platform::data_dir();
-    } catch (const std::exception&) {
-        return std::filesystem::temp_directory_path() / "AgentDesk";
-    }
 }
 
 // Contents/Resources in an app bundle, else the program's folder (a build folder).

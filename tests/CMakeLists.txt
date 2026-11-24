@@ -122,6 +122,7 @@ agentdesk_executable(win_integration_tests
     integration/windows/conpty_test.cpp
     integration/windows/conpty_compare_test.cpp
     integration/windows/process_test.cpp
+    integration/windows/system_test.cpp
     integration/windows/session_test.cpp
     integration/windows/pipe_test.cpp
     integration/windows/host_test.cpp

@@ -10,12 +10,12 @@ set(_host_sources
     src/git_tools.cpp)
 if(WIN32)
     list(APPEND _host_sources
-        src/store_win.cpp src/host_os_win.cpp src/handover.cpp)
+        src/host_os_win.cpp src/handover.cpp)
     set(_host_platform_include include_win)
-    set(_host_platform_libs agentdesk::platform rpcrt4)
+    set(_host_platform_libs agentdesk::platform)
 else()
     list(APPEND _host_sources
-        src/store_posix.cpp src/host_os_posix.cpp
+        src/host_os_posix.cpp
         src/handover_posix.cpp)
     set(_host_platform_include include_posix)
     set(_host_platform_libs agentdesk::platform)
