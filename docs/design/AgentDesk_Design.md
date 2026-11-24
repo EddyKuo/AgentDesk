@@ -1,8 +1,8 @@
-# AgentDesk：Windows AI Agent 工作台
+# AgentDesk：Windows／macOS AI Agent 工作台
 
-產品需求與系統設計文件 v2.20  
-日期：2026-11-20｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；還沒做的人工驗收見 5.4、5.7  
-技術基線：C++20、Windows 11 x64、Dear ImGui（FreeType 繪字）、Win32、DirectX 11、隨附 ConPTY
+產品需求與系統設計文件 v2.21  
+日期：2026-11-24｜狀態：產品版本 0.2.0。MVP（M0～M4）、herdr 主要功能（5.5）、herdr-app 介面與行為移植（5.6、ADR-15）都已完成，使用者在 2026-11-19 驗收（5.7）；WSL 發行版可作為本機 shell（ADR-16）；還沒做的人工驗收見 5.4、5.7。macOS 版（ADR-30）已實作，人工驗收見 5.8  
+技術基線：C++20、Dear ImGui（FreeType 繪字）。Windows 11 x64：Win32、DirectX 11、隨附 ConPTY。macOS 13 以上（Apple Silicon）：AppKit、Metal、POSIX pty（3.11）
 
 > 產品名稱定為 AgentDesk，本身以 MIT License 釋出。介面與行為依 herdr-app 原始碼複刻（ADR-15），程式全部用 C++ 重寫，不宣稱與 herdr 的協定或程式相容；程式裡不出現 herdr 的名稱（ADR-21），本文件提到 herdr 是因為它是參考產品。第 1 章保留 MVP 時的需求，MVP 之後加上的功能主要寫在 2.4～2.8、3.7.2～3.7.3 與第 4 章；實機驗證結果見各 Sprint 的 TestReport（`contracts/inbox/TestReport_sprint*.md`）。
 
@@ -20,6 +20,7 @@
 | 1.6 | 2026-11-16 | 使用者決定 OQ-02：首發支援 Claude Code 與 Codex CLI。新增 1.2.1 Given／When／Then 驗收條件（PRD 品質門檻）；ADR-09 理由依 OSC 7501 更新 |
 | 1.7 | 2026-11-16 | 一致性審查修正：狀態欄位統一為 `seq`，OSC 7501 的 seq 由 host 指派；report-state 新增 `--kind`、`--message`；明定紀錄被丟棄或清除後的 agent_state 與 `last_agent_state`；QA-13 加退出碼；5.2 第 8 項去除過時的 vcpkg port 選項；P2 範圍與 MVP 一致；ADR-10 的 Ghostty 改為僅供參考 |
 | 1.8 | 2026-11-17 | M0 結果：ADR-08 定案（隨附 ConPTY，內建版本實測丟掉 OSC 7501 回覆）；凍結 OQ-03～OQ-07；3.3 過載政策改為背壓；3.4 補 libvterm 已知限制；5.1 補 M0 後修正估工。依據 `docs/poc/M0-report.md` |
+| 2.21 | 2026-11-24 | macOS 版實作完成：新增 3.11（平台差異對照）與 5.8（完成狀態與待人工驗收的項目），檔頭的技術基線加上 macOS |
 | 2.20 | 2026-11-24 | OQ-10（macOS 版）提出並由使用者決定，新增 ADR-30；平台抽象層介面草案 `docs/design/platform-abstraction.md`；PRD 3.2.0；7.4 新增 OQ-11。現行 Windows 規格不變，技術基線等實作後再改 |
 | 2.19 | 2026-11-20 | ADR-29：開放 mod 前的四項準備（啟用前的安全說明、相容性規則、卡住時的處理說明、`docs/mods.md` 開發指南） |
 | 2.18 | 2026-11-20 | ADR-28：移除 AgentDesk 98（程式、素材、測試與建置步驟），取代 ADR-24 的隱藏做法；2.4、2.8、3.1、3.9、3.10、4.1、5.6 更新 |
@@ -545,6 +546,34 @@ MVP 時規劃的 `libs/adapters` 沒有單獨成立：profile 與狀態整合放
 | third_party | libvterm 0.3.3（加了換版用的狀態存取，ADR-19）、隨附 ConPTY 的授權與 NOTICE、字型、herdr 的授權與素材（版面、主題、程式表與圖示、提示音） |
 | docs | 設計文件、使用說明、研究筆記、POC 報告、整合說明 |
 
+### 3.11 macOS 版（ADR-30）
+
+macOS 版和 Windows 版共用同一份程式，平台差異用三種方式處理：
+
+1. **平台中立的介面**（`libs/platform/include/agentdesk/platform/`）：`Pty`、`Process`、`ByteStream`／`StreamListener`、`InstanceLock`、`system.hpp`。macOS 實作在 `libs/platform/posix/`。介面和步驟見 `docs/design/platform-abstraction.md`。
+2. **過渡用的相容層**（`libs/platform/posix/compat/`）：共用程式還在用 `platform::win` 的名稱（`to_utf8`／`to_wide`、`PtyProcess`、`Foreground`），macOS 上用同名標頭檔接到上面的介面，共用程式幾乎不用改。草案第 1～8 步在 Windows 上把共用程式改成中立名稱之後，這一層就拿掉。
+3. **只屬於某個平台的段落**：用 `#ifdef _WIN32` 隔開，Windows 的程式碼原封不動；整個檔案都是 Win32 的，另外寫一份 macOS 版（`pipe_posix.cpp`、`host_launcher_posix.cpp`、`handover_posix.cpp`、`apps/host/main_posix.cpp`、`apps/desktop/macos/`）。
+
+| 項目 | Windows | macOS |
+|---|---|---|
+| 終端機 | 隨附 ConPTY＋Job | `posix_openpt`＋`fork`（`setsid`、`TIOCSCTTY`），程序群組管理生命週期；結束用 kqueue 監看 |
+| OSC 7501 查詢回覆 | 需要隨附 ConPTY（ADR-08） | Unix pty 不攔截，直接通過；QA-21 的排序在 macOS 測試裡驗證 |
+| 前景程式與資料夾 | Job 成員＋PEB | `tcgetpgrp`＋`libproc`；shell 送來的 OSC 7 優先 |
+| 提示字元鉤子（OSC 133 A、OSC 7） | PowerShell、CMD、WSL | zsh 用 `ZDOTDIR` 載入鉤子後還原使用者的設定，bash 用 `PROMPT_COMMAND`；並補上 `TERM`、UTF-8 的 `LANG`，以及 login shell 的 `PATH`（從 Finder 啟動的程式 PATH 很短，找不到使用者裝的 `claude`、`node`、`git`） |
+| 本機通道 | Named Pipe（DACL） | Unix socket：`<使用者暫存資料夾>/AgentDesk/`（0700）、socket 0600，兩端都用 `getpeereid` 核對 uid；`--pipe` 名稱不含 `/` 時對應到這個資料夾 |
+| 單一實例 | named mutex | `flock` |
+| host 熱更新（FR-36） | `DuplicateHandle`＋`ConptyPackPseudoConsole` | `socketpair` 當通道（新 host 的 fd 3），狀態資料格式和 Windows 相同，之後用 `SCM_RIGHTS` 依序傳每個終端機的 pty master；新 host 核對 fd 是 pty master、root 程序還在、是同一使用者、自成 session 且擁有這個終端機，才接手。新 host 不是 root 的父程序，接手後程式結束時 exit code 記為 unknown |
+| 視窗 | Win32＋DX11，自繪標題列 | NSWindow＋MTKView（Metal），標題列透明，保留系統紅綠燈；側欄品牌列與 terminals 上方列讓出紅綠燈的位置；拖曳上方列移動視窗 |
+| 輸入法 | IMM | 收錄並修改 ImGui 的 macOS backend（`third_party/imgui_osx`）：組字中的文字畫在終端機游標處，組字期間的按鍵留給輸入法 |
+| 快捷鍵（FR-40） | `keys.json` | 預設鍵表照 herdr-app 的 `keys.macos.json`；`cmd` 是 ImGui 的 Ctrl（ImGui 在 macOS 互換 Cmd 與 Ctrl），`ctrl` 是 Control 鍵；終端機只收到 Control，Cmd 不會送進程式；提示以 ⌃⌥⇧⌘ 顯示 |
+| Option 鍵 | （Alt） | 設定 › Keyboard 的 `option_as_alt`：`auto`（美式／ABC 鍵盤配置時當 Alt）、`on`、`off`、`left`、`right`，規則照 herdr-app |
+| 字型後備 | 微軟正黑體、Segoe UI Symbol／Emoji | 黑體（`STHeiti Medium.ttc`，蘋方是系統下載的資源）、Apple Symbols；Apple Color Emoji 是 180 MB 的彩色點陣字型，不合併 |
+| mod | `mod.dll`，SEH 保護 | `mod.dylib`（`dlopen`），呼叫期間以訊號處理加 `sigsetjmp` 保護；SDK 的匯出巨集兩平台通用 |
+| 資料與資源位置 | `%LOCALAPPDATA%\AgentDesk`、exe 旁 | `~/Library/Application Support/AgentDesk`；字型、音效、程式表、主題、範例 mod 在 `AgentDesk.app/Contents/Resources` |
+| 更新 | `windows-x86_64`、PowerShell 重啟 | `darwin-aarch64`，zip 內是 `AgentDesk-<版本>-macos-arm64/AgentDesk.app`，`/bin/sh` 等舊程式結束後用 `open` 重開 |
+| 打包 | `agentdesk_package.exe` | `scripts/package_macos.sh`：`.app`、ad-hoc 簽章（Developer ID 與公證待 OQ-11）、zip |
+| 建置 | `scripts\build.cmd`、`msvc-x64-*` | `scripts/build.sh`、`clang-macos-arm64-*`；vcpkg 在 `~/vcpkg`，triplet `arm64-osx-agentdesk`（最低 macOS 13）；`agent-ui --screenshot <png>` 讓自動化截圖不需要螢幕錄製權限 |
+
 ## 4. 介面與操作設計
 
 ### 4.1 主畫面
@@ -711,6 +740,31 @@ M0～M4 已實作，驗收矩陣結果見 `contracts/inbox/TestReport_sprint5.md
 - **發布**：Release preset 的連結參數改為 `/debug /INCREMENTAL:NO /OPT:REF /OPT:ICF`，保留 PDB；agent-ui.exe 9.01 MB → 4.22 MB、agent-host.exe 2.06 MB → 0.72 MB、agentctl.exe 1.85 MB → 0.37 MB，Release 273 個測試通過。實測 /Gw、LTCG、/O1 後決定不再縮小（/O1 少 11%，但終端機繪製會變慢）。
 - **建置**：`scripts\build.cmd` 在 build 步驟前，先結束從 `build\<preset>\` 啟動的 agent-ui 與 agent-host（它們鎖住執行檔與 conpty.dll），其他位置的 AgentDesk 不動；`AGENTDESK_KEEP_HOST=1` 可略過。
 - **沒有另外驗收紀錄的項目**：5.4 列的繁中注音與候選視窗、100%／150%／200% DPI、Codex hook 實機、另一個 Windows 帳號連線被拒，以及 5.5 的實際 ssh 連線。Claude Code 的狀態顯示已在上面的實機驗收中確認。
+
+### 5.8 macOS 版完成狀態（2026-11-24，ADR-30）
+
+分支 `feature/sprint-11/macos-port`。照 `docs/design/platform-abstraction.md` 第 7 節的第 9～12 步做完，實作方式見 3.11。Windows 的第 1～8 步重構還沒做，相容層會留到那時候。
+
+- **自動化驗證（macOS 26.5、Apple Silicon）**：Debug 與 Release 各 236 個測試通過，包括：
+  - 原有的 terminal、protocol、UI 單元測試。
+  - POSIX 平台層整合測試（pty 輸出不漏位元組、背壓、resize、中斷、背景子程序一併結束、前景程式追蹤、socket 權限）。
+  - 和 Windows 共用的 Session 測試（OSC 7501 狀態、中斷寬限、背壓、stale seq）。
+  - QA-21 的回覆順序、macOS 鍵表。
+- **實機操作確認**：
+  - `agentctl` 能啟動、輸入、讀取 zsh session，`cd` 之後 `live_cwd` 會跟著變。
+  - host 熱更新：舊 host 交給 99.0.0 版 host，交接前後是同一個 shell（pid 不變）。
+  - `agent-ui` 能畫出側欄、分頁、終端機（使用者的 oh-my-posh 提示字元、Nerd Font 圖示）和設定 › Keyboard 頁（`--screenshot` 截圖）。
+  - 打包後的 `AgentDesk.app`（ad-hoc 簽章，zip 5.7 MiB）能從 bundle 裡讀到資源並啟動 host。
+- **待人工驗收**：
+  - 注音輸入：組字顯示、選字窗位置、組字中的按鍵不送進程式。
+  - Option 鍵的五種設定。
+  - 實際的 Claude Code／Codex 狀態顯示。
+  - Retina 與外接螢幕之間移動視窗。
+  - 紅綠燈與側欄、terminals 上方列的位置。
+  - 拖曳上方列移動視窗。
+  - 通知音效、mod 啟用。
+  - 實際用 ssh 連線遠端機器（另見 OQ-11）。
+- **還不能做的**：Developer ID 簽章與公證需要 Apple Developer 帳號；macOS 與 Windows 能不能互為遠端機器也還沒決定，兩者都在 OQ-11。
 
 ## 6. 測試計畫與驗收（QA）
 

@@ -912,7 +912,7 @@ Outcome exec_app_command(App::State& s, const Command& c) {
     } else if (name == "app.settings") {
         // `arg` names the page to open on ("mods", "alerts", ...).
         s.show_settings = true;
-        for (const char* sec : {"Look", "Machines", "Alerts", "Mods", "Updates", "Privacy"})
+        for (const char* sec : {"Look", "Keyboard", "Machines", "Alerts", "Mods", "Updates", "Privacy"})
             if (_stricmp(arg.c_str(), sec) == 0)
                 s.settings_tab = sec;
     } else if (name == "app.zoom_in" || name == "app.zoom_out" || name == "app.zoom_reset") {

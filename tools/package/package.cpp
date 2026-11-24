@@ -159,6 +159,7 @@ std::vector<Component> shipped_components(const fs::path& root, const fs::path& 
          share / L"lunasvg/copyright"},
         {"plutovg 1.3.3 (used by lunasvg)", "https://github.com/sammycage/plutovg",
          share / L"plutovg/copyright"},
+        {"FreeType (font rendering)", "https://freetype.org", share / L"freetype/copyright"},
         {"LobeHub icons (agent icons, programs\\icons)", "https://github.com/lobehub/lobe-icons",
          root / L"third_party/herdr/programs/icons/LICENSE-LobeHub.txt"},
         {"Lucide icons (glyphs, programs\\icons)", "https://lucide.dev",

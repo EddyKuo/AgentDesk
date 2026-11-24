@@ -30,6 +30,7 @@ The full manual (in Traditional Chinese) is [docs/user-guide.md](docs/user-guide
 ## Requirements
 
 - Windows 11 x64; a normal user account is enough. Windows 10 is untested.
+- Or macOS 13 Ventura or later on Apple Silicon (arm64).
 - Install and sign in to the agent CLIs you want to use. AgentDesk does not handle sign-in and never copies tokens. Claude Code reports status from version 2.1.295.
 - Building from source also needs Visual Studio 2022 Build Tools (see below).
 
@@ -42,6 +43,12 @@ The full manual (in Traditional Chinese) is [docs/user-guide.md](docs/user-guide
 **SmartScreen:** the first run may show "Windows protected your PC". AgentDesk's executables are not code-signed yet, and Windows shows this for any new download without reputation. Make sure the zip came from this project's GitHub Releases, then choose "More info" → "Run anyway". You can also build it yourself from source.
 
 The zip also contains `agentctl.exe`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `docs\`, the example mods, and the mod `sdk\`. Data and settings live in `%LOCALAPPDATA%\AgentDesk`.
+
+### macOS
+
+1. Unzip `AgentDesk-<version>-macos-arm64.zip` and move `AgentDesk.app` to Applications.
+2. The app is signed ad hoc, not with a Developer ID, so the first start needs Control-click → Open (or System Settings → Privacy & Security → Open Anyway). Make sure the zip came from this project's GitHub Releases.
+3. Data and settings live in `~/Library/Application Support/AgentDesk`. Shortcuts follow macOS (Cmd+T new tab, Cmd+D split, Cmd+C / Cmd+V in terminals; Control+C still interrupts the program). Settings → Keyboard decides whether Option is Alt in terminals.
 
 ## Quick start
 
@@ -81,6 +88,18 @@ Tests use GoogleTest through ctest:
 ctest --test-dir build\msvc-x64-debug -L unit          :: labels: unit, windows_integration
 build\msvc-x64-debug\tests\unit_tests.exe --gtest_filter=VtEngine.*
 ```
+
+### macOS
+
+Tools: Xcode Command Line Tools (Apple clang), CMake 3.25 or later, Ninja, and vcpkg cloned to `~/vcpkg` (bootstrapped with `./bootstrap-vcpkg.sh`). The presets use the overlay triplet `cmake/triplets/arm64-osx-agentdesk.cmake` (minimum macOS 13). No bundled ConPTY is needed: a Unix pty passes the status query's reply through.
+
+```sh
+scripts/build.sh clang-macos-arm64-debug all          # configure + build + ctest
+scripts/build.sh clang-macos-arm64-debug build
+scripts/package_macos.sh                              # Release build, AgentDesk.app, dist/*.zip
+```
+
+`agent-ui --screenshot out.png --exit-after-ms N` writes the last frame for automated checks without screen-recording permission.
 
 The release zip is made by `agentdesk_package.exe` after a Release build; see [docs/release.md](docs/release.md). Everything compiles with `/W4 /permissive- /WX`; formatting and static analysis use the clang-format and clang-tidy that ship with Visual Studio (`.clang-format`, `.clang-tidy`).
 

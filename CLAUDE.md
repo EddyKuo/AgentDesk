@@ -38,14 +38,16 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 - `qa\*.exe`：QA-05、QA-07、QA-10（`qa05_ui_detach.exe`、`qa07_silence.exe`、`qa10_ui_host_crash.exe`）、`screenshot_ui.exe`（隔離的 host 加 PrintWindow 截圖與 report，用來檢查渲染）、`smoke_zip.exe`；發布用 `agentdesk_package.exe`（先建 Release）
 - `fetch_conpty.exe`（隨附 ConPTY）、`make_fixtures.exe`（重產 `tests\fixtures\bytes`）
 
+macOS（ADR-30，設計文件 3.11）：`scripts/build.sh clang-macos-arm64-debug all`（vcpkg 在 `~/vcpkg`，triplet `arm64-osx-agentdesk`）、`scripts/package_macos.sh`（`.app` 與 zip）。macOS 的程式在 `libs/platform/posix/`（含過渡用的 `compat/`）、`*_posix.cpp`、`apps/desktop/macos/`；共用程式的 Win32 段落用 `#ifdef _WIN32` 隔開，Windows 的寫法不動。截圖用 `agent-ui --screenshot <png> --exit-after-ms N`。
+
 不要用自動化腳本反覆啟動又強制結束實際的 Claude Code：它會把這當成全螢幕渲染器故障，自行關掉該模式。渲染檢查用 PowerShell 或 vt_probe。
 
 ## 文件地圖
 
 | 檔案 | 內容 |
 |---|---|
-| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.19）。改設計就改這份，並在檔頭版本紀錄加一列 |
-| `contracts/approved/PRD.md` | PRD 契約 v3.1.0（鎖定設計文件 v2.19）。需求變更要依憲法 6.3 升版 |
+| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.21）。改設計就改這份，並在檔頭版本紀錄加一列 |
+| `contracts/approved/PRD.md` | PRD 契約 v3.2.0（鎖定設計文件 v2.20；v2.21 只加實作說明）。需求變更要依憲法 6.3 升版 |
 | `docs/design/use-cases.md`、`docs/design/design-concept.md` | Use case（UC-01～UC-21）與設計概念（給新加入的開發者） |
 | `contracts/inbox/TestReport_sprint*.md` | 每個 Sprint 的測試報告（QA，依 ADR_001 判定） |
 | `docs/poc/M0-report.md`、`docs/poc/evidence/` | M0 結論與實測 JSON |

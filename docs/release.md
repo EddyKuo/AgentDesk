@@ -27,6 +27,17 @@ build\msvc-x64-release\tools\qa\smoke_zip.exe --zip dist\AgentDesk-0.2.0-win-x64
 
 `--version` defaults to 0.1.0, so always pass it.
 
+## 2b. macOS package
+
+```sh
+scripts/package_macos.sh            # Release build, then dist/AgentDesk-<version>-macos-arm64.zip
+scripts/package_macos.sh --sign "Developer ID Application: <name>"   # with a Developer ID
+```
+
+The zip holds `AgentDesk-<version>-macos-arm64/AgentDesk.app` (the layout the updater unpacks): the three programs in `Contents/MacOS`, and fonts, sounds, programs, themes, example mods, the mod SDK, `LICENSE`, `THIRD_PARTY_NOTICES.md` and `docs/` in `Contents/Resources`. Without `--sign` it is signed ad hoc. Notarization (`xcrun notarytool`) needs an Apple Developer account and is not scripted yet (design doc 7.4 OQ-11). The update manifest's macOS target is `darwin-aarch64`.
+
+Smoke-test it like the Windows zip: unzip into a clean folder and run `AgentDesk.app/Contents/MacOS/agent-ui --pipe smoke --start zsh --exit-after-ms 5000 --screenshot shot.png` with `AGENTDESK_DATA_DIR` pointing at an empty folder.
+
 ## 3. Publish on GitHub
 
 1. Tag the commit: `git tag v0.2.0` and `git push origin v0.2.0`.

@@ -1,6 +1,6 @@
 # 平台抽象層介面草案（macOS 移植準備）
 
-版本 0.2（草案）｜日期：2026-11-24｜狀態：OQ-10 的方向已由使用者決定（第 8 節、設計文件 ADR-30），介面細節仍是草案。Windows 版行為以設計文件為準，不因這份文件改變。
+版本 0.3｜日期：2026-11-24｜狀態：OQ-10 已決定（第 8 節、設計文件 ADR-30）；macOS 部分（第 9～12 步）已實作，見第 10 節。Windows 版行為以設計文件為準，不因這份文件改變。
 
 ## 1. 目的與範圍
 
@@ -516,3 +516,15 @@ int run_shell(const ShellOptions& options);  // main loop; replaces wWinMain's b
 | 重構期間 Windows 版退化 | 已驗收的功能壞掉 | 每步獨立 PR、全測試加截圖比對；第 1～8 步不改任何對外行為 |
 | 自繪標題列在 macOS 和系統紅綠燈按鈕衝突 | 版面和 herdr-app 不一致 | 標題列左側讓出 `title_bar_insets()`；細節要查 herdr-app 在 macOS 的做法 |
 | macOS 沒有程式碼簽章與公證 | Gatekeeper 擋下執行 | 需要 Apple Developer 帳號，屬於發布問題，第 11 步再處理 |
+
+## 10. 實作狀態（2026-11-24）
+
+macOS 部分（第 9～12 步）已在分支 `feature/sprint-11/macos-port` 完成，平台差異對照寫在設計文件 3.11，完成狀態與待人工驗收的項目在設計文件 5.8。和這份草案不同的地方：
+
+- **Windows 先行的第 1～8 步還沒做。** 為了讓 Windows 程式不用動、之後和 Windows 端的修改合併時少衝突，共用程式暫時沿用 `platform::win` 的名稱：macOS 上由 `libs/platform/posix/compat/` 提供同名的標頭檔，接到第 5 節的中立介面。真正只屬於 Win32 的段落用 `#ifdef _WIN32` 隔開，整個檔案都是 Win32 的另外寫一份 macOS 版（`*_posix.cpp`、`apps/desktop/macos/`）。第 1～8 步做完時，這一層就拿掉。
+- **5.1**：`Pty` 多了熱更新用的 `read_available`、`handover_fd`、`release_after_handover`、`adopt`（只在 POSIX 上有）。root 程序結束一律用 kqueue 監看，熱更新時才能停止監看還在執行的程式。
+- **5.2**：`ProcessSpec` 多了 `stderr_fd`（POSIX），讓 ssh 和 git 的 stderr 可以分開收。
+- **5.3**：`--pipe` 名稱不含 `/` 時，對應到 runtime 資料夾裡的 `<名稱>.sock`。
+- **5.4**：多了 `runtime_dir()`、`login_path()`、`find_on_login_path()`；`FolderWatch` 沒有做成共用介面，git 與 Files／Changes 的監看在 macOS 上改用輪詢修改時間（`git_cache.cpp`、`side_panels.cpp`）。
+- **5.6**：`WindowHost` 沒有做成虛擬介面，改成 `apps/desktop/window_ops.hpp` 的幾個函式（Windows 是原本的 Win32 呼叫，macOS 由外殼實作）。
+
