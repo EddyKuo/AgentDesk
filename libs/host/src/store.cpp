@@ -1,8 +1,10 @@
 // The host's JSON files (profiles, sessions): atomic writes, backups, and profile detection.
 #include "agentdesk/host/store.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
 // rpc.h needs windows.h first.
+#endif
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -11,7 +13,12 @@
 #include <sstream>
 #include <stdexcept>
 
+#ifdef _WIN32
 #include <rpc.h>
+#else
+#include "agentdesk/platform/process.hpp"
+#include "agentdesk/platform/system.hpp"
+#endif
 
 #include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
@@ -20,6 +27,33 @@ namespace agentdesk::host {
 
 namespace win = platform::win;
 
+#ifndef _WIN32
+// macOS (ADR-30): ~/Library/Application Support/AgentDesk.
+std::filesystem::path default_data_dir() {
+    auto dir = platform::home_dir() / "Library" / "Application Support" / "AgentDesk";
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
+// The old file becomes the backup, then rename() swaps the new one in atomically.
+void write_json_atomic(const std::filesystem::path& file, const nlohmann::json& doc) {
+    const auto tmp = std::filesystem::path(file).concat(".tmp");
+    const auto bak = std::filesystem::path(file).concat(".bak");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out)
+            throw std::runtime_error("cannot write " + tmp.string());
+        out << doc.dump(2) << '\n';
+        out.flush();
+        if (!out)
+            throw std::runtime_error("write failed: " + tmp.string());
+    }
+    std::error_code ec;
+    if (std::filesystem::exists(file, ec))
+        std::filesystem::copy_file(file, bak, std::filesystem::copy_options::overwrite_existing, ec);
+    platform::replace_file_atomically(tmp, file);
+}
+#else
 std::filesystem::path default_data_dir() {
     wchar_t buf[MAX_PATH]{};
     const DWORD n = ::GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
@@ -54,6 +88,7 @@ void write_json_atomic(const std::filesystem::path& file, const nlohmann::json& 
         win::throw_last_error("MoveFileExW");
     }
 }
+#endif
 
 std::optional<nlohmann::json> read_json_with_backup(const std::filesystem::path& file) {
     auto try_read = [](const std::filesystem::path& p) -> std::optional<nlohmann::json> {
@@ -106,6 +141,7 @@ Profile profile_from_json(const nlohmann::json& j) {
     return p;
 }
 
+#ifdef _WIN32
 std::vector<Profile> detect_default_profiles() {
     std::vector<Profile> out;
     const auto add = [&](const char* id, const char* name, const wchar_t* exe,
@@ -155,14 +191,36 @@ std::vector<Profile> detect_wsl_profiles() {
     std::sort(out.begin(), out.end(), [](const Profile& a, const Profile& b) { return a.id < b.id; });
     return out;
 }
+#else
+// macOS (ADR-30): Claude Code and Codex when installed, then the shells (the login shell first,
+// started as login shells). Programs are looked up on the login shell's PATH.
+std::vector<Profile> detect_default_profiles() {
+    std::vector<Profile> out;
+    const auto add_program = [&](const char* id, const char* name, const char* exe) {
+        if (const auto p = platform::find_on_login_path(exe))
+            out.push_back({id, name, *p, {}});
+    };
+    add_program("claude-native", "Claude Code", "claude");
+    add_program("codex-native", "Codex CLI", "codex");
+    for (const auto& shell : platform::detect_shells()) {
+        Profile p{shell.id, shell.name, shell.executable, {}};
+        for (const auto& a : shell.args)
+            p.args.push_back(win::to_wide(a));
+        out.push_back(std::move(p));
+    }
+    return out;
+}
+
+std::vector<Profile> detect_wsl_profiles() { return {}; }
+#endif
 
 std::optional<std::string> validate_profile(const Profile& p) {
     if (p.id.empty())
         return "profile id is empty";
-    if (win::is_batch_file(p.executable.native())) {
+    if (win::is_batch_file(p.executable.wstring())) {
         return "batch launchers (.cmd/.bat) need the shell launcher adapter, which is not available yet";
     }
-    if (!win::is_launchable_file(p.executable.native())) {
+    if (!win::is_launchable_file(p.executable.wstring())) {
         return "executable not found: " + win::to_utf8(p.executable.native());
     }
     return std::nullopt;
@@ -213,12 +271,19 @@ std::string iso8601_now() {
     const auto now = std::chrono::system_clock::now();
     const std::time_t t = std::chrono::system_clock::to_time_t(now);
     std::tm tm{};
+#ifdef _WIN32
     gmtime_s(&tm, &t);
+#else
+    gmtime_r(&t, &tm);
+#endif
     char buf[32];
     std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
     return buf;
 }
 
+#ifndef _WIN32
+std::string new_uuid() { return platform::new_uuid(); }
+#else
 std::string new_uuid() {
     UUID id{};
     if (::UuidCreate(&id) != RPC_S_OK)
@@ -230,5 +295,6 @@ std::string new_uuid() {
     ::RpcStringFreeA(&text);
     return out;
 }
+#endif
 
 }  // namespace agentdesk::host

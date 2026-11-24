@@ -3,10 +3,18 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/links.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
 
 #include <objbase.h>
 #include <shellapi.h>
+#else
+#include <unistd.h>
+
+#include <vector>
+
+#include "agentdesk/platform/process.hpp"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -157,12 +165,19 @@ std::string from_path(const fs::path& p) {
 }
 
 std::optional<std::string> env(const char* name) {
+#ifdef _WIN32
     char* value = nullptr;
     std::size_t len = 0;
     if (_dupenv_s(&value, &len, name) != 0 || value == nullptr)
         return std::nullopt;
     std::string out(value);
     std::free(value);
+#else
+    const char* value = std::getenv(name);
+    if (value == nullptr)
+        return std::nullopt;
+    std::string out(value);
+#endif
     if (out.empty())
         return std::nullopt;
     return out;
@@ -339,6 +354,7 @@ std::optional<LinkTarget> resolve_link(const std::string& link, const std::strin
     return std::nullopt;
 }
 
+#ifdef _WIN32
 void open_link(const LinkTarget& target) {
     std::wstring wide;
     try {
@@ -378,5 +394,34 @@ void open_link(const LinkTarget& target) {
             CoUninitialize();
     }).detach();
 }
+#else
+// macOS: /usr/bin/open hands the target to its default app. A program or script is revealed in
+// the Finder (open -R), never run from a click on terminal text.
+void open_link(const LinkTarget& target) {
+    const std::string& t = target.target;
+    if (t.empty() || t.find('\0') != std::string::npos)
+        return;
+    std::vector<std::string> args;
+    if (target.file) {
+        std::error_code ec;
+        const fs::path p(t);
+        std::string ext = p.extension().string();
+        for (auto& ch : ext)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        static constexpr std::string_view kRun[] = {".app", ".command", ".sh", ".tool", ".pkg", ".dmg",
+                                                    ".workflow", ".scpt", ".jar", ".terminal", ".py", ".rb", ".pl"};
+        const bool runnable = std::find(std::begin(kRun), std::end(kRun), ext) != std::end(kRun) ||
+                              (fs::is_regular_file(p, ec) && ::access(t.c_str(), X_OK) == 0);
+        if (runnable)
+            args.push_back("-R");
+    }
+    args.push_back("--");
+    args.push_back(t);
+    try {
+        platform::spawn_detached("/usr/bin/open", args);
+    } catch (const std::exception&) {
+    }
+}
+#endif
 
 }  // namespace agentdesk::ui

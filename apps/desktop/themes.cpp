@@ -346,11 +346,15 @@ bool system_light() {
     const auto now = std::chrono::steady_clock::now();
     if (now - checked > std::chrono::seconds(2)) {
         checked = now;
+#ifdef _WIN32
         DWORD v = 0;
         DWORD size = sizeof v;
         light = ::RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
                                L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &v, &size) == ERROR_SUCCESS &&
                 v != 0;
+#else
+        light = !macos::system_dark();
+#endif
     }
     return light;
 }

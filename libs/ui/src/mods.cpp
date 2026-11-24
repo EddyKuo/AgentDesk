@@ -2,7 +2,14 @@
 // of taking agent-ui.exe down; also parses the panels mods return.
 #include "agentdesk/ui/mods.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <csetjmp>
+#include <csignal>
+
+#include <dlfcn.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -38,6 +45,7 @@ std::string dump(const Json& j) {
     return j.dump(-1, ' ', false, Json::error_handler_t::replace);
 }
 
+#ifdef _WIN32
 // ---- calls into a mod, guarded against crashes (structured exceptions). These functions hold
 // no C++ objects, so __try is allowed; a fault returns its exception code instead of ending
 // agent-ui.exe.
@@ -113,6 +121,80 @@ Code seh_copy(const char* s, std::size_t max, char* buf, std::size_t* len) {
         return GetExceptionCode();
     }
 }
+#else
+// ---- calls into a mod, guarded against crashes (macOS): while a mod's code runs, a fault signal
+// (SIGSEGV, SIGBUS, SIGILL, SIGFPE) jumps back here and the call reports it like the Windows
+// exception code, instead of ending agent-ui. Best effort, as there: the mod is turned off and its
+// code stays loaded. These functions call only C function pointers, so no destructor is skipped.
+using Code = unsigned long;
+
+thread_local sigjmp_buf* t_guard = nullptr;
+
+void on_fault(int sig) {
+    if (t_guard != nullptr)
+        siglongjmp(*t_guard, sig);
+    std::signal(sig, SIG_DFL);  // not inside a mod: crash as usual
+    std::raise(sig);
+}
+
+template <class F>
+Code guarded(F&& f) {
+    static constexpr int kSignals[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE};
+    struct sigaction sa {};
+    sa.sa_handler = on_fault;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_NODEFER;
+    struct sigaction old[4] {};
+    for (int i = 0; i < 4; ++i)
+        sigaction(kSignals[i], &sa, &old[i]);
+    sigjmp_buf jb;
+    sigjmp_buf* const outer = t_guard;
+    Code code = 0;
+    if (const int sig = sigsetjmp(jb, 1); sig == 0) {
+        t_guard = &jb;
+        f();
+    } else {
+        code = 0x80000000ul | static_cast<Code>(sig);
+    }
+    t_guard = outer;
+    for (int i = 0; i < 4; ++i)
+        sigaction(kSignals[i], &old[i], nullptr);
+    return code;
+}
+
+Code seh_init(agentdesk_mod_init_fn fn, const agentdesk_host* h, agentdesk_mod* m, int* rc) {
+    return guarded([&] { *rc = fn(h, m); });
+}
+Code seh_event(const agentdesk_mod* m, const char* e, const char* p) {
+    return guarded([&] { m->on_event(m->self, e, p); });
+}
+Code seh_panels(const agentdesk_mod* m, const char* where, const char** out) {
+    return guarded([&] { *out = m->panels(m->self, where); });
+}
+Code seh_click(const agentdesk_mod* m, const char* panel, const char* widget) {
+    return guarded([&] { m->click(m->self, panel, widget); });
+}
+Code seh_decorate(const agentdesk_mod* m, const char* kind, const char* subject, const char** out) {
+    return guarded([&] { *out = m->decorate(m->self, kind, subject); });
+}
+Code seh_command(const agentdesk_mod* m, const char* id) {
+    return guarded([&] { m->command(m->self, id); });
+}
+Code seh_destroy(const agentdesk_mod* m) {
+    return guarded([&] { m->destroy(m->self); });
+}
+// Copies a mod-owned string; a bad pointer counts as a crash.
+Code seh_copy(const char* s, std::size_t max, char* buf, std::size_t* len) {
+    return guarded([&] {
+        std::size_t n = 0;
+        while (n < max && s[n] != '\0') {
+            buf[n] = s[n];
+            ++n;
+        }
+        *len = n;
+    });
+}
+#endif
 
 std::string crash_text(Code code) {
     char buf[64];
@@ -192,7 +274,11 @@ struct ModHost::Mod {
     ModHost* host = nullptr;
     ModInfo info;
     std::filesystem::path folder;
+#ifdef _WIN32
     HMODULE dll = nullptr;
+#else
+    void* dll = nullptr;  // dlopen handle
+#endif
     agentdesk_host api{};
     agentdesk_mod mod{};
     bool ready = false;    // init succeeded and not crashed since
@@ -206,7 +292,11 @@ struct ModHost::Mod {
             return;  // a mod that crashed may have left state behind: keep its code mapped
         if (ready && mod.destroy != nullptr && seh_destroy(&mod) != 0)
             return;
+#ifdef _WIN32
         ::FreeLibrary(dll);
+#else
+        ::dlclose(dll);
+#endif
     }
 
     void fail(Code code) {
@@ -294,6 +384,7 @@ const char* api_setting(void* ctx, const char* key) {
 void start_mod(ModHost::Mod& m) {
     // The mod's own folder first for its dependencies, then System32; never the current folder
     // or PATH.
+#ifdef _WIN32
     m.dll = ::LoadLibraryExW((m.folder / L"mod.dll").c_str(), nullptr,
                              LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (m.dll == nullptr) {
@@ -305,6 +396,20 @@ void start_mod(ModHost::Mod& m) {
         m.info.error = "mod.dll does not export agentdesk_mod_init";
         return;
     }
+#else
+    // macOS: <folder>/mod.dylib by absolute path; its symbols stay private to it.
+    m.dll = ::dlopen((m.folder / "mod.dylib").c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (m.dll == nullptr) {
+        const char* why = ::dlerror();
+        m.info.error = std::string("cannot load mod.dylib (") + (why != nullptr ? why : "unknown error") + ")";
+        return;
+    }
+    const auto init = reinterpret_cast<agentdesk_mod_init_fn>(::dlsym(m.dll, "agentdesk_mod_init"));
+    if (init == nullptr) {
+        m.info.error = "mod.dylib does not export agentdesk_mod_init";
+        return;
+    }
+#endif
     m.api = {AGENTDESK_MOD_API_VERSION, &m,           api_run,    api_send, api_notify, api_exec,
              api_add_command,           api_sessions, api_setting};
     int rc = -1;
@@ -345,7 +450,11 @@ void ModHost::load(const std::set<std::string>& enabled) {
             folders.push_back(e.path());
     std::sort(folders.begin(), folders.end());
     for (const auto& f : folders) {
+#ifdef _WIN32
         const bool has_dll = std::filesystem::is_regular_file(f / L"mod.dll", ec);
+#else
+        const bool has_dll = std::filesystem::is_regular_file(f / "mod.dylib", ec);
+#endif
         const bool old_lua = std::filesystem::is_regular_file(f / L"main.lua", ec);
         if (!has_dll && !old_lua)
             continue;

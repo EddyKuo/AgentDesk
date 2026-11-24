@@ -5,9 +5,12 @@
 // value() throws type_error when the stored type differs, and win::to_utf8 throws on an unpaired
 // surrogate (on a worker thread either ends the process).
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <climits>
+#include <cstdint>
 #include <cmath>
 #include <optional>
 #include <string>
@@ -83,6 +86,31 @@ inline std::optional<Gradient> gradient(const Json& background) {
 inline std::string utf8_lossy(std::wstring_view text) {
     if (text.empty() || text.size() > static_cast<std::size_t>(INT_MAX))
         return {};
+#ifndef _WIN32
+    // macOS: wide text is UTF-32; anything that is not a code point becomes U+FFFD.
+    std::string out;
+    for (const wchar_t wc : text) {
+        auto c = static_cast<std::uint32_t>(wc);
+        if (c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF))
+            c = 0xFFFD;
+        if (c < 0x80) {
+            out.push_back(static_cast<char>(c));
+        } else if (c < 0x800) {
+            out.push_back(static_cast<char>(0xC0 | (c >> 6)));
+            out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        } else if (c < 0x10000) {
+            out.push_back(static_cast<char>(0xE0 | (c >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        } else {
+            out.push_back(static_cast<char>(0xF0 | (c >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((c >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+        }
+    }
+    return out;
+#else
     const int in = static_cast<int>(text.size());
     const int n = ::WideCharToMultiByte(CP_UTF8, 0, text.data(), in, nullptr, 0, nullptr, nullptr);
     if (n <= 0)
@@ -90,6 +118,7 @@ inline std::string utf8_lossy(std::wstring_view text) {
     std::string out(static_cast<std::size_t>(n), '\0');
     ::WideCharToMultiByte(CP_UTF8, 0, text.data(), in, out.data(), n, nullptr, nullptr);
     return out;
+#endif
 }
 
 }  // namespace agentdesk::desktop::safe

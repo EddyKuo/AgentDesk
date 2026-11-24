@@ -146,6 +146,8 @@ std::unique_ptr<Process> Process::spawn(const ProcessSpec& spec) {
     }
     if (spec.merge_stderr && spec.pipe_stdout)
         posix_spawn_file_actions_adddup2(&setup.actions, child_out.get(), 2);
+    else if (spec.stderr_fd >= 0)
+        posix_spawn_file_actions_adddup2(&setup.actions, spec.stderr_fd, 2);
     else
         posix_spawn_file_actions_addopen(&setup.actions, 2, "/dev/null", O_WRONLY, 0);
     if (!spec.cwd.empty())

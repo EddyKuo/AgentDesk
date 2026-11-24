@@ -153,6 +153,49 @@ std::string sha256_file_hex(const std::filesystem::path& file) {
     return out;
 }
 
+std::string login_path() {
+    static const std::string cached = [] {
+        const std::string shell = login_shell();
+        if (shell.empty() || !is_launchable_file(shell))
+            return std::string();
+        ProcessSpec spec;
+        spec.executable = shell;
+        spec.args = {"-l", "-c", "printf '%s' \"$PATH\""};
+        spec.cwd = home_dir();
+        try {
+            const auto r = run_capture(spec, std::chrono::seconds(5));
+            if (r.timed_out || r.exit_code != 0)
+                return std::string();
+            // A profile may print things: the PATH is the last line.
+            const auto nl = r.out.find_last_of('\n');
+            return nl == std::string::npos ? r.out : r.out.substr(nl + 1);
+        } catch (const std::exception&) {
+            return std::string();
+        }
+    }();
+    return cached;
+}
+
+std::optional<std::filesystem::path> find_on_login_path(std::string_view name) {
+    std::string path = login_path();
+    if (path.empty()) {
+        const char* env = std::getenv("PATH");
+        path = env != nullptr ? env : "";
+    }
+    std::size_t start = 0;
+    while (start <= path.size()) {
+        const auto end = std::min(path.find(':', start), path.size());
+        const std::string dir = path.substr(start, end - start);
+        if (!dir.empty()) {
+            const auto candidate = std::filesystem::path(dir) / std::string(name);
+            if (is_launchable_file(candidate))
+                return candidate;
+        }
+        start = end + 1;
+    }
+    return std::nullopt;
+}
+
 std::vector<ShellCandidate> detect_shells() {
     std::vector<std::string> paths;
     if (const std::string login = login_shell(); !login.empty())

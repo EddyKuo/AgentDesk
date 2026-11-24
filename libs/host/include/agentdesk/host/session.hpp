@@ -198,7 +198,14 @@ private:
     // command queue -> actor
     mutable std::mutex queue_mutex_;
     std::deque<Command> queue_;
+#ifdef _WIN32
     platform::win::UniqueHandle queue_event_;
+#else
+    // Wakes the actor (macOS): a command was queued, or the root process exited.
+    std::condition_variable queue_cv_;
+    bool queue_signalled_ = false;  // guarded by queue_mutex_
+#endif
+    void wake_actor();
     std::condition_variable queue_space_cv_;
     std::size_t queued_output_bytes_ = 0;   // guarded by queue_mutex_
     std::uint64_t backpressure_waits_ = 0;  // guarded by queue_mutex_

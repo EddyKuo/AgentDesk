@@ -3,6 +3,10 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
+#ifndef _WIN32
+#include "agentdesk/platform/process.hpp"
+#endif
+
 namespace agentdesk::desktop {
 namespace detail {
 
@@ -268,6 +272,21 @@ void emit_session_events(App::State& s, const std::vector<ui::ModSession>& list)
 // A program a mod asked to start: directly (never through a shell), without a window, not
 // waited for. argv[0] is looked up on PATH.
 void start_detached(const std::vector<std::wstring>& argv) {
+#ifndef _WIN32
+    // macOS: looked up on the login shell's PATH, started in its own session, not waited for.
+    if (argv.empty())
+        return;
+    const auto exe = platform::find_on_login_path(win::to_utf8(argv[0]));
+    if (!exe)
+        return;
+    std::vector<std::string> args;
+    for (std::size_t i = 1; i < argv.size(); ++i)
+        args.push_back(win::to_utf8(argv[i]));
+    try {
+        platform::spawn_detached(*exe, args);
+    } catch (const std::exception&) {
+    }
+#else
     wchar_t exe[MAX_PATH]{};
     if (::SearchPathW(nullptr, argv[0].c_str(), L".exe", MAX_PATH, exe, nullptr) == 0)
         return;
@@ -280,6 +299,7 @@ void start_detached(const std::vector<std::wstring>& argv) {
         ::CloseHandle(pi.hThread);
         ::CloseHandle(pi.hProcess);
     }
+#endif
 }
 
 }  // namespace
@@ -398,6 +418,13 @@ void play_alert(App::State& s, bool blocked) {
         file = win::to_wide(custom);
     if (file.empty())
         file = exe_dir() / L"sounds" / (blocked ? L"request.mp3" : L"done.mp3");
+#ifndef _WIN32
+    if (!std::filesystem::is_regular_file(file, ec))
+        macos::play_system_alert();
+    else
+        macos::play_sound_file(file);
+    return;
+#else
     if (!std::filesystem::is_regular_file(file, ec)) {
         ::PlaySoundW(blocked ? L"SystemExclamation" : L"SystemAsterisk", nullptr,
                      SND_ALIAS | SND_ASYNC | SND_NODEFAULT);
@@ -412,6 +439,7 @@ void play_alert(App::State& s, bool blocked) {
             ::mciSendStringW((L"close " + alias).c_str(), nullptr, 0, nullptr);
         }
     }).detach();
+#endif
 }
 }  // namespace detail
 

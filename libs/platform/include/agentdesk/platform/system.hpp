@@ -6,6 +6,8 @@
 #include <array>
 #include <cstddef>
 #include <filesystem>
+#include <optional>
+#include <string_view>
 #include <span>
 #include <string>
 #include <vector>
@@ -38,5 +40,12 @@ struct ShellCandidate {
     std::vector<std::string> args;
 };
 std::vector<ShellCandidate> detect_shells();
+
+// The PATH a login shell sets up (asked once, then cached; empty when it could not be read).
+// Apps started from the Finder get a minimal PATH, so programs the person installed (claude,
+// node, git from Homebrew) are found only with this one.
+std::string login_path();
+// Folders on `login_path()` (or PATH when that is empty), for looking up programs.
+std::optional<std::filesystem::path> find_on_login_path(std::string_view name);
 
 }  // namespace agentdesk::platform

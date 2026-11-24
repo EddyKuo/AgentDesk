@@ -43,6 +43,7 @@ bool whats_new_body(App::State& s) {
 // The feedback draft as it would be sent: the message, then a line naming the version, the
 // Windows build and the layout.
 std::string feedback_draft(const App::State& s) {
+#ifdef _WIN32
     OSVERSIONINFOEXW os{};
     os.dwOSVersionInfoSize = sizeof os;
     // RtlGetVersion reports the real Windows version; GetVersionEx is capped by the manifest.
@@ -53,6 +54,10 @@ std::string feedback_draft(const App::State& s) {
     const std::string about = std::string("AgentDesk ") + AGENTDESK_VERSION_STRING + ", Windows " +
                               std::to_string(os.dwMajorVersion) + "." + std::to_string(os.dwMinorVersion) +
                               "." + std::to_string(os.dwBuildNumber) + ", layout " + s.settings.layout;
+#else
+    const std::string about =
+        std::string("AgentDesk ") + AGENTDESK_VERSION_STRING + ", " + macos::os_version() + ", layout " + s.settings.layout;
+#endif
     return std::string(s.feedback_buf) + "\n\n-- " + about + "\n";
 }
 
@@ -61,6 +66,7 @@ void save_feedback(const std::string& draft) {
     const auto dir = data_dir() / L"feedback";
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
+#ifdef _WIN32
     SYSTEMTIME t{};
     ::GetLocalTime(&t);
     wchar_t name[64]{};
@@ -68,6 +74,15 @@ void save_feedback(const std::string& draft) {
                   t.wMinute, t.wSecond);
     std::ofstream(dir / name, std::ios::binary) << draft;
     ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#else
+    const std::time_t now = std::time(nullptr);
+    std::tm t{};
+    ::localtime_r(&now, &t);
+    char name[64]{};
+    std::strftime(name, sizeof name, "feedback-%Y%m%d-%H%M%S.md", &t);
+    std::ofstream(dir / name, std::ios::binary) << draft;
+    macos::open_path(dir);
+#endif
 }
 
 // The feedback body, scrolling between the title and the footer, 24 px in, 10 px gaps: the

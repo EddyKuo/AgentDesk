@@ -28,6 +28,15 @@ if(APPLE)
     target_link_libraries(posix_integration_tests PRIVATE agentdesk::platform GTest::gtest_main)
     gtest_discover_tests(posix_integration_tests DISCOVERY_MODE PRE_TEST
         PROPERTIES LABELS "posix_integration" TIMEOUT 120)
+    # agent-host built as a later release (99.0.0), for agent-host's own update (host handover).
+    if(AGENTDESK_BUILD_APPS)
+        add_executable(agent_host_next ${PROJECT_SOURCE_DIR}/apps/host/main_posix.cpp)
+        agentdesk_target_defaults(agent_host_next)
+        target_link_libraries(agent_host_next PRIVATE agentdesk::host agentdesk::ipc)
+        target_compile_definitions(agent_host_next PRIVATE AGENTDESK_VERSION_STRING="99.0.0")
+        set_target_properties(agent_host_next PROPERTIES OUTPUT_NAME agent-host
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/host_next")
+    endif()
     return()
 endif()
 

@@ -132,9 +132,13 @@ bool path_within(const std::string& p, const std::string& dir) {
 
 std::string display_path(const std::string& cwd) {
     static const std::string home = [] {
+#ifdef _WIN32
         wchar_t buf[MAX_PATH]{};
         const DWORD n = ::GetEnvironmentVariableW(L"USERPROFILE", buf, MAX_PATH);
         return n > 0 ? win::to_utf8(std::wstring(buf, n)) : std::string();
+#else
+        return platform::home_dir().string();
+#endif
     }();
     if (path_within(cwd, home))
         return "~" + cwd.substr(home.size());

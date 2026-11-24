@@ -337,10 +337,9 @@ void window_drag_area(App::State& s, ImVec2 a, ImVec2 b) {
     if (!ImGui::IsMouseHoveringRect(a, b, false) || !ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows))
         return;
     if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        ::ShowWindow(s.config.hwnd, ::IsZoomed(s.config.hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        window_toggle_maximize(s.config.hwnd);
     } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        ::ReleaseCapture();
-        ::SendMessageW(s.config.hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        window_begin_drag(s.config.hwnd);
         ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);  // the move loop ate the release
     }
 }

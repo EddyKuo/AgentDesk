@@ -1,6 +1,6 @@
 #!/bin/sh
 # macOS build (ADR-30): scripts/build.sh [preset] [configure|build|test|all]
-# Dependencies come from Homebrew for now (googletest, nlohmann-json).
+# Dependencies come from vcpkg (manifest mode) in ~/vcpkg, as on Windows (ADR-30).
 set -eu
 preset="${1:-clang-macos-arm64-debug}"
 step="${2:-all}"

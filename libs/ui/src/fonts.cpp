@@ -3,7 +3,17 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/fonts.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <strings.h>
+
+#include <CoreFoundation/CoreFoundation.h>
+#include <CoreText/CoreText.h>
+
+#include "agentdesk/platform/system.hpp"
+#include "agentdesk/platform/win/error.hpp"
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -26,6 +36,7 @@ std::string utf8(const std::filesystem::path& p) {
     return {u8.begin(), u8.end()};
 }
 
+#ifdef _WIN32
 std::filesystem::path system_fonts_dir() {
     wchar_t buf[MAX_PATH]{};
     const UINT n = ::GetWindowsDirectoryW(buf, MAX_PATH);
@@ -54,6 +65,62 @@ std::string find_font(std::initializer_list<const wchar_t*> bundled, std::initia
     }
     return {};
 }
+#else
+// macOS (ADR-30): the bundled fonts are in the app's Resources/fonts (or fonts/ next to the
+// program in a build folder). The Windows system font names the callers ask for map to the
+// macOS faces that play the same part; PingFang is a downloadable asset outside
+// /System/Library/Fonts, so the CJK fallback is Heiti (which has Traditional Chinese).
+std::filesystem::path bundled_fonts_dir() {
+    const auto dir = platform::executable_path().parent_path();
+    std::error_code ec;
+    if (const auto res = dir.parent_path() / "Resources" / "fonts"; std::filesystem::is_directory(res, ec))
+        return res;
+    return dir / "fonts";
+}
+
+const std::vector<std::filesystem::path>& system_font_dirs() {
+    static const std::vector<std::filesystem::path> dirs = {
+        "/System/Library/Fonts", "/System/Library/Fonts/Supplemental", "/Library/Fonts",
+        platform::home_dir() / "Library" / "Fonts"};
+    return dirs;
+}
+
+std::vector<std::string> mac_equivalents(std::wstring_view windows_name) {
+    static const std::map<std::wstring_view, std::vector<std::string>> kMap = {
+        {L"msjh.ttc", {"STHeiti Medium.ttc", "Hiragino Sans GB.ttc", "Arial Unicode.ttf"}},
+        {L"mingliu.ttc", {"Songti.ttc", "Arial Unicode.ttf"}},
+        {L"seguisym.ttf", {"Apple Symbols.ttf"}},
+        {L"seguiemj.ttf", {"Apple Color Emoji.ttc"}},
+        {L"CascadiaMono.ttf", {"SFNSMono.ttf", "Menlo.ttc"}},
+        {L"consola.ttf", {"Menlo.ttc"}},
+        {L"consolab.ttf", {"Menlo.ttc"}},
+        {L"segoeui.ttf", {"SFNS.ttf", "Helvetica.ttc"}},
+        {L"seguisb.ttf", {"SFNS.ttf", "Helvetica.ttc"}},
+        {L"segoeuib.ttf", {"SFNS.ttf", "Helvetica.ttc"}},
+    };
+    const auto it = kMap.find(windows_name);
+    return it == kMap.end() ? std::vector<std::string>{} : it->second;
+}
+
+std::string find_font(std::initializer_list<const wchar_t*> bundled, std::initializer_list<const wchar_t*> system) {
+    std::error_code ec;
+    for (const wchar_t* name : bundled) {
+        const auto p = bundled_fonts_dir() / platform::win::to_utf8(name);
+        if (std::filesystem::is_regular_file(p, ec))
+            return utf8(p);
+    }
+    for (const wchar_t* name : system) {
+        for (const auto& mac : mac_equivalents(name)) {
+            for (const auto& dir : system_font_dirs()) {
+                const auto p = dir / mac;
+                if (std::filesystem::is_regular_file(p, ec))
+                    return utf8(p);
+            }
+        }
+    }
+    return {};
+}
+#endif
 
 // AddFontFromFileTTF reads the whole file into a new buffer on every call, and every face merges
 // the same fallbacks (about 40 MB: JhengHei, Nerd Font, Segoe UI Symbol and Emoji), so loading
@@ -132,6 +199,7 @@ std::wstring FontFamily::file_for(int weight) const {
     return best->second;
 }
 
+#ifdef _WIN32
 namespace {
 
 // "Cascadia Mono SemiBold (TrueType)" -> family "Cascadia Mono", weight 600; italic -> false.
@@ -167,7 +235,9 @@ bool parse_font_name(std::wstring name, std::wstring& family, int& weight) {
 }
 
 }  // namespace
+#endif
 
+#ifdef _WIN32
 std::vector<FontFamily> installed_font_families() {
     std::map<std::wstring, FontFamily> by_name;
     auto put = [&](const std::wstring& reg_name, std::filesystem::path file, bool bundled) {
@@ -223,6 +293,82 @@ std::vector<FontFamily> installed_font_families() {
     });
     return out;
 }
+#else
+// macOS: the installed families from CoreText (family name, weight, file), plus the bundled
+// fonts. Italic faces are left out, as on Windows.
+std::vector<FontFamily> installed_font_families() {
+    std::map<std::string, FontFamily> by_name;
+    const auto put = [&](const std::string& family, int weight, const std::filesystem::path& file, bool bundled) {
+        std::string ext = file.extension().string();
+        for (auto& c : ext)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (family.empty() || (ext != ".ttf" && ext != ".otf" && ext != ".ttc"))
+            return;
+        auto& f = by_name[family];
+        f.name = family;
+        f.bundled = f.bundled || bundled;
+        f.weights.try_emplace(weight, file.wstring());
+    };
+    const auto cf_string = [](CFStringRef s) {
+        if (s == nullptr)
+            return std::string();
+        char buf[512]{};
+        return CFStringGetCString(s, buf, sizeof buf, kCFStringEncodingUTF8) ? std::string(buf) : std::string();
+    };
+    if (CTFontCollectionRef collection = CTFontCollectionCreateFromAvailableFonts(nullptr)) {
+        if (CFArrayRef list = CTFontCollectionCreateMatchingFontDescriptors(collection)) {
+            for (CFIndex i = 0; i < CFArrayGetCount(list); ++i) {
+                auto desc = static_cast<CTFontDescriptorRef>(CFArrayGetValueAtIndex(list, i));
+                auto family = static_cast<CFStringRef>(CTFontDescriptorCopyAttribute(desc, kCTFontFamilyNameAttribute));
+                auto url = static_cast<CFURLRef>(CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute));
+                auto traits = static_cast<CFDictionaryRef>(CTFontDescriptorCopyAttribute(desc, kCTFontTraitsAttribute));
+                bool italic = false;
+                double weight = 0;  // -1..1, 0 = regular
+                if (traits != nullptr) {
+                    if (auto sym = static_cast<CFNumberRef>(CFDictionaryGetValue(traits, kCTFontSymbolicTrait))) {
+                        std::uint32_t bits = 0;
+                        CFNumberGetValue(sym, kCFNumberSInt32Type, &bits);
+                        italic = (bits & kCTFontItalicTrait) != 0;
+                    }
+                    if (auto w = static_cast<CFNumberRef>(CFDictionaryGetValue(traits, kCTFontWeightTrait)))
+                        CFNumberGetValue(w, kCFNumberDoubleType, &weight);
+                }
+                char path[1024]{};
+                if (!italic && url != nullptr &&
+                    CFURLGetFileSystemRepresentation(url, true, reinterpret_cast<UInt8*>(path), sizeof path)) {
+                    // CoreText weights -1..1 onto 100..900 (0 = 400, 0.23 = 500, 0.3 = 600, 0.4 = 700).
+                    const int w = weight <= -0.6 ? 100 : weight <= -0.3 ? 300 : weight < 0.2 ? 400
+                                : weight < 0.27 ? 500 : weight < 0.35 ? 600 : weight < 0.5 ? 700 : 900;
+                    put(cf_string(family), w, path, false);
+                }
+                if (family != nullptr)
+                    CFRelease(family);
+                if (url != nullptr)
+                    CFRelease(url);
+                if (traits != nullptr)
+                    CFRelease(traits);
+            }
+            CFRelease(list);
+        }
+        CFRelease(collection);
+    }
+    static const std::pair<const char*, std::pair<const char*, int>> kBundled[] = {
+        {"JetBrainsMono-Medium.ttf", {"JetBrains Mono", 500}}, {"JetBrainsMono-Bold.ttf", {"JetBrains Mono", 700}},
+        {"Geist-Regular.ttf", {"Geist", 400}},                 {"Geist-Medium.ttf", {"Geist", 500}},
+        {"Geist-SemiBold.ttf", {"Geist", 600}}};
+    std::error_code ec;
+    for (const auto& [file, fam] : kBundled)
+        if (std::filesystem::is_regular_file(bundled_fonts_dir() / file, ec))
+            put(fam.first, fam.second, bundled_fonts_dir() / file, true);
+    std::vector<FontFamily> out;
+    for (auto& [k, f] : by_name)
+        out.push_back(std::move(f));
+    std::sort(out.begin(), out.end(), [](const FontFamily& a, const FontFamily& b) {
+        return ::strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
+    });
+    return out;
+}
+#endif
 
 ImFont* load_terminal_font(const std::wstring& file, float size_px) {
     std::string path = file.empty() ? find_font({L"JetBrainsMono-Medium.ttf"}, {L"CascadiaMono.ttf", L"consola.ttf"})

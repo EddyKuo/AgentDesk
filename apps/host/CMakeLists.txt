@@ -1,3 +1,10 @@
+if(APPLE)
+    # macOS (ADR-30): a plain executable; main_posix.cpp replaces the Win32 entry point.
+    agentdesk_executable(agent-host main_posix.cpp)
+    target_link_libraries(agent-host PRIVATE agentdesk::host agentdesk::ipc)
+    target_compile_definitions(agent-host PRIVATE AGENTDESK_VERSION_STRING="${PROJECT_VERSION}")
+    return()
+endif()
 agentdesk_executable(agent-host WIN32 main.cpp)
 target_link_libraries(agent-host PRIVATE agentdesk::host agentdesk::ipc shell32)
 target_compile_definitions(agent-host PRIVATE AGENTDESK_VERSION_STRING="${PROJECT_VERSION}")

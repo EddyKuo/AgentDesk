@@ -50,13 +50,14 @@
         "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_OSX_ARCHITECTURES": "arm64",
-        "CMAKE_PREFIX_PATH": "/opt/homebrew"
+        "VCPKG_TARGET_TRIPLET": "arm64-osx"
       },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
         "rhs": "Darwin"
-      }
+      },
+      "toolchainFile": "$env{HOME}/vcpkg/scripts/buildsystems/vcpkg.cmake"
     },
     {
       "name": "clang-macos-arm64-debug",

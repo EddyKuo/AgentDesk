@@ -33,10 +33,18 @@
 #include <string>
 #include <thread>
 #include <vector>
+#ifdef _WIN32
+#include <windows.h>
+
 #include <dwmapi.h>
-#include <imgui.h>
 #include <mmsystem.h>
 #include <shellapi.h>
+#endif
+#include <imgui.h>
+#ifndef _WIN32
+#include "agentdesk/platform/system.hpp"
+#include "macos/desktop_os.hpp"
+#endif
 
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
@@ -344,7 +352,10 @@ struct GitInfo {
 class GitCache {
 public:
     GitCache()
-        : wake_(::CreateEventW(nullptr, FALSE, FALSE, nullptr)),
+        :
+#ifdef _WIN32
+          wake_(::CreateEventW(nullptr, FALSE, FALSE, nullptr)),
+#endif
           worker_([this](std::stop_token st) { run(st); }),
           watcher_([this](std::stop_token st) { watch_loop(st); }) {}
     ~GitCache();
@@ -393,7 +404,11 @@ private:
     std::deque<std::string> queue_;
     std::map<std::string, Entry> entries_;
     std::atomic<bool> active_{true};
+#ifdef _WIN32
     HANDLE wake_ = nullptr;
+#else
+    std::atomic<bool> wake_flag_{false};  // a new repo to watch (macOS watcher polls)
+#endif
     std::jthread worker_;
     std::jthread watcher_;
 };

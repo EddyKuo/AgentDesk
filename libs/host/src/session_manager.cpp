@@ -14,6 +14,15 @@
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/platform/win/error.hpp"
 
+#ifndef _WIN32
+#include <unistd.h>
+
+#include "agentdesk/platform/system.hpp"
+
+// The one Win32 name the shared code below uses for the host's pid.
+static inline std::uint32_t GetCurrentProcessId() { return static_cast<std::uint32_t>(::getpid()); }
+#endif
+
 namespace agentdesk::host {
 
 namespace win = platform::win;
@@ -75,6 +84,7 @@ std::string valid_utf8(const std::string& in) {
 // unserializable: describe Windows errors with FormatMessageW instead.
 std::string error_text(const std::exception& e) {
     std::string what = e.what();
+#ifdef _WIN32
     if (const auto* se = dynamic_cast<const std::system_error*>(&e);
         se != nullptr && se->code().category() == std::system_category()) {
         const std::string ansi = se->code().message();
@@ -101,6 +111,7 @@ std::string error_text(const std::exception& e) {
             message = "Windows error " + std::to_string(se->code().value());
         what = prefix.empty() ? message : prefix + ": " + message;
     }
+#endif
     return valid_utf8(what);
 }
 
@@ -108,6 +119,7 @@ Response bad(const Request& r, std::string msg) {
     return protocol::fail(r.id, ErrorCode::kBadRequest, std::move(msg));
 }
 
+#ifdef _WIN32
 // WSL: a Linux cd never reaches wsl.exe's Windows current folder. bash runs PROMPT_COMMAND
 // before each prompt; set it (passed into Linux through WSLENV) to send OSC 7 with the distro
 // as the host, which the session maps to \\wsl.localhost\<distro>\... or C:\... for /mnt/c.
@@ -177,6 +189,58 @@ void add_folder_hook(platform::win::PtySpawnSpec& spec) {
         L"try { $l = Get-Location; if ($l.Provider.Name -eq 'FileSystem') "
         L"{ [Environment]::CurrentDirectory = $l.ProviderPath } } catch {}; $r }");
 }
+#else
+// macOS (ADR-30): every shell gets a terminal type and a UTF-8 locale (apps started from the
+// Finder have neither), and the common shells report each prompt: OSC 133 A (the program before
+// it, an agent, has ended) and OSC 7 (the folder). zsh reads startup files from $ZDOTDIR: ours
+// restores the person's ZDOTDIR, sources their .zshenv and adds a precmd hook; their other files
+// load as usual. bash gets PROMPT_COMMAND, which a profile that assigns it replaces.
+std::filesystem::path zsh_hook_dir() {
+    const auto dir = platform::runtime_dir() / "zsh";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    const auto file = dir / ".zshenv";
+    static constexpr const char* kZshenv =
+        "# Written by AgentDesk: reports each prompt (OSC 133 A, OSC 7), then gets out of the way.\n"
+        "if [[ -n \"${AGENTDESK_USER_ZDOTDIR+x}\" ]]; then ZDOTDIR=\"$AGENTDESK_USER_ZDOTDIR\"; "
+        "else unset ZDOTDIR; fi\n"
+        "unset AGENTDESK_USER_ZDOTDIR\n"
+        "[[ -f \"${ZDOTDIR:-$HOME}/.zshenv\" ]] && source \"${ZDOTDIR:-$HOME}/.zshenv\"\n"
+        "if [[ -o interactive ]]; then\n"
+        "  __agentdesk_precmd() { printf '\\e]133;A\\a\\e]7;file://%s%s\\a' \"${HOST%%.*}\" \"${PWD// /%20}\"; }\n"
+        "  autoload -Uz add-zsh-hook && add-zsh-hook precmd __agentdesk_precmd\n"
+        "fi\n";
+    std::ofstream(file, std::ios::trunc) << kZshenv;
+    return dir;
+}
+
+void add_folder_hook(platform::win::PtySpawnSpec& spec) {
+    if (!spec.env_overrides.contains(L"TERM"))
+        spec.env_overrides[L"TERM"] = L"xterm-256color";
+    spec.env_overrides[L"COLORTERM"] = L"truecolor";
+    spec.env_overrides[L"TERM_PROGRAM"] = L"AgentDesk";
+    // Programs the person installed (claude, node, git) are on the login shell's PATH, not on the
+    // minimal one an app started from the Finder gets.
+    if (const std::string path = platform::login_path(); !path.empty() && !spec.env_overrides.contains(L"PATH"))
+        spec.env_overrides[L"PATH"] = win::to_wide(path);
+    const char* lang = std::getenv("LANG");
+    if (lang == nullptr || std::string_view(lang).find("UTF-8") == std::string_view::npos)
+        spec.env_overrides[L"LANG"] = L"en_US.UTF-8";
+    const std::string exe = spec.executable.filename().string();
+    if (exe == "zsh") {
+        if (const char* own = std::getenv("ZDOTDIR"); own != nullptr)
+            spec.env_overrides[L"AGENTDESK_USER_ZDOTDIR"] = win::to_wide(own);
+        try {
+            spec.env_overrides[L"ZDOTDIR"] = zsh_hook_dir().wstring();
+        } catch (const std::exception&) {
+            // No hook: the folder and the end of a program are then unknown, nothing else breaks.
+        }
+    } else if (exe == "bash") {
+        spec.env_overrides[L"PROMPT_COMMAND"] =
+            L"printf '\\033]133;A\\007\\033]7;file://%s%s\\007' \"${HOSTNAME%%.*}\" \"${PWD// /%20}\"";
+    }
+}
+#endif
 
 std::optional<terminal::Key> key_from_name(std::string_view n) {
     static const std::pair<std::string_view, terminal::Key> kKeys[] = {
@@ -299,7 +363,11 @@ void log_skipped_entry(const std::filesystem::path& data_dir, std::string_view f
                        const std::exception& e) {
     try {
         std::ofstream(data_dir / L"host.log", std::ios::app)
+#ifdef _WIN32
             << iso8601_now() << " pid=" << ::GetCurrentProcessId() << " skipped " << file << " entry "
+#else
+            << iso8601_now() << " pid=" << ::getpid() << " skipped " << file << " entry "
+#endif
             << index << " ("
             << (dynamic_cast<const Json::exception*>(&e) != nullptr ? "malformed" : "unreadable") << ")\n";
     } catch (const std::exception&) {
@@ -687,7 +755,7 @@ Response SessionManager::do_git_run(const Request& req) {
     // worktree remove may take minutes.
     const bool long_running = args.front() == L"worktree";
     args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-c", L"core.fsmonitor=false", L"-c",
-                               L"diff.autoRefreshIndex=false", L"-C", cwd->native()});
+                               L"diff.autoRefreshIndex=false", L"-C", cwd->wstring()});
     std::error_code ec;
     if (!std::filesystem::is_directory(*cwd, ec))
         return protocol::fail(req.id, ErrorCode::kNotFound, "not a folder");
@@ -718,9 +786,13 @@ Response SessionManager::do_worktree_add(const Request& req) {
     if (!std::filesystem::is_directory(repo_path, ec))
         return protocol::fail(req.id, ErrorCode::kBadRequest, "repo folder does not exist: " + repo);
     if (path.empty()) {
+#ifdef _WIN32
         wchar_t home[MAX_PATH]{};
         const DWORD n = ::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
         const auto base = std::filesystem::path(std::wstring(home, n)) / L".agentdesk" / L"worktrees";
+#else
+        const auto base = platform::home_dir() / ".agentdesk" / "worktrees";
+#endif
         const auto p = default_worktree_path(base, repo_path, branch).u8string();
         path.assign(p.begin(), p.end());
     }
@@ -729,12 +801,12 @@ Response SessionManager::do_worktree_add(const Request& req) {
     // A branch that exists is checked out; a new one starts from HEAD. Existence is asked of git, never read
     // from its (translated) messages.
     const auto known = run_tool(
-        {L"git", L"-C", repo_path.native(), L"show-ref", L"--verify", L"--quiet", L"refs/heads/" + wbranch},
+        {L"git", L"-C", repo_path.wstring(), L"show-ref", L"--verify", L"--quiet", L"refs/heads/" + wbranch},
         repo_path, kGitTimeout);
     if (!known.started)
         return protocol::fail(req.id, ErrorCode::kSpawnFailed, "git was not found on PATH");
     const bool exists = !known.timed_out && known.exit_code == 0;
-    std::vector<std::wstring> add = {L"git", L"-C", repo_path.native(), L"worktree", L"add"};
+    std::vector<std::wstring> add = {L"git", L"-C", repo_path.wstring(), L"worktree", L"add"};
     if (exists)
         add.insert(add.end(), {wpath, wbranch});
     else
@@ -978,7 +1050,7 @@ SessionConfig new_session_config(const HostConfig& host, const Profile& profile,
     sc.engine.cols = cols;
     sc.engine.rows = rows;
     sc.spec.env_overrides[L"AGENTDESK_SESSION_ID"] = win::to_wide(session_id);
-    sc.spec.env_overrides[L"AGENTDESK_CTL"] = host.ctl_path.native();
+    sc.spec.env_overrides[L"AGENTDESK_CTL"] = host.ctl_path.wstring();
     sc.spec.env_overrides[L"AGENTDESK_PIPE"] = host.pipe_name;
     return sc;
 }

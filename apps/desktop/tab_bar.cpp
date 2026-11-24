@@ -119,18 +119,18 @@ void draw_new_menu(App::State& s) {
 // ---------------------------------------------------------------- tab bar
 
 void draw_window_buttons(App::State& s, float right, float top, float h) {
-    if (s.config.hwnd == nullptr)
+    if (s.config.hwnd == nullptr || !window_draws_own_buttons())
         return;
     const float b = px(26);
     float x = right - b * 3 - px(4);
     const float y = top + (h - b) * 0.5f;
-    const bool zoomed = ::IsZoomed(s.config.hwnd) != FALSE;
+    const bool zoomed = window_is_maximized(s.config.hwnd);
     if (icon_button(s, "##win-min", ui::icon::kMinimize, ImVec2(x, y), b, fpx(16), nullptr, g_pal->dim))
-        ::ShowWindow(s.config.hwnd, SW_MINIMIZE);
+        window_minimize(s.config.hwnd);
     x += b + px(2);
     if (icon_button(s, "##win-max", zoomed ? ui::icon::kRestore : ui::icon::kMaximize, ImVec2(x, y), b,
                     fpx(16), nullptr, g_pal->dim))
-        ::ShowWindow(s.config.hwnd, zoomed ? SW_RESTORE : SW_MAXIMIZE);
+        window_toggle_maximize(s.config.hwnd);
     x += b + px(2);
     ImGui::SetCursorScreenPos(ImVec2(x, y));
     const bool close = ImGui::InvisibleButton("##win-close", ImVec2(b, b));
@@ -141,7 +141,7 @@ void draw_window_buttons(App::State& s, float right, float top, float h) {
     draw_icon(s, dl, ui::icon::kWinClose, fpx(16), ImVec2(x + b * 0.5f, y + b * 0.5f),
               hov ? g_pal->text : g_pal->dim);
     if (close)
-        ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
+        window_close(s.config.hwnd);
 }
 
 // The Changes and Files toggles, laid out leftwards from `right`; returns the new right edge.
@@ -408,13 +408,17 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
     dl->AddLine(ImVec2(pos.x, pos.y + height - 1), ImVec2(pos.x + width, pos.y + height - 1), g_pal->border);
     // Right part first, so the tabs know how much room is left.
     float right = pos.x + width - px(10);
-    if (s.config.hwnd != nullptr) {
+    if (s.config.hwnd != nullptr && window_draws_own_buttons()) {
         draw_window_buttons(s, right + px(10) - px(6), pos.y, height);
         right -= px(26) * 3 + px(4) + px(12);
     }
     right = draw_panel_buttons(s, dl, pos, height, right);
     const float plus_x = right - px(26);
     float x = pos.x + px(10);
+    // macOS: the system's window buttons sit at the left of the window (when no sidebar is left of
+    // the bar, they are over it).
+    if (pos.x < px(1))
+        x += px(window_system_buttons_width());
     // Not in the original bar: once the sidebar is hidden (sidebar.toggle) nothing on screen could
     // bring it back, so a sidebar button leads the bar while it is hidden.
     if (const lay::Node* side = s.layout().tree.find("sidebar"); side != nullptr && side->hidden) {

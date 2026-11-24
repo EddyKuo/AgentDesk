@@ -87,6 +87,23 @@ public:
     bool pause_reader(std::chrono::milliseconds timeout);
     void resume_reader();
 
+#ifndef _WIN32
+    // ---- agent-host's handover (ADR-30, docs/design/platform-abstraction.md 5.5)
+    // With the reader paused: up to `max` bytes the terminal holds now; never waits.
+    std::string read_available(std::size_t max);
+    // The pty master, to pass to the new host with SCM_RIGHTS. Stays owned by *this.
+    [[nodiscard]] int handover_fd() const;
+    // The new host holds the terminal: close ours without signalling anything. Closed afterwards.
+    void release_after_handover();
+    // In the new host: takes a pty master and root process the old host passed over, after
+    // checking them (a pty master; the root is alive, ours, leads its own session, and that session
+    // owns the terminal). The reader starts paused (resume_reader()). The root is not our child,
+    // so its exit code is unknown: exit_code() then reports -1. Throws std::runtime_error when a
+    // check fails (the fd is then closed).
+    static std::unique_ptr<Pty> adopt(int master_fd, std::uint32_t pid, PtyOutputSink on_output,
+                                      PtyExitSink on_exit);
+#endif
+
     struct Impl;
 
 private:

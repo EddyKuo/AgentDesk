@@ -76,7 +76,7 @@ host::ToolResult git_at(App::State& s, const std::string& machine, const std::st
                         std::chrono::seconds timeout = std::chrono::seconds(30)) {
     if (machine.empty()) {
         const std::filesystem::path p(win::to_wide(cwd));
-        args.insert(args.begin(), {L"git", L"-C", p.native()});
+        args.insert(args.begin(), {L"git", L"-C", p.wstring()});
         return host::run_tool(args, p, timeout);
     }
     return remote_git(s.panels->remote, machine, cwd, args);
@@ -874,11 +874,11 @@ Outcome exec_app_command(App::State& s, const Command& c) {
         s.picker_sel = -1;
         s.picker_reset = true;
     } else if (name == "window.minimize") {
-        ::ShowWindow(s.config.hwnd, SW_MINIMIZE);
+        window_minimize(s.config.hwnd);
     } else if (name == "window.maximize") {
-        ::ShowWindow(s.config.hwnd, ::IsZoomed(s.config.hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        window_toggle_maximize(s.config.hwnd);
     } else if (name == "window.close") {
-        ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
+        window_close(s.config.hwnd);
     } else if (name == "machine.add") {
         s.show_machine_add = true;
     } else if (name == "app.welcome") {
@@ -926,7 +926,11 @@ Outcome exec_app_command(App::State& s, const Command& c) {
     } else if (name == "app.keys") {
         const auto path = data_dir() / L"keys.json";
         load_keys(s);  // writes the defaults when the file is missing
+#ifdef _WIN32
         ::ShellExecuteW(nullptr, L"open", L"notepad.exe", path.c_str(), nullptr, SW_SHOWNORMAL);
+#else
+        macos::open_text_file(path);
+#endif
         s.toast("keys.json opened", "Saved changes apply right away.", "", g_pal->info);
     } else if (name == "app.exit_all") {
         s.show_exit = true;
@@ -1116,7 +1120,11 @@ Outcome exec_layout_mod_command(App::State& s, const Command& c) {
         const auto dir = data_dir() / L"mods";
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
+#ifdef _WIN32
         ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#else
+        macos::open_path(dir);
+#endif
     } else if (c.name == "mod") {
         const auto c2 = c.arg.find(':');
         if (c2 == std::string::npos)

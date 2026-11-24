@@ -2,9 +2,13 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/window_place.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
 // shellscalingapi.h needs windows.h first.
 #include <shellscalingapi.h>
+#else
+#include <cstdio>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -120,6 +124,7 @@ std::string format(const Saved& s) {
     return j.dump(2) + "\n";
 }
 
+#ifdef _WIN32
 std::vector<Monitor> monitors(std::size_t* under_cursor) {
     struct Found {
         std::vector<Monitor> list;
@@ -178,6 +183,7 @@ const Monitor& monitor_for(const Rect& r, const std::vector<Monitor>& list) {
                 return m;
     return list.front();
 }
+#endif  // macOS: window_place_macos.mm
 
 std::optional<Saved> load(const std::filesystem::path& file) {
     std::ifstream in(file, std::ios::binary);
@@ -200,7 +206,11 @@ void save(const std::filesystem::path& file, const Saved& s) {
         if (!out)
             return;
     }
+#ifdef _WIN32
     ::MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING);
+#else
+    std::rename(tmp.c_str(), file.c_str());
+#endif
 }
 
 }  // namespace agentdesk::ui::window_place

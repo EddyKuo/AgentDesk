@@ -18,4 +18,9 @@ namespace agentdesk::terminal {
 // The path is percent-decoded; NUL, control characters and ".." segments make it unmappable.
 std::string windows_path_from_cwd_uri(std::string_view uri, std::string_view local_host);
 
+// macOS (ADR-30): the absolute POSIX path for an OSC 7 URI from this computer, or "" when the URI
+// names another host or cannot be mapped. Same decoding and refusals as above.
+//   file://<local>/Users/me/src%20x  -> /Users/me/src x
+std::string posix_path_from_cwd_uri(std::string_view uri, std::string_view local_host);
+
 }  // namespace agentdesk::terminal

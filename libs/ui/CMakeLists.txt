@@ -16,19 +16,25 @@ agentdesk_library(agentdesk_ui
     src/remote_screen.cpp
     src/host_client.cpp
     src/links.cpp
-    src/clipboard.cpp
-    src/system_process.cpp
+    $<IF:$<PLATFORM_ID:Darwin>,src/macos/clipboard_macos.mm,src/clipboard.cpp>
+    $<IF:$<PLATFORM_ID:Darwin>,src/system_process_posix.cpp,src/system_process.cpp>
     src/telemetry.cpp
     src/updates.cpp
     src/image_cache.cpp
     src/programs.cpp
     src/layout.cpp
     src/window_place.cpp
+    $<$<PLATFORM_ID:Darwin>:src/macos/window_place_macos.mm>
     ${CMAKE_CURRENT_BINARY_DIR}/layout_defaults.cpp)
 add_library(agentdesk::ui ALIAS agentdesk_ui)
 target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # host/input.hpp is part of the public interface (TerminalSource::send).
-target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt shcore lunasvg::lunasvg)
+if(APPLE)
+    target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi lunasvg::lunasvg
+        "-framework AppKit" "-framework CoreText" "-framework CoreFoundation")
+else()
+    target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt shcore lunasvg::lunasvg)
+endif()
 target_link_libraries(agentdesk_ui PUBLIC imgui::imgui agentdesk::terminal agentdesk::host agentdesk::ipc agentdesk::protocol)
 
 # The shipped layout files (kept verbatim), compiled in as text for

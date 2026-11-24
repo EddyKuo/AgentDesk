@@ -24,6 +24,11 @@ struct ProcessSpec {
     bool pipe_stdout = true;
     bool merge_stderr = false;    // stderr into the stdout pipe (else to /dev/null)
     bool end_with_parent = true;  // ~Process kills it (own process group on macOS)
+#ifndef _WIN32
+    // When set (and stderr is not merged): the child's stderr goes to this descriptor, which the
+    // caller keeps owning (ssh explains failures there).
+    int stderr_fd = -1;
+#endif
 };
 
 // A child with optional pipes. It inherits nothing but the pipes it asked for.

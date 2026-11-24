@@ -3,12 +3,42 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
+#ifndef _WIN32
+#include "agentdesk/ui/window_place.hpp"
+#endif
+
+#ifdef _WIN32
 // GetDpiForMonitor; app_internal.hpp brings in windows.h first.
 #include <shellscalingapi.h>
+#endif
 
 namespace agentdesk::desktop {
 namespace detail {
 
+#ifndef _WIN32
+// macOS (ADR-30): AGENTDESK_DATA_DIR, else ~/Library/Application Support/AgentDesk.
+std::filesystem::path data_dir() {
+    try {
+        return platform::data_dir();
+    } catch (const std::exception&) {
+        return std::filesystem::temp_directory_path() / "AgentDesk";
+    }
+}
+
+// The program's files (mods, programs, sounds, themes): the app bundle's Resources folder.
+std::filesystem::path exe_dir() { return macos::resources_dir(); }
+
+namespace {
+// The first run's zoom: 1.0, x1.15 on a screen 2400 points wide or wider (as on Windows, in
+// logical units: Retina already draws everything sharper, not bigger).
+float first_run_zoom() {
+    float z = 1.0f;
+    if (const auto monitors = ui::window_place::monitors(); !monitors.empty() && monitors.front().bounds.w >= 2400)
+        z *= 1.15f;
+    return std::clamp(std::round(z * 10.0f) / 10.0f, 0.5f, 3.0f);
+}
+}  // namespace
+#else
 std::filesystem::path data_dir() {
     wchar_t buf[MAX_PATH]{};
     DWORD n = ::GetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", buf, MAX_PATH);
@@ -50,6 +80,7 @@ float first_run_zoom() {
 }
 
 }  // namespace
+#endif
 
 // The shown layout's {dark, light} themes, else the defaults.
 std::pair<std::string, std::string> layout_theme_pair(const Settings& st) {
@@ -288,7 +319,11 @@ void save_settings(const Settings& s) {
             std::filesystem::remove(tmp, ec);
             continue;
         }
+#ifdef _WIN32
         if (!::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+#else
+        if (std::error_code mv; std::filesystem::rename(tmp, path, mv), mv) {
+#endif
             std::filesystem::remove(tmp, ec);
             g_settings_problem = "Not saved to ui.json";
         }

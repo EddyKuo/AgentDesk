@@ -10,7 +10,8 @@ function(agentdesk_target_defaults target)
             UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
     else()
         # The clang counterpart of /W4 /WX (ADR_001 thresholds).
-        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+        # Aggregates initialized with fewer fields than they have are intended (designated defaults).
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-missing-field-initializers)
     endif()
 endfunction()
 

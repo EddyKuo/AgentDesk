@@ -3,7 +3,12 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/telemetry.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <cstdlib>
+#include <stdio.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -17,7 +22,9 @@
 #include <thread>
 #include <utility>
 
+#ifdef _WIN32
 #include <bcrypt.h>
+#endif
 
 #include "system_process.hpp"
 
@@ -55,13 +62,21 @@ bool write_atomic(const fs::path& path, const std::string& text) {
         if (!out)
             return false;
     }
+#ifdef _WIN32
     return ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+#else
+    return ::rename(tmp.c_str(), path.c_str()) == 0;
+#endif
 }
 
 // 64 random bits from the OS's RNG, for the install id and send jitter.
 std::uint64_t random_u64() {
     std::uint64_t v = 0;
+#ifdef _WIN32
     ::BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&v), sizeof v, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+#else
+    ::arc4random_buf(&v, sizeof v);
+#endif
     return v;
 }
 
@@ -394,7 +409,7 @@ private:
         std::error_code ec;
         for (const auto& e : fs::directory_iterator(dir() / L"queue", ec)) {
             const fs::path path = e.path();
-            const std::string day = detail::to_utf8(path.stem().native());
+            const std::string day = detail::to_utf8(path.stem().wstring());
             if (day < oldest) {
                 std::error_code rm;
                 fs::remove(path, rm);

@@ -11,8 +11,22 @@
       "name": "imgui",
       "features": [
         "docking-experimental",
-        "win32-binding",
-        "dx11-binding",
+        {
+          "name": "win32-binding",
+          "platform": "windows"
+        },
+        {
+          "name": "dx11-binding",
+          "platform": "windows"
+        },
+        {
+          "name": "osx-binding",
+          "platform": "osx"
+        },
+        {
+          "name": "metal-binding",
+          "platform": "osx"
+        },
         "wchar32",
         "freetype"
       ]

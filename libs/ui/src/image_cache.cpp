@@ -82,7 +82,7 @@ ImageCache::Image ImageCache::keep(const std::tuple<std::wstring, int, int, bool
 ImageCache::Image ImageCache::svg(const std::filesystem::path& file, int w, int h, bool mono) {
     if (w <= 0 || h <= 0)
         return {};
-    const auto key = std::make_tuple(file.native(), w, h, mono);
+    const auto key = std::make_tuple(file.wstring(), w, h, mono);
     if (const auto it = entries_.find(key); it != entries_.end())
         return it->second.image;
     std::string text = read_file(file);

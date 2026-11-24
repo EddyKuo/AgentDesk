@@ -256,7 +256,12 @@ const std::string& StreamListener::endpoint() const noexcept {
 }
 
 std::unique_ptr<ByteStream> connect_stream(const std::string& endpoint, std::chrono::milliseconds timeout) {
-    const sockaddr_un addr = make_address(endpoint);
+    sockaddr_un addr{};
+    try {
+        addr = make_address(endpoint);
+    } catch (const std::system_error&) {
+        return nullptr;  // no server can listen there
+    }
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
         UniqueFd fd = try_connect(addr);

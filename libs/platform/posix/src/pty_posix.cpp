@@ -9,9 +9,13 @@
 #include <thread>
 
 #include <fcntl.h>
+#include <libproc.h>
 #include <poll.h>
 #include <signal.h>
+#include <sys/event.h>
 #include <sys/ioctl.h>
+#include <sys/proc.h>
+#include <sys/proc_info.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <termios.h>
@@ -34,6 +38,8 @@ constexpr auto kKillWait = std::chrono::seconds(2);
 
 std::mutex g_ptsname_mutex;  // ptsname() returns a static buffer
 
+constexpr std::uintptr_t kCancelWaiter = 1;  // EVFILT_USER ident that stops the waiter
+
 winsize to_winsize(PtySize size) {
     winsize ws{};
     ws.ws_col = std::max<std::uint16_t>(size.cols, 1);
@@ -52,6 +58,8 @@ struct Pty::Impl {
     UniqueFd wake_write;
     std::thread reader;
     std::thread waiter;
+    UniqueFd kq;           // the waiter's kqueue: the root's exit, or a cancel
+    bool adopted = false;  // taken over from another host: the root is not our child
 
     mutable std::mutex mutex;
     mutable std::condition_variable cv;
@@ -122,15 +130,39 @@ struct Pty::Impl {
         cv.notify_all();
     }
 
+    // Watches the root's exit with kqueue, so release_after_handover() can stop watching a
+    // process that keeps running. Our own child is reaped with waitpid() for its status; an
+    // adopted root belongs to someone else, so its exit code stays unknown (-1).
     void waiter_loop() noexcept {
-        int status = 0;
-        pid_t r = -1;
-        do {
-            r = ::waitpid(pid, &status, 0);
-        } while (r < 0 && errno == EINTR);
+        struct kevent change{};
+        EV_SET(&change, static_cast<uintptr_t>(pid), EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, nullptr);
+        ::kevent(kq.get(), &change, 1, nullptr, 0, nullptr);  // ESRCH: already gone, checked below
+        int code = -1;
+        for (;;) {
+            if (!adopted) {
+                int status = 0;
+                const pid_t r = ::waitpid(pid, &status, WNOHANG);
+                if (r == pid) {
+                    code = posix::exit_code_from_status(status);
+                    break;
+                }
+                if (r < 0 && errno != EINTR)
+                    break;
+            } else if (::kill(pid, 0) != 0 && errno == ESRCH) {
+                break;
+            }
+            struct kevent event{};
+            const int n = ::kevent(kq.get(), nullptr, 0, &event, 1, nullptr);
+            if (n < 0 && errno != EINTR)
+                return;
+            if (n == 1 && event.filter == EVFILT_USER)
+                return;  // cancelled: the program keeps running in another host
+            if (n == 1 && event.filter == EVFILT_PROC && adopted)
+                break;
+        }
         {
             std::lock_guard lock(mutex);
-            exit_code = r == pid ? posix::exit_code_from_status(status) : -1;
+            exit_code = code;
             cv.notify_all();
         }
         if (on_exit) {
@@ -139,6 +171,32 @@ struct Pty::Impl {
             } catch (...) {
             }
         }
+    }
+
+    void cancel_waiter() const {
+        struct kevent ev{};
+        EV_SET(&ev, kCancelWaiter, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
+        ::kevent(kq.get(), &ev, 1, nullptr, 0, nullptr);
+    }
+
+    // Starts the reader (paused when asked) and the waiter.
+    void start_threads(bool paused_reader) {
+        kq.reset(::kqueue());
+        if (!kq.valid())
+            posix::throw_errno("kqueue");
+        posix::set_cloexec(kq.get());
+        struct kevent ev{};
+        EV_SET(&ev, kCancelWaiter, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
+        if (::kevent(kq.get(), &ev, 1, nullptr, 0, nullptr) != 0)
+            posix::throw_errno("kevent(EVFILT_USER)");
+        auto [rd, wr] = posix::make_pipe();
+        ::fcntl(rd.get(), F_SETFL, O_NONBLOCK);
+        ::fcntl(wr.get(), F_SETFL, O_NONBLOCK);
+        wake_read = std::move(rd);
+        wake_write = std::move(wr);
+        pause_requested = paused_reader;
+        waiter = std::thread([this] { waiter_loop(); });
+        reader = std::thread([this] { reader_loop(); });
     }
 
     // The process group is the child's pid (it called setsid()).
@@ -257,14 +315,7 @@ std::unique_ptr<Pty> Pty::spawn(const PtySpawnSpec& spec, PtyOutputSink on_outpu
     impl->pid = pid;
     impl->on_output = std::move(on_output);
     impl->on_exit = std::move(on_exit);
-    auto [wake_read, wake_write] = posix::make_pipe();
-    ::fcntl(wake_read.get(), F_SETFL, O_NONBLOCK);
-    ::fcntl(wake_write.get(), F_SETFL, O_NONBLOCK);
-    impl->wake_read = std::move(wake_read);
-    impl->wake_write = std::move(wake_write);
-    Impl* raw = impl.get();
-    impl->waiter = std::thread([raw] { raw->waiter_loop(); });
-    impl->reader = std::thread([raw] { raw->reader_loop(); });
+    impl->start_threads(false);
     return std::unique_ptr<Pty>(new Pty(std::move(impl)));
 }
 
@@ -381,6 +432,83 @@ void Pty::resume_reader() {
     std::lock_guard lock(impl_->mutex);
     impl_->pause_requested = false;
     impl_->cv.notify_all();
+}
+
+std::string Pty::read_available(std::size_t max) {
+    std::string out;
+    std::array<char, 16 * 1024> buf{};
+    while (out.size() < max) {
+        pollfd p{impl_->master.get(), POLLIN, 0};
+        if (::poll(&p, 1, 0) != 1 || (p.revents & POLLIN) == 0)
+            break;
+        const ssize_t n = ::read(impl_->master.get(), buf.data(), std::min(buf.size(), max - out.size()));
+        if (n <= 0)
+            break;
+        out.append(buf.data(), static_cast<std::size_t>(n));
+    }
+    return out;
+}
+
+int Pty::handover_fd() const {
+    return impl_->master.get();
+}
+
+void Pty::release_after_handover() {
+    std::lock_guard close_lock(impl_->close_mutex);
+    if (impl_->closed)
+        return;
+    Impl& s = *impl_;
+    s.cancel_waiter();
+    if (s.waiter.joinable())
+        s.waiter.join();
+    {
+        std::lock_guard lock(s.mutex);
+        s.stop_requested = true;
+        s.pause_requested = false;
+        s.cv.notify_all();
+    }
+    s.wake();
+    if (s.reader.joinable())
+        s.reader.join();
+    {
+        std::lock_guard lock(s.write_mutex);
+        s.master.reset();  // the new host holds its own copy; nothing is signalled
+    }
+    s.closed = true;
+}
+
+std::unique_ptr<Pty> Pty::adopt(int master_fd, std::uint32_t pid, PtyOutputSink on_output,
+                                PtyExitSink on_exit) {
+    UniqueFd master(master_fd);
+    const auto fail = [](const std::string& why) { throw std::runtime_error("adopt terminal: " + why); };
+    const auto root = static_cast<pid_t>(pid);
+    {
+        std::lock_guard lock(g_ptsname_mutex);
+        if (!master.valid() || ::ptsname(master.get()) == nullptr)
+            fail("not a pty master");
+    }
+    posix::set_cloexec(master.get());
+    proc_bsdinfo info{};
+    if (root <= 0 ||
+        ::proc_pidinfo(root, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) != static_cast<int>(sizeof(info)) ||
+        info.pbi_status == SZOMB)
+        fail("program " + std::to_string(pid) + " is not running");
+    if (info.pbi_uid != ::geteuid())
+        fail("program " + std::to_string(pid) + " belongs to another user");
+    if (::getsid(root) != root)
+        fail("program " + std::to_string(pid) + " does not lead its own session");
+    const pid_t group = ::tcgetpgrp(master.get());
+    if (group <= 0 || ::getsid(group) != root)
+        fail("the terminal is not owned by program " + std::to_string(pid));
+
+    auto impl = std::make_unique<Impl>();
+    impl->master = std::move(master);
+    impl->pid = root;
+    impl->adopted = true;
+    impl->on_output = std::move(on_output);
+    impl->on_exit = std::move(on_exit);
+    impl->start_threads(true);
+    return std::unique_ptr<Pty>(new Pty(std::move(impl)));
 }
 
 PtyCapabilities pty_capabilities() {
