@@ -1,4 +1,4 @@
-# agent-ui: the window contents are shared; each system has its own shell (main.cpp: Win32 and
+# agent-ui: the window contents are shared; each system has its own shell (win/main_win.cpp: Win32 and
 # DX11; macos/main_macos.mm: AppKit and Metal, ADR-30) and its own desktop_os.hpp, window_ops.hpp
 # and watcher files (win/, macos/). Bundled files are copied next to the program: fonts/ (OFL /
 # MIT), the alert sounds/, the program table and icons in programs/ and the theme files in
@@ -52,8 +52,8 @@ set(_ui_app_sources
     ui_tokens.cpp)
 if(WIN32)
     agentdesk_executable(agent-ui WIN32
-        main.cpp
         ${_ui_app_sources}
+        win/main_win.cpp
         win/desktop_os_win.cpp
         win/git_cache_win.cpp
         win/side_panels_win.cpp

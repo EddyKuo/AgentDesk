@@ -1,6 +1,9 @@
 // libs/ipc: Named Pipe transport (S2-1, QA-17).
 #include "agentdesk/ipc/pipe.hpp"
 
+#include <windows.h>
+
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -10,6 +13,9 @@
 
 #include <gtest/gtest.h>
 
+#include "agentdesk/platform/ipc_transport.hpp"
+#include "agentdesk/platform/text.hpp"
+#include "agentdesk/platform/win/user.hpp"
 #include "agentdesk/protocol/messages.hpp"
 
 using namespace std::chrono_literals;
@@ -17,10 +23,10 @@ using namespace agentdesk;
 
 namespace {
 
-std::wstring unique_name() {
+std::string unique_name() {
     static std::atomic<int> n{0};
-    return L"\\\\.\\pipe\\AgentDeskTest-" + std::to_wstring(::GetCurrentProcessId()) + L"-" +
-           std::to_wstring(++n);
+    return "\\\\.\\pipe\\AgentDeskTest-" + std::to_string(::GetCurrentProcessId()) + "-" +
+           std::to_string(++n);
 }
 
 // Echo server: answers every request with {"echo": params}.
@@ -40,8 +46,7 @@ ipc::ServerHandlers echo_handlers() {
 }  // namespace
 
 TEST(Pipe, NamesIncludeUserSidAndSession) {
-    EXPECT_NE(ipc::default_pipe_name().find(ipc::current_user_sid()), std::wstring::npos);
-    EXPECT_NE(ipc::default_mutex_name().find(L"Local\\AgentDesk-host-"), std::wstring::npos);
+    EXPECT_NE(ipc::default_pipe_name().find(platform::win::user_sid()), std::string::npos);
 }
 
 TEST(Pipe, RequestResponseRoundTrip) {
@@ -113,8 +118,8 @@ TEST(Pipe, OversizedFrameDisconnectsClient) {
     auto h = echo_handlers();
     h.on_close = [&](const ipc::ConnectionPtr&) { ++closed; };
     ipc::PipeServer server(name, h);
-    HANDLE raw =
-        ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    HANDLE raw = ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                               nullptr, OPEN_EXISTING, 0, nullptr);
     ASSERT_NE(raw, INVALID_HANDLE_VALUE);
     const unsigned char hdr[4] = {0xFF, 0xFF, 0xFF, 0x7F};
     DWORD written = 0;
@@ -124,6 +129,55 @@ TEST(Pipe, OversizedFrameDisconnectsClient) {
         std::this_thread::sleep_for(10ms);
     EXPECT_EQ(closed, 1);
     ::CloseHandle(raw);
+}
+
+// One agent-host per user: the name is taken until its holder lets go; only a host that takes over
+// from the holder shares it.
+TEST(Pipe, InstanceLockIsExclusiveExceptForATakeover) {
+    const std::string name = "lock-test-" + std::to_string(::GetCurrentProcessId());
+    auto first = platform::InstanceLock::try_acquire(name);
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(platform::InstanceLock::try_acquire(name), nullptr);
+    auto successor = platform::InstanceLock::try_acquire(name, true);
+    ASSERT_NE(successor, nullptr);
+    first.reset();
+    EXPECT_EQ(platform::InstanceLock::try_acquire(name), nullptr) << "the successor holds it now";
+    successor.reset();
+    EXPECT_NE(platform::InstanceLock::try_acquire(name), nullptr);
+}
+
+// cancel() from another thread ends a blocked read and a blocked write, and the server's client sees
+// the disconnect.
+TEST(Pipe, CancelWakesBlockedReadsAndWrites) {
+    const auto name = unique_name();
+    auto listener = platform::StreamListener::listen(name);
+    std::unique_ptr<platform::ByteStream> server;
+    platform::PeerIdentity peer;
+    std::thread acceptor([&] { server = listener->accept(&peer); });
+    auto client = platform::connect_stream(name, 5s);
+    acceptor.join();
+    ASSERT_TRUE(client && server);
+    EXPECT_EQ(peer.pid, ::GetCurrentProcessId());
+    EXPECT_TRUE(peer.same_user);
+    std::atomic<int> ended{0};
+    std::thread reader([&] {
+        std::array<char, 16> buf{};
+        EXPECT_EQ(server->read_some(buf), 0u);
+        ++ended;
+    });
+    std::thread writer([&] {
+        const std::string big(8u << 20, 'x');  // far more than the pipe holds; nobody reads
+        EXPECT_FALSE(server->write_all(big));
+        ++ended;
+    });
+    std::this_thread::sleep_for(100ms);
+    EXPECT_EQ(ended, 0);
+    server->cancel();
+    reader.join();
+    writer.join();
+    std::array<char, 16> buf{};
+    EXPECT_EQ(client->read_some(buf), 0u);
+    EXPECT_FALSE(client->write_all("x"));
 }
 
 TEST(Pipe, DroppableMessagesRespectSendBudget) {
@@ -141,8 +195,8 @@ TEST(Pipe, DroppableMessagesRespectSendBudget) {
         }
     };
     ipc::PipeServer server(name, h);
-    HANDLE raw =
-        ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    HANDLE raw = ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                               nullptr, OPEN_EXISTING, 0, nullptr);
     ASSERT_NE(raw, INVALID_HANDLE_VALUE);
     const std::string req = protocol::encode_frame(R"({"v":1,"id":"a","method":"go"})");
     DWORD written = 0;
@@ -173,8 +227,8 @@ TEST(Pipe, StopDoesNotWaitForAClientThatStoppedReading) {
         ++sent;
     };
     auto server = std::make_unique<ipc::PipeServer>(name, h);
-    HANDLE raw =
-        ::CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    HANDLE raw = ::CreateFileW(agentdesk::platform::to_wide(name).c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                               nullptr, OPEN_EXISTING, 0, nullptr);
     ASSERT_NE(raw, INVALID_HANDLE_VALUE);
     const std::string req = protocol::encode_frame(R"({"v":1,"id":"a","method":"go"})");
     DWORD written = 0;

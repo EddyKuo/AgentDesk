@@ -1,11 +1,13 @@
 #pragma once
 
-// Win32 error helpers and UTF-8 / UTF-16 conversion.
+// Win32 error helpers, with the UTF-8 / UTF-16 conversion (text.hpp) under the names Win32 code uses.
 
 #include <windows.h>
 
 #include <string>
 #include <system_error>
+
+#include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::platform::win {
 
@@ -21,7 +23,7 @@ namespace agentdesk::platform::win {
 }
 
 // UTF-16 <-> UTF-8 conversion for Win32 boundaries. Invalid input throws.
-std::string to_utf8(std::wstring_view text);
-std::wstring to_wide(std::string_view utf8);
+using platform::to_utf8;
+using platform::to_wide;
 
 }  // namespace agentdesk::platform::win

@@ -31,7 +31,7 @@
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/system.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 #include "agentdesk/ui/host_client.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
 #include "agentdesk/ui/keyboard.hpp"
@@ -40,7 +40,6 @@
 #include "agentdesk/ui/window_place.hpp"
 #include "app.hpp"
 
-namespace win = agentdesk::platform::win;
 namespace ui = agentdesk::ui;
 namespace ipc = agentdesk::ipc;
 using Clock = std::chrono::steady_clock;
@@ -56,7 +55,7 @@ struct DevOptions {
     std::string start_profile;
     long long exit_after_ms = 0;
     std::filesystem::path report;
-    std::wstring pipe;
+    std::string pipe;
     std::vector<std::string> run;
     std::string input;
     std::filesystem::path screenshot;  // --screenshot <png>: the last frame, written at exit
@@ -73,7 +72,7 @@ DevOptions parse_dev_options(int argc, char** argv) {
         else if (a == "--report" && i + 1 < argc)
             o.report = argv[++i];
         else if (a == "--pipe" && i + 1 < argc)
-            o.pipe = win::to_wide(argv[++i]);
+            o.pipe = argv[++i];
         else if (a == "--input" && i + 1 < argc)
             o.input = argv[++i];
         else if (a == "--screenshot" && i + 1 < argc)
@@ -683,13 +682,13 @@ int main(int argc, char** argv) {
                                               }];
 
         ui::HostClientOptions hopts;
-        hopts.host_exe = ipc::sibling_executable(L"agent-host");
+        hopts.host_exe = ipc::sibling_executable("agent-host");
         hopts.pipe_name = g_shell.dev.pipe.empty() ? ipc::default_pipe_name() : g_shell.dev.pipe;
         ui::updates::set_pipe(g_shell.dev.pipe);
         hopts.wake = [] { schedule_pump(2); };
 
         agentdesk::desktop::AppConfig cfg;
-        cfg.hwnd = (__bridge void*)window;
+        cfg.window = (__bridge void*)window;
         cfg.wake = [] { schedule_pump(2); };
         cfg.start_profile = g_shell.dev.start_profile;
         cfg.run_commands = g_shell.dev.run;

@@ -24,6 +24,7 @@
 #include <unistd.h>
 
 #include "agentdesk/platform/pty.hpp"
+#include "agentdesk/platform/pty_handles.hpp"
 #include "posix_util.hpp"
 #include "proc_info.hpp"
 
@@ -454,6 +455,15 @@ void Pty::close() {
     s.closed = true;
 }
 
+bool Pty::exit_code_known() const {
+    const auto code = exit_code();
+    return !code || *code != -1;  // real codes are 0..255
+}
+
+std::string Pty::foreground_program() const {
+    return foreground().program;
+}
+
 bool Pty::closed() const {
     std::lock_guard lock(impl_->close_mutex);
     return impl_->closed;
@@ -492,8 +502,13 @@ std::string Pty::read_available(std::size_t max) {
     return out;
 }
 
-int Pty::handover_fd() const {
-    return impl_->master.get();
+std::optional<PtyHandles> Pty::handover_handles(std::string* why) const {
+    if (closed()) {
+        if (why != nullptr)
+            *why = "terminal already closed";
+        return std::nullopt;
+    }
+    return PtyHandles{impl_->master.get(), pid()};
 }
 
 void Pty::release_after_handover() {
@@ -520,9 +535,9 @@ void Pty::release_after_handover() {
     s.closed = true;
 }
 
-std::unique_ptr<Pty> Pty::adopt(int master_fd, std::uint32_t pid, PtyOutputSink on_output,
-                                PtyExitSink on_exit) {
-    UniqueFd master(master_fd);
+std::unique_ptr<Pty> Pty::adopt(const PtyHandles& handles, PtyOutputSink on_output, PtyExitSink on_exit) {
+    UniqueFd master(handles.master_fd);
+    const std::uint32_t pid = handles.pid;
     const auto fail = [](const std::string& why) { throw std::runtime_error("adopt terminal: " + why); };
     const auto root = static_cast<pid_t>(pid);
     {
@@ -557,7 +572,7 @@ std::unique_ptr<Pty> Pty::adopt(int master_fd, std::uint32_t pid, PtyOutputSink 
 PtyCapabilities pty_capabilities() {
     PtyCapabilities caps;
     caps.answers_osc7501_query = true;  // a Unix pty passes every byte through
-    caps.handover = false;              // design doc ADR-30: macOS handover comes in step 10
+    caps.handover = true;
     return caps;
 }
 

@@ -2,7 +2,7 @@
 
 // The parts of the updater that differ per system: updates_win.cpp (a folder with agent-ui.exe,
 // PowerShell relaunches it) and updates_posix.cpp (an AgentDesk.app bundle, ADR-30). CMake
-// builds one of them; sha256, target and find_root (updates.hpp) are there too.
+// builds one of them; target and find_root (updates.hpp) are there too.
 
 #include <filesystem>
 #include <optional>

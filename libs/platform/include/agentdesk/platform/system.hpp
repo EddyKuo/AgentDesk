@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string_view>
@@ -14,34 +15,48 @@
 
 namespace agentdesk::platform {
 
-// AGENTDESK_DATA_DIR when set, else the per-user application data folder
-// (macOS: ~/Library/Application Support/AgentDesk). Created when missing.
+// An environment variable (UTF-8); nullopt when unset.
+std::optional<std::string> env_var(std::string_view name);
+void unset_env_var(std::string_view name);
+
+// AGENTDESK_DATA_DIR when set, else the per-user application data folder (Windows:
+// %LOCALAPPDATA%\AgentDesk; macOS: ~/Library/Application Support/AgentDesk). Created when missing.
 std::filesystem::path data_dir();
 std::filesystem::path executable_path();  // the running executable, absolute
+// The file of a program of ours: "agent-host" is agent-host.exe on Windows.
+std::filesystem::path program_file(std::string_view name);
 std::filesystem::path home_dir();
-// The per-user folder for endpoints and locks (macOS: <per-user temp dir>/AgentDesk, mode 0700).
+// The per-user folder for endpoints and locks that are files (macOS: <per-user temp dir>/AgentDesk,
+// mode 0700; Windows, where neither is a file, the temporary folder's).
 // Created when missing.
 std::filesystem::path runtime_dir();
 
-// Puts `temp` in place of `target` in one step; on failure `target` is unchanged.
-void replace_file_atomically(const std::filesystem::path& temp, const std::filesystem::path& target);
+// Puts `temp` in place of `target` in one step; on failure `target` is unchanged. With `backup`, the
+// old content of `target` (if any) is kept there. Throws std::system_error.
+void replace_file_atomically(const std::filesystem::path& temp, const std::filesystem::path& target,
+                             const std::filesystem::path& backup = {});
 
 std::string computer_name();  // UTF-8
+std::uint32_t current_pid();
 std::string new_uuid();       // lower case with dashes
 void random_bytes(std::span<std::byte> out);
-// Lower-case hex SHA-256 of a file's contents; throws std::system_error when unreadable.
+// Lower-case hex SHA-256.
+std::string sha256_hex(std::string_view bytes);
+// The same of a file's contents; throws std::system_error when unreadable.
 std::string sha256_file_hex(const std::filesystem::path& file);
 
-// Shells to offer as profiles, the person's login shell first.
+// Shells to offer as profiles. Windows: PowerShell, cmd, then the WSL distributions ("wsl-<name>");
+// macOS: the person's login shell first.
 struct ShellCandidate {
-    std::string id;    // "zsh", "bash", ...
+    std::string id;    // "pwsh", "zsh", ...
     std::string name;  // shown in menus
     std::filesystem::path executable;
     std::vector<std::string> args;
 };
 std::vector<ShellCandidate> detect_shells();
 
-// The PATH a login shell sets up (asked once, then cached; empty when it could not be read).
+// The PATH a login shell sets up (asked once, then cached; empty when it could not be read, and on
+// Windows, where programs have one PATH).
 // Apps started from the Finder get a minimal PATH, so programs the person installed (claude,
 // node, git from Homebrew) are found only with this one.
 std::string login_path();

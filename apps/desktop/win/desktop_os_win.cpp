@@ -12,7 +12,7 @@
 
 #include <shellscalingapi.h>
 
-#include "agentdesk/platform/win/command_line.hpp"
+#include "agentdesk/platform/process.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "desktop_os.hpp"
 
@@ -122,46 +122,21 @@ std::string local_file_stamp() {
     return win::to_utf8(name);
 }
 
-bool replace_file(const std::filesystem::path& tmp, const std::filesystem::path& target, std::error_code* why) {
-    const BOOL ok = ::MoveFileExW(tmp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-    const DWORD err = ok ? ERROR_SUCCESS : ::GetLastError();  // before another call can change it
-    if (why != nullptr)
-        *why = std::error_code(static_cast<int>(err), std::system_category());
-    return ok != FALSE;
-}
-
-std::string env(const char* name) {
-    const std::wstring key = win::to_wide(name);
-    std::wstring buf(256, L'\0');
-    DWORD n = ::GetEnvironmentVariableW(key.c_str(), buf.data(), static_cast<DWORD>(buf.size()));
-    if (n >= buf.size()) {  // too small: n is the size it needs
-        buf.resize(n);
-        n = ::GetEnvironmentVariableW(key.c_str(), buf.data(), static_cast<DWORD>(buf.size()));
-    }
-    buf.resize(n < buf.size() ? n : 0);
-    return win::to_utf8(buf);
-}
-
-std::filesystem::path home_dir() {
-    wchar_t buf[MAX_PATH]{};
-    const DWORD n = ::GetEnvironmentVariableW(L"USERPROFILE", buf, MAX_PATH);
-    return n > 0 && n < MAX_PATH ? std::filesystem::path(std::wstring(buf, n)) : std::filesystem::path();
-}
-
 void start_detached(const std::vector<std::wstring>& argv) {
     if (argv.empty())
         return;
-    wchar_t exe[MAX_PATH]{};
-    if (::SearchPathW(nullptr, argv[0].c_str(), L".exe", MAX_PATH, exe, nullptr) == 0)
+    const auto exe = platform::find_executable(win::to_utf8(argv[0]));
+    if (!exe)
         return;
-    std::wstring cmd = win::build_command_line(exe, std::vector<std::wstring>(argv.begin() + 1, argv.end()));
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi{};
-    if (::CreateProcessW(exe, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si,
-                         &pi)) {
-        ::CloseHandle(pi.hThread);
-        ::CloseHandle(pi.hProcess);
+    platform::ProcessSpec spec;
+    spec.executable = *exe;
+    for (std::size_t i = 1; i < argv.size(); ++i)
+        spec.args.push_back(win::to_utf8(argv[i]));
+    spec.pipe_stdout = false;
+    spec.end_with_parent = false;
+    try {
+        (void)platform::Process::spawn(spec);
+    } catch (const std::exception&) {  // not started: nothing to tell the mod
     }
 }
 
@@ -177,22 +152,6 @@ std::vector<std::filesystem::path> matching_files(const std::filesystem::path& p
         ::FindClose(h);
     }
     return found;
-}
-
-std::filesystem::path data_dir() {
-    wchar_t buf[MAX_PATH]{};
-    DWORD n = ::GetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", buf, MAX_PATH);
-    std::filesystem::path dir;
-    if (n > 0 && n < MAX_PATH) {
-        dir = std::wstring(buf, n);
-    } else {
-        n = ::GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
-        dir = (n > 0 ? std::filesystem::path(std::wstring(buf, n)) : std::filesystem::temp_directory_path()) /
-              L"AgentDesk";
-    }
-    std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
-    return dir;
 }
 
 std::filesystem::path program_files_dir() {

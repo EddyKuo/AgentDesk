@@ -57,7 +57,7 @@ std::filesystem::path system32() {
     return std::filesystem::path(std::wstring(buf, n));
 }
 
-PtySpawnSpec cmd_spec(std::vector<std::wstring> args) {
+PtySpawnSpec cmd_spec(std::vector<std::string> args) {
     PtySpawnSpec spec;
     spec.executable = system32() / L"cmd.exe";
     spec.args = std::move(args);
@@ -88,7 +88,7 @@ TEST(ConPty, SystemApiLoads) {
 
 TEST(ConPty, EchoAppearsAndExitCodePropagates) {
     OutputCollector out;
-    auto p = spawn(cmd_spec({L"/d", L"/c", L"echo", L"conpty-ok&", L"exit", L"7"}), out);
+    auto p = spawn(cmd_spec({"/d", "/c", "echo", "conpty-ok&", "exit", "7"}), out);
     const auto code = p->wait_exit(15s);
     ASSERT_TRUE(code.has_value()) << "child did not exit";
     EXPECT_EQ(*code, 7u);
@@ -100,7 +100,7 @@ TEST(ConPty, CwdWithSpaceAndChineseIsUsed) {
     const auto dir = std::filesystem::temp_directory_path() / L"AgentDesk 測試 cwd";
     std::filesystem::create_directories(dir);
     OutputCollector out;
-    auto spec = cmd_spec({L"/d", L"/c", L"cd"});
+    auto spec = cmd_spec({"/d", "/c", "cd"});
     spec.cwd = dir;
     auto p = spawn(spec, out);
     ASSERT_TRUE(p->wait_exit(15s).has_value());
@@ -111,8 +111,8 @@ TEST(ConPty, CwdWithSpaceAndChineseIsUsed) {
 
 TEST(ConPty, EnvironmentOverridesReachChild) {
     OutputCollector out;
-    auto spec = cmd_spec({L"/d", L"/c", L"echo", L"[%AGENTDESK_TEST_VAR%]"});
-    spec.env_overrides[L"AGENTDESK_TEST_VAR"] = L"value-42";
+    auto spec = cmd_spec({"/d", "/c", "echo", "[%AGENTDESK_TEST_VAR%]"});
+    spec.env_overrides["AGENTDESK_TEST_VAR"] = "value-42";
     auto p = spawn(spec, out);
     ASSERT_TRUE(p->wait_exit(15s).has_value());
     p->close();
@@ -121,7 +121,7 @@ TEST(ConPty, EnvironmentOverridesReachChild) {
 
 TEST(ConPty, InputReachesInteractiveShell) {
     OutputCollector out;
-    auto p = spawn(cmd_spec({L"/d", L"/q"}), out);
+    auto p = spawn(cmd_spec({"/d", "/q"}), out);
     p->write("echo typed-input-123\r");
     ASSERT_TRUE(out.wait_for("typed-input-123", 15s, 2)) << out.text();  // echo of command + output
     p->write("exit 3\r");
@@ -133,7 +133,7 @@ TEST(ConPty, InputReachesInteractiveShell) {
 
 TEST(ConPty, ResizeSucceeds) {
     OutputCollector out;
-    auto p = spawn(cmd_spec({L"/d", L"/q"}), out);
+    auto p = spawn(cmd_spec({"/d", "/q"}), out);
     EXPECT_NO_THROW(p->resize({80, 24}));
     EXPECT_NO_THROW(p->resize({0, 0}));  // clamped, never forwarded as zero
     p->close();
@@ -141,7 +141,7 @@ TEST(ConPty, ResizeSucceeds) {
 
 TEST(ConPty, TerminateKillsWholeTree) {
     OutputCollector out;
-    auto p = spawn(cmd_spec({L"/d", L"/c", L"ping", L"-n", L"60", L"127.0.0.1"}), out);
+    auto p = spawn(cmd_spec({"/d", "/c", "ping", "-n", "60", "127.0.0.1"}), out);
     ASSERT_TRUE(out.wait_for("127.0.0.1", 15s)) << out.text();
     EXPECT_GE(p->job_active_processes(), 2u);  // cmd.exe + PING.EXE
     p->terminate(9);
@@ -161,7 +161,7 @@ TEST(ConPty, CtrlCByteInterruptsPing) {
     OutputCollector out;
     PtySpawnSpec spec = cmd_spec({});
     spec.executable = system32() / L"PING.EXE";
-    spec.args = {L"-n", L"60", L"127.0.0.1"};
+    spec.args = {"-n", "60", "127.0.0.1"};
     auto p = spawn(spec, out);
     ASSERT_TRUE(out.wait_for("127.0.0.1", 15s)) << out.text();
     p->interrupt();
@@ -171,7 +171,7 @@ TEST(ConPty, CtrlCByteInterruptsPing) {
 
 TEST(ConPty, CloseWhileRunningDoesNotDeadlock) {
     OutputCollector out;
-    auto p = spawn(cmd_spec({L"/d", L"/c", L"ping", L"-n", L"60", L"127.0.0.1"}), out);
+    auto p = spawn(cmd_spec({"/d", "/c", "ping", "-n", "60", "127.0.0.1"}), out);
     ASSERT_TRUE(out.wait_for("127.0.0.1", 15s));
     const auto start = std::chrono::steady_clock::now();
     p->close();
@@ -197,13 +197,13 @@ TEST(ConPty, RejectsBatchFilesAndMissingPaths) {
 TEST(ConPty, RepeatedSpawnCloseDoesNotLeakHandles) {
     {
         OutputCollector warm;
-        auto p = spawn(cmd_spec({L"/d", L"/c", L"exit", L"0"}), warm);
+        auto p = spawn(cmd_spec({"/d", "/c", "exit", "0"}), warm);
         p->wait_exit(15s);
     }
     const DWORD before = handle_count();
     for (int i = 0; i < 30; ++i) {
         OutputCollector out;
-        auto p = spawn(cmd_spec({L"/d", L"/c", L"exit", L"0"}), out);
+        auto p = spawn(cmd_spec({"/d", "/c", "exit", "0"}), out);
         ASSERT_TRUE(p->wait_exit(15s).has_value());
     }
     // Small slack for runtime-internal handles; a leak grows by several handles per spawn.

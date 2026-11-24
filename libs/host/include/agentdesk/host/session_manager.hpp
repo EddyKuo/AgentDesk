@@ -24,10 +24,9 @@
 namespace agentdesk::host {
 
 struct HostConfig {
-    platform::win::ConPtyApi conpty;
     std::filesystem::path data_dir;     // profiles.json, sessions.json
     std::filesystem::path ctl_path;     // agentctl.exe advertised to children (AGENTDESK_CTL)
-    std::wstring pipe_name;             // AGENTDESK_PIPE
+    std::string pipe_name;              // AGENTDESK_PIPE (UTF-8)
     std::string host_instance_id;       // changes on every host start (design doc 4.3)
     std::string host_version;           // agent-host's version, said in hello (Settings > Updates)
     std::function<void()> on_shutdown;  // host.shutdown accepted

@@ -106,6 +106,7 @@ Process::Process(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 Process::~Process() {
     impl_->in_write.reset();
     impl_->out_read.reset();
+    impl_->err_read.reset();
     if (impl_->poll_exit())
         return;
     if (impl_->own_group) {
@@ -128,6 +129,7 @@ std::unique_ptr<Process> Process::spawn(const ProcessSpec& spec) {
 
     UniqueFd child_in;
     UniqueFd child_out;
+    UniqueFd child_err;
     if (spec.pipe_stdin) {
         auto [rd, wr] = posix::make_pipe();
         child_in = std::move(rd);
@@ -144,12 +146,16 @@ std::unique_ptr<Process> Process::spawn(const ProcessSpec& spec) {
     } else {
         posix_spawn_file_actions_addopen(&setup.actions, 1, "/dev/null", O_WRONLY, 0);
     }
-    if (spec.merge_stderr && spec.pipe_stdout)
+    if (spec.merge_stderr && spec.pipe_stdout) {
         posix_spawn_file_actions_adddup2(&setup.actions, child_out.get(), 2);
-    else if (spec.stderr_fd >= 0)
-        posix_spawn_file_actions_adddup2(&setup.actions, spec.stderr_fd, 2);
-    else
+    } else if (spec.pipe_stderr) {
+        auto [rd, wr] = posix::make_pipe();
+        child_err = std::move(wr);
+        impl->err_read = std::move(rd);
+        posix_spawn_file_actions_adddup2(&setup.actions, child_err.get(), 2);
+    } else {
         posix_spawn_file_actions_addopen(&setup.actions, 2, "/dev/null", O_WRONLY, 0);
+    }
     if (!spec.cwd.empty())
         posix_spawn_file_actions_addchdir_np(&setup.actions, spec.cwd.c_str());
 
@@ -168,12 +174,14 @@ void Process::close_stdin() {
     impl_->in_write.reset();
 }
 
-std::optional<std::string> Process::read_some(std::size_t max) {
-    if (!impl_->out_read.valid() || max == 0)
+namespace {
+
+std::optional<std::string> read_fd(const UniqueFd& fd, std::size_t max) {
+    if (!fd.valid() || max == 0)
         return std::nullopt;
     std::string buf(max, '\0');
     for (;;) {
-        const ssize_t n = ::read(impl_->out_read.get(), buf.data(), max);
+        const ssize_t n = ::read(fd.get(), buf.data(), max);
         if (n > 0) {
             buf.resize(static_cast<std::size_t>(n));
             return buf;
@@ -182,6 +190,16 @@ std::optional<std::string> Process::read_some(std::size_t max) {
             continue;
         return std::nullopt;
     }
+}
+
+}  // namespace
+
+std::optional<std::string> Process::read_some(std::size_t max) {
+    return read_fd(impl_->out_read, max);
+}
+
+std::optional<std::string> Process::read_some_stderr(std::size_t max) {
+    return read_fd(impl_->err_read, max);
 }
 
 std::optional<int> Process::wait(std::chrono::milliseconds timeout) {
@@ -305,6 +323,10 @@ std::optional<std::filesystem::path> find_executable(std::string_view name) {
         start = end + 1;
     }
     return std::nullopt;
+}
+
+bool is_batch_file(const std::filesystem::path& /*path*/) {
+    return false;
 }
 
 }  // namespace agentdesk::platform

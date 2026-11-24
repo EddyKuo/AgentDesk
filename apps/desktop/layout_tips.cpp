@@ -25,7 +25,7 @@ std::string shown_card_key(const App::State& s) {
 bool auto_allowed(const App::State& s) {
     if (!s.config.automated)
         return true;
-    return os::env("AGENTDESK_TIPS").starts_with('1');
+    return env("AGENTDESK_TIPS").starts_with('1');
 }
 
 void close_card(App::State& s, bool all_off) {

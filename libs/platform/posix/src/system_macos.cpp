@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -43,6 +44,17 @@ std::string login_shell() {
 }
 
 }  // namespace
+
+std::optional<std::string> env_var(std::string_view name) {
+    const char* v = std::getenv(std::string(name).c_str());
+    if (v == nullptr)
+        return std::nullopt;
+    return v;
+}
+
+void unset_env_var(std::string_view name) {
+    ::unsetenv(std::string(name).c_str());
+}
 
 std::filesystem::path home_dir() {
     const char* env = std::getenv("HOME");
@@ -99,7 +111,16 @@ std::filesystem::path executable_path() {
     return ec ? std::filesystem::path(buf) : p;
 }
 
-void replace_file_atomically(const std::filesystem::path& temp, const std::filesystem::path& target) {
+std::filesystem::path program_file(std::string_view name) {
+    return std::filesystem::path(name);
+}
+
+// The old file is copied to the backup, then rename() swaps the new one in atomically.
+void replace_file_atomically(const std::filesystem::path& temp, const std::filesystem::path& target,
+                             const std::filesystem::path& backup) {
+    std::error_code ec;
+    if (!backup.empty() && std::filesystem::exists(target, ec))
+        std::filesystem::copy_file(target, backup, std::filesystem::copy_options::overwrite_existing, ec);
     if (::rename(temp.c_str(), target.c_str()) != 0)
         posix::throw_errno("rename");
 }
@@ -114,6 +135,10 @@ std::string computer_name() {
     return name;
 }
 
+std::uint32_t current_pid() {
+    return static_cast<std::uint32_t>(::getpid());
+}
+
 std::string new_uuid() {
     uuid_t id;
     uuid_generate_random(id);
@@ -124,6 +149,34 @@ std::string new_uuid() {
 
 void random_bytes(std::span<std::byte> out) {
     ::arc4random_buf(out.data(), out.size());
+}
+
+namespace {
+
+std::string digest_hex(CC_SHA256_CTX& ctx) {
+    std::array<unsigned char, CC_SHA256_DIGEST_LENGTH> digest{};
+    CC_SHA256_Final(digest.data(), &ctx);
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(digest.size() * 2);
+    for (const unsigned char b : digest) {
+        out.push_back(kHex[b >> 4]);
+        out.push_back(kHex[b & 0xF]);
+    }
+    return out;
+}
+
+}  // namespace
+
+std::string sha256_hex(std::string_view bytes) {
+    CC_SHA256_CTX ctx;
+    CC_SHA256_Init(&ctx);
+    while (!bytes.empty()) {
+        const auto n = static_cast<CC_LONG>(std::min<std::size_t>(bytes.size(), 1u << 30));
+        CC_SHA256_Update(&ctx, bytes.data(), n);
+        bytes.remove_prefix(n);
+    }
+    return digest_hex(ctx);
 }
 
 std::string sha256_file_hex(const std::filesystem::path& file) {
@@ -141,16 +194,7 @@ std::string sha256_file_hex(const std::filesystem::path& file) {
     }
     if (in.bad())
         throw std::system_error(EIO, std::generic_category(), "read " + file.string());
-    std::array<unsigned char, CC_SHA256_DIGEST_LENGTH> digest{};
-    CC_SHA256_Final(digest.data(), &ctx);
-    static constexpr char kHex[] = "0123456789abcdef";
-    std::string out;
-    out.reserve(digest.size() * 2);
-    for (const unsigned char b : digest) {
-        out.push_back(kHex[b >> 4]);
-        out.push_back(kHex[b & 0xF]);
-    }
-    return out;
+    return digest_hex(ctx);
 }
 
 std::string login_path() {

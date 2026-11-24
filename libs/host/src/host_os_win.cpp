@@ -1,11 +1,14 @@
 // host_os.hpp on Windows: system error text, the shells' folder hooks (PowerShell, cmd, WSL).
 #include <windows.h>
 
+#include <cctype>
 #include <cwctype>
 #include <memory>
 #include <system_error>
 
+#include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/terminal/cwd_uri.hpp"
 #include "host_os.hpp"
 
 namespace agentdesk::host::detail {
@@ -49,25 +52,25 @@ namespace {
 // as the host, which the session maps to \\wsl.localhost\<distro>\... or C:\... for /mnt/c.
 // Only for an interactive shell: a profile that runs a command (-e, --exec, --) is left alone.
 // A ~/.bashrc that assigns PROMPT_COMMAND, or zsh/fish, replaces it; then the folder is unknown.
-void add_wsl_folder_hook(platform::win::PtySpawnSpec& spec) {
+void add_wsl_folder_hook(platform::PtySpawnSpec& spec) {
     for (const auto& a : spec.args)
-        if (a == L"-e" || a == L"--exec" || a == L"--")
+        if (a == "-e" || a == "--exec" || a == "--")
             return;
     // OSC 133 A too: the prompt is back, so the program that ran before it (an agent) has ended.
-    spec.env_overrides[L"PROMPT_COMMAND"] =
-        L"printf '\\033]133;A\\007\\033]7;file://%s%s\\007' \"$WSL_DISTRO_NAME\" \"$PWD\"";
-    std::wstring wslenv;
-    if (const auto it = spec.env_overrides.find(L"WSLENV"); it != spec.env_overrides.end()) {
+    spec.env_overrides["PROMPT_COMMAND"] =
+        "printf '\\033]133;A\\007\\033]7;file://%s%s\\007' \"$WSL_DISTRO_NAME\" \"$PWD\"";
+    std::string wslenv;
+    if (const auto it = spec.env_overrides.find("WSLENV"); it != spec.env_overrides.end()) {
         wslenv = it->second;
     } else {
         wchar_t buf[4096]{};
         const DWORD n = ::GetEnvironmentVariableW(L"WSLENV", buf, 4096);
         if (n > 0 && n < 4096)
-            wslenv.assign(buf, n);
+            wslenv = win::to_utf8(std::wstring_view(buf, n));
     }
-    if (wslenv.find(L"PROMPT_COMMAND") == std::wstring::npos)
-        wslenv += (wslenv.empty() ? L"" : L":") + std::wstring(L"PROMPT_COMMAND/u");
-    spec.env_overrides[L"WSLENV"] = wslenv;
+    if (wslenv.find("PROMPT_COMMAND") == std::string::npos)
+        wslenv += (wslenv.empty() ? "" : ":") + std::string("PROMPT_COMMAND/u");
+    spec.env_overrides["WSLENV"] = wslenv;
 }
 
 std::wstring to_lower(std::wstring s) {
@@ -82,7 +85,7 @@ std::wstring to_lower(std::wstring s) {
 // what the host reads to follow the shell. So the prompt is wrapped: after the person's own
 // prompt runs, the location is copied into [Environment]::CurrentDirectory. Only for an interactive
 // PowerShell the profile starts without its own -Command/-File; cmd needs nothing.
-void add_folder_hook(platform::win::PtySpawnSpec& spec) {
+void add_folder_hook(platform::PtySpawnSpec& spec) {
     const std::wstring exe = to_lower(spec.executable.filename().native());
     if (exe == L"wsl.exe") {
         add_wsl_folder_hook(spec);
@@ -95,35 +98,60 @@ void add_folder_hook(platform::win::PtySpawnSpec& spec) {
         const DWORD n = ::GetEnvironmentVariableW(L"PROMPT", buf, 1024);
         const std::wstring own = n > 0 && n < 1024 ? std::wstring(buf, n) : std::wstring(L"$P$G");
         if (own.find(L"]133;A") == std::wstring::npos)
-            spec.env_overrides[L"PROMPT"] = L"$E]133;A$E\\" + own;
+            spec.env_overrides["PROMPT"] = "$E]133;A$E\\" + win::to_utf8(own);
         return;
     }
     if (exe != L"pwsh.exe" && exe != L"powershell.exe")
         return;
     for (const auto& a : spec.args) {
-        const std::wstring l = to_lower(a);
-        if (l == L"-command" || l == L"-c" || l == L"-file" || l == L"-f" || l == L"-encodedcommand" ||
-            l == L"-ec" || l == L"-noninteractive")
+        std::string l = a;
+        for (auto& c : l)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (l == "-command" || l == "-c" || l == "-file" || l == "-f" || l == "-encodedcommand" ||
+            l == "-ec" || l == "-noninteractive")
             return;
     }
-    spec.args.push_back(L"-NoExit");
-    spec.args.push_back(L"-Command");
+    spec.args.push_back("-NoExit");
+    spec.args.push_back("-Command");
     spec.args.push_back(
-        L"$global:__agentdesk_prompt = $function:prompt; "
-        L"function global:prompt { [Console]::Write([char]27 + ']133;A' + [char]7); "
-        L"$r = & $global:__agentdesk_prompt; "
-        L"try { $l = Get-Location; if ($l.Provider.Name -eq 'FileSystem') "
-        L"{ [Environment]::CurrentDirectory = $l.ProviderPath } } catch {}; $r }");
+        "$global:__agentdesk_prompt = $function:prompt; "
+        "function global:prompt { [Console]::Write([char]27 + ']133;A' + [char]7); "
+        "$r = & $global:__agentdesk_prompt; "
+        "try { $l = Get-Location; if ($l.Provider.Name -eq 'FileSystem') "
+        "{ [Environment]::CurrentDirectory = $l.ProviderPath } } catch {}; $r }");
 }
 
-std::uint32_t current_pid() {
-    return ::GetCurrentProcessId();
+std::optional<std::filesystem::path> find_tool(const std::string& name) {
+    return platform::find_executable(name);
 }
 
-std::filesystem::path home_dir() {
-    wchar_t home[MAX_PATH]{};
-    const DWORD n = ::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
-    return std::filesystem::path(std::wstring(home, n));
+void prepare_tool(platform::ProcessSpec& spec) {
+    // git may leave work behind that must finish (gc, hooks): no kill-on-close job.
+    spec.end_with_parent = false;
+    // Files inside WSL belong to the Linux user, so Git for Windows refuses the repository as
+    // "dubious ownership". They are the person's own distribution: trust it for this one call.
+    if (is_wsl_path(spec.cwd.native()) && to_lower(spec.executable.stem().native()) == L"git")
+        spec.args.insert(spec.args.begin(), {"-c", "safe.directory=*"});
+}
+
+std::string local_path_from_cwd_uri(const std::string& uri) {
+    static const std::string local = [] {
+        char buf[MAX_COMPUTERNAME_LENGTH + 1]{};
+        DWORD n = MAX_COMPUTERNAME_LENGTH + 1;
+        return ::GetComputerNameA(buf, &n) ? std::string(buf, n) : std::string();
+    }();
+    return terminal::windows_path_from_cwd_uri(uri, local);
 }
 
 }  // namespace agentdesk::host::detail
+
+namespace agentdesk::host {
+
+bool is_wsl_path(const std::wstring& path) {
+    std::wstring p = path.substr(0, 16);
+    for (auto& c : p)
+        c = static_cast<wchar_t>(std::towlower(c == L'/' ? L'\\' : c));
+    return p.starts_with(L"\\\\wsl.localhost\\") || p.starts_with(L"\\\\wsl$\\");
+}
+
+}  // namespace agentdesk::host

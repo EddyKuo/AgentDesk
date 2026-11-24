@@ -19,8 +19,8 @@
 #include <tlhelp32.h>
 
 #include "agentdesk/host/session.hpp"
-#include "agentdesk/platform/win/conpty_api.hpp"
 #include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/win/pty_conpty.hpp"
 
 namespace win = agentdesk::platform::win;
 namespace host = agentdesk::host;
@@ -64,10 +64,8 @@ nlohmann::json memory() {
             {"peak_working_set_mb", static_cast<double>(pmc.PeakWorkingSetSize) / (1024.0 * 1024.0)}};
 }
 
-host::SessionConfig probe_config(const win::ConPtyApi& api, const std::filesystem::path& probe,
-                                 std::vector<std::wstring> args) {
+host::SessionConfig probe_config(const std::filesystem::path& probe, std::vector<std::string> args) {
     host::SessionConfig c;
-    c.api = api;
     c.spec.executable = probe;
     c.spec.args = std::move(args);
     c.spec.cwd = std::filesystem::temp_directory_path();
@@ -115,11 +113,10 @@ HistoryCheck check_history(const host::Session& session, const std::regex& line_
     return check;
 }
 
-nlohmann::json run_flood(const win::ConPtyApi& api, const std::filesystem::path& probe, int seconds,
-                         long long rate) {
+nlohmann::json run_flood(const std::filesystem::path& probe, int seconds, long long rate) {
     const auto start = Clock::now();
-    auto session = host::Session::start(
-        probe_config(api, probe, {L"flood", std::to_wstring(seconds), std::to_wstring(rate)}));
+    auto session =
+        host::Session::start(probe_config(probe, {"flood", std::to_string(seconds), std::to_string(rate)}));
     const auto code = session->wait_exit(std::chrono::seconds(seconds * 3 + 30));
     const auto elapsed = std::chrono::duration<double>(Clock::now() - start).count();
     const auto info = session->info();
@@ -155,10 +152,10 @@ nlohmann::json run_flood(const win::ConPtyApi& api, const std::filesystem::path&
             {"memory_after", memory()}};
 }
 
-nlohmann::json run_cycles(const win::ConPtyApi& api, const std::filesystem::path& probe, int cycles) {
+nlohmann::json run_cycles(const std::filesystem::path& probe, int cycles) {
     nlohmann::json samples = nlohmann::json::array();
     {
-        auto warm = host::Session::start(probe_config(api, probe, {L"echo"}));
+        auto warm = host::Session::start(probe_config(probe, {"echo"}));
         warm->force_stop();
         warm->wait_exit(5s);
     }
@@ -166,7 +163,7 @@ nlohmann::json run_cycles(const win::ConPtyApi& api, const std::filesystem::path
     const DWORD t0 = thread_count();
     const auto start = Clock::now();
     for (int i = 1; i <= cycles; ++i) {
-        auto s = host::Session::start(probe_config(api, probe, {L"echo"}));
+        auto s = host::Session::start(probe_config(probe, {"echo"}));
         s->force_stop();
         s->wait_exit(5s);
         s.reset();
@@ -202,13 +199,12 @@ nlohmann::json run_snapshot_cost() {
 // Interaction latency (design doc 1.5): key sent -> echoed character visible in the published
 // snapshot.
 // cmd.exe echoes typed characters itself (cooked input), so no model is involved.
-nlohmann::json run_echo_latency(const win::ConPtyApi& api, int rounds) {
+nlohmann::json run_echo_latency(int rounds) {
     host::SessionConfig c;
-    c.api = api;
     wchar_t sys[MAX_PATH]{};
     const UINT n = ::GetSystemDirectoryW(sys, MAX_PATH);
     c.spec.executable = std::filesystem::path(std::wstring(sys, n)) / L"cmd.exe";
-    c.spec.args = {L"/d", L"/q"};
+    c.spec.args = {"/d", "/q"};
     c.spec.cwd = std::filesystem::temp_directory_path();
     c.spec.size = {250, 30};
     c.engine.rows = 30;
@@ -260,16 +256,16 @@ int wmain(int argc, wchar_t** argv) {
         }
         if (probe.empty())
             throw std::invalid_argument("--probe is required");
-        const auto api = win::load_conpty(exe_dir());
+        const auto api = win::pty_conpty();
         nlohmann::json report = {{"conpty", win::to_utf8(api.source)}, {"bundled_conpty", api.bundled}};
         report["snapshot"] = run_snapshot_cost();
-        report["echo_latency"] = run_echo_latency(api, 100);
+        report["echo_latency"] = run_echo_latency(100);
         if (flood_seconds <= 0) {
             std::cout << report.dump(2) << std::endl;
             return 0;
         }
-        report["flood"] = run_flood(api, probe, flood_seconds, rate);
-        report["cycles"] = run_cycles(api, probe, cycles);
+        report["flood"] = run_flood(probe, flood_seconds, rate);
+        report["cycles"] = run_cycles(probe, cycles);
         report["memory_end"] = memory();
         std::cout << report.dump(2) << std::endl;
         return 0;

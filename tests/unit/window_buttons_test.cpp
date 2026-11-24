@@ -92,9 +92,10 @@ TEST(WindowButtons, EachStaysNearItsUsualHue) {
             const double h = c::hue_of(col.fill[i]);
             EXPECT_LE(angle_to(h, wb::kAnchorHue[i]), wb::kHueWindow + 2.0) << name << " button " << i;
             for (std::size_t j = 0; j < 3; ++j)
-                if (j != i)
+                if (j != i) {
                     EXPECT_LT(angle_to(h, wb::kAnchorHue[i]), angle_to(h, wb::kAnchorHue[j]))
                         << name << " button " << i << " is nearer anchor " << j;
+                }
         }
     }
 }
@@ -132,9 +133,10 @@ TEST(WindowButtons, FollowTheTheme) {
 TEST(WindowButtons, MonochromeAndLightThemes) {
     for (const auto& [name, in] : themes()) {
         const wb::Colors col = wb::derive(in);
-        if (name == "paper" || name == "mac-dawn" || name == "phosphor-paper")
+        if (name == "paper" || name == "mac-dawn" || name == "phosphor-paper") {
             for (const auto f : col.fill)
                 EXPECT_LT(c::relative_luminance(f), c::relative_luminance(in.bar)) << name;
+        }
     }
     const wb::Input green{0xe6ffec, 0x7cf29a, 0xa8ffc0, 0xb8ffc8, 0x06100a, 0x1e5a2c, 0x8cffa8};
     const wb::Colors col = wb::derive(green);

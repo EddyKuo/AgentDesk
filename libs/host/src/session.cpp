@@ -1,17 +1,16 @@
-// Session: the actor that owns one terminal (VtEngine + PtyProcess), its writer thread,
+// Session: the actor that owns one terminal (VtEngine + Pty), its writer thread,
 // backpressure, snapshot publishing and the handover state format.
 #include "agentdesk/host/session.hpp"
 
 #include <algorithm>
 #include <stdexcept>
+#include <system_error>
 
-#include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/terminal/bytes.hpp"
-#include "agentdesk/terminal/cwd_uri.hpp"
+#include "host_os.hpp"
 
 namespace agentdesk::host {
 
-namespace win = platform::win;
 using Clock = std::chrono::steady_clock;
 
 namespace {
@@ -43,8 +42,53 @@ terminal::EngineEvents Session::engine_events() {
     return events;
 }
 
-platform::win::PtyOutputSink Session::output_sink() {
+platform::PtyOutputSink Session::output_sink() {
     return [this](std::span<const char> b) { post_output(std::string(b.data(), b.size())); };
+}
+
+Session::Session(SessionConfig config, SessionListener listener)
+    : config_(std::move(config)), listener_(std::move(listener)) {}
+
+// A program that cannot be started is a system_error whichever check found it.
+std::unique_ptr<platform::Pty> Session::spawn_terminal() {
+    try {
+        return platform::Pty::spawn(config_.spec, output_sink(), [this] { wake_actor(); });
+    } catch (const std::invalid_argument& e) {
+        throw std::system_error(std::make_error_code(std::errc::no_such_file_or_directory), e.what());
+    }
+}
+
+void Session::wake_actor() {
+    {
+        std::lock_guard lock(queue_mutex_);
+        actor_signalled_ = true;
+    }
+    queue_cv_.notify_all();
+}
+
+void Session::wait_for_work(bool& root_exited) {
+    std::optional<Clock::time_point> wake_at;
+    if (engine_->seq() != published_seq_)
+        wake_at = last_publish_ + config_.snapshot_interval;
+    if (interrupt_deadline_)
+        wake_at = wake_at ? std::min(*wake_at, *interrupt_deadline_) : *interrupt_deadline_;
+    {
+        std::unique_lock lock(queue_mutex_);
+        const auto ready = [&] { return actor_signalled_ || !queue_.empty() || stopping_.load(); };
+        if (wake_at)
+            queue_cv_.wait_until(lock, *wake_at, ready);
+        else
+            queue_cv_.wait(lock, ready);
+        actor_signalled_ = false;
+    }
+
+    drain_queue();
+
+    // Frozen for a handover: the program's exit is the new host's to see (design doc 7.4 OQ-09).
+    if (!root_exited && !frozen_ && process_->wait_exit(std::chrono::milliseconds(0))) {
+        root_exited = true;
+        on_root_exit();
+    }
 }
 
 std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener listener) {
@@ -54,7 +98,7 @@ std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener li
 
     self->writer_ = std::thread([raw = self.get()] { raw->writer_loop(); });
     try {
-        auto process = self->spawn_process();
+        auto process = self->spawn_terminal();
         std::lock_guard lock(self->write_mutex_);  // the writer reads process_ under this lock
         self->process_ = std::move(process);
     } catch (...) {
@@ -180,7 +224,7 @@ void Session::force_stop() {
         note_state_locked();
     }
     if (process_)
-        process_->terminate(1);
+        process_->terminate();
     wake_actor();
 }
 
@@ -194,20 +238,20 @@ std::shared_ptr<const terminal::ScreenSnapshot> Session::snapshot() const {
     return snapshot_;
 }
 
-platform::win::Foreground Session::foreground() const {
+platform::ForegroundInfo Session::foreground() const {
     const SessionInfo i = info();
     if (!process_ || i.process_state != ProcessState::kRunning)
         return {};
-    platform::win::Foreground fg;
+    platform::ForegroundInfo fg;
     try {
         fg = process_->foreground();
     } catch (const std::exception&) {
         return {};
     }
-    // A folder the shell reported itself (OSC 7) beats the Windows process's current directory:
-    // WSL and MSYS shells cd without changing it.
+    // A folder the shell reported itself (OSC 7) beats the process's current directory: WSL and
+    // MSYS shells cd without changing it.
     if (!i.cwd_uri.empty()) {
-        if (auto p = local_path_from_cwd_uri(i.cwd_uri); !p.empty())
+        if (auto p = detail::local_path_from_cwd_uri(i.cwd_uri); !p.empty())
             fg.cwd = std::move(p);
     }
     return fg;
@@ -265,7 +309,7 @@ void Session::writer_loop() {
         try {
             process_->write(chunk);
         } catch (const std::exception&) {
-            // The pseudoconsole is closed or the child exited; input has nowhere to go.
+            // The terminal is closed or the child exited; input has nowhere to go.
         }
         lock.lock();
         writer_busy_ = false;
@@ -316,14 +360,15 @@ void Session::actor_loop() {
 }
 
 void Session::on_root_exit() {
-    std::uint32_t remaining = 0;
+    std::size_t remaining = 0;
     try {
-        remaining = process_->job_active_processes();
+        remaining = process_->live_processes();
     } catch (const std::exception&) {
     }
     const auto code = process_->wait_exit(std::chrono::milliseconds(0));
-    // Close the pseudoconsole: the reader drains the final output (posted to our queue) and the
-    // job's remaining descendants are terminated. The reader must not wait for queue space while
+    const bool known = process_->exit_code_known();
+    // Close the terminal: the reader drains the final output (posted to our queue) and the
+    // remaining descendants are ended. The reader must not wait for queue space while
     // we join it, so backpressure is lifted first.
     release_backpressure();
     process_->close();
@@ -333,8 +378,10 @@ void Session::on_root_exit() {
     {
         std::lock_guard lock(state_mutex_);
         info_.process_state = ProcessState::kExited;
-        info_.exit_code = recorded_exit_code(code);
-        info_.remaining_processes = remaining > 0 ? remaining - 1 : 0;  // excluding the root
+        info_.exit_code.reset();
+        if (known)
+            info_.exit_code = static_cast<std::uint32_t>(code.value_or(0));
+        info_.remaining_processes = static_cast<std::uint32_t>(remaining);
         info_.still_running_after_interrupt = false;
         note_state_locked();
     }
@@ -380,7 +427,7 @@ void Session::handle(ResizeCmd& c) {
     if (!process_)
         return;  // adopted after its program exited: nothing to resize
     try {
-        process_->resize({static_cast<short>(snap.cols), static_cast<short>(snap.rows)});
+        process_->resize({static_cast<std::uint16_t>(snap.cols), static_cast<std::uint16_t>(snap.rows)});
     } catch (const std::exception&) {
         // closed after exit; the engine size still changes for history viewing
     }
@@ -721,7 +768,7 @@ std::string Session::save_session_state() const {
 
 std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener listener,
                                         std::string_view state,
-                                        const std::optional<platform::win::PtyHandles>& handles) {
+                                        const std::optional<platform::PtyHandles>& handles) {
     std::unique_ptr<Session> self(new Session(std::move(config), std::move(listener)));
     terminal::ByteReader r(state);
     const auto bad = [] { return std::runtime_error("not a session state this agent-host reads"); };
@@ -751,7 +798,8 @@ std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener li
         if (handles->pid != i.pid)
             throw std::runtime_error("handed over process is not this session's");
         // Last step that can throw: once adopted, the process must be released, never closed.
-        self->process_ = self->adopt_process(*handles);
+        self->process_ =
+            platform::Pty::adopt(*handles, self->output_sink(), [raw = self.get()] { raw->wake_actor(); });
     } else if (i.process_state != ProcessState::kExited && i.process_state != ProcessState::kFailed) {
         throw std::runtime_error("a running session came without its terminal");
     }

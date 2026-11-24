@@ -12,7 +12,7 @@ std::filesystem::path layouts_dir() {
 }
 
 std::filesystem::path layout_state_path(const std::string& name) {
-    return layouts_dir() / L".state" / win::to_wide(name + ".json");
+    return layouts_dir() / L".state" / platform::to_wide(name + ".json");
 }
 
 namespace {
@@ -122,7 +122,7 @@ void save_layout_state(const LayoutSpec& l) {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         out << j.dump(2) << "\n";
     }
-    os::replace_file(tmp, path);
+    replace_file(tmp, path);
 }
 
 namespace {

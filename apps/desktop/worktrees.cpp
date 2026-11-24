@@ -13,7 +13,7 @@ std::string worktree_root(const App::State& s, const std::string& machine, const
     if (!machine.empty() && ui::path_text::is_windows(root) != ui::path_text::is_windows(g.top))
         return {};
     if (root.empty() && machine.empty()) {
-        const auto u8 = (os::home_dir() / ".agentdesk" / "worktrees").u8string();
+        const auto u8 = (home_dir() / ".agentdesk" / "worktrees").u8string();
         root.assign(u8.begin(), u8.end());
     }
     return root;

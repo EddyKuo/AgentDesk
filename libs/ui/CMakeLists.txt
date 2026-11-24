@@ -14,6 +14,7 @@ set(_ui_sources
     src/keyboard.cpp
     src/git_info.cpp
     src/path_text.cpp
+    src/system_process.cpp
     src/mods.cpp
     src/remote_screen.cpp
     src/host_client.cpp
@@ -49,13 +50,13 @@ set(_ui_sources
 # behind the internal headers in src/ (*_os.hpp, system_process.hpp).
 if(WIN32)
     list(APPEND _ui_sources
-        src/clipboard.cpp
+        src/clipboard_win.cpp
         src/fonts_win.cpp
         src/keyboard_win.cpp
         src/keymap_win.cpp
         src/links_win.cpp
         src/mods_win.cpp
-        src/system_process.cpp
+        src/system_process_win.cpp
         src/updates_win.cpp
         src/window_place_win.cpp)
 else()

@@ -19,8 +19,9 @@ struct DetachedResult {
 // Starts a background process that outlives its launcher (design doc 2.2 step 1):
 // DETACHED_PROCESS + CREATE_BREAKAWAY_FROM_JOB, falling back to staying in the parent job when
 // breakaway is denied. Never CREATE_NEW_PROCESS_GROUP (would disable Ctrl+C for its children).
-// No handles are inherited.
-DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vector<std::wstring>& args);
+// No handles are inherited. `environment` (make_environment_block) replaces ours when not empty.
+DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vector<std::wstring>& args,
+                              std::wstring environment = {});
 
 // True when the current process is in a job with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.
 bool current_job_kills_on_close();

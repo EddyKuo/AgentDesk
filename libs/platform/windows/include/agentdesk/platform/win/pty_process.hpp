@@ -19,6 +19,7 @@
 #include <condition_variable>
 #include <vector>
 
+#include "agentdesk/platform/pty_handles.hpp"
 #include "agentdesk/platform/win/conpty_api.hpp"
 #include "agentdesk/platform/win/job.hpp"
 #include "agentdesk/platform/win/process_tree.hpp"
@@ -33,29 +34,17 @@ struct PtySize {
 
 struct PtySpawnSpec {
     std::filesystem::path executable;  // must be an .exe; batch files are rejected
-    std::vector<std::wstring> args;
-    std::filesystem::path cwd;                           // must exist; never silently replaced
-    std::map<std::wstring, std::wstring> env_overrides;  // merged over the current environment
+    std::vector<std::string> args;     // UTF-8, argv[1..]
+    std::filesystem::path cwd;         // must exist; never silently replaced
+    // UTF-8; merged over the current environment, an empty value removes the variable
+    std::map<std::string, std::string> env_overrides;
     PtySize size;
 };
 
 // Called on the reader thread with each chunk in order. Must not block for long.
 using PtyOutputSink = std::function<void(std::span<const char>)>;
 
-// agent-host's handover (design doc 7.4 OQ-09): everything that keeps one terminal alive. The
-// first three are the bundled ConPTY's HPCON members (microsoft/terminal v1.24.11911.0
-// src/winconpty/winconpty.h 11-41): the signal pipe (resize), the \Reference handle that keeps
-// the console server up, and the OpenConsole process.
-struct PtyHandles {
-    HANDLE signal = nullptr;
-    HANDLE reference = nullptr;
-    HANDLE conhost = nullptr;
-    HANDLE input_write = nullptr;
-    HANDLE output_read = nullptr;
-    HANDLE process = nullptr;
-    HANDLE job = nullptr;
-    DWORD pid = 0;
-};
+using platform::PtyHandles;
 
 // One child process attached to a pseudoconsole, inside a kill-on-close job.
 // Threading: the reader thread is owned here; write()/resize()/interrupt() may be called from

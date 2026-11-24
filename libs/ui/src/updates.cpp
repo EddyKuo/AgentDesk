@@ -12,6 +12,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "agentdesk/platform/system.hpp"
 #include "agentdesk/protocol/frame.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "system_process.hpp"
@@ -20,6 +21,14 @@
 namespace agentdesk::ui::updates {
 
 namespace fs = std::filesystem;
+
+std::string sha256(std::string_view bytes) {
+    try {
+        return platform::sha256_hex(bytes);
+    } catch (const std::exception&) {
+        return {};  // matches no checksum
+    }
+}
 using Json = nlohmann::json;
 using detail::read_file;
 using detail::trim;
@@ -56,7 +65,7 @@ struct Shared {
     std::atomic<bool> running{false};
     std::atomic<bool> checking{false};
     bool cleanup_old = false;  // after_update: .old goes once agent-host is the new one
-    std::wstring pipe;         // set_pipe: the agent-host this window updates
+    std::string pipe;          // set_pipe: the agent-host this window updates
 };
 Shared& g() {
     static Shared* shared = new Shared();
@@ -872,7 +881,7 @@ void after_update() {
 
 // ---- agent-host's own update (design doc 7.4 OQ-09)
 
-void set_pipe(std::wstring pipe) {
+void set_pipe(std::string pipe) {
     std::lock_guard lock(g().mutex);
     g().pipe = std::move(pipe);
 }
@@ -883,7 +892,7 @@ bool run_core_update(const std::vector<std::wstring>& extra, std::string* now, s
     {
         std::lock_guard lock(g().mutex);
         if (!g().pipe.empty())
-            args.insert(args.end(), {L"--pipe", g().pipe});
+            args.insert(args.end(), {L"--pipe", detail::to_wide(g().pipe)});
     }
     args.insert(args.end(), extra.begin(), extra.end());
     const fs::path ctl = os::ctl_exe_beside(g().config.exe.parent_path());

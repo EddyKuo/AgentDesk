@@ -19,7 +19,8 @@ bool current_job_kills_on_close() {
     return (info.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE) != 0;
 }
 
-DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vector<std::wstring>& args) {
+DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vector<std::wstring>& args,
+                              std::wstring environment) {
     std::wstring cmdline = build_command_line(exe.native(), args);
     STARTUPINFOW si{};
     si.cb = sizeof(si);
@@ -38,8 +39,9 @@ DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vecto
     }
     DetachedResult result;
     auto start = [&](DWORD flags) {
-        return ::CreateProcessW(exe.c_str(), cmdline.data(), nullptr, nullptr, FALSE, flags, nullptr,
-                                cwd.c_str(), &si, &pi) != FALSE;
+        return ::CreateProcessW(exe.c_str(), cmdline.data(), nullptr, nullptr, FALSE, flags,
+                                environment.empty() ? nullptr : environment.data(), cwd.c_str(), &si,
+                                &pi) != FALSE;
     };
     if (start(kBase | CREATE_BREAKAWAY_FROM_JOB)) {
         result.broke_away = true;

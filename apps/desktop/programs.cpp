@@ -65,7 +65,7 @@ ui::Program program_of_profile(const std::string& executable, const std::string&
 std::filesystem::path program_icon_file(const ui::Program& p) {
     if (p.icon.empty())
         return {};
-    const auto rel = win::to_wide(p.icon);
+    const auto rel = platform::to_wide(p.icon);
     std::error_code ec;
     if (const auto mine = data_dir() / rel; std::filesystem::is_regular_file(mine, ec))
         return mine;
@@ -134,7 +134,7 @@ bool path_within(const std::string& p, const std::string& dir) {
 
 std::string display_path(const std::string& cwd) {
     static const std::string home = [] {
-        const auto u8 = os::home_dir().u8string();
+        const auto u8 = home_dir().u8string();
         return std::string(u8.begin(), u8.end());
     }();
     if (path_within(cwd, home))

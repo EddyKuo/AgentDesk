@@ -128,8 +128,14 @@ std::unique_ptr<PtyProcess> PtyProcess::spawn(const ConPtyApi& api, const PtySpa
     si.StartupInfo.hStdOutput = INVALID_HANDLE_VALUE;
     si.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
 
-    std::wstring command_line = build_command_line(spec.executable.native(), spec.args);
-    std::wstring environment = make_environment_block(spec.env_overrides);
+    std::vector<std::wstring> args;
+    for (const auto& a : spec.args)
+        args.push_back(to_wide(a));
+    std::map<std::wstring, std::wstring> env;
+    for (const auto& [name, value] : spec.env_overrides)
+        env[to_wide(name)] = to_wide(value);
+    std::wstring command_line = build_command_line(spec.executable.native(), args);
+    std::wstring environment = make_environment_block(env);
     const std::wstring cwd = spec.cwd.native();
 
     PROCESS_INFORMATION pi{};

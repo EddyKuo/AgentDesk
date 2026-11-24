@@ -2,7 +2,7 @@
 // Reading what the UI did not write itself: ui.json, layouts\.state, telemetry
 // files, other machines' answers (fs.list, git.run) and file names. A value of the wrong type is
 // the fallback and text that is not valid UTF-16 is still shown, never an exception: nlohmann's
-// value() throws type_error when the stored type differs, and win::to_utf8 throws on an unpaired
+// value() throws type_error when the stored type differs, and platform::to_utf8 throws on an unpaired
 // surrogate (on a worker thread either ends the process).
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include <climits>

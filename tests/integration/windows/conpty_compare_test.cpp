@@ -28,7 +28,7 @@ namespace {
 // writer thread (never read and write on the same thread).
 class ProbeHost {
 public:
-    explicit ProbeHost(const ConPtyApi& api, std::wstring mode) {
+    explicit ProbeHost(const ConPtyApi& api, std::string mode) {
         PtySpawnSpec spec;
         spec.executable = AGENTDESK_VT_PROBE;
         spec.args = {std::move(mode)};
@@ -151,7 +151,7 @@ protected:
 };
 
 TEST_P(ConPtyCompareTest, StatusQueryReplyReachesProgramBeforeDa1) {
-    ProbeHost host(api_, L"query");
+    ProbeHost host(api_, "query");
     ASSERT_TRUE(host.wait_text("PROBE-REPLY:", 15s)) << host.raw();
     const std::string got = host.probe_reply_hex();
     const auto osc = got.find(hex("\x1b]7501;?\x1b\\"));
@@ -173,7 +173,7 @@ TEST_P(ConPtyCompareTest, StatusQueryReplyReachesProgramBeforeDa1) {
 }
 
 TEST_P(ConPtyCompareTest, StatusReportsReachHost) {
-    ProbeHost host(api_, L"report");
+    ProbeHost host(api_, "report");
     ASSERT_TRUE(host.wait_text("PROBE-DONE", 15s)) << host.raw();
     std::this_thread::sleep_for(100ms);  // the report precedes PROBE-DONE in the same stream
     const auto root = host.with_engine([](VtEngine& e) {
@@ -185,7 +185,7 @@ TEST_P(ConPtyCompareTest, StatusReportsReachHost) {
 }
 
 TEST_P(ConPtyCompareTest, KeyboardBytesArriveUnchanged) {
-    ProbeHost host(api_, L"echo");
+    ProbeHost host(api_, "echo");
     std::this_thread::sleep_for(300ms);
     host.process().write("ab\xe6\xb8\xac\r");  // "ab測" + Enter
     ASSERT_TRUE(host.wait_text("PROBE-ECHO:", 15s)) << host.raw();
@@ -197,7 +197,7 @@ TEST_P(ConPtyCompareTest, KeyboardBytesArriveUnchanged) {
 // ConPTY asks its viewer for win32-input-mode; the engine notices and
 // sends Shift+Enter as win32 key events, which ConPTY turns back into Enter for the program.
 TEST_P(ConPtyCompareTest, Win32InputModeShiftEnterReachesProgram) {
-    ProbeHost host(api_, L"echo");
+    ProbeHost host(api_, "echo");
     std::this_thread::sleep_for(300ms);
     ASSERT_TRUE(host.with_engine([](VtEngine& e) { return e.win32_input(); })) << hex(host.raw().substr(0, 200));
     host.process().write("hi");

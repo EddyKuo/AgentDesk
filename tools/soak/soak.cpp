@@ -135,7 +135,7 @@ private:
 
 // A UI coming and going: attach to every steady session, stay half a second, disconnect.
 bool attach_and_detach(const std::wstring& pipe, const std::vector<std::string>& steady) {
-    auto c = ipc::PipeClient::connect(pipe, 5s);
+    auto c = ipc::PipeClient::connect(agentdesk::platform::win::to_utf8(pipe), 5s);
     if (!c)
         return false;
     for (const auto& id : steady)
@@ -226,7 +226,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     const win::UniqueHandle host(pi.hProcess);
     ::CloseHandle(pi.hThread);
-    auto client = ipc::PipeClient::connect(pipe, 10s);
+    auto client = ipc::PipeClient::connect(agentdesk::platform::win::to_utf8(pipe), 10s);
     if (!client) {
         std::cerr << "host unreachable\n";
         return 3;

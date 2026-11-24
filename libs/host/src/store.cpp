@@ -10,12 +10,52 @@
 #include <stdexcept>
 
 #include "agentdesk/platform/crt.hpp"
-#include "agentdesk/platform/win/command_line.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/process.hpp"
+#include "agentdesk/platform/system.hpp"
+#include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::host {
 
-namespace win = platform::win;
+void write_json_atomic(const std::filesystem::path& file, const nlohmann::json& doc) {
+    const auto tmp = std::filesystem::path(file).concat(L".tmp");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out)
+            throw std::runtime_error("cannot write " + platform::to_utf8(tmp.native()));
+        out << doc.dump(2) << '\n';
+        out.flush();
+        if (!out)
+            throw std::runtime_error("write failed: " + platform::to_utf8(tmp.native()));
+    }
+    platform::replace_file_atomically(tmp, file, std::filesystem::path(file).concat(L".bak"));
+}
+
+// Claude Code and Codex when installed, then the system's shells. Programs are looked up the way a
+// login shell finds them.
+std::vector<Profile> detect_default_profiles() {
+    std::vector<Profile> out;
+    const auto add_program = [&](const char* id, const char* name, const char* program) {
+        if (const auto p = platform::find_on_login_path(program))
+            out.push_back({id, name, *p, {}});
+    };
+    add_program("claude-native", "Claude Code", "claude");
+    add_program("codex-native", "Codex CLI", "codex");
+    for (const auto& s : platform::detect_shells())
+        out.push_back({s.id, s.name, s.executable, s.args});
+    return out;
+}
+
+std::vector<Profile> detect_wsl_profiles() {
+    std::vector<Profile> out;
+    for (const auto& s : platform::detect_shells())
+        if (s.id.starts_with("wsl-"))
+            out.push_back({s.id, s.name, s.executable, s.args});
+    return out;
+}
+
+std::string new_uuid() {
+    return platform::new_uuid();
+}
 
 std::optional<nlohmann::json> read_json_with_backup(const std::filesystem::path& file) {
     auto try_read = [](const std::filesystem::path& p) -> std::optional<nlohmann::json> {
@@ -50,11 +90,10 @@ std::optional<nlohmann::json> read_json_with_backup(const std::filesystem::path&
 }
 
 nlohmann::json to_json(const Profile& p) {
-    nlohmann::json args = nlohmann::json::array();
-    for (const auto& a : p.args)
-        args.push_back(win::to_utf8(a));
-    return {
-        {"id", p.id}, {"name", p.name}, {"executable", win::to_utf8(p.executable.native())}, {"args", args}};
+    return {{"id", p.id},
+            {"name", p.name},
+            {"executable", platform::to_utf8(p.executable.native())},
+            {"args", p.args}};
 }
 
 // Throws (nlohmann::json::exception, std::system_error) on a damaged entry; callers skip it.
@@ -62,20 +101,20 @@ Profile profile_from_json(const nlohmann::json& j) {
     Profile p;
     p.id = j.at("id").get<std::string>();
     p.name = j.value("name", p.id);
-    p.executable = win::to_wide(j.at("executable").get<std::string>());
+    p.executable = platform::to_wide(j.at("executable").get<std::string>());
     for (const auto& a : j.value("args", nlohmann::json::array()))
-        p.args.push_back(win::to_wide(a.get<std::string>()));
+        p.args.push_back(a.get<std::string>());
     return p;
 }
 
 std::optional<std::string> validate_profile(const Profile& p) {
     if (p.id.empty())
         return "profile id is empty";
-    if (win::is_batch_file(p.executable.wstring())) {
+    if (platform::is_batch_file(p.executable)) {
         return "batch launchers (.cmd/.bat) need the shell launcher adapter, which is not available yet";
     }
-    if (!win::is_launchable_file(p.executable.wstring())) {
-        return "executable not found: " + win::to_utf8(p.executable.native());
+    if (!platform::is_launchable_file(p.executable)) {
+        return "executable not found: " + platform::to_utf8(p.executable.native());
     }
     return std::nullopt;
 }

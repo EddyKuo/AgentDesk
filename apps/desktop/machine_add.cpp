@@ -63,11 +63,11 @@ std::vector<std::filesystem::path> SshConfigReader::include_files(const std::str
     for (const auto& w : words) {
         std::filesystem::path p;
         if (w.rfind("~/", 0) == 0 || w.rfind("~\\", 0) == 0)
-            p = home_ / win::to_wide(w.substr(2));
-        else if (std::filesystem::path(win::to_wide(w)).is_absolute() || w.rfind("/", 0) == 0)
-            p = win::to_wide(w);
+            p = home_ / platform::to_wide(w.substr(2));
+        else if (std::filesystem::path(platform::to_wide(w)).is_absolute() || w.rfind("/", 0) == 0)
+            p = platform::to_wide(w);
         else
-            p = home_ / L".ssh" / win::to_wide(w);
+            p = home_ / L".ssh" / platform::to_wide(w);
         p.make_preferred();
         if (w.find_first_of("*?[") == std::string::npos) {
             files.push_back(p);
@@ -145,7 +145,7 @@ std::vector<std::pair<std::string, std::string>> SshConfigReader::hosts() const 
 }
 
 std::vector<std::pair<std::string, std::string>> ssh_config_hosts() {
-    const std::filesystem::path home = os::home_dir();
+    const std::filesystem::path home = home_dir();
     if (home.empty())
         return {};
     SshConfigReader reader(home);

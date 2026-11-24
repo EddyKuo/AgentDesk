@@ -22,16 +22,17 @@
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/crt.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/system.hpp"
+#include "agentdesk/platform/text.hpp"
 #include "agentdesk/protocol/messages.hpp"
 #include "agentdesk/ui/updates.hpp"
 #include "cli_os.hpp"
 
 namespace {
 
-namespace win = agentdesk::platform::win;
 namespace ipc = agentdesk::ipc;
 namespace protocol = agentdesk::protocol;
+namespace platform = agentdesk::platform;
 using protocol::ErrorCode;
 using protocol::Json;
 using namespace std::chrono_literals;
@@ -70,23 +71,23 @@ const std::vector<std::string> kValueOptions = {
 Args parse_args(int argc, wchar_t** argv) {
     Args a;
     for (int i = 1; i < argc; ++i) {
-        const std::string s = win::to_utf8(argv[i]);
+        const std::string s = platform::to_utf8(argv[i]);
         if (s == "--") {
             for (++i; i < argc; ++i)
-                a.passthrough.push_back(win::to_utf8(argv[i]));
+                a.passthrough.push_back(platform::to_utf8(argv[i]));
             break;
         }
         if (s == "--label") {
             if (i + 1 >= argc)
                 throw std::invalid_argument("missing value for --label");
-            a.labels.push_back(win::to_utf8(argv[++i]));
+            a.labels.push_back(platform::to_utf8(argv[++i]));
             continue;
         }
         if (s.rfind("--", 0) == 0) {
             if (std::find(kValueOptions.begin(), kValueOptions.end(), s) != kValueOptions.end()) {
                 if (i + 1 >= argc)
                     throw std::invalid_argument("missing value for " + s);
-                a.options[s] = win::to_utf8(argv[++i]);
+                a.options[s] = platform::to_utf8(argv[++i]);
             } else {
                 a.flags.push_back(s);
             }
@@ -153,8 +154,9 @@ std::optional<int> call(Ctx& ctx, const std::string& method, Json params, Json& 
     return std::nullopt;
 }
 
-std::string env(const wchar_t* name) {
-    return agentdesk::cli::os::env(name);
+// An environment variable; "" when unset.
+std::string env(const char* name) {
+    return platform::env_var(name).value_or(std::string());
 }
 
 Json labels_json(const std::vector<std::string>& list) {
@@ -176,7 +178,7 @@ std::string session_arg(const Ctx& ctx) {
 
 // A whole file's bytes; nullopt when it cannot be opened.
 std::optional<std::string> read_file(const std::string& path) {
-    std::ifstream in(std::filesystem::path(win::to_wide(path)), std::ios::binary);
+    std::ifstream in(std::filesystem::path(platform::to_wide(path)), std::ios::binary);
     if (!in)
         return std::nullopt;
     std::stringstream ss;
@@ -195,7 +197,7 @@ int cmd_run(Ctx& ctx) {
         throw std::invalid_argument("--profile is required");
     Json params{
         {"profile_id", *profile},
-        {"cwd", ctx.args.opt("--cwd").value_or(win::to_utf8(std::filesystem::current_path().native()))},
+        {"cwd", ctx.args.opt("--cwd").value_or(platform::to_utf8(std::filesystem::current_path().native()))},
         {"args", ctx.args.passthrough}};
     if (const auto n = ctx.args.opt("--name"))
         params["name"] = *n;
@@ -204,7 +206,7 @@ int cmd_run(Ctx& ctx) {
     // Run from inside a session: that session is the parent (a sub-agent), unless --no-parent.
     if (const auto p = ctx.args.opt("--parent"))
         params["parent"] = *p;
-    else if (const auto self = env(L"AGENTDESK_SESSION_ID"); !self.empty() && !ctx.args.has("--no-parent"))
+    else if (const auto self = env("AGENTDESK_SESSION_ID"); !self.empty() && !ctx.args.has("--no-parent"))
         params["parent"] = self;
     if (!ctx.args.labels.empty())
         params["labels"] = labels_json(ctx.args.labels);
@@ -438,7 +440,7 @@ int cmd_wait(Ctx& ctx) {
 
 // From inside a sub-agent: report text to the session that started it (or --to).
 int cmd_report(Ctx& ctx) {
-    std::string from = ctx.args.opt("--from").value_or(env(L"AGENTDESK_SESSION_ID"));
+    std::string from = ctx.args.opt("--from").value_or(env("AGENTDESK_SESSION_ID"));
     if (from.empty())
         throw std::invalid_argument("report runs inside an AgentDesk session (or pass --from)");
     std::string text;
@@ -517,8 +519,8 @@ int cmd_shutdown(Ctx& ctx) {
 // person's approval prompt, which AgentDesk must never do. Never starts a host; gives up fast.
 int run_hook() {
     const std::string input = agentdesk::cli::os::read_stdin(1024 * 1024);
-    const std::string session = env(L"AGENTDESK_SESSION_ID");
-    const std::wstring pipe = win::to_wide(env(L"AGENTDESK_PIPE"));
+    const std::string session = env("AGENTDESK_SESSION_ID");
+    const std::string pipe = env("AGENTDESK_PIPE");
     if (session.empty() || pipe.empty())
         return kOk;  // not inside an AgentDesk session
     const auto evt = Json::parse(input, nullptr, false);
@@ -558,8 +560,8 @@ int run_hook() {
 // stdin/stdout <-> the local host pipe, byte for byte. Runs on a remote machine under ssh:
 // "ssh <machine> agentctl bridge" lets another PC's AgentDesk use this machine's agent-host.
 // stdout carries only protocol bytes; diagnostics go to stderr.
-int run_bridge(const std::wstring& pipe, bool may_start) {
-    auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);
+int run_bridge(const std::string& pipe, bool may_start) {
+    auto host = ipc::connect_or_start_host(ipc::sibling_executable("agent-host"), pipe, 10s, may_start);
     if (!host.client) {
         diag("cannot reach agent-host on this machine");
         return kNoHost;
@@ -598,7 +600,7 @@ protocol::Json ctl_hello() {
 
 // After host.update: the new agent-host serves the pipe once the old one let go. True once it
 // answers as the instance the old host named.
-bool successor_serves(const std::wstring& pipe, const std::string& instance) {
+bool successor_serves(const std::string& pipe, const std::string& instance) {
     const auto deadline = std::chrono::steady_clock::now() + 15s;
     while (std::chrono::steady_clock::now() < deadline) {
         if (auto c = ipc::PipeClient::connect(pipe, std::chrono::milliseconds(500))) {
@@ -611,12 +613,12 @@ bool successor_serves(const std::wstring& pipe, const std::string& instance) {
     return false;
 }
 
-int cmd_update(Ctx& ctx, const std::wstring& pipe) {
+int cmd_update(Ctx& ctx, const std::string& pipe) {
     namespace updates = agentdesk::ui::updates;
     updates::CoreStageRequest req;
     req.at_least = ctx.args.opt("--version");
     if (const auto exe = ctx.args.opt("--exe"))
-        req.from = std::filesystem::path(win::to_wide(*exe));
+        req.from = std::filesystem::path(platform::to_wide(*exe));
     // Never starts agent-host just to update it.
     auto client = ipc::PipeClient::connect(pipe, std::chrono::milliseconds(300));
     std::optional<protocol::Response> hello;
@@ -624,7 +626,7 @@ int cmd_update(Ctx& ctx, const std::wstring& pipe) {
         hello = client->call("hello", ctl_hello(), ctx.timeout);
     if (!hello || hello->error || !hello->result) {
         // Nothing runs: the update is in place for agent-host's next start.
-        req.host_exe = ipc::sibling_executable(L"agent-host.exe");
+        req.host_exe = ipc::sibling_executable("agent-host");
         req.have = updates::host_version_of(req.host_exe).value_or("0.0.0");
         const auto staged = updates::stage_core(req);
         if (!staged.ok)
@@ -633,7 +635,7 @@ int cmd_update(Ctx& ctx, const std::wstring& pipe) {
     }
     const Json& h = *hello->result;
     req.have = h.value("host_version", "");
-    req.host_exe = std::filesystem::path(win::to_wide(h.value("host_exe", "")));
+    req.host_exe = std::filesystem::path(platform::to_wide(h.value("host_exe", "")));
     if (req.have.empty() || req.host_exe.empty())
         return update_failed(ctx, "this agent-host cannot update itself", "restart AgentDesk to update it");
     const auto staged = updates::stage_core(req);
@@ -641,7 +643,7 @@ int cmd_update(Ctx& ctx, const std::wstring& pipe) {
         return update_failed(ctx, staged.error, staged.hint);
     if (!staged.exe)
         return update_done(ctx, "agent-host " + staged.version);  // already the latest
-    const auto r = client->call("host.update", {{"exe", win::to_utf8(staged.exe->native())}}, 120s);
+    const auto r = client->call("host.update", {{"exe", platform::to_utf8(staged.exe->native())}}, 120s);
     if (!r || r->error || !r->result) {
         if (staged.swapped)
             updates::unstage_core(req.host_exe);
@@ -679,11 +681,11 @@ const char* kUsage =
 
 // report-state runs inside agent hooks: never start a host from there, and inherit the pipe
 // advertised to the session (design doc 3.6).
-std::wstring session_pipe(const Ctx& ctx) {
+std::string session_pipe(const Ctx& ctx) {
     if (const auto p = ctx.args.opt("--pipe"))
-        return win::to_wide(*p);
-    if (const std::string p = env(L"AGENTDESK_PIPE"); !p.empty())
-        return win::to_wide(p);
+        return *p;
+    if (const std::string p = env("AGENTDESK_PIPE"); !p.empty())
+        return p;
     return ipc::default_pipe_name();
 }
 
@@ -727,20 +729,20 @@ int agentdesk::cli::agentctl_main(int argc, wchar_t** argv) {
     if (ctx.args.command == "hook")
         return run_hook();  // no output, always 0
     if (ctx.args.command == "bridge") {
-        std::wstring pipe = ipc::default_pipe_name();
+        std::string pipe = ipc::default_pipe_name();
         if (const auto p = ctx.args.opt("--pipe"))
-            pipe = win::to_wide(*p);
+            pipe = *p;
         return run_bridge(pipe, !ctx.args.has("--no-start"));
     }
 
-    const std::wstring pipe = session_pipe(ctx);
+    const std::string pipe = session_pipe(ctx);
     if (ctx.args.command == "update")
         return cmd_update(ctx, pipe);
     const bool may_start = !ctx.args.has("--no-start") && ctx.args.command != "report-state" &&
                            ctx.args.command != "shutdown" && ctx.args.command != "report";
-    auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);
+    auto host = ipc::connect_or_start_host(ipc::sibling_executable("agent-host"), pipe, 10s, may_start);
     if (!host.client) {
-        diag("cannot reach agent-host (pipe " + win::to_utf8(pipe) + ")");
+        diag(host.error.empty() ? "cannot reach agent-host (pipe " + pipe + ")" : host.error);
         return kNoHost;
     }
     if (host.host_dies_with_launcher) {

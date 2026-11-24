@@ -1,4 +1,4 @@
-// mods_os.hpp on Windows: mod.dll loaded from its own folder, calls guarded by __try.
+// mods_os.hpp on Windows: calls guarded by __try.
 #include <windows.h>
 
 #include "mods_os.hpp"
@@ -77,28 +77,6 @@ Code seh_copy(const char* s, std::size_t max, char* buf, std::size_t* len) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return GetExceptionCode();
     }
-}
-
-const char* library_file() {
-    return "mod.dll";
-}
-
-// The mod's own folder first for its dependencies, then System32; never the current folder or
-// PATH.
-void* load_library(const std::filesystem::path& folder, std::string* error) {
-    HMODULE dll = ::LoadLibraryExW((folder / L"mod.dll").c_str(), nullptr,
-                                   LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if (dll == nullptr)
-        *error = "cannot load mod.dll (error " + std::to_string(::GetLastError()) + ")";
-    return dll;
-}
-
-void* find_symbol(void* library, const char* name) {
-    return reinterpret_cast<void*>(::GetProcAddress(static_cast<HMODULE>(library), name));
-}
-
-void unload_library(void* library) {
-    ::FreeLibrary(static_cast<HMODULE>(library));
 }
 
 }  // namespace agentdesk::ui::mods_os

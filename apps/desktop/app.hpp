@@ -18,7 +18,7 @@
 namespace agentdesk::desktop {
 
 struct AppConfig {
-    NativeWindow hwnd = nullptr;  // the window (HWND on Windows, NSWindow on macOS)
+    NativeWindow window = nullptr;  // the window (HWND on Windows, NSWindow on macOS)
     std::function<void()> wake;             // ask the loop for another frame
     std::string start_profile;              // developer option --start
     std::vector<std::string> run_commands;  // developer option --run "cmd;cmd" (after start)

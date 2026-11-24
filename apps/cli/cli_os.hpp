@@ -14,13 +14,11 @@ int agentctl_main(int argc, wchar_t** argv);
 
 namespace os {
 
-// An environment variable as UTF-8; "" when unset.
-std::string env(const wchar_t* name);
 // Up to `max` bytes of stdin, until it ends.
 std::string read_stdin(std::size_t max);
 // Copies stdin to the host's endpoint and its answers to stdout, byte for byte, until either
 // side ends, then exits the process with 0. Returns false only when the endpoint cannot be opened.
-bool bridge_stdio(const std::wstring& pipe);
+bool bridge_stdio(const std::string& pipe);
 
 }  // namespace os
 

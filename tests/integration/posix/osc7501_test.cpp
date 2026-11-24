@@ -27,7 +27,7 @@ std::string from_hex(const std::string& hex) {
 TEST(PosixOsc7501, QueryIsAnsweredBeforeDa1) {
     SessionConfig c;
     c.spec.executable = AGENTDESK_VT_PROBE;
-    c.spec.args = {L"query"};
+    c.spec.args = {"query"};
     c.spec.cwd = std::filesystem::temp_directory_path();
     c.spec.size = {200, 24};
     c.engine.rows = 24;

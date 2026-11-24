@@ -45,16 +45,19 @@ struct ForegroundInfo {
     std::vector<std::string> argv;  // empty if unreadable
 };
 
-// One child program in a pseudo terminal. Everything it starts ends with it: on macOS the child
-// leads its own session and process group, which close() and terminate() end, and the shell gets
-// SIGHUP when the terminal goes away with the host.
+// One terminal's handover data (agent-host's self-update): pty_handles.hpp of this system.
+struct PtyHandles;
+
+// One child program in a pseudo terminal. Everything it starts ends with it. Windows: ConPTY and a
+// kill-on-close job. macOS: the child leads its own session and process group, which close() and
+// terminate() end, and the shell gets SIGHUP when the terminal goes away with the host.
 //
 // Threads: write/resize/interrupt from one thread at a time; close() never on the reader thread
 // (it joins it) and not from inside a sink.
 class Pty {
 public:
-    // Throws std::invalid_argument for an executable that cannot be started (missing, not a
-    // regular file, not executable) or a cwd that is not a folder, std::system_error otherwise.
+    // Throws std::invalid_argument or std::system_error: an executable that cannot be started
+    // (missing, not a program, a Windows batch file), a cwd that is not a folder, a system error.
     static std::unique_ptr<Pty> spawn(const PtySpawnSpec& spec, PtyOutputSink on_output, PtyExitSink on_exit);
 
     ~Pty();
@@ -66,16 +69,20 @@ public:
     void write(std::string_view bytes);  // blocking; throws std::system_error once the terminal is gone
     void resize(PtySize size);
     void interrupt();  // writes 0x03; the terminal turns it into SIGINT for the program in front
-    void terminate();  // ends the whole process group now (SIGKILL)
+    void terminate();  // ends the whole process tree now
 
-    // The root's exit code once it has exited: its status, or 128 + signal number.
+    // The root's exit code once it has exited (POSIX: its status, or 128 + signal number).
     [[nodiscard]] std::optional<int> exit_code() const;
+    // False when the root has exited and the system cannot know its code (macOS: a root adopted in
+    // a handover is not our child); exit_code() is -1 then.
+    [[nodiscard]] bool exit_code_known() const;
     // Waits up to `timeout` for the root to exit.
     std::optional<int> wait_exit(std::chrono::milliseconds timeout) const;
     [[nodiscard]] std::uint32_t pid() const noexcept;
-    // The root and its descendants still running in the terminal's process group.
+    // The root (while it runs) and its descendants still running.
     [[nodiscard]] std::size_t live_processes() const;
     [[nodiscard]] ForegroundInfo foreground() const;
+    [[nodiscard]] std::string foreground_program() const;  // ForegroundInfo::program alone
 
     // Lets the reader drain the last output (bounded wait), joins it, then ends whatever is left
     // in the process group. Idempotent.
@@ -87,22 +94,20 @@ public:
     bool pause_reader(std::chrono::milliseconds timeout);
     void resume_reader();
 
-#ifndef _WIN32
-    // ---- agent-host's handover (ADR-30, docs/design/platform-abstraction.md 5.5)
+    // ---- agent-host's handover (design doc 7.4 OQ-09, ADR-30, platform-abstraction.md 5.5)
     // With the reader paused: up to `max` bytes the terminal holds now; never waits.
     std::string read_available(std::size_t max);
-    // The pty master, to pass to the new host with SCM_RIGHTS. Stays owned by *this.
-    [[nodiscard]] int handover_fd() const;
-    // The new host holds the terminal: close ours without signalling anything. Closed afterwards.
+    // What the new host needs to take this terminal over, still owned by *this; nullopt with `why`
+    // when it cannot be handed over.
+    std::optional<PtyHandles> handover_handles(std::string* why) const;
+    // The new host holds the terminal: close ours without ending anything. Closed afterwards.
     void release_after_handover();
-    // In the new host: takes a pty master and root process the old host passed over, after
-    // checking them (a pty master; the root is alive, ours, leads its own session, and that session
-    // owns the terminal). The reader starts paused (resume_reader()). The root is not our child,
-    // so its exit code is unknown: exit_code() then reports -1. Throws std::runtime_error when a
-    // check fails (the fd is then closed).
-    static std::unique_ptr<Pty> adopt(int master_fd, std::uint32_t pid, PtyOutputSink on_output,
+    // In the new host: takes ownership of what the old host passed over after checking it (POSIX: a
+    // pty master, and a root that is alive, ours and owns the terminal; Windows: process id, job
+    // membership, kill-on-close, OpenConsole). The reader starts paused (resume_reader()). Throws
+    // when a check fails; everything passed is closed then.
+    static std::unique_ptr<Pty> adopt(const PtyHandles& handles, PtyOutputSink on_output,
                                       PtyExitSink on_exit);
-#endif
 
     struct Impl;
 

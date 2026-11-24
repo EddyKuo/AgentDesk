@@ -7,14 +7,16 @@
 #include <cstdint>
 #include <cstdio>
 #include <cwctype>
+#include <memory>
 #include <thread>
 
-#include "agentdesk/platform/win/command_line.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/process.hpp"
+#include "agentdesk/platform/text.hpp"
+#include "host_os.hpp"
+
 
 namespace agentdesk::host {
 
-namespace win = agentdesk::platform::win;
 
 std::string ToolResult::message() const {
     const std::string& m = error.find_first_not_of(" \t\r\n") != std::string::npos ? error : output;
@@ -22,6 +24,52 @@ std::string ToolResult::message() const {
     if (a == std::string::npos)
         return {};
     return m.substr(a, m.find_last_not_of(" \t\r\n") - a + 1);
+}
+
+ToolResult run_tool(const std::vector<std::wstring>& argv, const std::filesystem::path& cwd,
+                    std::chrono::milliseconds timeout) {
+    ToolResult r;
+    if (argv.empty())
+        return r;
+    const auto exe = detail::find_tool(platform::to_utf8(argv[0]));
+    if (!exe)
+        return r;
+    platform::ProcessSpec spec;
+    spec.executable = *exe;
+    for (std::size_t i = 1; i < argv.size(); ++i)
+        spec.args.push_back(platform::to_utf8(argv[i]));
+    spec.cwd = cwd;
+    spec.pipe_stdout = true;
+    spec.pipe_stderr = true;
+    detail::prepare_tool(spec);
+    std::unique_ptr<platform::Process> child;
+    try {
+        child = platform::Process::spawn(spec);
+    } catch (const std::exception&) {
+        return r;
+    }
+    r.started = true;
+    // Both pipes drain at once: a child blocked writing one would never finish the other.
+    std::thread reader([&] {
+        while (auto chunk = child->read_some(16 * 1024))
+            if (r.output.size() < kMaxToolOutput)
+                r.output.append(*chunk, 0, kMaxToolOutput - r.output.size());
+    });
+    std::thread err_reader([&] {
+        while (auto chunk = child->read_some_stderr(16 * 1024))
+            if (r.error.size() < kMaxToolOutput)
+                r.error.append(*chunk, 0, kMaxToolOutput - r.error.size());
+    });
+    auto code = child->wait(timeout);
+    if (!code) {
+        r.timed_out = true;
+        child->kill();
+        code = child->wait(std::chrono::seconds(2));
+    }
+    reader.join();
+    err_reader.join();
+    r.exit_code = static_cast<std::uint32_t>(code.value_or(1));
+    return r;
 }
 
 std::string worktree_slug(const std::string& branch) {

@@ -8,7 +8,32 @@ namespace agentdesk::desktop {
 namespace detail {
 
 std::filesystem::path data_dir() {
-    return os::data_dir();
+    try {
+        return platform::data_dir();
+    } catch (const std::exception&) {  // it cannot be made: the files live in the temporary folder
+        return std::filesystem::temp_directory_path() / "AgentDesk";
+    }
+}
+
+std::filesystem::path home_dir() {
+    return platform::home_dir();
+}
+
+bool replace_file(const std::filesystem::path& tmp, const std::filesystem::path& target, std::error_code* why) {
+    try {
+        platform::replace_file_atomically(tmp, target);
+    } catch (const std::system_error& e) {
+        if (why != nullptr)
+            *why = e.code();
+        return false;
+    }
+    if (why != nullptr)
+        why->clear();
+    return true;
+}
+
+std::string env(const char* name) {
+    return platform::env_var(name).value_or(std::string());
 }
 
 std::filesystem::path exe_dir() {
@@ -348,7 +373,7 @@ void save_settings(const Settings& s) {
             std::filesystem::remove(tmp, ec);
             continue;
         }
-        if (!os::replace_file(tmp, path)) {
+        if (!replace_file(tmp, path)) {
             std::filesystem::remove(tmp, ec);
             g_settings_problem = "Not saved to ui.json";
         }

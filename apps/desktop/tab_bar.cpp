@@ -122,18 +122,18 @@ void draw_new_menu(App::State& s) {
 // ---------------------------------------------------------------- tab bar
 
 void draw_window_buttons(App::State& s, float right, float top, float h) {
-    if (s.config.hwnd == nullptr || !window_draws_own_buttons())
+    if (s.config.window == nullptr || !window_draws_own_buttons())
         return;
     const float b = px(26);
     float x = right - b * 3 - px(4);
     const float y = top + (h - b) * 0.5f;
-    const bool zoomed = window_is_maximized(s.config.hwnd);
+    const bool zoomed = window_is_maximized(s.config.window);
     if (icon_button(s, "##win-min", ui::icon::kMinimize, ImVec2(x, y), b, fpx(16), nullptr, g_pal->dim))
-        window_minimize(s.config.hwnd);
+        window_minimize(s.config.window);
     x += b + px(2);
     if (icon_button(s, "##win-max", zoomed ? ui::icon::kRestore : ui::icon::kMaximize, ImVec2(x, y), b,
                     fpx(16), nullptr, g_pal->dim))
-        window_toggle_maximize(s.config.hwnd);
+        window_toggle_maximize(s.config.window);
     x += b + px(2);
     ImGui::SetCursorScreenPos(ImVec2(x, y));
     const bool close = ImGui::InvisibleButton("##win-close", ImVec2(b, b));
@@ -145,7 +145,7 @@ void draw_window_buttons(App::State& s, float right, float top, float h) {
     draw_icon(s, dl, ui::icon::kWinClose, fpx(16), ImVec2(x + b * 0.5f, y + b * 0.5f),
               hov ? window_button_glyph(0, g_pal->sidebar) : g_pal->dim);
     if (close)
-        window_close(s.config.hwnd);
+        window_close(s.config.window);
 }
 
 namespace {

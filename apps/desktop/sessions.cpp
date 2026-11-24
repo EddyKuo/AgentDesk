@@ -391,8 +391,8 @@ void play_alert(App::State& s, bool blocked) {
     std::filesystem::path file;
     const std::string custom = blocked ? s.settings.sound_blocked : s.settings.sound_done;
     std::error_code ec;
-    if (!custom.empty() && std::filesystem::is_regular_file(win::to_wide(custom), ec))
-        file = win::to_wide(custom);
+    if (!custom.empty() && std::filesystem::is_regular_file(platform::to_wide(custom), ec))
+        file = platform::to_wide(custom);
     if (file.empty())
         file = exe_dir() / L"sounds" / (blocked ? L"request.mp3" : L"done.mp3");
     os::play_alert(file, blocked);

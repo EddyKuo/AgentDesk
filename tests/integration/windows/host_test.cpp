@@ -27,6 +27,7 @@
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
+#include "agentdesk/platform/win/user.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/platform/win/job.hpp"
@@ -186,7 +187,7 @@ protected:
         auto c = connect();
         ASSERT_NE(c, nullptr) << "host did not come up";
     }
-    std::unique_ptr<ipc::PipeClient> connect() { return ipc::PipeClient::connect(pipe_, 10s); }
+    std::unique_ptr<ipc::PipeClient> connect() { return ipc::PipeClient::connect(agentdesk::platform::to_utf8(pipe_), 10s); }
     ProcResult ctl(std::vector<std::wstring> args) {
         args.insert(args.begin(), {L"--pipe", pipe_, L"--no-start"});
         return run_capture(AGENTDESK_CTL_EXE, args, fs::temp_directory_path());
@@ -423,7 +424,7 @@ JobRun auto_start_host_inside_job(bool allow_breakaway, const std::wstring& pipe
     ::CloseHandle(pi.hProcess);
     job.reset();  // "close the terminal": kills everything still in the job
     std::this_thread::sleep_for(500ms);
-    auto probe = ipc::PipeClient::connect(pipe, 2s);
+    auto probe = ipc::PipeClient::connect(agentdesk::platform::to_utf8(pipe), 2s);
     out.host_alive_after_job_closed = probe != nullptr;
     if (probe)
         probe->call("host.shutdown", {{"stop_sessions", true}}, 5s);
@@ -719,7 +720,7 @@ TEST_F(HostFixture, PipeDaclAllowsOnlySystemAndCurrentUser) {
     }
     ::LocalFree(sd);
     std::sort(sids.begin(), sids.end());
-    std::vector<std::wstring> expected = {L"S-1-5-18", ipc::current_user_sid()};
+    std::vector<std::wstring> expected = {L"S-1-5-18", w(agentdesk::platform::win::user_sid())};
     std::sort(expected.begin(), expected.end());
     EXPECT_EQ(sids, expected);  // no Everyone (S-1-1-0), no anonymous, no other users
 }

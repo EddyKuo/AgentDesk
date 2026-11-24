@@ -1,6 +1,6 @@
 # 平台抽象層介面草案（macOS 移植準備）
 
-版本 0.3｜日期：2026-11-24｜狀態：OQ-10 已決定（第 8 節、設計文件 ADR-30）；macOS 部分（第 9～12 步）已實作，見第 10 節。Windows 版行為以設計文件為準，不因這份文件改變。
+版本 0.4｜日期：2026-11-24｜狀態：OQ-10 已決定（第 8 節、設計文件 ADR-30）；macOS 部分（第 9～12 步）與 Windows 重構（第 1～8 步）都已實作，見第 10 節。Windows 版行為以設計文件為準，不因這份文件改變。
 
 ## 1. 目的與範圍
 
@@ -521,11 +521,12 @@ int run_shell(const ShellOptions& options);  // main loop; replaces wWinMain's b
 
 macOS 部分（第 9～12 步）已在分支 `feature/sprint-11/macos-port` 完成，平台差異對照寫在設計文件第 9 章，待人工驗收的項目在設計文件 12.2。和這份草案不同的地方：
 
-- Windows 先行的第 1～8 步還沒做：為了讓 Windows 程式少動、之後和 Windows 端的修改合併時少衝突，共用程式暫時沿用 `platform::win` 的名稱：macOS 上由 `libs/platform/posix/compat/` 提供同名的標頭檔，接到第 5 節的中立介面。第 1～8 步做完時，這一層就拿掉。
-- 平台差異在建置時分開（2026-11-24 重構）：共用的 `.cpp` 不再有 `#ifdef _WIN32`。各模組不同的部分放在小的內部介面後面（`host_os.hpp`、`fonts_os.hpp`、`keymap_os.hpp`、`keyboard_os.hpp`、`links_os.hpp`、`mods_os.hpp`、`updates_os.hpp`、`apps/desktop/desktop_os.hpp`、`apps/cli/cli_os.hpp`），實作分成 `*_win.cpp`（或 `win/`）與 `*_posix.cpp`（或 `macos/`），由 CMake 挑選。宣告本身不同的標頭檔放在 `include_win/`、`include_posix/`，靠 include 路徑挑選。剩下的 `#ifdef` 只有第 5 節中立介面裡 POSIX 專用的成員，以及給第三方用的 `mod_sdk.hpp` 匯出巨集。原本整份是 Win32 的檔案（`pipe.cpp`、`handover.cpp`、`apps/host/main.cpp`、`apps/desktop/main.cpp`）留在原位，方便合併。
-- **5.1**：`Pty` 多了熱更新用的 `read_available`、`handover_fd`、`release_after_handover`、`adopt`（只在 POSIX 上有）。root 程序結束一律用 kqueue 監看，熱更新時才能停止監看還在執行的程式。
-- **5.2**：`ProcessSpec` 多了 `stderr_fd`（POSIX），讓 ssh 和 git 的 stderr 可以分開收。
-- **5.3**：`--pipe` 名稱不含 `/` 時，對應到 runtime 資料夾裡的 `<名稱>.sock`。
-- **5.4**：多了 `runtime_dir()`、`login_path()`、`find_on_login_path()`；`FolderWatch` 沒有做成共用介面，git 與 Files／Changes 的監看在 macOS 上改用輪詢修改時間（`macos/git_cache_macos.cpp`、`macos/side_panels_macos.cpp`）。
+- Windows 的第 1～8 步已在分支 `feature/sprint-11/platform-windows` 完成（分成七個 commit：第 2、3 步和第 7、8 步各合成一個，交接邏輯另外一個；放在同一個 PR；設計文件 ADR-45）。過渡用的 `libs/platform/posix/compat/` 已移除，交接邏輯合為一份（`handover.cpp` 加 `handover_os.hpp`）。
+- 平台差異在建置時分開（2026-11-24 重構）：共用的 `.cpp` 不再有 `#ifdef _WIN32`。各模組不同的部分放在小的內部介面後面（`host_os.hpp`、`fonts_os.hpp`、`keymap_os.hpp`、`keyboard_os.hpp`、`links_os.hpp`、`mods_os.hpp`、`updates_os.hpp`、`apps/desktop/desktop_os.hpp`、`apps/cli/cli_os.hpp`），實作分成 `*_win.cpp`（或 `win/`）與 `*_posix.cpp`（或 `macos/`），由 CMake 挑選。宣告本身不同的標頭檔剩兩個（`crt.hpp`、`pty_handles.hpp`），放在平台層各自的 `include/`。剩下的 `#ifdef` 只有給第三方用的 `mod_sdk.hpp` 匯出巨集，由 ctest 的 `PlatformBoundaries` 檢查。原本整份是 Win32 的檔案改名為 `*_win.cpp` 或搬到 `win/`。
+- **5.1**：`Pty` 多了熱更新用的 `read_available`、`handover_handles`、`release_after_handover`、`adopt`（`PtyHandles` 的內容各平台不同，在 `pty_handles.hpp`），以及 `exit_code_known()`（macOS 接手的 root 拿不到結束代碼）、`foreground_program()`。Windows 的 `PtyProcess` 保留為內部實作，測試與 `pty_run` 仍直接用它來比較兩種 ConPTY。macOS 的 root 程序結束一律用 kqueue 監看，熱更新時才能停止監看還在執行的程式。
+- **5.2**：`ProcessSpec` 用 `pipe_stderr` 分開收 stderr（ssh 和 git），另有 `is_batch_file()`。
+- **5.3**：多了 `endpoint_named()`（macOS 上不含 `/` 的 `--pipe` 名稱對應到 runtime 資料夾裡的 `<名稱>.sock`）與 `endpoint_in_use()`；`InstanceLock::try_acquire` 多一個 `taking_over`。`PipeServer`、`PipeClient` 沒有改名。
+- **5.4**：多了 `env_var()`、`program_file()`、`current_pid()`、`sha256_hex()`、帶備份的 `replace_file_atomically()`、`runtime_dir()`、`login_path()`、`find_on_login_path()`；`FolderWatch` 沒有做成共用介面，git 與 Files／Changes 的監看在 macOS 上改用輪詢修改時間（`macos/git_cache_macos.cpp`、`macos/side_panels_macos.cpp`）。
+- **5.5**：`HandoverSupport` 沒有做，用 `pty_capabilities().handover` 與 `Pty::handover_handles()` 的原因文字代替。
 - **5.6**：`WindowHost` 沒有做成虛擬介面，改成 `apps/desktop/window_ops.hpp` 的幾個函式（Windows 在 `win/window_ops_win.cpp`，macOS 由外殼 `macos/main_macos.mm` 實作）。
 

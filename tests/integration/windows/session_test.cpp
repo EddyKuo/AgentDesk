@@ -3,14 +3,14 @@
 
 #include <chrono>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
-#include "agentdesk/platform/win/conpty_api.hpp"
-
 using namespace std::chrono_literals;
-namespace win = agentdesk::platform::win;
 using agentdesk::host::AgentState;
 using agentdesk::host::ProcessState;
 using agentdesk::host::RawInput;
@@ -20,13 +20,8 @@ using agentdesk::host::TextInput;
 
 namespace {
 
-win::ConPtyApi best_conpty() {
-    return win::load_conpty(std::filesystem::path(AGENTDESK_BUNDLED_CONPTY_DIR));
-}
-
-SessionConfig probe_config(std::wstring mode) {
+SessionConfig probe_config(std::string mode) {
     SessionConfig c;
-    c.api = best_conpty();
     c.spec.executable = AGENTDESK_VT_PROBE;
     c.spec.args = {std::move(mode)};
     c.spec.cwd = std::filesystem::temp_directory_path();
@@ -59,7 +54,7 @@ bool screen_contains(const Session& s, const std::string& needle) {
 }  // namespace
 
 TEST(Session, StartsRunningAndExitsWithCode) {
-    auto s = Session::start(probe_config(L"report"));
+    auto s = Session::start(probe_config("report"));
     EXPECT_NE(s->info().pid, 0u);
     const auto code = s->wait_exit(15s);
     ASSERT_TRUE(code.has_value());
@@ -70,7 +65,7 @@ TEST(Session, StartsRunningAndExitsWithCode) {
 
 // QA-08/QA-22: OSC 7501 drives agent state; process exit drops blocked -> Unknown, last kept.
 TEST(Session, Osc7501StateThenUnknownAfterExitKeepsLastState) {
-    auto s = Session::start(probe_config(L"report"));
+    auto s = Session::start(probe_config("report"));
     ASSERT_TRUE(s->wait_exit(15s).has_value());
     const auto info = s->info();
     EXPECT_EQ(info.agent.state, AgentState::kUnknown);
@@ -80,7 +75,7 @@ TEST(Session, Osc7501StateThenUnknownAfterExitKeepsLastState) {
 
 // QA-09: a child that ignores Ctrl+C -> still running after the grace period -> force stop.
 TEST(Session, InterruptGracePeriodThenForceStop) {
-    auto config = probe_config(L"echo");  // raw input mode: 0x03 is just a byte to the probe
+    auto config = probe_config("echo");  // raw input mode: 0x03 is just a byte to the probe
     config.interrupt_grace = 300ms;
     auto s = Session::start(config);
     std::this_thread::sleep_for(300ms);
@@ -94,7 +89,7 @@ TEST(Session, InterruptGracePeriodThenForceStop) {
 }
 
 TEST(Session, TextInputIsEncodedByEngine) {
-    auto s = Session::start(probe_config(L"echo"));
+    auto s = Session::start(probe_config("echo"));
     std::this_thread::sleep_for(300ms);
     s->send(TextInput{U"hi測\r"});
     ASSERT_TRUE(wait_until([&] { return screen_contains(*s, "PROBE-ECHO:6869e6b8ac0d"); }, 10s));
@@ -104,7 +99,7 @@ TEST(Session, TextInputIsEncodedByEngine) {
 
 // QA-19 (host side): stale or replayed seq values from one source never override newer state.
 TEST(Session, ReportStateIgnoresStaleSeq) {
-    auto s = Session::start(probe_config(L"echo"));
+    auto s = Session::start(probe_config("echo"));
     s->report_state("codex-hook", 100, AgentState::kWorking);
     s->report_state("codex-hook", 99, AgentState::kIdle);   // stale
     s->report_state("codex-hook", 100, AgentState::kDone);  // replay
@@ -120,7 +115,7 @@ TEST(Session, ReportStateIgnoresStaleSeq) {
 }
 
 TEST(Session, ResizeChangesSnapshotSizeAndGeneration) {
-    auto s = Session::start(probe_config(L"echo"));
+    auto s = Session::start(probe_config("echo"));
     const auto gen = s->snapshot()->generation;
     s->resize(30, 100);
     ASSERT_TRUE(wait_until([&] { return s->snapshot()->cols == 100 && s->snapshot()->rows == 30; }, 5s));
@@ -130,7 +125,7 @@ TEST(Session, ResizeChangesSnapshotSizeAndGeneration) {
 
 // QA-07: with no structured source, silence never turns into Done (or anything else).
 TEST(Session, SilenceWithoutSourceStaysUnknown) {
-    auto s = Session::start(probe_config(L"echo"));
+    auto s = Session::start(probe_config("echo"));
     std::this_thread::sleep_for(1500ms);
     const auto info = s->info();
     EXPECT_EQ(info.process_state, ProcessState::kRunning);
@@ -141,8 +136,8 @@ TEST(Session, SilenceWithoutSourceStaysUnknown) {
 
 // OQ-06 backpressure: a tiny queue forces the reader to pause; every line still arrives in order.
 TEST(Session, BackpressureNeverDropsOutput) {
-    auto config = probe_config(L"flood");
-    config.spec.args = {L"flood", L"2", L"2097152"};  // 2 s at 2 MiB/s
+    auto config = probe_config("flood");
+    config.spec.args = {"flood", "2", "2097152"};  // 2 s at 2 MiB/s
     config.output_queue_limit = 4 * 1024;
     auto s = Session::start(config);
     ASSERT_TRUE(s->wait_exit(60s).has_value());
@@ -172,8 +167,60 @@ TEST(Session, BackpressureNeverDropsOutput) {
     EXPECT_EQ(gaps, 0);
 }
 
+// A program that ends while its output is still queued: every byte is on the screen before the
+// session is reported exited, and nothing is published after that. Several at once, so the exit
+// notices and the actors compete.
+TEST(Session, LastOutputArrivesBeforeTheExit) {
+    struct Seen {
+        std::mutex mutex;
+        std::shared_ptr<const agentdesk::terminal::ScreenSnapshot> last;
+        bool exited = false;
+        bool complete = false;
+        int after_exit = 0;
+    };
+    constexpr int kSessions = 6;
+    std::vector<std::unique_ptr<Seen>> seen;
+    std::vector<std::unique_ptr<Session>> sessions;
+    for (int i = 0; i < kSessions; ++i) {
+        auto* s = seen.emplace_back(std::make_unique<Seen>()).get();
+        agentdesk::host::SessionListener listener;
+        listener.on_snapshot = [s](std::shared_ptr<const agentdesk::terminal::ScreenSnapshot> snap) {
+            std::lock_guard lock(s->mutex);
+            s->last = std::move(snap);
+            if (s->exited)
+                ++s->after_exit;
+        };
+        listener.on_info = [s](const agentdesk::host::SessionInfo& info) {
+            std::lock_guard lock(s->mutex);
+            if (info.process_state != ProcessState::kExited || s->exited)
+                return;
+            s->exited = true;
+            for (int r = 0; s->last && r < s->last->rows; ++r)
+                if (s->last->row_text(r).find("FLOOD-DONE") != std::string::npos)
+                    s->complete = true;
+        };
+        auto config = probe_config("flood");
+        config.spec.args = {"flood", "1", "4194304"};
+        config.output_queue_limit = 64 * 1024;
+        sessions.push_back(Session::start(config, listener));
+    }
+    for (int i = 0; i < kSessions; ++i) {
+        ASSERT_TRUE(sessions[static_cast<std::size_t>(i)]->wait_exit(60s).has_value());
+        auto& s = *seen[static_cast<std::size_t>(i)];
+        EXPECT_TRUE(wait_until(
+            [&] {
+                std::lock_guard lock(s.mutex);
+                return s.exited;
+            },
+            5s));
+        std::lock_guard lock(s.mutex);
+        EXPECT_TRUE(s.complete) << "session " << i << " ended before its last output";
+        EXPECT_EQ(s.after_exit, 0);
+    }
+}
+
 TEST(Session, StartFailureIsReported) {
-    auto config = probe_config(L"echo");
+    auto config = probe_config("echo");
     config.spec.executable = L"C:\\nowhere\\missing.exe";
     EXPECT_THROW(Session::start(config), std::system_error);
 }

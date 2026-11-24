@@ -118,7 +118,7 @@ private:
 
 class ProcessStream final : public ByteStream {
 public:
-    explicit ProcessStream(std::unique_ptr<Process> child) : child_(std::move(child)) {}
+    explicit ProcessStream(std::shared_ptr<Process> child) : child_(std::move(child)) {}
 
     std::size_t read_some(std::span<char> buf) override {
         const int fd = child_->impl().out_read.get();
@@ -142,7 +142,7 @@ public:
     }
 
 private:
-    std::unique_ptr<Process> child_;
+    std::shared_ptr<Process> child_;
     std::atomic<bool> cancelled_{false};
 };
 
@@ -150,6 +150,16 @@ private:
 
 std::string default_endpoint() {
     return (runtime_dir() / "host.sock").string();
+}
+
+std::string endpoint_named(const std::string& name) {
+    if (name.find('/') != std::string::npos)
+        return name;
+    return (runtime_dir() / (name + ".sock")).string();
+}
+
+bool endpoint_in_use(const std::system_error& e) {
+    return e.code().value() == EADDRINUSE;
 }
 
 struct StreamListener::Impl {
@@ -285,7 +295,7 @@ std::unique_ptr<ByteStream> connect_stream(const std::string& endpoint, std::chr
     }
 }
 
-std::unique_ptr<ByteStream> process_stream(std::unique_ptr<Process> child) {
+std::unique_ptr<ByteStream> process_stream(std::shared_ptr<Process> child) {
     if (!child || !child->impl().out_read.valid() || !child->impl().in_write.valid())
         throw std::invalid_argument("process_stream needs a child with stdin and stdout pipes");
     return std::make_unique<ProcessStream>(std::move(child));
@@ -299,7 +309,7 @@ InstanceLock::InstanceLock(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) 
 
 InstanceLock::~InstanceLock() = default;  // closing the fd releases the lock
 
-std::unique_ptr<InstanceLock> InstanceLock::try_acquire(const std::string& name) {
+std::unique_ptr<InstanceLock> InstanceLock::try_acquire(const std::string& name, bool /*taking_over*/) {
     const auto path = runtime_dir() / (name + ".lock");
     UniqueFd fd(::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600));
     if (!fd.valid())

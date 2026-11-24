@@ -14,7 +14,7 @@
 #include "../fonts_os.hpp"
 #include "agentdesk/platform/crt.hpp"
 #include "agentdesk/platform/system.hpp"
-#include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/text.hpp"
 #include "agentdesk/ui/fonts.hpp"
 
 namespace agentdesk::ui {
@@ -146,7 +146,7 @@ std::string find_font(std::initializer_list<const wchar_t*> bundled,
                       std::initializer_list<const wchar_t*> system) {
     std::error_code ec;
     for (const wchar_t* name : bundled) {
-        const auto p = bundled_fonts_dir() / platform::win::to_utf8(name);
+        const auto p = bundled_fonts_dir() / platform::to_utf8(name);
         if (std::filesystem::is_regular_file(p, ec))
             return utf8(p);
     }
