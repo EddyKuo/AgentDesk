@@ -964,7 +964,7 @@ Outcome exec_app_command(App::State& s, const Command& c) {
         if (!ui::updates::apply(&error)) {
             if (error.empty())
                 return "no update is ready yet";
-            return "Close AgentDesk's terminals (or restart Windows) and try again. Couldn't replace "
+            return "Close AgentDesk's terminals (or restart the computer) and try again. Couldn't replace "
                    "AgentDesk's files: " +
                    error + ".";
         }

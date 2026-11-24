@@ -806,8 +806,8 @@ Json Day::report(const std::string& install, const Config& config) const {
         {"app",
          {
              {"version", version(config.app_version)},
-             {"os", "windows"},
-             {"arch", "x86_64"},
+             {"os", detail::os_name()},
+             {"arch", detail::cpu_arch()},
              {"channel", "stable"},
          }},
         {"core", {{"version", core ? Json(version(*core)) : Json()}}},

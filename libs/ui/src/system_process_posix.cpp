@@ -119,6 +119,14 @@ void unset_env_var(const wchar_t* name) {
     ::unsetenv(win::to_utf8(name).c_str());
 }
 
+const char* os_name() {
+    return "macos";
+}
+
+const char* cpu_arch() {
+    return "aarch64";
+}
+
 std::optional<std::wstring> home_folder() {
     return env_var(L"HOME");
 }

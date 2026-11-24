@@ -453,7 +453,8 @@ when the window closes.
   Stop it:
     agentctl stop reviewer --interrupt
 
-Profiles: agentctl run needs a profile id; ask the person or look at %LOCALAPPDATA%\AgentDesk\profiles.json.
+Profiles: agentctl run needs a profile id; ask the person or look at profiles.json in AgentDesk's data folder
+(%LOCALAPPDATA%\AgentDesk on Windows, ~/Library/Application Support/AgentDesk on macOS).
 Never send prompts to agents the person did not ask you to start.
 )";
 

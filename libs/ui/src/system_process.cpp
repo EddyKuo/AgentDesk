@@ -189,6 +189,14 @@ void unset_env_var(const wchar_t* name) {
     ::SetEnvironmentVariableW(name, nullptr);
 }
 
+const char* os_name() {
+    return "windows";
+}
+
+const char* cpu_arch() {
+    return "x86_64";
+}
+
 std::optional<std::wstring> home_folder() {
     return env_var(L"USERPROFILE");
 }

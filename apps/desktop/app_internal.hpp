@@ -888,7 +888,7 @@ struct App::State {
         return false;
     }
     [[nodiscard]] std::string machine_label(const std::string& machine) const {
-        return machine.empty() ? std::string("This PC") : machine;
+        return machine.empty() ? std::string("This computer") : machine;
     }
     // The machine's spaces are still on their way: it is connecting (not connected, no error
     // yet), or this computer's document has not arrived. Disconnected or failed is not loading.

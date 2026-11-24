@@ -13,7 +13,7 @@ constexpr const char* kWhatsNew[] = {
     "Bigger interface text by default (15 px), adjustable in Settings > Look; Geist and JetBrains Mono are "
     "bundled.",
     "New tabs, spaces and splits open a shell in the focused folder; spaces and branches follow cd.",
-    "WSL distributions are listed as shells, and Linux cd is followed too.",
+    "The + menus list every shell found on this computer, so each new space or tab can use a different one.",
     "Programs that read the mouse get clicks and the wheel; Shift keeps the mouse for selecting.",
     "Settle tab puts a running tab away until you show it or it needs you.",
     "Duplicate or reset a layout, duplicate a mod.",
@@ -351,8 +351,8 @@ void draw_close_notice(App::State& s) {
     ImGui::TextWrapped(
         "Closing this window only detaches. Your sessions keep running in agent-host, and reopening "
         "AgentDesk "
-        "brings back the same spaces, tabs and panes. Use \"Exit and stop all\" in the sidebar to end "
-        "everything.");
+        "brings back the same spaces, tabs and panes. To end everything, run \"Exit and stop all "
+        "sessions\" from the command palette.");
     primary_button_style(true);
     if (ImGui::Button("Close window")) {
         s.settings.close_notice_shown = true;  // shown once (design doc 4.3)

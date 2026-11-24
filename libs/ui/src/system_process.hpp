@@ -50,6 +50,10 @@ std::string trim(std::string_view s);
 std::string lower(std::string_view s);
 // The whole file as bytes; `ok` (when given) says whether it could be opened.
 std::string read_file(const std::filesystem::path& p, bool* ok = nullptr);
+// The system and processor this build runs on, as reports name them ("windows", "x86_64";
+// "macos", "aarch64").
+const char* os_name();
+const char* cpu_arch();
 // Seconds since 1970-01-01 UTC.
 std::uint64_t unix_now();
 

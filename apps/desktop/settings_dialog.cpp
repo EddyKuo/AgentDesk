@@ -327,8 +327,12 @@ bool look_terminals(App::State& s) {
     static char buf[512];
     if (ImGui::IsWindowAppearing() || buf[0] == '\0')
         std::snprintf(buf, sizeof buf, "%s", s.settings.worktree_dir.c_str());
-    settings_row(s, "Worktrees folder", "Empty: %USERPROFILE%\\.agentdesk\\worktrees", px(260),
-                 ImGui::GetFrameHeight());
+    // The default as this system writes it (home folder, its own separator).
+    static const std::string default_note = [] {
+        const auto u8 = (os::home_dir() / ".agentdesk" / "worktrees").u8string();
+        return "Empty: " + std::string(u8.begin(), u8.end());
+    }();
+    settings_row(s, "Worktrees folder", default_note.c_str(), px(260), ImGui::GetFrameHeight());
     if (ImGui::InputText("##wt", buf, sizeof buf)) {
         s.settings.worktree_dir = buf;
         changed = true;
@@ -560,17 +564,24 @@ bool settings_machines(App::State& s) {
 }
 
 // ------------------------------------------------------------------ Alerts page
-// Sounds only: a note shows in the corner either way.
+// Sounds and the corner notes, each with its own switch.
 bool settings_alerts(App::State& s) {
     bool changed = false;
-    settings_section(s, "Sounds");
-    settings_row(
-        s, "Play sounds",
-        "When an agent needs you, and when one finishes while you're not looking. A note shows in the "
-        "corner either way.",
-        px(36), px(20));
+    settings_section(s, "Sounds and notes");
+    settings_row(s, "Play sounds",
+                 "When an agent needs you (always), and when one finishes while you're not looking.", px(36),
+                 px(20));
     if (settings_toggle("##st-sounds", s.settings.sounds)) {
         s.settings.sounds = !s.settings.sounds;
+        changed = true;
+    }
+    settings_row_done(s);
+    settings_row(s, "Show notes",
+                 "A note in the corner when an agent you're not looking at needs you or finishes; click it to "
+                 "go there.",
+                 px(36), px(20));
+    if (settings_toggle("##st-toasts", s.settings.toasts)) {
+        s.settings.toasts = !s.settings.toasts;
         changed = true;
     }
     settings_row_done(s);
@@ -626,7 +637,7 @@ bool settings_mods(App::State& s) {
             settings_gap(px(6));
             settings_wrapped(s,
                              ("Turn on " + m.name +
-                              "? It will run inside AgentDesk with your Windows account's rights: it can read and "
+                              "? It will run inside AgentDesk with your user account's rights: it can read and "
                               "change your files, start programs and type into your terminals. Turn it on only "
                               "if you trust where it came from. A mod that hangs freezes this window until you end "
                               "agent-ui; your terminals keep running.")

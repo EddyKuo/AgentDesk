@@ -23,7 +23,7 @@ change_summary: |
   內容依 0.2.0 的程式校正：FR-24 的 worktree 位置寫成兩個平台的路徑；FR-26 的遠端機器不再限定 Windows，
   改為「對方裝了 AgentDesk、agentctl 可執行」，跨平台互連是否保證仍待 OQ-11；FR-32 加上 macOS 的 shell；
   FR-36 併入 macOS 的熱更新；FR-29 列出實作的介面元件。新增第 7 節「已知落差」，列出程式與需求不一致、
-  尚未修正的地方。刪除了已不適用的敘述（AgentDesk 98 的歷史、Lua mod），所以升主版號。
+  尚未修正的地方（寫成當天已全部修正）。刪除了已不適用的敘述（AgentDesk 98 的歷史、Lua mod），所以升主版號。
   上一版保存在 `contracts/deprecated/PRD_v3.2.0.md`，更早的版本紀錄見該檔。
 ---
 
@@ -206,11 +206,12 @@ AgentDesk 是原生的 AI Agent 工作台：在可分割的終端機面板裡跑
 
 #### FR-21 注意力與通知
 **優先級**：P1
-**描述**：Agent 在沒被看時完成標為 Done，看過才變 Idle（這個已讀狀態屬於 UI，不回寫 host）；分頁與 space 顯示其中最緊急的狀態，排序是 Needs you > Done > Working > Idle。需要使用者（含 Error）時一定播放提示音；只有沒在看它時才在右下角跳通知，點通知跳到該面板。提示音可關閉或換成自己的 MP3。
+**描述**：Agent 在沒被看時完成標為 Done，看過才變 Idle（這個已讀狀態屬於 UI，不回寫 host）；分頁與 space 顯示其中最緊急的狀態，排序是 Needs you > Done > Working > Idle。需要使用者（含 Error）時一定播放提示音；只有沒在看它時才在右下角跳通知，點通知跳到該面板。提示音與通知可在設定 › Alerts 分別關閉，提示音可換成自己的 MP3。
 **驗收**：
 - Given 使用者沒在看某個 Agent，When 它完成，Then 標為 Done、播放提示音並跳出通知，點通知跳到該面板，看過後變成 Idle。
 - Given 任一 Agent，When 它需要使用者，Then 一定播放提示音；只有沒在看它時才跳出通知。
 - Given UI 剛啟動、第一次取得清單，When 顯示，Then 不發出任何提醒。
+- Given 使用者在設定 › Alerts 關閉「Show notes」，When 沒在看的 Agent 完成，Then 照樣播放提示音，但不跳出通知。
 
 **驗證**：`Attention.*`（含 `Attention.AlertRules`）。
 
@@ -452,13 +453,7 @@ AgentDesk 是原生的 AI Agent 工作台：在可分割的終端機面板裡跑
 
 程式目前與本契約不一致、尚未修正的地方。修正後從這裡刪除；若決定改需求，則依憲法 6.3 升版。
 
-| 項目 | 現況 | 影響 |
-|---|---|---|
-| macOS 畫面上的 Windows 字樣 | Worktrees 資料夾說明寫 `%USERPROFILE%`、mod 權限說明寫「Windows 帳號」、更新錯誤寫「restart Windows」、命令說明寫「This PC」；`agentctl --skill` 的說明文字寫 `%LOCALAPPDATA%` | FR-39：文字不正確，功能正常 |
-| 使用統計的平台欄位 | 報告的 `os`、`arch` 固定寫 `windows`、`x86_64` | FR-37：macOS 的報告平台欄位錯誤 |
-| `toasts` 設定 | `ui.json` 讀寫 `toasts`，但不影響是否顯示通知 | FR-21：無法單獨關閉通知 |
-| 關閉說明與歡迎頁的指引 | 第一次關閉視窗的說明叫使用者用側欄的「Exit and stop all」，側欄沒有這個按鈕（在命令面板）；歡迎頁第 4 頁寫「Settings › Send feedback」，實際在命令面板 | FR-29：指引文字錯誤 |
-| What's new 內容 | 固定的 7 條，提到 WSL，macOS 也顯示 | FR-35：macOS 上內容不適用 |
+目前沒有。4.0.0 寫成時列出的五項（macOS 畫面上的 Windows 字樣、使用統計的平台欄位、`toasts` 設定沒有作用、第一次關閉的說明指向不存在的按鈕、What's new 的 WSL 條目）已在 2026-11-24 修正。
 
 ## 8. 需求追溯
 

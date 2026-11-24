@@ -434,7 +434,7 @@ sequenceDiagram
 
 - **預設開啟，但沒有預設伺服器**：設了 `AGENTDESK_TELEMETRY_URL` 才送出（curl POST，20 秒上限）。`DO_NOT_TRACK`、`AGENTDESK_TELEMETRY=0`（或 false、off、no）、CI 環境變數（CI、GITHUB_ACTIONS、GITLAB_CI、CIRCLECI、BUILDKITE、JENKINS_URL、TEAMCITY_VERSION）只關閉這一次執行。設定 › Privacy 關閉時清空待送的報告並換一個新的安裝 id（128 位元亂數）。
 - **報告**：每個 UTC 日一份，跨日後放進待送佇列，7 天後丟棄；送出失敗以 2／4／8／16／24 小時加隨機抖動重試。存在資料資料夾的 `telemetry/`。
-- **內容**：版本、安裝 id、日期；app 版本與通道、agent-host 版本；使用時間、啟動次數與中位數時間、異常結束次數；Agent 程式名稱（只用程式表裡的名稱，其他記為 other）；分組後的 Agent、space、分頁、終端機數量（0、1、2–5、6–20、21+）；版面、mod 類別（內建、改過的內建、自訂）、內建命令名稱、是否自訂按鍵與主題、歡迎頁結果、更新失敗與 host 遺失事件。不含自由文字。
+- **內容**：版本、安裝 id、日期；app 版本、作業系統與處理器（windows／x86_64 或 macos／aarch64）、通道、agent-host 版本；使用時間、啟動次數與中位數時間、異常結束次數；Agent 程式名稱（只用程式表裡的名稱，其他記為 other）；分組後的 Agent、space、分頁、終端機數量（0、1、2–5、6–20、21+）；版面、mod 類別（內建、改過的內建、自訂）、內建命令名稱、是否自訂按鍵與主題、歡迎頁結果、更新失敗與 host 遺失事件。不含自由文字。
 - 「What we send」逐字顯示待送的報告、今天的草稿與上次送出的內容。
 
 ## 6. agentctl
@@ -541,7 +541,7 @@ sequenceDiagram
 
 - **「在看」**：視窗有焦點，而且該面板在目前顯示的分頁裡可見。
 - **提醒**：進入 Blocked／Error 每次都提醒（在看時只播聲音）；從忙碌變成其他狀態時，只在沒在看時提醒並標 Done，看過才變 Idle；UI 第一次取得清單時不提醒。子 Agent 的 Done 顯示為 Idle。
-- **提醒的內容**：`sounds` 開啟時播放提示音（Needs you 用 `request.mp3`、完成用 `done.mp3`，或 `sound_blocked`、`sound_done` 指定的 MP3；檔案不在時播系統聲音）；收起的分頁回到分頁列；沒在看時右下角跳出通知「<標題> needs you／finished」加「<space> / <分頁>」，點了跳到該面板。
+- **提醒的內容**：`sounds` 開啟時播放提示音（Needs you 用 `request.mp3`、完成用 `done.mp3`，或 `sound_blocked`、`sound_done` 指定的 MP3；檔案不在時播系統聲音）；收起的分頁回到分頁列；沒在看而且 `toasts` 開啟時，右下角跳出通知「<標題> needs you／finished」加「<space> / <分頁>」，點了跳到該面板。
 - **通知**：340×72，右下角堆疊，顯示 5 秒（Needs you 與 Working 8 秒）。另外，程式啟動 2 秒內以非 0 結束（127 不限時間）時顯示「Terminal failed to start」10 秒，附 exit code 與最後 5 行。
 - 分頁與 space 顯示其中最緊急的等級；Agents 清單依等級、最後變動時間、建立時間排序。
 - 不使用作業系統的通知中心。
@@ -621,6 +621,7 @@ macOS 上 ImGui 互換 Cmd 與 Ctrl：`keys.json` 的 `cmd` 是 ImGui 的 Ctrl�
 | `copy_on_select` | true | 放開即複製 |
 | `worktree_dir` | 空 | 空的時候是家目錄的 `.agentdesk/worktrees` |
 | `sounds`、`sound_done`、`sound_blocked` | true、空、空 | 提示音 |
+| `toasts` | true | Agent 提醒的角落通知 |
 | `option_as_alt` | auto | macOS：auto、on、off、left、right |
 | `machines` | [] | `{name, target, ctl}` |
 | `mods_enabled` | [] | 啟用的 mod |
@@ -632,7 +633,7 @@ macOS 上 ImGui 互換 Cmd 與 Ctrl：`keys.json` 的 `cmd` 是 ImGui 的 Ctrl�
 | `welcomed`、`seen_version`、`close_notice_shown` | | 歡迎頁、What's new、第一次關閉的說明 |
 | `telemetry` | true | 只有關閉時才寫入 false |
 
-另外還讀寫 `toasts`（不影響行為）與舊版的 `sidebar`、`sidebar_width`、`spaces_share`、`panel_width`、`theme`（只用來轉換）。
+另外還讀寫舊版的 `sidebar`、`sidebar_width`、`spaces_share`、`panel_width`、`theme`（只用來轉換）。
 
 **設定頁**：
 
@@ -641,7 +642,7 @@ macOS 上 ImGui 互換 Cmd 與 Ctrl：`keys.json` 的 `cmd` 是 ImGui 的 Ctrl�
 | Look | 版面卡片；外觀（系統、淺色、深色）與每個版面的深淺主題卡片；縮放、介面文字、終端機字型、字級、字重、行高、格寬、捲動速度、介面字型；預設 shell、放開即複製、編輯 keys.json 與錯誤列表、worktree 資料夾 |
 | Keyboard | 只在 macOS：Option 鍵的五種設定 |
 | Machines | 這台電腦與 agent-host 版本；每台機器的狀態、版本、改名、移除（移除後那台的終端機照常執行）；Add a machine |
-| Alerts | 提示音開關，兩種提示音的試聽 |
+| Alerts | 提示音開關、通知開關（Show notes），兩種提示音的試聽 |
 | Mods | 每個 mod 一個開關與說明；打開前先說明權限，按「Turn on」才啟用；錯誤顯示在該 mod 下面；重新載入、開啟 mods 資料夾 |
 | Updates | AgentDesk 的版本、狀態、What's new、檢查與重新啟動；agent-host 的版本與「Update agent-host」 |
 | Privacy | 使用統計開關；「What we send」逐字顯示會送出的內容 |
@@ -715,7 +716,7 @@ macOS 上 ImGui 互換 Cmd 與 Ctrl：`keys.json` 的 `cmd` 是 ImGui 的 Ctrl�
 | 快捷鍵說明（`app.help`） | 640×520，依 spaces、tabs、panes、agents、terminal、window 分組列出所有按鍵，可篩選 |
 | 啟動器（`agent.new`） | 資料夾、名稱（選填）、機器（有遠端機器時）；每個 profile 一列，按 1～9 直接啟動；New git worktree…；說明「在 agent-host 裡執行，關掉視窗也會繼續」 |
 | 改名 | 寬 380，用於分頁、space、面板與 mod.clone；清空就回到自動名稱 |
-| What's new | 更新後第一次啟動顯示一次（`seen_version`），內容是固定的條列 |
+| What's new | 更新後第一次啟動顯示一次（`seen_version`），內容是固定的條列（不分平台） |
 | Send feedback | 680×650；只有 Copy 與 Save to file（`feedback/feedback-<時間>.md`），草稿附上版本、作業系統與版面 |
 | 確認 | 關閉 space、移除 worktree |
 | 結束並停止全部（`app.exit_all`） | 列出執行中的 session，確認後請 host 停止全部並結束 |
@@ -887,7 +888,7 @@ OQ-01～OQ-10 已決定：OQ-01 名稱 AgentDesk、OQ-08 MIT License（ADR-10）
 
 ### 12.4 已知落差與後續工作
 
-**程式與需求不一致**（PRD 第 7 節）：macOS 畫面上殘留的 Windows 字樣與 `agentctl --skill` 的 `%LOCALAPPDATA%`；使用統計的 `os`、`arch` 固定寫 Windows；`toasts` 設定沒有作用；第一次關閉的說明與歡迎頁指向不存在的按鈕；What's new 的內容是 Windows 的。
+**程式與需求不一致**（PRD 第 7 節）：目前沒有。
 
 **技術債與後續工作**：
 

@@ -302,7 +302,8 @@ void run_mods(App::State& s) {
 
 namespace {
 // An agent needs the person or finished. The sound plays either way (when on); a tab put away
-// comes back; the toast ("<space> / <tab>") only when the person was not looking at it.
+// comes back; the toast ("<space> / <tab>") only when the person was not looking at it and notes
+// are on.
 void alert(App::State& s, const std::string& id, const ui::SessionView& v, bool looking) {
     const bool blocked = v.agent_state == "Blocked";
     const std::string title = s.pane_title(id);
@@ -310,7 +311,7 @@ void alert(App::State& s, const std::string& id, const ui::SessionView& v, bool 
         play_alert(s, blocked);
     if (s.ws.unsettle_session(id))
         s.doc_changed();
-    if (looking)
+    if (looking || !s.settings.toasts)
         return;
     std::string where;
     const auto loc = s.ws.find(id);
