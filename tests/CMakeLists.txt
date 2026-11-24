@@ -5,50 +5,76 @@ include(GoogleTest)
 
 set(AGENTDESK_FIXTURE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
+# Unit layer: pure logic, no I/O beyond fixture files, no child processes. Expectations that differ
+# per system (key tables, install layout, link targets) are in unit/win/ and unit/posix/.
+set(_unit_sources
+    unit/toolchain_smoke_test.cpp
+    unit/program_status_test.cpp
+    unit/cwd_uri_test.cpp
+    unit/vt_engine_test.cpp
+    unit/vt_handover_test.cpp
+    unit/input_mapping_test.cpp
+    unit/protocol_test.cpp
+    unit/remote_screen_test.cpp
+    unit/workspace_test.cpp
+    unit/chrome_logic_test.cpp
+    unit/mods_test.cpp
+    unit/updates_test.cpp
+    unit/telemetry_test.cpp
+    unit/programs_test.cpp
+    unit/layout_test.cpp
+    unit/sprites_test.cpp
+    unit/safe_read_test.cpp
+    unit/window_place_test.cpp)
+if(WIN32)
+    list(APPEND _unit_sources
+        unit/command_line_test.cpp
+        unit/win/keymap_win_test.cpp
+        unit/win/links_win_test.cpp
+        unit/win/updates_win_test.cpp)
+else()
+    list(APPEND _unit_sources
+        unit/posix/keymap_macos_test.cpp
+        unit/posix/links_posix_test.cpp
+        unit/posix/updates_posix_test.cpp)
+endif()
+agentdesk_executable(unit_tests ${_unit_sources})
+# agent-ui's header-only helpers (apps/desktop/safe_read.hpp).
+target_include_directories(unit_tests PRIVATE ${PROJECT_SOURCE_DIR}/apps/desktop)
+target_link_libraries(unit_tests PRIVATE agentdesk::ui agentdesk::protocol agentdesk::terminal agentdesk::vterm
+    nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock)
+if(WIN32)
+    target_link_libraries(unit_tests PRIVATE agentdesk::platform_win shell32)
+endif()
+# A mod library for the mod tests (tests/fixtures/mods/test_mod.cpp): test_mods/mod.dll, mod.dylib.
+add_library(test_mod SHARED fixtures/mods/test_mod.cpp)
+agentdesk_target_defaults(test_mod)
+target_link_libraries(test_mod PRIVATE agentdesk::modapi)
+set(_test_mods "${CMAKE_CURRENT_BINARY_DIR}/test_mods")
+set_target_properties(test_mod PROPERTIES OUTPUT_NAME mod PREFIX ""
+    LIBRARY_OUTPUT_DIRECTORY "${_test_mods}"
+    RUNTIME_OUTPUT_DIRECTORY "${_test_mods}" RUNTIME_OUTPUT_DIRECTORY_DEBUG "${_test_mods}"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${_test_mods}" RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${_test_mods}")
 if(APPLE)
-    # macOS port in progress (ADR-30): the unit tests of the libraries ported so far, and the
-    # POSIX integration tests of the platform layer (real child processes in real ptys).
-    agentdesk_executable(unit_tests
-        unit/toolchain_smoke_test.cpp
-        unit/program_status_test.cpp
-        unit/cwd_uri_test.cpp
-        unit/vt_engine_test.cpp
-        unit/vt_handover_test.cpp
-        unit/protocol_test.cpp
-        unit/input_mapping_test.cpp
-        unit/remote_screen_test.cpp
-        unit/workspace_test.cpp
-        unit/chrome_logic_test.cpp
-        unit/mods_test.cpp
-        unit/updates_test.cpp
-        unit/telemetry_test.cpp
-        unit/programs_test.cpp
-        unit/layout_test.cpp
-        unit/sprites_test.cpp
-        unit/safe_read_test.cpp
-        unit/window_place_test.cpp)
-    target_include_directories(unit_tests PRIVATE ${PROJECT_SOURCE_DIR}/apps/desktop)
-    target_link_libraries(unit_tests PRIVATE agentdesk::ui agentdesk::protocol agentdesk::terminal agentdesk::vterm
-        nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock)
-    add_library(test_mod SHARED fixtures/mods/test_mod.cpp)
-    agentdesk_target_defaults(test_mod)
-    target_link_libraries(test_mod PRIVATE agentdesk::modapi)
-    set_target_properties(test_mod PROPERTIES OUTPUT_NAME mod PREFIX "" SUFFIX ".dylib"
-        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test_mods")
-    add_dependencies(unit_tests test_mod)
-    target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}"
-        AGENTDESK_PROGRAMS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/programs"
-        AGENTDESK_PRESET_LAYOUTS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/layouts"
-        AGENTDESK_TEST_MOD=L"$<TARGET_FILE:test_mod>")
-    gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)
+    set_target_properties(test_mod PROPERTIES SUFFIX ".dylib")
+endif()
+add_dependencies(unit_tests test_mod)
+# The program table and layout files the tests read straight from the source tree.
+target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}"
+    AGENTDESK_PROGRAMS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/programs"
+    AGENTDESK_PRESET_LAYOUTS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/layouts"
+    AGENTDESK_TEST_MOD=L"$<TARGET_FILE:test_mod>")
+gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)
 
+if(NOT WIN32)
+    # macOS (ADR-30): the POSIX integration tests of the platform layer (real child processes in
+    # real ptys), and Session shared with Windows, with vt_probe as the agent.
     agentdesk_executable(posix_integration_tests
         integration/posix/pty_test.cpp
         integration/posix/process_test.cpp
         integration/posix/ipc_test.cpp
         integration/posix/system_test.cpp
         integration/posix/osc7501_test.cpp
-        # Shared with Windows: Session through the platform layer, with vt_probe as the agent.
         integration/windows/session_test.cpp)
     target_link_libraries(posix_integration_tests PRIVATE agentdesk::platform agentdesk::host GTest::gtest_main)
     add_dependencies(posix_integration_tests vt_probe)
@@ -68,48 +94,6 @@ if(APPLE)
     endif()
     return()
 endif()
-
-# Unit layer: pure logic, no I/O beyond fixture files, no child processes.
-agentdesk_executable(unit_tests
-    unit/toolchain_smoke_test.cpp
-    unit/program_status_test.cpp
-    unit/cwd_uri_test.cpp
-    unit/vt_engine_test.cpp
-    unit/vt_handover_test.cpp
-    unit/command_line_test.cpp
-    unit/input_mapping_test.cpp
-    unit/protocol_test.cpp
-    unit/remote_screen_test.cpp
-    unit/workspace_test.cpp
-    unit/chrome_logic_test.cpp
-    unit/mods_test.cpp
-    unit/updates_test.cpp
-    unit/telemetry_test.cpp
-    unit/programs_test.cpp
-    unit/layout_test.cpp
-    unit/sprites_test.cpp
-    unit/safe_read_test.cpp
-    unit/window_place_test.cpp)
-# agent-ui's header-only helpers (apps/desktop/safe_read.hpp).
-target_include_directories(unit_tests PRIVATE ${PROJECT_SOURCE_DIR}/apps/desktop)
-target_link_libraries(unit_tests PRIVATE
-    agentdesk::ui agentdesk::protocol agentdesk::terminal agentdesk::platform_win agentdesk::vterm
-    nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock shell32)
-# A mod DLL for the mod tests (tests/fixtures/mods/test_mod.cpp), built as test_mods/mod.dll.
-add_library(test_mod SHARED fixtures/mods/test_mod.cpp)
-agentdesk_target_defaults(test_mod)
-target_link_libraries(test_mod PRIVATE agentdesk::modapi)
-set(_test_mods "${CMAKE_CURRENT_BINARY_DIR}/test_mods")
-set_target_properties(test_mod PROPERTIES OUTPUT_NAME mod RUNTIME_OUTPUT_DIRECTORY "${_test_mods}"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${_test_mods}" RUNTIME_OUTPUT_DIRECTORY_RELEASE "${_test_mods}"
-    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${_test_mods}")
-add_dependencies(unit_tests test_mod)
-# The program table and layout files the tests read straight from the source tree.
-target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}"
-    AGENTDESK_PROGRAMS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/programs"
-    AGENTDESK_PRESET_LAYOUTS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/layouts"
-    AGENTDESK_TEST_MOD=L"$<TARGET_FILE:test_mod>")
-gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)
 
 # Windows integration layer: real child processes in ConPTY + job objects.
 agentdesk_executable(win_integration_tests

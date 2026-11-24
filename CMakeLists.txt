@@ -11,9 +11,8 @@ project(AgentDesk
     DESCRIPTION "Native workbench for AI coding agent CLIs"
     LANGUAGES C CXX)
 
-# Windows 11 x64, and macOS 13+ on Apple Silicon (design doc ADR-30). The macOS port is built up
-# in steps (docs/design/platform-abstraction.md 7); until it is complete only the parts already
-# ported are built there.
+# Windows 11 x64, and macOS 13+ on Apple Silicon (design doc ADR-30). One tree for both: shared
+# sources, and each system's own files picked in the CMakeLists of each folder.
 if(NOT WIN32 AND NOT APPLE)
     message(FATAL_ERROR "AgentDesk targets Windows 11 x64 and macOS (Apple Silicon)")
 endif()
@@ -34,28 +33,16 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 if(APPLE)
     enable_language(OBJCXX)
-    add_subdirectory(third_party/libvterm)
-    add_subdirectory(libs)
-    add_subdirectory(tools)
-    if(AGENTDESK_BUILD_APPS)
-        add_subdirectory(apps)
-        add_subdirectory(mods)
-    endif()
-    if(AGENTDESK_BUILD_TESTS)
-        enable_testing()
-        add_subdirectory(tests)
-    endif()
-    return()
+else()
+    include(AgentDeskConPty)
+    include(AgentDeskClFilter)
 endif()
-
-include(AgentDeskConPty)
-include(AgentDeskClFilter)
 
 add_subdirectory(third_party/libvterm)
 add_subdirectory(libs)
 add_subdirectory(tools)
 
-# The example mods are built next to agent-ui.exe, so they come with the apps.
+# The example mods are built next to agent-ui, so they come with the apps.
 if(AGENTDESK_BUILD_APPS)
     add_subdirectory(apps)
     add_subdirectory(mods)

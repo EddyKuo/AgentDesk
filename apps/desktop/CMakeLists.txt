@@ -69,10 +69,12 @@ add_custom_command(TARGET agent-ui POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E rm -f "$<TARGET_FILE_DIR:agent-ui>/fonts/README.agentdesk.md"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/programs" "$<TARGET_FILE_DIR:agent-ui>/programs"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/themes" "$<TARGET_FILE_DIR:agent-ui>/themes")
-# Last: a running agent-host holds its exe and conpty.dll open on Windows, and a failed copy stops
-# the steps after it.
-add_custom_command(TARGET agent-ui POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:agent-host>" "$<TARGET_FILE:agentctl>" "$<TARGET_FILE_DIR:agent-ui>")
+# agent-host and agentctl next to agent-ui, on every build (a POST_BUILD step would only run when
+# agent-ui itself relinks and leave stale copies). On Windows a running agent-host holds its exe
+# open; the copy then fails and says so.
+add_custom_target(agent-ui-siblings ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:agent-host>" "$<TARGET_FILE:agentctl>" "$<TARGET_FILE_DIR:agent-ui>"
+    DEPENDS agent-host agentctl agent-ui)
 if(WIN32)
     agentdesk_bundle_conpty(agent-ui)
 endif()

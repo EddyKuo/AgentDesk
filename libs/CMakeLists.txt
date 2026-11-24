@@ -1,16 +1,10 @@
-# First-party libraries. Each subdirectory defines one static library.
-if(APPLE)
-    # macOS port in progress (ADR-30): the libraries ported so far.
+# First-party libraries. Each subdirectory defines one static library; the platform layer is the
+# system's own (platform/windows, platform/posix: ADR-30).
+if(WIN32)
+    add_subdirectory(platform/windows)
+else()
     add_subdirectory(platform/posix)
-    add_subdirectory(terminal)
-    add_subdirectory(protocol)
-    add_subdirectory(ipc)
-    add_subdirectory(host)
-    add_subdirectory(modapi)
-    add_subdirectory(ui)
-    return()
 endif()
-add_subdirectory(platform/windows)
 add_subdirectory(terminal)
 add_subdirectory(protocol)
 add_subdirectory(ipc)

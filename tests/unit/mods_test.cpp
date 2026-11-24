@@ -1,22 +1,13 @@
 // ModHost tests against a test mod DLL: loading, settings, guarded calls and the panels it returns.
 #include "agentdesk/ui/mods.hpp"
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#include <chrono>
-#define GetCurrentProcessId getpid
-static unsigned long long GetTickCount64() {
-    return static_cast<unsigned long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count());
-}
-#endif
 
 #include <filesystem>
 #include <fstream>
 
 #include <gtest/gtest.h>
+
+#include "test_util.hpp"
 
 namespace fs = std::filesystem;
 using agentdesk::ui::ModHost;
@@ -27,17 +18,13 @@ using agentdesk::ui::ModWidget;
 // mod.dll; each test copies it into a fresh mods folder.
 namespace {
 
-#ifdef _WIN32
-constexpr const char* kModFile = "mod.dll";
-#else
-constexpr const char* kModFile = "mod.dylib";
-#endif
+// mod.dll or mod.dylib: the test mod's own file name.
+const fs::path kModFile = fs::path(AGENTDESK_TEST_MOD).filename();
 
 class ModsTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        dir_ = fs::temp_directory_path() / (L"agentdesk-mods-" + std::to_wstring(::GetCurrentProcessId()) +
-                                            L"-" + std::to_wstring(::GetTickCount64()));
+        dir_ = fs::temp_directory_path() / ("agentdesk-mods-" + agentdesk::test::unique_suffix());
         fs::create_directories(dir_);
     }
     void TearDown() override {

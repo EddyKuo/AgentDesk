@@ -1,15 +1,8 @@
-// agentctl.exe: command-line client of agent-host.exe (design doc 3.8).
+// agentctl: command-line client of agent-host (design doc 3.8). The entry point and what differs
+// per system are in cli_win.cpp / cli_posix.cpp.
 // Exit codes: 0 ok, 2 bad arguments, 3 host unreachable, 4 session not found or ambiguous,
 // 5 operation refused, 6 start failed, 7 timeout. With --json, stdout carries only the result.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-
-#include "agentdesk/platform/ipc_transport.hpp"
-#endif
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -31,6 +24,7 @@
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/protocol/messages.hpp"
 #include "agentdesk/ui/updates.hpp"
+#include "cli_os.hpp"
 
 namespace {
 
@@ -159,14 +153,7 @@ std::optional<int> call(Ctx& ctx, const std::string& method, Json params, Json& 
 }
 
 std::string env(const wchar_t* name) {
-#ifdef _WIN32
-    wchar_t buf[512]{};
-    const DWORD n = ::GetEnvironmentVariableW(name, buf, 512);
-    return n > 0 && n < 512 ? win::to_utf8(std::wstring(buf, n)) : std::string();
-#else
-    const char* v = std::getenv(win::to_utf8(name).c_str());
-    return v != nullptr ? std::string(v) : std::string();
-#endif
+    return agentdesk::cli::os::env(name);
 }
 
 Json labels_json(const std::vector<std::string>& list) {
@@ -484,33 +471,11 @@ int cmd_shutdown(Ctx& ctx) {
 // (Codex Stop/Interrupt accept only JSON) and a decision on PermissionRequest would bypass the
 // person's approval prompt, which AgentDesk must never do. Never starts a host; gives up fast.
 int run_hook() {
-    std::string input;
-#ifdef _WIN32
-    {
-        HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);
-        char buf[4096];
-        DWORD n = 0;
-        while (input.size() < 1024 * 1024 && in != nullptr && in != INVALID_HANDLE_VALUE &&
-               ::ReadFile(in, buf, sizeof buf, &n, nullptr) && n > 0)
-            input.append(buf, n);
-    }
-    wchar_t session[256]{};
-    wchar_t pipe[512]{};
-    if (::GetEnvironmentVariableW(L"AGENTDESK_SESSION_ID", session, 256) == 0 ||
-        ::GetEnvironmentVariableW(L"AGENTDESK_PIPE", pipe, 512) == 0)
-        return kOk;  // not inside an AgentDesk session
-#else
-    {
-        char buf[4096];
-        ssize_t n = 0;
-        while (input.size() < 1024 * 1024 && (n = ::read(0, buf, sizeof buf)) > 0)
-            input.append(buf, static_cast<std::size_t>(n));
-    }
+    const std::string input = agentdesk::cli::os::read_stdin(1024 * 1024);
     const std::string session = env(L"AGENTDESK_SESSION_ID");
     const std::wstring pipe = win::to_wide(env(L"AGENTDESK_PIPE"));
     if (session.empty() || pipe.empty())
         return kOk;  // not inside an AgentDesk session
-#endif
     const auto evt = Json::parse(input, nullptr, false);
     if (!evt.is_object())
         return kOk;
@@ -532,7 +497,7 @@ int run_hook() {
                                                     std::chrono::system_clock::now().time_since_epoch())
                                                     .count());
     Json params{
-        {"session", win::to_utf8(session)}, {"source", "agentdesk-hook"}, {"state", state}, {"seq", seq}};
+        {"session", session}, {"source", "agentdesk-hook"}, {"state", state}, {"seq", seq}};
     if (!kind.empty())
         params["kind"] = kind;
     try {
@@ -548,7 +513,6 @@ int run_hook() {
 // stdin/stdout <-> the local host pipe, byte for byte. Runs on a remote machine under ssh:
 // "ssh <machine> agentctl bridge" lets another PC's AgentDesk use this machine's agent-host.
 // stdout carries only protocol bytes; diagnostics go to stderr.
-#ifdef _WIN32
 int run_bridge(const std::wstring& pipe, bool may_start) {
     auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);
     if (!host.client) {
@@ -556,87 +520,12 @@ int run_bridge(const std::wstring& pipe, bool may_start) {
         return kNoHost;
     }
     host.client->close();
-    win::UniqueHandle p = ipc::open_raw_pipe(pipe, 10s);
-    if (!p) {
+    if (!agentdesk::cli::os::bridge_stdio(pipe)) {  // exits the process once the bridge ends
         diag("cannot open the agent-host pipe");
         return kNoHost;
     }
-    HANDLE in = ::GetStdHandle(STD_INPUT_HANDLE);
-    HANDLE out_h = ::GetStdHandle(STD_OUTPUT_HANDLE);
-    std::atomic<bool> done{false};
-    auto io = [&](bool write, char* buf, DWORD len, DWORD& n) {
-        OVERLAPPED ov{};
-        win::UniqueHandle ev(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
-        ov.hEvent = ev.get();
-        const BOOL ok = write ? ::WriteFile(p.get(), buf, len, nullptr, &ov)
-                              : ::ReadFile(p.get(), buf, len, nullptr, &ov);
-        if (!ok && ::GetLastError() != ERROR_IO_PENDING)
-            return false;
-        return ::GetOverlappedResult(p.get(), &ov, &n, TRUE) != FALSE;
-    };
-    std::thread up([&] {
-        char buf[16384];
-        DWORD n = 0;
-        while (!done && ::ReadFile(in, buf, sizeof buf, &n, nullptr) && n > 0) {
-            DWORD w = 0;
-            if (!io(true, buf, n, w) || w != n)
-                break;
-        }
-        done = true;
-        ::CancelIoEx(p.get(), nullptr);
-    });
-    char buf[16384];
-    DWORD n = 0;
-    while (!done && io(false, buf, sizeof buf, n) && n > 0) {
-        DWORD w = 0;
-        if (!::WriteFile(out_h, buf, n, &w, nullptr) || w != n)
-            break;
-    }
-    done = true;
-    up.detach();  // may be blocked reading stdin; the process exit ends it
-    ::ExitProcess(kOk);
+    return kOk;
 }
-#else
-int run_bridge(const std::wstring& pipe, bool may_start) {
-    auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);
-    if (!host.client) {
-        diag("cannot reach agent-host on this machine");
-        return kNoHost;
-    }
-    host.client->close();
-    std::unique_ptr<agentdesk::platform::ByteStream> p = ipc::open_raw_pipe(pipe, 10s);
-    if (!p) {
-        diag("cannot open the agent-host socket");
-        return kNoHost;
-    }
-    std::thread up([&] {
-        char buf[16384];
-        for (;;) {
-            const ssize_t n = ::read(0, buf, sizeof buf);
-            if (n <= 0 || !p->write_all(std::string_view(buf, static_cast<std::size_t>(n))))
-                break;
-        }
-        p->cancel();
-    });
-    std::array<char, 16384> buf{};
-    for (;;) {
-        const std::size_t n = p->read_some(buf);
-        if (n == 0)
-            break;
-        std::size_t done = 0;
-        while (done < n) {
-            const ssize_t w = ::write(1, buf.data() + done, n - done);
-            if (w <= 0)
-                break;
-            done += static_cast<std::size_t>(w);
-        }
-        if (done < n)
-            break;
-    }
-    up.detach();  // may be blocked reading stdin; the process exit ends it
-    std::_Exit(kOk);
-}
-#endif
 
 // agentctl update: agent-host to its latest release; terminals keep running (agent-host hands
 // them to the new one, design doc 7.4 OQ-09). --json: {"now": "agent-host X"} on stdout, or
@@ -747,13 +636,8 @@ const char* kUsage =
 std::wstring session_pipe(const Ctx& ctx) {
     if (const auto p = ctx.args.opt("--pipe"))
         return win::to_wide(*p);
-#ifdef _WIN32
-    if (wchar_t buf[512]{}; ::GetEnvironmentVariableW(L"AGENTDESK_PIPE", buf, 512) > 0)
-        return buf;
-#else
     if (const std::string p = env(L"AGENTDESK_PIPE"); !p.empty())
         return win::to_wide(p);
-#endif
     return ipc::default_pipe_name();
 }
 
@@ -774,19 +658,7 @@ int run_command(Ctx& ctx) {
 
 }  // namespace
 
-#ifdef _WIN32
-int wmain(int argc, wchar_t** argv) {
-    ::SetConsoleOutputCP(CP_UTF8);
-#else
-int main(int argc, char** argv_utf8) {
-    std::vector<std::wstring> wide;
-    for (int i = 0; i < argc; ++i)
-        wide.push_back(win::to_wide(argv_utf8[i]));
-    std::vector<wchar_t*> wide_ptrs;
-    for (auto& w : wide)
-        wide_ptrs.push_back(w.data());
-    wchar_t** argv = wide_ptrs.data();
-#endif
+int agentdesk::cli::agentctl_main(int argc, wchar_t** argv) {
     Ctx ctx;
     try {
         ctx.args = parse_args(argc, argv);

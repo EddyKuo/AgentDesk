@@ -1,10 +1,9 @@
-if(APPLE)
-    # macOS (ADR-30): the fake agent the integration tests run in a pty.
-    agentdesk_executable(vt_probe vt_probe/vt_probe.cpp)
-    return()
+# Developer and test tools (not shipped). vt_probe, the fake agent, runs on both systems.
+agentdesk_executable(vt_probe vt_probe/vt_probe.cpp
+    $<IF:$<BOOL:${WIN32}>,vt_probe/vt_probe_win.cpp,vt_probe/vt_probe_posix.cpp>)
+if(NOT WIN32)
+    return()  # the other tools drive ConPTY and the Win32 UI (macOS: ADR-30)
 endif()
-# Developer and test tools (not shipped).
-agentdesk_executable(vt_probe vt_probe/vt_probe.cpp)
 
 # Headless host for M0 experiments: program in ConPTY + VtEngine, JSON report.
 agentdesk_executable(pty_run pty_run/pty_run.cpp)
