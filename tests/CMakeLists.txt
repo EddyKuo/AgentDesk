@@ -5,6 +5,32 @@ include(GoogleTest)
 
 set(AGENTDESK_FIXTURE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
+if(APPLE)
+    # macOS port in progress (ADR-30): the unit tests of the libraries ported so far, and the
+    # POSIX integration tests of the platform layer (real child processes in real ptys).
+    agentdesk_executable(unit_tests
+        unit/toolchain_smoke_test.cpp
+        unit/program_status_test.cpp
+        unit/cwd_uri_test.cpp
+        unit/vt_engine_test.cpp
+        unit/vt_handover_test.cpp
+        unit/protocol_test.cpp)
+    target_link_libraries(unit_tests PRIVATE agentdesk::protocol agentdesk::terminal agentdesk::vterm
+        nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock)
+    target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}")
+    gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)
+
+    agentdesk_executable(posix_integration_tests
+        integration/posix/pty_test.cpp
+        integration/posix/process_test.cpp
+        integration/posix/ipc_test.cpp
+        integration/posix/system_test.cpp)
+    target_link_libraries(posix_integration_tests PRIVATE agentdesk::platform GTest::gtest_main)
+    gtest_discover_tests(posix_integration_tests DISCOVERY_MODE PRE_TEST
+        PROPERTIES LABELS "posix_integration" TIMEOUT 120)
+    return()
+endif()
+
 # Unit layer: pure logic, no I/O beyond fixture files, no child processes.
 agentdesk_executable(unit_tests
     unit/toolchain_smoke_test.cpp

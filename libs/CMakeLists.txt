@@ -1,4 +1,11 @@
 # First-party libraries. Each subdirectory defines one static library.
+if(APPLE)
+    # macOS port in progress (ADR-30): the libraries ported so far.
+    add_subdirectory(platform/posix)
+    add_subdirectory(terminal)
+    add_subdirectory(protocol)
+    return()
+endif()
 add_subdirectory(platform/windows)
 add_subdirectory(terminal)
 add_subdirectory(protocol)

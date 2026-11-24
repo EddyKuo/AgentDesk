@@ -8,6 +8,9 @@ function(agentdesk_target_defaults target)
             /W4 /permissive- /WX /utf-8 /EHsc /Zc:__cplusplus /Zc:preprocessor)
         target_compile_definitions(${target} PRIVATE
             UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
+    else()
+        # The clang counterpart of /W4 /WX (ADR_001 thresholds).
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
 endfunction()
 
