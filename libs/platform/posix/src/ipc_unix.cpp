@@ -152,6 +152,16 @@ std::string default_endpoint() {
     return (runtime_dir() / "host.sock").string();
 }
 
+std::string endpoint_named(const std::string& name) {
+    if (name.find('/') != std::string::npos)
+        return name;
+    return (runtime_dir() / (name + ".sock")).string();
+}
+
+bool endpoint_in_use(const std::system_error& e) {
+    return e.code().value() == EADDRINUSE;
+}
+
 struct StreamListener::Impl {
     std::string path;
     UniqueFd fd;
@@ -299,7 +309,7 @@ InstanceLock::InstanceLock(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) 
 
 InstanceLock::~InstanceLock() = default;  // closing the fd releases the lock
 
-std::unique_ptr<InstanceLock> InstanceLock::try_acquire(const std::string& name) {
+std::unique_ptr<InstanceLock> InstanceLock::try_acquire(const std::string& name, bool /*taking_over*/) {
     const auto path = runtime_dir() / (name + ".lock");
     UniqueFd fd(::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600));
     if (!fd.valid())

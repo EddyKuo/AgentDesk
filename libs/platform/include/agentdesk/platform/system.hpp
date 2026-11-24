@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string_view>
@@ -18,6 +19,8 @@ namespace agentdesk::platform {
 // (macOS: ~/Library/Application Support/AgentDesk). Created when missing.
 std::filesystem::path data_dir();
 std::filesystem::path executable_path();  // the running executable, absolute
+// The file of a program of ours: "agent-host" is agent-host.exe on Windows.
+std::filesystem::path program_file(std::string_view name);
 std::filesystem::path home_dir();
 // The per-user folder for endpoints and locks (macOS: <per-user temp dir>/AgentDesk, mode 0700).
 // Created when missing.
@@ -27,6 +30,7 @@ std::filesystem::path runtime_dir();
 void replace_file_atomically(const std::filesystem::path& temp, const std::filesystem::path& target);
 
 std::string computer_name();  // UTF-8
+std::uint32_t current_pid();
 std::string new_uuid();       // lower case with dashes
 void random_bytes(std::span<std::byte> out);
 // Lower-case hex SHA-256 of a file's contents; throws std::system_error when unreadable.

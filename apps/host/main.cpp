@@ -22,6 +22,7 @@
 #include "agentdesk/host/store.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
+#include "agentdesk/platform/ipc_transport.hpp"
 #include "agentdesk/platform/pty.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/platform/win/unique_handle.hpp"
@@ -144,7 +145,7 @@ void remove_old_exe_after(win::UniqueHandle old_host) {
     std::thread([old = std::move(old_host)] {
         ::WaitForSingleObject(old.get(), 60000);
         std::error_code ec;
-        std::filesystem::remove(ipc::sibling_executable(L"agent-host.exe.old"), ec);
+        std::filesystem::remove(ipc::sibling_executable("agent-host").concat(".old"), ec);
     }).detach();
 }
 
@@ -163,18 +164,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     // One host per user and logon session (design doc 2.2 step 2). A second one just exits;
     // its launcher then connects to the existing host. A host taking over from the running one
     // shares the name until that one exits.
-    const std::wstring mutex_name =
-        custom_pipe ? L"Local\\AgentDesk-host-test-" + std::to_wstring(std::hash<std::wstring>{}(win::to_wide(pipe_name)))
-                    : win::to_wide(ipc::default_mutex_name());
-    win::UniqueHandle instance(::CreateMutexW(nullptr, FALSE, mutex_name.c_str()));
-    if (!instance || (::GetLastError() == ERROR_ALREADY_EXISTS && !taking_over))
+    const std::string lock_name =
+        custom_pipe ? "host-test-" + std::to_string(std::hash<std::string>{}(pipe_name)) : "host";
+    const auto instance = agentdesk::platform::InstanceLock::try_acquire(lock_name, taking_over);
+    if (!instance)
         return 0;
 
     win::UniqueHandle shutdown(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
     host::HostConfig cfg;
     const bool bundled_conpty = agentdesk::platform::pty_capabilities().answers_osc7501_query;
     cfg.data_dir = data_dir;
-    cfg.ctl_path = ipc::sibling_executable(L"agentctl.exe");
+    cfg.ctl_path = ipc::sibling_executable("agentctl");
     cfg.pipe_name = pipe_name;
     cfg.host_instance_id = host::new_uuid();
     cfg.host_version = AGENTDESK_VERSION_STRING;

@@ -7,6 +7,7 @@
 
 #include "agentdesk/platform/pty.hpp"
 #include "agentdesk/platform/pty_handles.hpp"
+#include "agentdesk/platform/system.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/platform/win/pty_conpty.hpp"
 #include "agentdesk/platform/win/pty_process.hpp"
@@ -26,27 +27,13 @@ ConPtyChoice& conpty_choice() {
     return c;
 }
 
-std::filesystem::path executable_dir() {
-    std::wstring path(MAX_PATH, L'\0');
-    for (;;) {
-        const DWORD n = ::GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
-        if (n == 0)
-            throw_last_error("GetModuleFileNameW");
-        if (n < path.size()) {
-            path.resize(n);
-            return std::filesystem::path(path).parent_path();
-        }
-        path.resize(path.size() * 2);
-    }
-}
-
 }  // namespace
 
 ConPtyApi pty_conpty() {
     auto& c = conpty_choice();
     std::lock_guard lock(c.mutex);
     if (!c.api)
-        c.api = load_conpty(executable_dir());
+        c.api = load_conpty(executable_path().parent_path());
     return *c.api;
 }
 

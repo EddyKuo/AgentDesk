@@ -538,7 +538,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     bool dx11_backend = ImGui_ImplDX11_Init(g_gfx.device, g_gfx.context);
 
     ui::HostClientOptions hopts;
-    hopts.host_exe = ipc::sibling_executable(L"agent-host.exe");
+    hopts.host_exe = ipc::sibling_executable("agent-host");
     hopts.pipe_name = dev.pipe.empty() ? ipc::default_pipe_name() : dev.pipe;
     ui::updates::set_pipe(dev.pipe);  // agent-host's update goes to the host this window uses
     hopts.wake = [] { ::SetEvent(g_wake); };

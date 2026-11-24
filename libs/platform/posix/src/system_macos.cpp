@@ -99,6 +99,10 @@ std::filesystem::path executable_path() {
     return ec ? std::filesystem::path(buf) : p;
 }
 
+std::filesystem::path program_file(std::string_view name) {
+    return std::filesystem::path(name);
+}
+
 void replace_file_atomically(const std::filesystem::path& temp, const std::filesystem::path& target) {
     if (::rename(temp.c_str(), target.c_str()) != 0)
         posix::throw_errno("rename");
@@ -112,6 +116,10 @@ std::string computer_name() {
     if (name.ends_with(".local"))
         name.resize(name.size() - 6);
     return name;
+}
+
+std::uint32_t current_pid() {
+    return static_cast<std::uint32_t>(::getpid());
 }
 
 std::string new_uuid() {

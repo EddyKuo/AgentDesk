@@ -27,6 +27,7 @@
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
+#include "agentdesk/platform/win/user.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/platform/win/job.hpp"
@@ -719,7 +720,7 @@ TEST_F(HostFixture, PipeDaclAllowsOnlySystemAndCurrentUser) {
     }
     ::LocalFree(sd);
     std::sort(sids.begin(), sids.end());
-    std::vector<std::wstring> expected = {L"S-1-5-18", w(ipc::current_user_sid())};
+    std::vector<std::wstring> expected = {L"S-1-5-18", w(agentdesk::platform::win::user_sid())};
     std::sort(expected.begin(), expected.end());
     EXPECT_EQ(sids, expected);  // no Everyone (S-1-1-0), no anonymous, no other users
 }

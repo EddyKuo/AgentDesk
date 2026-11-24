@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
     Shutdown shutdown;
     host::HostConfig cfg;
     cfg.data_dir = data_dir;
-    cfg.ctl_path = ipc::sibling_executable(L"agentctl");
+    cfg.ctl_path = ipc::sibling_executable("agentctl");
     cfg.pipe_name = pipe_name;
     cfg.host_instance_id = host::new_uuid();
     cfg.host_version = AGENTDESK_VERSION_STRING;
@@ -194,7 +194,7 @@ int main(int argc, char** argv) {
                                " instance=" + cfg.host_instance_id + " pty=posix");
         if (taking_over) {
             std::error_code ec;
-            std::filesystem::remove(ipc::sibling_executable(L"agent-host.old"), ec);
+            std::filesystem::remove(ipc::sibling_executable("agent-host").concat(".old"), ec);
         }
         shutdown.wait();
         // Let the shutdown (or host.update) response reach the client before tearing down the socket.

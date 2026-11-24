@@ -266,7 +266,7 @@ void start_remotes(App::State& s) {
             // host under another data folder); anything else is an ssh target.
             if (cfg.target.rfind("pipe:", 0) == 0) {
                 return ipc::connect_over_command(
-                    {ipc::sibling_executable(L"agentctl.exe").wstring(), L"--pipe",
+                    {ipc::sibling_executable("agentctl").wstring(), L"--pipe",
                      platform::to_wide(cfg.target.substr(5)), L"--no-start", L"bridge"},
                     std::chrono::seconds(10));
             }

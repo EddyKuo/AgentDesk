@@ -7,6 +7,8 @@ agentdesk_library(agentdesk_platform_win
     src/pty_process.cpp
     src/pty_win.cpp
     src/process_win.cpp
+    src/ipc_win.cpp
+    src/system_win.cpp
     src/detached.cpp
     src/process_tree.cpp)
 add_library(agentdesk::platform_win ALIAS agentdesk_platform_win)

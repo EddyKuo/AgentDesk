@@ -1,9 +1,8 @@
 #pragma once
 
-// Local IPC on macOS (ADR-30): the interface of the Windows pipe.hpp (libs/ipc/include_win) over Unix domain sockets
-// (platform::StreamListener / ByteStream). Endpoint names stay std::string so shared callers
-// build unchanged; on macOS a name is the socket's path. Same-user only, checked on both ends; a
-// control channel, not an isolation boundary against malware running as the same user.
+// Local IPC (design doc 3.7) over platform::ByteStream: a Named Pipe on Windows, a Unix socket on
+// macOS (ADR-30). One endpoint per user, the peer's user checked on both ends. A control channel, not
+// an isolation boundary against malware running as the same user. Endpoint names are UTF-8.
 
 #include <atomic>
 #include <chrono>
@@ -26,12 +25,8 @@
 
 namespace agentdesk::ipc {
 
-std::string current_user_sid();     // the uid as text (there are no SIDs)
-std::uint32_t current_session_id();  // the audit session id
-// <per-user temp dir>/AgentDesk/host.sock
+// agent-host's endpoint for this user (platform::default_endpoint).
 std::string default_pipe_name();
-// Name of agent-host's instance lock (platform::InstanceLock).
-std::string default_mutex_name();
 
 inline constexpr std::size_t kClientSendBudget = 4u * 1024u * 1024u;  // design doc 3.3
 inline constexpr std::size_t kClientHardLimit = 16u * 1024u * 1024u;  // beyond: disconnect
@@ -53,8 +48,8 @@ public:
     Connection(const Connection&) = delete;
     Connection& operator=(const Connection&) = delete;
 
-    // Same budgets as on Windows: droppable messages are refused past 4 MiB queued, anything past
-    // 16 MiB disconnects the client.
+    // Reliable messages (responses, state events) are always queued until the hard limit, then the
+    // client is dropped; droppable ones (screen updates) are refused past the send budget.
     bool send(const std::string& payload, bool droppable = false);
     void close();
 
@@ -80,7 +75,7 @@ private:
 
 class PipeServer {
 public:
-    // Throws std::system_error(EADDRINUSE) when a live server owns the name.
+    // Throws std::system_error when a live server owns the name (platform::endpoint_in_use).
     PipeServer(std::string name, ServerHandlers handlers);
     ~PipeServer();
     PipeServer(const PipeServer&) = delete;

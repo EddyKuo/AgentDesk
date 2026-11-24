@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "agentdesk/ipc/pipe.hpp"
@@ -40,7 +41,7 @@ HostConnection connect_over_command(const std::vector<std::wstring>& argv, std::
 // remote agentctl (on PATH by default).
 std::vector<std::wstring> ssh_bridge_argv(const std::string& target, const std::string& remote_ctl);
 
-// agent-host.exe next to the current executable.
-std::filesystem::path sibling_executable(const wchar_t* file_name);
+// A program of ours ("agent-host") next to the current executable.
+std::filesystem::path sibling_executable(std::string_view name);
 
 }  // namespace agentdesk::ipc

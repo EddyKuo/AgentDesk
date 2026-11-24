@@ -682,7 +682,7 @@ int main(int argc, char** argv) {
                                               }];
 
         ui::HostClientOptions hopts;
-        hopts.host_exe = ipc::sibling_executable(L"agent-host");
+        hopts.host_exe = ipc::sibling_executable("agent-host");
         hopts.pipe_name = g_shell.dev.pipe.empty() ? ipc::default_pipe_name() : g_shell.dev.pipe;
         ui::updates::set_pipe(g_shell.dev.pipe);
         hopts.wake = [] { schedule_pump(2); };

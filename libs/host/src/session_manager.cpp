@@ -907,7 +907,7 @@ Response SessionManager::do_hello(const Request& req) {
                  // Self-update (design doc 7.4 OQ-09): the hosts whose sessions this one took
                  // over (a client keeps those sessions), and where it runs from (agentctl update).
                  {"succeeds", config_.succeeds},
-                 {"host_exe", platform::to_utf8(ipc::sibling_executable(L"agent-host.exe").native())},
+                 {"host_exe", platform::to_utf8(ipc::sibling_executable("agent-host").native())},
                  {"capabilities",
                   {{"osc7501", platform::pty_capabilities().answers_osc7501_query},
                    {"bundled_conpty", platform::pty_capabilities().answers_osc7501_query}}}});

@@ -559,7 +559,7 @@ int run_hook() {
 // "ssh <machine> agentctl bridge" lets another PC's AgentDesk use this machine's agent-host.
 // stdout carries only protocol bytes; diagnostics go to stderr.
 int run_bridge(const std::string& pipe, bool may_start) {
-    auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);
+    auto host = ipc::connect_or_start_host(ipc::sibling_executable("agent-host"), pipe, 10s, may_start);
     if (!host.client) {
         diag("cannot reach agent-host on this machine");
         return kNoHost;
@@ -624,7 +624,7 @@ int cmd_update(Ctx& ctx, const std::string& pipe) {
         hello = client->call("hello", ctl_hello(), ctx.timeout);
     if (!hello || hello->error || !hello->result) {
         // Nothing runs: the update is in place for agent-host's next start.
-        req.host_exe = ipc::sibling_executable(L"agent-host.exe");
+        req.host_exe = ipc::sibling_executable("agent-host");
         req.have = updates::host_version_of(req.host_exe).value_or("0.0.0");
         const auto staged = updates::stage_core(req);
         if (!staged.ok)
@@ -738,9 +738,9 @@ int agentdesk::cli::agentctl_main(int argc, wchar_t** argv) {
         return cmd_update(ctx, pipe);
     const bool may_start = !ctx.args.has("--no-start") && ctx.args.command != "report-state" &&
                            ctx.args.command != "shutdown" && ctx.args.command != "report";
-    auto host = ipc::connect_or_start_host(ipc::sibling_executable(L"agent-host.exe"), pipe, 10s, may_start);
+    auto host = ipc::connect_or_start_host(ipc::sibling_executable("agent-host"), pipe, 10s, may_start);
     if (!host.client) {
-        diag("cannot reach agent-host (pipe " + pipe + ")");
+        diag(host.error.empty() ? "cannot reach agent-host (pipe " + pipe + ")" : host.error);
         return kNoHost;
     }
     if (host.host_dies_with_launcher) {

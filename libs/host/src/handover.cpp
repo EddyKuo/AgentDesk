@@ -33,6 +33,7 @@
 #include "agentdesk/host/session_manager.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/platform/win/unique_handle.hpp"
 #include "agentdesk/terminal/bytes.hpp"
 
 namespace agentdesk::host {
