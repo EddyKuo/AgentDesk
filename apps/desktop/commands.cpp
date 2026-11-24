@@ -47,7 +47,8 @@ bool known_command(std::string_view name) {
 }
 
 // Profile used for new spaces/tabs/splits: the configured one if it exists, else the first
-// shell found (PowerShell 7, Windows PowerShell, Command Prompt), else empty.
+// shell found (PowerShell 7, Windows PowerShell, Command Prompt; on macOS the login shell), else
+// empty.
 std::string pick_shell(const std::string& wanted,
                        const std::vector<std::pair<std::string, std::string>>& profiles) {
     const auto has = [&](const std::string& id) {
@@ -57,6 +58,10 @@ std::string pick_shell(const std::string& wanted,
         return wanted;
     for (const char* id : {"pwsh", "powershell", "cmd"})
         if (has(id))
+            return id;
+    // Elsewhere (macOS) the host lists the login shell first among the shells it found.
+    for (const auto& [id, name] : profiles)
+        if (is_shell_profile(id))
             return id;
     return {};
 }
