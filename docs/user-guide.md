@@ -1,16 +1,27 @@
 # AgentDesk 使用說明
 
-AgentDesk 是 Windows 11 x64 的 AI coding agent 工作台：在可分割的終端機面板裡同時跑 Claude Code、Codex CLI 或任何命令列程式，關掉視窗後工作繼續跑，重開時接回原來的版面，並告訴你哪個 Agent 在等你。
+AgentDesk 是 Windows 11 x64 與 macOS（Apple Silicon，13 Ventura 以上）的 AI coding agent 工作台：在可分割的終端機面板裡同時跑 Claude Code、Codex CLI 或任何命令列程式，關掉視窗後工作繼續跑，重開時接回原來的版面，並告訴你哪個 Agent 在等你。
 
 ## 安裝
 
+先自行安裝並登入要用的 Agent CLI。AgentDesk 不處理登入，也不複製任何 token。
+
+**Windows**
+
 1. 解壓 `AgentDesk-<版本>-win-x64.zip` 到任意資料夾，例如 `%LOCALAPPDATA%\Programs\AgentDesk`。不需要系統管理員權限，也不寫登錄檔。
 2. 確認 `conpty\conpty.dll` 與 `conpty\x64\OpenConsole.exe` 跟執行檔放在一起。少了它們，Claude Code 的狀態回報會失效（見「限制」）。
-3. 先自行安裝並登入要用的 Agent CLI。AgentDesk 不處理登入，也不複製任何 token。
+
+**macOS**
+
+1. 解壓 `AgentDesk-<版本>-macos-arm64.zip`，把 `AgentDesk.app` 拖進「應用程式」。
+2. 這個 app 用的是 ad-hoc 簽章，還沒有 Apple 的 Developer ID，第一次開啟要按住 Control 點 app 選「打開」，或到「系統設定 > 隱私權與安全性」按「仍要打開」。
+3. 從 Finder 或 Dock 開啟時，終端機一樣拿得到你登入 shell 的 `PATH`，用 Homebrew 或 npm 裝的 `claude`、`node`、`git` 都找得到。
+
+下文的快捷鍵以 Windows 為準，macOS 的對照見「快捷鍵」一節；路徑寫 `%LOCALAPPDATA%\AgentDesk` 的地方，在 macOS 是 `~/Library/Application Support/AgentDesk`，`%USERPROFILE%` 是 `~`。
 
 ## 畫面
 
-執行 `agent-ui.exe`。它會在背景啟動 `agent-host.exe`，所有工作都跑在 host 裡。視窗沒有系統標題列，最小化、最大化、關閉按鈕在分頁列右端；拖曳分頁列或左上的品牌列可以移動視窗，雙擊切換最大化，也能用 Windows 的貼齊功能。
+執行 `agent-ui.exe`（macOS 開 AgentDesk.app）。它會在背景啟動 agent-host，所有工作都跑在 host 裡。Windows 的視窗沒有系統標題列，最小化、最大化、關閉按鈕在分頁列右端；拖曳分頁列或左上的品牌列可以移動視窗，雙擊切換最大化，也能用 Windows 的貼齊功能。macOS 保留系統的紅綠燈按鈕，位置在左上角，拖曳上方列可以移動視窗。
 
 視窗會記住上次的位置、大小，以及是否最大化，下次開啟時回到原處；那台螢幕不在了，就以同樣大小開在滑鼠所在的螢幕中間。第一次開啟時，大小依螢幕決定：約為 1280×820 乘上 Windows 的縮放比例與 AgentDesk 的縮放（設定裡的 zoom），並保持在螢幕可用範圍的一半到九成之間。所以 Full HD 100% 和 4K 150% 開出來的視窗，看起來的比例差不多。想重新套用預設大小，關掉 AgentDesk 後刪除 `window.json`。
 
@@ -32,15 +43,15 @@ Agent 需要你時一定會播放提示音；你沒在看的 Agent 完成時也�
 
 ## 新增工作
 
-新 space、新分頁和分割都會先開一個 shell（預設依序找 PowerShell 7、Windows PowerShell、Command Prompt，可在「設定 > Look」更改），位置在目前面板 shell 所在的資料夾。用 `cd` 切到專案後再輸入 `claude` 或 `codex`；面板、space 名稱和分支都會跟著更新。
+新 space、新分頁和分割都會先開一個 shell（Windows 預設依序找 PowerShell 7、Windows PowerShell、Command Prompt；macOS 用你的登入 shell，通常是 zsh；可在「設定 > Look」更改），位置在目前面板 shell 所在的資料夾。用 `cd` 切到專案後再輸入 `claude` 或 `codex`；面板、space 名稱和分支都會跟著更新。
 
-按側欄 Spaces 旁的「+」會列出這台電腦有的 shell（PowerShell 7、Windows PowerShell、Command Prompt、WSL），選哪個就用哪個開新 space；分頁列「+」的選單也列出這些 shell，可以直接開成新分頁。快捷鍵 Ctrl+Shift+N（新 space）和 Ctrl+Shift+T（新分頁）一樣開預設的 shell。
+按側欄 Spaces 旁的「+」會列出這台電腦有的 shell（Windows 是 PowerShell 7、Windows PowerShell、Command Prompt、WSL；macOS 是登入 shell 與 `/etc/shells` 列出的 zsh、bash 等），選哪個就用哪個開新 space；分頁列「+」的選單也列出這些 shell，可以直接開成新分頁。快捷鍵 Ctrl+Shift+N（新 space）和 Ctrl+Shift+T（新分頁）一樣開預設的 shell。
 
 - 新分頁：Ctrl+Shift+T，或分頁列「+」選單的 Terminal
 - 新 space：Ctrl+Shift+N，或 Spaces 標題旁的「+」
 - 往右或往下分割：Ctrl+Shift+O、Ctrl+Shift+E，或面板標題列的按鈕
 - 直接啟動 Agent：分頁列「+」選單的「Start an agent」，可按 1～9；或命令面板的「Start a program…」
-- git worktree：「+」選單或 space 右鍵選單的 New worktree。只要輸入分支名稱，AgentDesk 會在 `%USERPROFILE%\.agentdesk\worktrees\<repo>\<分支>` 建立 checkout（可在設定中更改），開成新的 space 並開一個 shell。已存在的分支直接 checkout，新分支從目前位置建立。遠端機器的 space 也可以用，checkout 建在那台電腦上。Open worktree 列出 repo 的所有 checkout；Remove worktree 會關閉該 space 並刪除 checkout 資料夾，分支保留，有未提交的變更時會先警告。
+- git worktree：「+」選單或 space 右鍵選單的 New worktree。只要輸入分支名稱，AgentDesk 會在 `%USERPROFILE%\.agentdesk\worktrees\<repo>\<分支>`（macOS 是 `~/.agentdesk/worktrees/<repo>/<分支>`）建立 checkout（可在設定中更改），開成新的 space 並開一個 shell。已存在的分支直接 checkout，新分支從目前位置建立。遠端機器的 space 也可以用，checkout 建在那台電腦上。Open worktree 列出 repo 的所有 checkout；Remove worktree 會關閉該 space 並刪除 checkout 資料夾，分支保留，有未提交的變更時會先警告。
 
 第一次啟動會開歡迎頁，可以選大小與主題、加入遠端機器、選擇要顯示的面板。之後可從命令面板的「Welcome」再打開。
 
@@ -67,13 +78,37 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 | Ctrl+= ／Ctrl+- ／Ctrl+0 | 放大／縮小／重設整個視窗 |
 | Ctrl+, | 設定 |
 
+macOS 用另一套以 Cmd 為主的按鍵，照 macOS 的習慣：
+
+| macOS | 動作 |
+|---|---|
+| ⌘P | 前往：搜尋 space、分頁或 Agent |
+| ⇧⌘P、⌘/ | 命令面板、完整快捷鍵清單 |
+| ⌘T／⌘N | 新分頁／新 space |
+| ⌘D／⇧⌘D | 往右／往下分割 |
+| ⇧⌘Enter | 放大或還原面板 |
+| ⇧⌘W／⌘W | 關閉面板／分頁 |
+| ⌘1～9、⇧⌘[ ／⇧⌘]、⌃Tab | 切換分頁 |
+| ⌃1～9、⌥⌘[ ／⌥⌘] | 切換 space |
+| ⌥⌘方向鍵、⌥⇧⌘方向鍵 | 移到該方向的面板、與它交換位置 |
+| ⌘[ ／⌘] | 上一個／下一個 Agent |
+| ⌘F、⌘A | 在終端機裡搜尋、全選 |
+| ⌘C、⌘V、⌃V | 複製、貼上、貼圖片 |
+| ⌥←／⌥→、⌥Delete | 終端機裡逐字移動、刪掉前一個字 |
+| ⌘←／⌘→、⌘Delete | 終端機裡移到行首／行尾、刪到行首 |
+| ⌘B、⇧⌘L、⌘, | 側欄、切換版面、設定 |
+| ⌘=／⌘-／⌘0 | 放大／縮小／重設整個視窗 |
+| ⌘H、⌥⌘H、⌘M、⌘Q | 隱藏、隱藏其他 app、最小化、關閉視窗 |
+
+在 macOS 上，Cmd 只給 AgentDesk 用，不會送進程式；Control 照原樣送給程式，所以 ⌃C 一定是中斷，不會變成複製。Option 鍵預設在美式與 ABC 鍵盤配置時當成 Alt（終端機裡的 ⌥B、⌥F 會逐字移動），其他鍵盤配置則照常輸入特殊字元；可以在「設定 > Keyboard」改成一律當 Alt、一律輸入字元，或只讓左邊或右邊的 Option 當 Alt。
+
 這些按鍵由 AgentDesk 使用，不會送進終端機裡的程式。要改鍵位，在「設定 > Look」按「Edit keys.json」，例如：
 
 ```json
 { "global": { "ctrl-shift-t": "", "ctrl-alt-n": "tab.new" } }
 ```
 
-值為空字串表示取消綁定。格式如下：
+值為空字串表示取消綁定。macOS 的按鍵寫法多一個 `cmd`，例如 `"cmd-shift-t"`；`ctrl` 指的是 Control 鍵。格式如下：
 
 - 區段：`global`（整個視窗）、`terminal`（終端機有焦點時）、`layout:<版面名稱>`（顯示該版面時）。同一個鍵在多個區段都有設定時，依 terminal、layout、global 的順序取用。
 - 動作可以是命令名稱、`命令:值`、`{"command": "layout.switch", "args": {"name": "terminals"}}`、`send:<文字>`（送進終端機），或 `terminal`（這個鍵交給程式）。
@@ -83,10 +118,10 @@ Ctrl+Shift+/ 顯示完整清單（可篩選），Ctrl+Shift+P 開啟命令面板
 
 ## 終端機操作
 
-- 輸入：一般按鍵、方向鍵、F1～F12、注音等輸入法組字後的文字。Shift+Enter、Ctrl+Enter 和 Esc 會原樣送到程式（例如 Claude Code 用 Shift+Enter 換行）。
-- Ctrl+C：有選取時複製，沒有選取時送中斷。Ctrl+Shift+C 固定複製，Ctrl+V 或 Ctrl+Shift+V 貼上。
+- 輸入：一般按鍵、方向鍵、F1～F12、注音等輸入法組字後的文字。macOS 上組字中的文字會畫在終端機的游標位置，按下確認後才送進程式。Shift+Enter、Ctrl+Enter 和 Esc 會原樣送到程式（例如 Claude Code 用 Shift+Enter 換行）。
+- Ctrl+C：有選取時複製，沒有選取時送中斷。Ctrl+Shift+C 固定複製，Ctrl+V 或 Ctrl+Shift+V 貼上。macOS 用 ⌘C、⌘V；⌃C 一律送中斷。
 - 滑鼠：拖曳選取、雙擊選字、三擊選整行，放開就複製（可在設定關閉）。自動換行的長行複製出來是一整行；全選包含歷史。選取時拖到面板外，畫面會自動捲動。
-- 連結：按住 Ctrl 時，網址、檔案路徑和程式標記的連結會加上底線，Ctrl＋點一下就會開啟。程式和指令檔只會在檔案總管中標出，不會執行。
+- 連結：按住 Ctrl（macOS 是 ⌘）時，網址、檔案路徑和程式標記的連結會加上底線，按著點一下就會開啟。程式和指令檔只會在檔案總管（macOS 是 Finder）中標出，不會執行。
 - 貼上：中鍵也能貼上。在檔案總管複製檔案後按 Ctrl+V，或把檔案拖進終端機，都會貼上加了引號的路徑。剪貼簿只有圖片時，Ctrl+V 會交給程式，讓 Agent 自己讀圖。
 - 會讀滑鼠的程式（例如 vim、less、htop）：點擊、拖曳和滾輪直接交給程式；按住 Shift 可以照常選取文字。
 - 右鍵預設開選單。在右鍵選單選「Send right-clicks to pane」後，這個面板的右鍵改交給程式；Shift＋右鍵一定開選單。
@@ -128,9 +163,9 @@ agentctl report "found 3 problems: ..."
 
 按側欄左下的「Add machine」，從 `~/.ssh/config` 列出的主機中選一台，或直接輸入 `user@host`。AgentDesk 會執行 `ssh <目標> agentctl bridge`，把那台電腦的 space 和 Agent 顯示在同一個側欄，它們在那台電腦上執行，這台電腦休眠時也繼續跑。
 
-需求：遠端是 Windows 並安裝了 AgentDesk，`agentctl` 在 PATH 上（或填完整路徑），並設定好金鑰登入。AgentDesk 不會在背景跳出密碼輸入；需要密碼或要確認主機金鑰時，設定頁會顯示 ssh 的訊息，請先在自己的終端機執行一次 `ssh <目標>`。
+需求：遠端安裝了 AgentDesk，`agentctl` 在 PATH 上（或填完整路徑），並設定好金鑰登入。Windows 與 macOS 能不能互相當遠端機器，目前還沒驗證。AgentDesk 不會在背景跳出密碼輸入；需要密碼或要確認主機金鑰時，設定頁會顯示 ssh 的訊息，請先在自己的終端機執行一次 `ssh <目標>`。
 
-## WSL
+## WSL（Windows）
 
 裝了 WSL 時，每個 Linux 發行版（例如 Ubuntu）會自動加進 profile，在分頁列「+」選單的 Terminal 底下出現「Ubuntu (WSL)」。它在目前面板所在的資料夾開一個 Linux shell（`D:\src` 會是 `/mnt/d/src`），你再在裡面執行 Linux 版的 `claude` 或 `codex`。Docker Desktop 內部用的發行版不列出。想讓新分頁、新 space 預設就開 WSL，在「設定 > Look」的 Shell 選它。
 
@@ -138,7 +173,7 @@ agentctl report "found 3 problems: ..."
 
 - 資料夾追蹤只支援 bash。用 zsh、fish，或你的 `~/.bashrc` 自己設定了 `PROMPT_COMMAND` 時，資料夾會停在啟動時的位置。
 - Files／Changes 對 WSL 裡的 repo 執行 Windows 的 git，並對這次呼叫加上 `safe.directory=*`（否則 git 會因檔案擁有者是 Linux 使用者而拒絕）。WSL 的檔案走網路檔案系統，大 repo 會比較慢，面板至少每 10 秒更新一次。
-- WSL 不能當「遠端機器」：Add machine 需要對方執行 Windows 版的 AgentDesk。
+- WSL 不能當「遠端機器」：Add machine 需要對方執行 AgentDesk 的 agent-host，而 WSL 裡沒有。
 
 如果你原本就有 `profiles.json`，AgentDesk 會補上 WSL profile，只補這一次；之後你刪掉的不會再加回來。
 
@@ -159,18 +194,19 @@ Ctrl+Shift+L、命令面板或「設定 > Look」切換：
 
 ## 設定
 
-Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy。每次修改都立即生效並儲存，沒有儲存鈕。
+Ctrl+, 開啟，左側分成 Look、Keyboard（只有 macOS）、Machines、Alerts、Mods、Updates、Privacy。每次修改都立即生效並儲存，沒有儲存鈕。
 
 - **Look**：版面與主題卡片（我們的 Midnight、Ember、Moss、Paper，加上 graphite、ink、moss、paper、atom one dark；把同樣格式的主題檔放進 `%LOCALAPPDATA%\AgentDesk\themes\` 也會列出來，每個版面各自記住深色與淺色主題）；整體縮放、介面文字大小（預設 15 px，覺得太小可以調大）、終端機字型與大小、行高、字寬、捲動速度；新終端機用的 shell、放開滑鼠就複製、keys.json、worktree 資料夾。
+- **Keyboard**：macOS 的 Option 鍵要當 Alt 還是輸入字元（見「快捷鍵」）。
 - **Machines**：遠端機器清單與「Add a machine…」。
 - **Alerts**：提示音開關與試聽、右下角通知開關。
 - **Mods**：啟用或停用 mod、看錯誤、重新載入。
 - **Updates**：AgentDesk 與 agent-host 的版本、「What's new」（更新後第一次啟動會自動顯示一次）、「Check now」。AgentDesk 沒有內建的更新伺服器，要設定環境變數 `AGENTDESK_RELEASES_URL` 才會每小時檢查一次；有新版時會在右下角提示，按「Restart to update」換版，或下次結束時換。agent-host 可以單獨更新，終端機裡的程式不會中斷。
 - **Privacy**：使用統計的開關，以及「What we send」逐字顯示會送出的內容。只有設定 `AGENTDESK_TELEMETRY_URL` 時才會送出；`DO_NOT_TRACK` 或 `AGENTDESK_TELEMETRY=0` 會關閉這一次執行。
 
-左下的「Send feedback」開一個草稿視窗，草稿最後會附上 AgentDesk 與 Windows 的版本。Send feedback 的草稿不會自己送出：按「Copy」複製，或按「Save to file」存到 `%LOCALAPPDATA%\AgentDesk\feedback\`，再用你習慣的方式寄出。
+左下的「Send feedback」開一個草稿視窗，草稿最後會附上 AgentDesk 與作業系統的版本。Send feedback 的草稿不會自己送出：按「Copy」複製，或按「Save to file」存到資料夾的 `feedback`（見「資料位置」），再用你習慣的方式寄出。
 
-介面字型是隨附的 Geist，終端機預設是隨附的 JetBrains Mono Medium；中文字以微軟正黑體補上。
+介面字型是隨附的 Geist，終端機預設是隨附的 JetBrains Mono Medium；中文字在 Windows 以微軟正黑體補上，在 macOS 以蘋方補上。
 
 ## 程式圖示
 
@@ -178,13 +214,13 @@ Ctrl+, 開啟，左側分成 Look、Machines、Alerts、Mods、Updates、Privacy
 
 ## Mod
 
-Mod 是用 C++ 寫的 DLL，放在 `%LOCALAPPDATA%\AgentDesk\mods\<名稱>\mod.dll`，旁邊可以有 `mod.json`（說明文字）和 `settings.json`（mod 自己的設定）。它可以對 Agent 狀態做出反應、加命令面板項目、在側欄或 Details 加面板、在分頁和 Agent 列加文字、啟動程式。在「設定 > Mods」啟用或停用、看錯誤、重新載入。命令面板的「Duplicate mod」把一個 mod 的資料夾複製成 `<名稱>-copy`，預設不啟用。第一次啟動會放入三個範例，預設都不啟用：
+Mod 是用 C++ 寫的動態函式庫，放在 `%LOCALAPPDATA%\AgentDesk\mods\<名稱>\mod.dll`（macOS 是 `mods/<名稱>/mod.dylib`），旁邊可以有 `mod.json`（說明文字）和 `settings.json`（mod 自己的設定）。它可以對 Agent 狀態做出反應、加命令面板項目、在側欄或 Details 加面板、在分頁和 Agent 列加文字、啟動程式。在「設定 > Mods」啟用或停用、看錯誤、重新載入。命令面板的「Duplicate mod」把一個 mod 的資料夾複製成 `<名稱>-copy`，預設不啟用。第一次啟動會放入三個範例，預設都不啟用：
 
 - `tab-timer`：在分頁顯示 Agent 已工作多久。
 - `ntfy-notify`：Agent 需要你時推播到手機。在它的 `settings.json` 填入 ntfy.sh 的 topic 後啟用。
 - `agent-summary`：側欄面板，顯示需要你、工作中、閒置的數量。
 
-自己寫 mod：zip 裡的 `sdk\include` 有介面標頭檔，`sdk\examples` 是三個範例的原始碼。用 VS 2022 編譯成 DLL，檔名 `mod.dll`；`sdk` 資料夾的 `CMakeLists.txt` 可以直接編出所有範例。最小的例子：
+自己寫 mod：zip 裡的 `sdk\include` 有介面標頭檔，`sdk\examples` 是三個範例的原始碼。Windows 用 VS 2022 編譯成 `mod.dll`，macOS 用 Xcode Command Line Tools 編譯成 `mod.dylib`；同一份原始碼要在兩個平台各編一次；`sdk` 資料夾的 `CMakeLists.txt` 可以直接編出所有範例。最小的例子：
 
 ```cpp
 #include <agentdesk/mod_sdk.hpp>
@@ -207,7 +243,7 @@ AGENTDESK_MOD(Hello, "Says when an agent needs you")
 
 `host()` 提供 `run(命令)`、`send(session, 文字, 是否按 Enter)`、`notify(標題, 內文)`、`exec({程式, 參數...})`、`add_command(id, 名稱)`、`sessions()`、`setting(鍵, 預設值)`。可以覆寫的有 `on_event`（agent_state、session_added、session_exited、tick）、`panels(位置)`（用 `Panel` 的 `text`、`row`、`badge`、`progress`、`button`、`separator` 組出面板）、`click`、`decorate("tab"|"agent", ...)`、`command`。不用 C++ 的話，也可以直接實作 `mod_api.h` 的 C 介面。
 
-Mod 在 AgentDesk 裡以你的權限執行，跟你安裝的其他程式一樣，所以只啟用你信任的 mod。在設定頁打開 mod 的開關時，AgentDesk 會先說明這一點，按「Turn on」才會啟用。`exec` 直接啟動程式，不經過 shell。mod 當掉（例如記憶體存取錯誤）時會被停用，錯誤顯示在設定頁，AgentDesk 照常執行；但 mod 卡在無窮迴圈時，整個介面會停住：終端機仍在 agent-host 裡繼續跑，用工作管理員結束 `agent-ui.exe`，在 `ui.json` 的 `mods_enabled` 拿掉那個 mod，再重新開啟 AgentDesk。寫 mod 的完整說明（介面、相容性規則、注意事項）在 [mods.md](mods.md)（英文）。舊版的 Lua mod（`main.lua`）已不支援，設定頁會顯示錯誤；三個範例會自動換成 C++ 版本，原本的 `settings.json` 保留。
+Mod 在 AgentDesk 裡以你的權限執行，跟你安裝的其他程式一樣，所以只啟用你信任的 mod。在設定頁打開 mod 的開關時，AgentDesk 會先說明這一點，按「Turn on」才會啟用。`exec` 直接啟動程式，不經過 shell。mod 當掉（例如記憶體存取錯誤）時會被停用，錯誤顯示在設定頁，AgentDesk 照常執行；但 mod 卡在無窮迴圈時，整個介面會停住：終端機仍在 agent-host 裡繼續跑，用工作管理員（macOS 用「強制結束」）結束 agent-ui，在 `ui.json` 的 `mods_enabled` 拿掉那個 mod，再重新開啟 AgentDesk。寫 mod 的完整說明（介面、相容性規則、注意事項）在 [mods.md](mods.md)（英文）。舊版的 Lua mod（`main.lua`）已不支援，設定頁會顯示錯誤；三個範例會自動換成 C++ 版本，原本的 `settings.json` 保留。
 
 ## agentctl（命令列）
 
@@ -236,12 +272,12 @@ agentctl shutdown --stop-sessions
 | Agent | 狀態來源 | 設定 |
 |---|---|---|
 | Claude Code 2.1.295 以上 | 終端機狀態協定 OSC 7501 | 不需設定 |
-| Codex CLI | hook 呼叫 `agentctl report-state` | 依 `docs\agent-hooks.md` 手動安裝 hook |
+| Codex CLI | hook 呼叫 `agentctl hook` | 依 `docs/integrations/agent-hooks.md` 手動安裝 hook |
 | 其他程式 | 無 | 顯示 Unknown |
 
 ## 資料位置
 
-`%LOCALAPPDATA%\AgentDesk`：
+Windows 是 `%LOCALAPPDATA%\AgentDesk`，macOS 是 `~/Library/Application Support/AgentDesk`：
 
 - `profiles.json`：可自行編輯，新增 profile。
 - `sessions.json`：工作紀錄。
@@ -257,14 +293,15 @@ agentctl shutdown --stop-sessions
 
 ## 限制
 
-- 只支援 Windows 11 x64；Windows 10 未驗證。不支援多人協作；沒有手機 app。WSL 的支援範圍見上面「WSL」一節。
+- 只支援 Windows 11 x64 與 Apple Silicon 的 macOS 13 以上；Windows 10、Intel Mac 與 Linux 未支援。不支援多人協作；沒有手機 app。WSL 的支援範圍見上面「WSL」一節。
 - 重新開機、登出或 host 異常結束後無法續接原工作（顯示 Lost）。
 - 歷史捲動為純文字，最多 5000 行；每個工作的歷史上限 10,000 行或 16 MiB，超過時捨棄最舊的部分。
 - 字寬依 libvterm 0.3.3：東亞「模糊寬度」字元一律 1 欄；由零寬連接字組成的 emoji（例如家庭 emoji）不合併，會占多欄；emoji 以單色顯示；不支援 kitty keyboard protocol 與終端機圖片。
 - 狀態協定 OSC 7501 的「RIS 清除全部紀錄」規則尚未實作（libvterm 不通知 RIS）。
 - 沒有隨附 ConPTY 時，Windows 內建 ConPTY 會吞掉狀態查詢的回覆，Claude Code 因此不會回報狀態。
 - 已結束的工作超過 8 個時，較舊的只保留清單紀錄，最後畫面與歷史不再保留。
-- 遠端機器需要遠端也是 Windows 並安裝 AgentDesk；Linux／macOS 的 host 尚未提供。
+- 遠端機器需要遠端也安裝 AgentDesk；Linux 的 host 尚未提供，Windows 與 macOS 互連還沒驗證。
+- macOS 版還沒有 Developer ID 簽章與公證，第一次開啟要手動允許。
 - 介面沒有螢幕閱讀器支援（Dear ImGui 的限制）。
 - 遠端機器的 Files／Changes 面板不會即時更新，每 10 秒更新一次。
-- shell 所在資料夾的追蹤支援 PowerShell、cmd、WSL 的 bash，以及會送 OSC 7 的 shell；其他 shell 只顯示啟動時的資料夾。
+- shell 所在資料夾的追蹤支援 PowerShell、cmd、WSL 的 bash、macOS 的 zsh 與 bash，以及會送 OSC 7 的 shell；其他 shell 只顯示啟動時的資料夾。

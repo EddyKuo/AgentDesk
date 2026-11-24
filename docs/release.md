@@ -34,7 +34,7 @@ scripts/package_macos.sh            # Release build, then dist/AgentDesk-<versio
 scripts/package_macos.sh --sign "Developer ID Application: <name>"   # with a Developer ID
 ```
 
-The zip holds `AgentDesk-<version>-macos-arm64/AgentDesk.app` (the layout the updater unpacks): the three programs in `Contents/MacOS`, and fonts, sounds, programs, themes, example mods, the mod SDK, `LICENSE`, `THIRD_PARTY_NOTICES.md` and `docs/` in `Contents/Resources`. Without `--sign` it is signed ad hoc. Notarization (`xcrun notarytool`) needs an Apple Developer account and is not scripted yet (design doc 7.4 OQ-11). The update manifest's macOS target is `darwin-aarch64`.
+The zip holds `AgentDesk-<version>-macos-arm64/AgentDesk.app` (the layout the updater unpacks): the three programs in `Contents/MacOS`, and fonts, sounds, programs, themes, example mods, the mod SDK, `LICENSE`, `THIRD_PARTY_NOTICES.md` and `docs/` in `Contents/Resources`. Without `--sign` it is signed ad hoc. Notarization (`xcrun notarytool`) needs an Apple Developer account and is not scripted yet (design doc 12.3, OQ-11). The update manifest's macOS target is `darwin-aarch64`.
 
 Smoke-test it like the Windows zip: unzip into a clean folder and run `AgentDesk.app/Contents/MacOS/agent-ui --pipe smoke --start zsh --exit-after-ms 5000 --screenshot shot.png` with `AGENTDESK_DATA_DIR` pointing at an empty folder.
 
