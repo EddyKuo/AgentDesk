@@ -22,7 +22,7 @@
 #include "agentdesk/host/store.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
-#include "agentdesk/platform/win/conpty_api.hpp"
+#include "agentdesk/platform/pty.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/platform/win/unique_handle.hpp"
 
@@ -172,7 +172,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
     win::UniqueHandle shutdown(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
     host::HostConfig cfg;
-    cfg.conpty = win::load_conpty(ipc::sibling_executable(L"agent-host.exe").parent_path());
+    const bool bundled_conpty = agentdesk::platform::pty_capabilities().answers_osc7501_query;
     cfg.data_dir = data_dir;
     cfg.ctl_path = ipc::sibling_executable(L"agentctl.exe");
     cfg.pipe_name = pipe_name;
@@ -194,7 +194,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         auto server = serve(pipe_name, handlers_for(manager), taking_over);
         log_line(data_dir, std::string(taking_over ? "took over" : "started") +
                                " instance=" + cfg.host_instance_id +
-                               " conpty=" + (cfg.conpty.bundled ? "bundled" : "inbox"));
+                               " conpty=" + (bundled_conpty ? "bundled" : "inbox"));
         if (old_host)
             remove_old_exe_after(std::move(old_host));
         ::WaitForSingleObject(shutdown.get(), INFINITE);

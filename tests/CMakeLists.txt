@@ -102,8 +102,7 @@ if(NOT WIN32)
     target_link_libraries(posix_integration_tests PRIVATE agentdesk::platform agentdesk::host GTest::gtest_main)
     add_dependencies(posix_integration_tests vt_probe)
     target_compile_definitions(posix_integration_tests PRIVATE
-        AGENTDESK_VT_PROBE="$<TARGET_FILE:vt_probe>"
-        AGENTDESK_BUNDLED_CONPTY_DIR="")
+        AGENTDESK_VT_PROBE="$<TARGET_FILE:vt_probe>")
     gtest_discover_tests(posix_integration_tests DISCOVERY_MODE PRE_TEST
         PROPERTIES LABELS "posix_integration" TIMEOUT 120)
     # agent-host built as a later release (99.0.0), for agent-host's own update (host handover).
@@ -126,6 +125,7 @@ agentdesk_executable(win_integration_tests
     integration/windows/pipe_test.cpp
     integration/windows/host_test.cpp
     integration/windows/handover_test.cpp
+    integration/windows/use_bundled_conpty.cpp
     integration/windows/updates_test.cpp)
 target_link_libraries(win_integration_tests PRIVATE psapi advapi32 ws2_32 agentdesk::ui
     agentdesk::host agentdesk::ipc agentdesk::platform_win agentdesk::terminal nlohmann_json::nlohmann_json GTest::gtest_main)

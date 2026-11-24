@@ -909,7 +909,8 @@ Response SessionManager::do_hello(const Request& req) {
                  {"succeeds", config_.succeeds},
                  {"host_exe", platform::to_utf8(ipc::sibling_executable(L"agent-host.exe").native())},
                  {"capabilities",
-                  {{"osc7501", config_.conpty.bundled}, {"bundled_conpty", config_.conpty.bundled}}}});
+                  {{"osc7501", platform::pty_capabilities().answers_osc7501_query},
+                   {"bundled_conpty", platform::pty_capabilities().answers_osc7501_query}}}});
 }
 
 Response SessionManager::do_profile_list(const Request& req) {
@@ -940,7 +941,6 @@ std::optional<std::map<std::string, std::string>> labels_param(const Json& param
 SessionConfig new_session_config(const HostConfig& host, const Profile& profile, const Json& p,
                                  const std::string& session_id, const std::string& cwd) {
     SessionConfig sc;
-    sc.api = host.conpty;
     sc.spec.executable = profile.executable;
     sc.spec.args = profile.args;
     for (const auto& a : p.value("args", Json::array()))
@@ -949,7 +949,7 @@ SessionConfig new_session_config(const HostConfig& host, const Profile& profile,
     sc.spec.cwd = platform::to_wide(cwd);  // never silently replaced (design doc 4.2)
     const int cols = std::clamp(p.value("cols", 120), 2, 1000);
     const int rows = std::clamp(p.value("rows", 40), 1, 500);
-    sc.spec.size = {static_cast<short>(cols), static_cast<short>(rows)};
+    sc.spec.size = {static_cast<std::uint16_t>(cols), static_cast<std::uint16_t>(rows)};
     sc.engine.cols = cols;
     sc.engine.rows = rows;
     sc.spec.env_overrides["AGENTDESK_SESSION_ID"] = session_id;

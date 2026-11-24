@@ -9,7 +9,6 @@
 #include <cwctype>
 #include <thread>
 
-#include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::host {

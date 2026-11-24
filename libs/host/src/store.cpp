@@ -10,12 +10,11 @@
 #include <stdexcept>
 
 #include "agentdesk/platform/crt.hpp"
-#include "agentdesk/platform/win/command_line.hpp"
+#include "agentdesk/platform/process.hpp"
 #include "agentdesk/platform/text.hpp"
 
 namespace agentdesk::host {
 
-namespace win = platform::win;
 
 std::optional<nlohmann::json> read_json_with_backup(const std::filesystem::path& file) {
     auto try_read = [](const std::filesystem::path& p) -> std::optional<nlohmann::json> {
@@ -70,10 +69,10 @@ Profile profile_from_json(const nlohmann::json& j) {
 std::optional<std::string> validate_profile(const Profile& p) {
     if (p.id.empty())
         return "profile id is empty";
-    if (win::is_batch_file(p.executable.wstring())) {
+    if (platform::is_batch_file(p.executable)) {
         return "batch launchers (.cmd/.bat) need the shell launcher adapter, which is not available yet";
     }
-    if (!win::is_launchable_file(p.executable.wstring())) {
+    if (!platform::is_launchable_file(p.executable)) {
         return "executable not found: " + platform::to_utf8(p.executable.native());
     }
     return std::nullopt;

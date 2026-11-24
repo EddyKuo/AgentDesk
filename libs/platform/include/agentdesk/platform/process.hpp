@@ -84,4 +84,8 @@ std::optional<std::filesystem::path> find_executable(std::string_view name);
 // True when `path` names a file this platform can start directly.
 bool is_launchable_file(const std::filesystem::path& path);
 
+// A Windows batch file (.cmd, .bat): only cmd.exe runs it, with its own parsing rules. Never
+// elsewhere.
+bool is_batch_file(const std::filesystem::path& path);
+
 }  // namespace agentdesk::platform

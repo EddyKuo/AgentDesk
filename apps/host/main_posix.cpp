@@ -25,12 +25,10 @@
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/ipc/pipe.hpp"
 #include "agentdesk/platform/ipc_transport.hpp"
-#include "agentdesk/platform/win/conpty_api.hpp"
 #include "agentdesk/platform/text.hpp"
 
 namespace {
 
-namespace win = agentdesk::platform::win;
 namespace host = agentdesk::host;
 namespace ipc = agentdesk::ipc;
 namespace platform = agentdesk::platform;
@@ -169,7 +167,6 @@ int main(int argc, char** argv) {
 
     Shutdown shutdown;
     host::HostConfig cfg;
-    cfg.conpty = win::load_conpty({});
     cfg.data_dir = data_dir;
     cfg.ctl_path = ipc::sibling_executable(L"agentctl");
     cfg.pipe_name = pipe_name;

@@ -41,7 +41,6 @@
 
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
-#include "agentdesk/platform/win/command_line.hpp"
 #include "agentdesk/platform/text.hpp"
 #include "agentdesk/ui/chrome_logic.hpp"
 #include "agentdesk/ui/focus_mode.hpp"

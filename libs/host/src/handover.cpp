@@ -150,18 +150,18 @@ HANDLE duplicate_into(HANDLE target_process, HANDLE h) {
 }
 
 // A live terminal's handles, in the order the handover format stores them.
-std::array<HANDLE*, 7> handle_slots(win::PtyHandles& h) {
+std::array<HANDLE*, 7> handle_slots(platform::PtyHandles& h) {
     return {&h.signal, &h.reference, &h.conhost, &h.input_write, &h.output_read, &h.process, &h.job};
 }
 
-void write_handles(ByteWriter& w, win::PtyHandles h) {
+void write_handles(ByteWriter& w, platform::PtyHandles h) {
     for (const HANDLE* x : handle_slots(h))
         w.u64(handle_value(*x));
     w.u32(h.pid);
 }
 
-win::PtyHandles read_handles(ByteReader& r) {
-    win::PtyHandles h;
+platform::PtyHandles read_handles(ByteReader& r) {
+    platform::PtyHandles h;
     for (HANDLE* x : handle_slots(h))
         *x = handle_from(r.u64());
     h.pid = r.u32();
@@ -468,14 +468,13 @@ std::shared_ptr<SessionManager> HandoverAccess::receive(HostConfig config, HANDL
                 m->pending_reports.push_back(r.str());
             if (r.boolean()) {
                 const std::string state = r.str();
-                std::optional<win::PtyHandles> handles;
+                std::optional<platform::PtyHandles> handles;
                 if (r.boolean())
                     handles = read_handles(r);
                 if (!r.ok())
                     refuse("the handover is damaged");
                 const std::string id = m->record.id;
                 SessionConfig sc;
-                sc.api = self.config_.conpty;
                 try {
                     m->session = Session::adopt(std::move(sc), self.listener_for(id), state, handles);
                 } catch (const std::exception& e) {

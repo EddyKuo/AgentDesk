@@ -8,7 +8,7 @@
 #include <filesystem>
 #include <string>
 
-#include "agentdesk/platform/win/pty_process.hpp"
+#include "agentdesk/platform/pty.hpp"
 
 namespace agentdesk::host::detail {
 
@@ -18,9 +18,12 @@ std::string os_error_text(const std::exception& e, std::string what);
 
 // The environment and arguments that make a shell report its prompt (OSC 133 A) and folder
 // (OSC 7), plus what every terminal needs on this system.
-void add_folder_hook(platform::win::PtySpawnSpec& spec);
+void add_folder_hook(platform::PtySpawnSpec& spec);
 
 std::uint32_t current_pid();
+
+// The local folder an OSC 7 URI names, or "" when it is another machine's.
+std::string local_path_from_cwd_uri(const std::string& uri);
 
 // The person's home folder (worktrees go in ~/.agentdesk/worktrees).
 std::filesystem::path home_dir();

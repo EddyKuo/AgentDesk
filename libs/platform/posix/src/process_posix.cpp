@@ -307,4 +307,8 @@ std::optional<std::filesystem::path> find_executable(std::string_view name) {
     return std::nullopt;
 }
 
+bool is_batch_file(const std::filesystem::path& /*path*/) {
+    return false;
+}
+
 }  // namespace agentdesk::platform

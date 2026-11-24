@@ -3,14 +3,14 @@
 
 #include <chrono>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
-#include "agentdesk/platform/win/conpty_api.hpp"
-
 using namespace std::chrono_literals;
-namespace win = agentdesk::platform::win;
 using agentdesk::host::AgentState;
 using agentdesk::host::ProcessState;
 using agentdesk::host::RawInput;
@@ -20,13 +20,8 @@ using agentdesk::host::TextInput;
 
 namespace {
 
-win::ConPtyApi best_conpty() {
-    return win::load_conpty(std::filesystem::path(AGENTDESK_BUNDLED_CONPTY_DIR));
-}
-
 SessionConfig probe_config(std::string mode) {
     SessionConfig c;
-    c.api = best_conpty();
     c.spec.executable = AGENTDESK_VT_PROBE;
     c.spec.args = {std::move(mode)};
     c.spec.cwd = std::filesystem::temp_directory_path();
@@ -170,6 +165,53 @@ TEST(Session, BackpressureNeverDropsOutput) {
     }
     EXPECT_GE(prev, 0);
     EXPECT_EQ(gaps, 0);
+}
+
+// A program that ends while its output is still queued: every byte is on the screen before the
+// session is reported exited, and nothing is published after that. Several at once, so the exit
+// notices and the actors compete.
+TEST(Session, LastOutputArrivesBeforeTheExit) {
+    struct Seen {
+        std::mutex mutex;
+        std::shared_ptr<const agentdesk::terminal::ScreenSnapshot> last;
+        bool exited = false;
+        bool complete = false;
+        int after_exit = 0;
+    };
+    constexpr int kSessions = 6;
+    std::vector<std::unique_ptr<Seen>> seen;
+    std::vector<std::unique_ptr<Session>> sessions;
+    for (int i = 0; i < kSessions; ++i) {
+        auto* s = seen.emplace_back(std::make_unique<Seen>()).get();
+        agentdesk::host::SessionListener listener;
+        listener.on_snapshot = [s](std::shared_ptr<const agentdesk::terminal::ScreenSnapshot> snap) {
+            std::lock_guard lock(s->mutex);
+            s->last = std::move(snap);
+            if (s->exited)
+                ++s->after_exit;
+        };
+        listener.on_info = [s](const agentdesk::host::SessionInfo& info) {
+            std::lock_guard lock(s->mutex);
+            if (info.process_state != ProcessState::kExited || s->exited)
+                return;
+            s->exited = true;
+            for (int r = 0; s->last && r < s->last->rows; ++r)
+                if (s->last->row_text(r).find("FLOOD-DONE") != std::string::npos)
+                    s->complete = true;
+        };
+        auto config = probe_config("flood");
+        config.spec.args = {"flood", "1", "4194304"};
+        config.output_queue_limit = 64 * 1024;
+        sessions.push_back(Session::start(config, listener));
+    }
+    for (int i = 0; i < kSessions; ++i) {
+        ASSERT_TRUE(sessions[static_cast<std::size_t>(i)]->wait_exit(60s).has_value());
+        auto& s = *seen[static_cast<std::size_t>(i)];
+        EXPECT_TRUE(wait_until([&] { std::lock_guard lock(s.mutex); return s.exited; }, 5s));
+        std::lock_guard lock(s.mutex);
+        EXPECT_TRUE(s.complete) << "session " << i << " ended before its last output";
+        EXPECT_EQ(s.after_exit, 0);
+    }
 }
 
 TEST(Session, StartFailureIsReported) {

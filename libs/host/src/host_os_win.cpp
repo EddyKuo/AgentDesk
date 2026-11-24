@@ -7,6 +7,7 @@
 #include <system_error>
 
 #include "agentdesk/platform/win/error.hpp"
+#include "agentdesk/terminal/cwd_uri.hpp"
 #include "host_os.hpp"
 
 namespace agentdesk::host::detail {
@@ -50,7 +51,7 @@ namespace {
 // as the host, which the session maps to \\wsl.localhost\<distro>\... or C:\... for /mnt/c.
 // Only for an interactive shell: a profile that runs a command (-e, --exec, --) is left alone.
 // A ~/.bashrc that assigns PROMPT_COMMAND, or zsh/fish, replaces it; then the folder is unknown.
-void add_wsl_folder_hook(platform::win::PtySpawnSpec& spec) {
+void add_wsl_folder_hook(platform::PtySpawnSpec& spec) {
     for (const auto& a : spec.args)
         if (a == "-e" || a == "--exec" || a == "--")
             return;
@@ -83,7 +84,7 @@ std::wstring to_lower(std::wstring s) {
 // what the host reads to follow the shell. So the prompt is wrapped: after the person's own
 // prompt runs, the location is copied into [Environment]::CurrentDirectory. Only for an interactive
 // PowerShell the profile starts without its own -Command/-File; cmd needs nothing.
-void add_folder_hook(platform::win::PtySpawnSpec& spec) {
+void add_folder_hook(platform::PtySpawnSpec& spec) {
     const std::wstring exe = to_lower(spec.executable.filename().native());
     if (exe == L"wsl.exe") {
         add_wsl_folder_hook(spec);
@@ -121,6 +122,15 @@ void add_folder_hook(platform::win::PtySpawnSpec& spec) {
 
 std::uint32_t current_pid() {
     return ::GetCurrentProcessId();
+}
+
+std::string local_path_from_cwd_uri(const std::string& uri) {
+    static const std::string local = [] {
+        char buf[MAX_COMPUTERNAME_LENGTH + 1]{};
+        DWORD n = MAX_COMPUTERNAME_LENGTH + 1;
+        return ::GetComputerNameA(buf, &n) ? std::string(buf, n) : std::string();
+    }();
+    return terminal::windows_path_from_cwd_uri(uri, local);
 }
 
 std::filesystem::path home_dir() {

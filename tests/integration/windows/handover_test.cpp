@@ -152,7 +152,6 @@ namespace {
 
 agentdesk::host::SessionConfig counter_config() {
     agentdesk::host::SessionConfig c;
-    c.api = bundled();
     c.spec.executable = AGENTDESK_VT_PROBE;
     c.spec.args = {"counter"};
     c.spec.cwd = std::filesystem::temp_directory_path();
@@ -189,7 +188,7 @@ TEST(Handover, SessionMovesWithScreenAndHistory) {
     const auto history_before = a->history_tail(100);
     const int count_before = last_count(*a);
     win::PtyHandles copy = *frozen->handles;
-    for (HANDLE* h : {&copy.signal, &copy.reference, &copy.conhost, &copy.input_write, &copy.output_read,
+    for (void** h : {&copy.signal, &copy.reference, &copy.conhost, &copy.input_write, &copy.output_read,
                       &copy.process, &copy.job})
         *h = dup(*h);
     a->release_after_handover();

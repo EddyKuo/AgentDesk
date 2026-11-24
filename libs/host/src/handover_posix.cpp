@@ -34,7 +34,6 @@ extern char** environ;  // NOLINT(readability-redundant-declaration): not declar
 
 namespace agentdesk::host {
 
-namespace win = platform::win;
 using protocol::ErrorCode;
 using protocol::Json;
 using protocol::Request;
@@ -212,12 +211,12 @@ void end_successor(pid_t pid) {
     }
 }
 
-void write_handles(ByteWriter& w, const win::PtyHandles& h) {
+void write_handles(ByteWriter& w, const platform::PtyHandles& h) {
     w.u32(h.pid);
 }
 
-win::PtyHandles read_handles(ByteReader& r) {
-    win::PtyHandles h;
+platform::PtyHandles read_handles(ByteReader& r) {
+    platform::PtyHandles h;
     h.pid = r.u32();
     return h;
 }
@@ -485,7 +484,7 @@ std::shared_ptr<SessionManager> HandoverAccess::receive(HostConfig config, int c
                 m->pending_reports.push_back(r.str());
             if (r.boolean()) {
                 const std::string state = r.str();
-                std::optional<win::PtyHandles> handles;
+                std::optional<platform::PtyHandles> handles;
                 if (r.boolean()) {
                     handles = read_handles(r);
                     // The terminals' pty masters follow the state, in the order it lists them.
@@ -497,7 +496,6 @@ std::shared_ptr<SessionManager> HandoverAccess::receive(HostConfig config, int c
                     refuse("the handover is damaged");
                 const std::string id = m->record.id;
                 SessionConfig sc;
-                sc.api = self.config_.conpty;
                 try {
                     m->session = Session::adopt(std::move(sc), self.listener_for(id), state, handles);
                 } catch (const std::exception& e) {

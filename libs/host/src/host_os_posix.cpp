@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include "agentdesk/platform/system.hpp"
+#include "agentdesk/terminal/cwd_uri.hpp"
 #include "host_os.hpp"
 
 namespace agentdesk::host::detail {
@@ -44,7 +45,7 @@ std::filesystem::path zsh_hook_dir() {
 
 }  // namespace
 
-void add_folder_hook(platform::win::PtySpawnSpec& spec) {
+void add_folder_hook(platform::PtySpawnSpec& spec) {
     if (!spec.env_overrides.contains("TERM"))
         spec.env_overrides["TERM"] = "xterm-256color";
     spec.env_overrides["COLORTERM"] = "truecolor";
@@ -74,6 +75,14 @@ void add_folder_hook(platform::win::PtySpawnSpec& spec) {
 
 std::uint32_t current_pid() {
     return static_cast<std::uint32_t>(::getpid());
+}
+
+std::string local_path_from_cwd_uri(const std::string& uri) {
+    static const std::string local = [] {
+        char buf[256]{};
+        return ::gethostname(buf, sizeof(buf) - 1) == 0 ? std::string(buf) : std::string();
+    }();
+    return terminal::posix_path_from_cwd_uri(uri, local);
 }
 
 std::filesystem::path home_dir() {

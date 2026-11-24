@@ -24,7 +24,6 @@
 namespace agentdesk::host {
 
 struct HostConfig {
-    platform::win::ConPtyApi conpty;
     std::filesystem::path data_dir;     // profiles.json, sessions.json
     std::filesystem::path ctl_path;     // agentctl.exe advertised to children (AGENTDESK_CTL)
     std::string pipe_name;              // AGENTDESK_PIPE (UTF-8)

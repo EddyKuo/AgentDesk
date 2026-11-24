@@ -1,6 +1,6 @@
 #pragma once
 
-// One terminal session inside agent-host: the ConPTY child, its VtEngine, the threads around
+// One terminal session inside agent-host: the child in a pseudo terminal, its VtEngine, the threads around
 // them (reader, actor, writer) and the freeze/adopt steps of a host handover.
 
 #include <atomic>
@@ -22,16 +22,14 @@
 #include "agentdesk/host/input.hpp"
 #include "agentdesk/host/state_timeline.hpp"
 #include "agentdesk/host/states.hpp"
-#include "agentdesk/platform/win/conpty_api.hpp"
-#include "agentdesk/platform/win/process_tree.hpp"
-#include "agentdesk/platform/win/pty_process.hpp"
+#include "agentdesk/platform/pty.hpp"
+#include "agentdesk/platform/pty_handles.hpp"
 #include "agentdesk/terminal/vt_engine.hpp"
 
 namespace agentdesk::host {
 
 struct SessionConfig {
-    platform::win::ConPtyApi api;
-    platform::win::PtySpawnSpec spec;
+    platform::PtySpawnSpec spec;
     terminal::VtEngineOptions engine;
     std::chrono::milliseconds snapshot_interval{8};       // UI updates are coalesced, VT bytes never
     std::chrono::milliseconds interrupt_grace{5000};      // design doc 3.2
@@ -54,7 +52,7 @@ struct SessionInfo {
     std::uint32_t pid = 0;
     bool stop_requested = false;
     bool still_running_after_interrupt = false;  // grace period elapsed, offer force
-    std::uint32_t remaining_processes = 0;       // job members after the root exited
+    std::uint32_t remaining_processes = 0;       // of the terminal, after the root exited
     AgentStatus agent;
     std::uint64_t bytes_from_program = 0;
     bool history_truncated = false;
@@ -72,7 +70,7 @@ struct SessionListener {
     std::function<void(const SessionInfo&)> on_info;
 };
 
-// One managed terminal session: ConPTY child + VtEngine, owned by a single actor thread.
+// One managed terminal session: a child in a pseudo terminal + VtEngine, owned by a single actor thread.
 // The engine is touched only on that thread; the renderer reads immutable snapshots.
 class Session {
 public:
@@ -86,7 +84,7 @@ public:
     void send(InputEvent input);
     void resize(int rows, int cols);
     void interrupt();   // Ctrl+C, then grace period
-    void force_stop();  // TerminateJobObject (explicit user action only)
+    void force_stop();  // ends the process tree (explicit user action only)
     // Structured status from an adapter (agentctl report-state). Stale seq values are ignored.
     void report_state(std::string source, std::uint64_t seq, AgentState state,
                       terminal::StatusKind kind = terminal::StatusKind::kNone, std::string message = {});
@@ -94,7 +92,7 @@ public:
     [[nodiscard]] std::shared_ptr<const terminal::ScreenSnapshot> snapshot() const;
     [[nodiscard]] SessionInfo info() const;
     // Program running in the terminal now ("claude", "pwsh", ...); empty once exited.
-    [[nodiscard]] platform::win::Foreground foreground() const;
+    [[nodiscard]] platform::ForegroundInfo foreground() const;
     [[nodiscard]] std::string foreground_program() const;
     // Lines from history (oldest first) with line_id >= from, at most `max_lines`.
     [[nodiscard]] std::vector<terminal::HistoryLine> history(std::uint64_t from, std::size_t max_lines) const;
@@ -118,7 +116,7 @@ public:
     struct Frozen {
         std::string state;  // engine + session state (save format of this build)
         // The live terminal's handles, owned by *this; nullopt when the program already exited.
-        std::optional<platform::win::PtyHandles> handles;
+        std::optional<platform::PtyHandles> handles;
     };
     // Whether this session's terminal could be handed over (bundled ConPTY), without changing it.
     [[nodiscard]] bool can_hand_over(std::string* why) const;
@@ -136,7 +134,7 @@ public:
     // In the new host: a session from frozen state and duplicated handles, not running yet (no
     // threads; nothing read or written). Throws when the state or handles do not check out.
     static std::unique_ptr<Session> adopt(SessionConfig config, SessionListener listener, std::string_view state,
-                                          const std::optional<platform::win::PtyHandles>& handles);
+                                          const std::optional<platform::PtyHandles>& handles);
     // The takeover is final: start reading, writing and watching.
     void start_adopted();
 
@@ -176,7 +174,7 @@ private:
     explicit Session(SessionConfig config, SessionListener listener);
     // The engine's callbacks and the reader's sink, both bound to *this.
     terminal::EngineEvents engine_events();
-    platform::win::PtyOutputSink output_sink();
+    platform::PtyOutputSink output_sink();
     [[nodiscard]] std::vector<terminal::HistoryLine> ask_history(std::uint64_t from, std::size_t max_lines,
                                                                  bool tail) const;
     void post(Command cmd);
@@ -206,29 +204,19 @@ private:
     SessionConfig config_;
     SessionListener listener_;
     std::unique_ptr<terminal::VtEngine> engine_;  // actor thread only
-    std::unique_ptr<platform::win::PtyProcess> process_;
+    std::unique_ptr<platform::Pty> process_;
 
     // command queue -> actor
     mutable std::mutex queue_mutex_;
     std::deque<Command> queue_;
-    // How the actor is woken: an event on Windows, a condition variable on macOS (session_win.cpp,
-    // session_posix.cpp).
-    struct ActorWake;
-    struct ActorWakeDeleter {
-        void operator()(ActorWake* p) const noexcept;
-    };
-    std::unique_ptr<ActorWake, ActorWakeDeleter> wake_;
+    std::condition_variable queue_cv_;  // wakes the actor
+    bool actor_signalled_ = false;      // guarded by queue_mutex_
     void wake_actor();
-    // Waits for a command, the root process's exit, the next publish slot or the interrupt
-    // deadline; then drains the queue and notices the root's exit (actor thread).
+    // Waits for a command, the root process's exit (the terminal's exit sink wakes us), the next
+    // publish slot or the interrupt deadline; then drains the queue and notices the root's exit
+    // (actor thread).
     void wait_for_work(bool& root_exited);
-    std::unique_ptr<platform::win::PtyProcess> spawn_process();
-    std::unique_ptr<platform::win::PtyProcess> adopt_process(const platform::win::PtyHandles& handles);
-    // The exit code to record from what wait_exit() gave after the root exited; nullopt when the
-    // system cannot know it (macOS: a root adopted in a handover is not our child).
-    static std::optional<std::uint32_t> recorded_exit_code(std::optional<std::uint32_t> waited);
-    // The local folder an OSC 7 URI names, or "" when it is another machine's.
-    static std::string local_path_from_cwd_uri(const std::string& uri);
+    std::unique_ptr<platform::Pty> spawn_terminal();
     std::condition_variable queue_space_cv_;
     std::size_t queued_output_bytes_ = 0;   // guarded by queue_mutex_
     std::uint64_t backpressure_waits_ = 0;  // guarded by queue_mutex_
