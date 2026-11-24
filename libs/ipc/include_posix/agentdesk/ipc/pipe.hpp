@@ -1,6 +1,6 @@
 #pragma once
 
-// Local IPC on macOS (ADR-30): the interface of pipe.hpp over Unix domain sockets
+// Local IPC on macOS (ADR-30): the interface of the Windows pipe.hpp (libs/ipc/include_win) over Unix domain sockets
 // (platform::StreamListener / ByteStream). Endpoint names stay std::wstring so shared callers
 // build unchanged; on macOS a name is the socket's path. Same-user only, checked on both ends; a
 // control channel, not an isolation boundary against malware running as the same user.

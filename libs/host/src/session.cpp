@@ -2,12 +2,6 @@
 // backpressure, snapshot publishing and the handover state format.
 #include "agentdesk/host/session.hpp"
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
-
 #include <algorithm>
 #include <stdexcept>
 
@@ -26,15 +20,6 @@ template <class... Ts>
 struct Overloaded : Ts... {
     using Ts::operator()...;
 };
-
-#ifdef _WIN32
-DWORD millis_until(Clock::time_point t) {
-    const auto now = Clock::now();
-    if (t <= now)
-        return 0;
-    return static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(t - now).count() + 1);
-}
-#endif
 
 // A new agent state; the one it replaces becomes last_state when it differs.
 void set_agent_state(AgentStatus& a, AgentState next) {
@@ -56,30 +41,6 @@ platform::win::PtyOutputSink Session::output_sink() {
     return [this](std::span<const char> b) { post_output(std::string(b.data(), b.size())); };
 }
 
-#ifdef _WIN32
-Session::Session(SessionConfig config, SessionListener listener)
-    : config_(std::move(config)),
-      listener_(std::move(listener)),
-      queue_event_(::CreateEventW(nullptr, FALSE, FALSE, nullptr)) {
-    if (!queue_event_) {
-        win::throw_last_error("CreateEventW(session queue)");
-    }
-}
-
-void Session::wake_actor() { ::SetEvent(queue_event_.get()); }
-#else
-Session::Session(SessionConfig config, SessionListener listener)
-    : config_(std::move(config)), listener_(std::move(listener)) {}
-
-void Session::wake_actor() {
-    {
-        std::lock_guard lock(queue_mutex_);
-        queue_signalled_ = true;
-    }
-    queue_cv_.notify_all();
-}
-#endif
-
 std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener listener) {
     std::unique_ptr<Session> self(new Session(std::move(config), std::move(listener)));
     self->engine_ = std::make_unique<terminal::VtEngine>(self->config_.engine, self->engine_events());
@@ -87,12 +48,7 @@ std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener li
 
     self->writer_ = std::thread([raw = self.get()] { raw->writer_loop(); });
     try {
-#ifdef _WIN32
-        auto process = win::PtyProcess::spawn(self->config_.api, self->config_.spec, self->output_sink());
-#else
-        auto process = win::PtyProcess::spawn(self->config_.api, self->config_.spec, self->output_sink(),
-                                              [raw = self.get()] { raw->wake_actor(); });
-#endif
+        auto process = self->spawn_process();
         std::lock_guard lock(self->write_mutex_);  // the writer reads process_ under this lock
         self->process_ = std::move(process);
     } catch (...) {
@@ -243,22 +199,8 @@ platform::win::Foreground Session::foreground() const {
     // A folder the shell reported itself (OSC 7) beats the Windows process's current directory:
     // WSL and MSYS shells cd without changing it.
     if (!i.cwd_uri.empty()) {
-#ifdef _WIN32
-        static const std::string local = [] {
-            char buf[MAX_COMPUTERNAME_LENGTH + 1]{};
-            DWORD n = MAX_COMPUTERNAME_LENGTH + 1;
-            return ::GetComputerNameA(buf, &n) ? std::string(buf, n) : std::string();
-        }();
-        if (auto p = terminal::windows_path_from_cwd_uri(i.cwd_uri, local); !p.empty())
+        if (auto p = local_path_from_cwd_uri(i.cwd_uri); !p.empty())
             fg.cwd = std::move(p);
-#else
-        static const std::string local = [] {
-            char buf[256]{};
-            return ::gethostname(buf, sizeof(buf) - 1) == 0 ? std::string(buf) : std::string();
-        }();
-        if (auto p = terminal::posix_path_from_cwd_uri(i.cwd_uri, local); !p.empty())
-            fg.cwd = std::move(p);
-#endif
     }
     return fg;
 }
@@ -339,52 +281,7 @@ void Session::actor_loop() {
     bool root_exited = process_ == nullptr;
     for (;;) {
         // Wait for commands, root process exit, the next publish slot or the interrupt deadline.
-#ifdef _WIN32
-        DWORD timeout = INFINITE;
-        if (engine_->seq() != published_seq_) {
-            timeout = millis_until(last_publish_ + config_.snapshot_interval);
-        }
-        if (interrupt_deadline_) {
-            timeout = std::min(timeout, millis_until(*interrupt_deadline_));
-        }
-        // Frozen for a handover: the program's exit is the new host's to see (design doc 7.4 OQ-09).
-        const bool watch = !root_exited && !frozen_;
-        HANDLE handles[2] = {queue_event_.get(), watch ? process_->process_handle() : nullptr};
-        const DWORD count = watch ? 2 : 1;
-        const DWORD r = ::WaitForMultipleObjects(count, handles, FALSE, timeout);
-
-        drain_queue();
-
-        if (!root_exited && !frozen_ &&
-            ((watch && r == WAIT_OBJECT_0 + 1) ||
-             ::WaitForSingleObject(process_->process_handle(), 0) == WAIT_OBJECT_0)) {
-            root_exited = true;
-            on_root_exit();
-        }
-#else
-        // The pty's exit callback wakes us; a deadline bounds the wait like the Windows timeout.
-        std::optional<Clock::time_point> wake_at;
-        if (engine_->seq() != published_seq_)
-            wake_at = last_publish_ + config_.snapshot_interval;
-        if (interrupt_deadline_)
-            wake_at = wake_at ? std::min(*wake_at, *interrupt_deadline_) : *interrupt_deadline_;
-        {
-            std::unique_lock lock(queue_mutex_);
-            const auto ready = [&] { return queue_signalled_ || !queue_.empty() || stopping_.load(); };
-            if (wake_at)
-                queue_cv_.wait_until(lock, *wake_at, ready);
-            else
-                queue_cv_.wait(lock, ready);
-            queue_signalled_ = false;
-        }
-
-        drain_queue();
-
-        if (!root_exited && !frozen_ && process_->wait_exit(std::chrono::milliseconds(0)).has_value()) {
-            root_exited = true;
-            on_root_exit();
-        }
-#endif
+        wait_for_work(root_exited);
 
         if (interrupt_deadline_ && Clock::now() >= *interrupt_deadline_) {
             interrupt_deadline_.reset();
@@ -831,12 +728,7 @@ std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener li
         if (handles->pid != i.pid)
             throw std::runtime_error("handed over process is not this session's");
         // Last step that can throw: once adopted, the process must be released, never closed.
-#ifdef _WIN32
-        self->process_ = win::PtyProcess::adopt(self->config_.api, *handles, self->output_sink());
-#else
-        self->process_ = win::PtyProcess::adopt(self->config_.api, *handles, self->output_sink(),
-                                                [raw = self.get()] { raw->wake_actor(); });
-#endif
+        self->process_ = self->adopt_process(*handles);
     } else if (i.process_state != ProcessState::kExited && i.process_state != ProcessState::kFailed) {
         throw std::runtime_error("a running session came without its terminal");
     }

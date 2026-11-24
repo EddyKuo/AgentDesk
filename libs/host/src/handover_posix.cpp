@@ -24,6 +24,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "agentdesk/host/handover.hpp"
 #include "agentdesk/host/session_manager.hpp"
 #include "agentdesk/platform/system.hpp"
 #include "agentdesk/platform/win/error.hpp"
@@ -229,6 +230,14 @@ ReadyLine parse_ready(const std::string& line) {
 
 }  // namespace
 
+struct SessionManager::Successor {
+    std::uint32_t pid = 0;
+    int channel = -1;  // closed by finish_handover()
+    std::vector<ManagedPtr> sessions;  // frozen, handed over
+};
+
+void SessionManager::SuccessorDeleter::operator()(Successor* p) const noexcept { delete p; }
+
 // ---------------------------------------------------------------- old host
 
 Response SessionManager::do_update(const Request& req) {
@@ -378,7 +387,7 @@ Response SessionManager::do_update(const Request& req) {
     const auto [instance, version] = parse_ready(*line);
 
     handed_over_ = true;
-    successor_ = Successor{static_cast<std::uint32_t>(successor), channel, std::move(frozen)};
+    successor_.reset(new Successor{static_cast<std::uint32_t>(successor), channel, std::move(frozen)});
     if (config_.on_handed_over)
         config_.on_handed_over();
     // `agentctl update --json` prints this "now" text as is.
@@ -409,7 +418,16 @@ SessionManager::SessionManager(HostConfig config, Adopting) : config_(std::move(
     load_profiles();
 }
 
+// receive_handover builds the manager from private parts; SessionManager befriends this.
+struct HandoverAccess {
+    static std::shared_ptr<SessionManager> receive(HostConfig config, int channel);
+};
+
 std::shared_ptr<SessionManager> receive_handover(HostConfig config, int channel) {
+    return HandoverAccess::receive(std::move(config), channel);
+}
+
+std::shared_ptr<SessionManager> HandoverAccess::receive(HostConfig config, int channel) {
     const int from_old = channel;
     const int to_old = channel;
     const auto refuse = [&](const std::string& why) {

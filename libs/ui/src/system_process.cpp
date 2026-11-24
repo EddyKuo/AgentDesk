@@ -185,6 +185,14 @@ std::optional<std::wstring> env_var(const wchar_t* name) {
     return v;
 }
 
+void unset_env_var(const wchar_t* name) {
+    ::SetEnvironmentVariableW(name, nullptr);
+}
+
+std::optional<std::wstring> home_folder() {
+    return env_var(L"USERPROFILE");
+}
+
 std::string trim(std::string_view s) {
     const auto a = s.find_first_not_of(" \t\r\n");
     if (a == std::string_view::npos)

@@ -124,6 +124,14 @@ std::optional<std::wstring> env_var(const wchar_t* name) {
     return win::to_wide(v);
 }
 
+void unset_env_var(const wchar_t* name) {
+    ::unsetenv(win::to_utf8(name).c_str());
+}
+
+std::optional<std::wstring> home_folder() {
+    return env_var(L"HOME");
+}
+
 std::string trim(std::string_view s) {
     const auto a = s.find_first_not_of(" \t\r\n");
     if (a == std::string_view::npos)

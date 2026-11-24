@@ -198,14 +198,21 @@ private:
     // command queue -> actor
     mutable std::mutex queue_mutex_;
     std::deque<Command> queue_;
-#ifdef _WIN32
-    platform::win::UniqueHandle queue_event_;
-#else
-    // Wakes the actor (macOS): a command was queued, or the root process exited.
-    std::condition_variable queue_cv_;
-    bool queue_signalled_ = false;  // guarded by queue_mutex_
-#endif
+    // How the actor is woken: an event on Windows, a condition variable on macOS (session_win.cpp,
+    // session_posix.cpp).
+    struct ActorWake;
+    struct ActorWakeDeleter {
+        void operator()(ActorWake* p) const noexcept;
+    };
+    std::unique_ptr<ActorWake, ActorWakeDeleter> wake_;
     void wake_actor();
+    // Waits for a command, the root process's exit, the next publish slot or the interrupt
+    // deadline; then drains the queue and notices the root's exit (actor thread).
+    void wait_for_work(bool& root_exited);
+    std::unique_ptr<platform::win::PtyProcess> spawn_process();
+    std::unique_ptr<platform::win::PtyProcess> adopt_process(const platform::win::PtyHandles& handles);
+    // The local folder an OSC 7 URI names, or "" when it is another machine's.
+    static std::string local_path_from_cwd_uri(const std::string& uri);
     std::condition_variable queue_space_cv_;
     std::size_t queued_output_bytes_ = 0;   // guarded by queue_mutex_
     std::uint64_t backpressure_waits_ = 0;  // guarded by queue_mutex_

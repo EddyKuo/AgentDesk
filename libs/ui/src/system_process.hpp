@@ -1,7 +1,8 @@
 #pragma once
 
-// Process, environment and file helpers shared by updates.cpp and telemetry.cpp: runs Windows'
-// own tools (curl.exe, tar.exe from System32) without a console and without a shell.
+// Process, environment and file helpers shared by updates.cpp, telemetry.cpp and links.cpp: runs
+// the system's own tools (curl, tar) without a console and without a shell. system_process.cpp is
+// the Windows implementation, system_process_posix.cpp the macOS one (ADR-30).
 
 #include <cstdint>
 #include <filesystem>
@@ -40,6 +41,9 @@ std::wstring to_wide(const std::string& s);
 
 // An environment variable's value; nullopt when it is unset.
 std::optional<std::wstring> env_var(const wchar_t* name);
+void unset_env_var(const wchar_t* name);
+// The person's home folder (USERPROFILE, HOME); nullopt when unknown.
+std::optional<std::wstring> home_folder();
 // `s` without leading and trailing spaces, tabs and line ends.
 std::string trim(std::string_view s);
 // ASCII lowercase.

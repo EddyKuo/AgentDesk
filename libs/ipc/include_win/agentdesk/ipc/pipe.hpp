@@ -1,13 +1,9 @@
 #pragma once
 
-#ifndef _WIN32
-// macOS (ADR-30): the same interface over Unix sockets.
-#include "agentdesk/ipc/pipe_posix.hpp"
-#else
-
 // Local IPC over a Named Pipe (design doc 3.7): one pipe per user + logon session, DACL limited
 // to the current user, remote clients rejected, client identity verified on connect.
 // This is a same-user control channel, not an isolation boundary against same-account malware.
+// libs/ipc/include_posix has the macOS version of this header (Unix sockets).
 
 #include <windows.h>
 
@@ -164,4 +160,3 @@ private:
 
 }  // namespace agentdesk::ipc
 
-#endif  // _WIN32

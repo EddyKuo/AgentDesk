@@ -41,20 +41,8 @@ struct HostConfig {
     std::function<void()> on_handed_over;
 };
 
-// The new host's side of a handover (main, `agent-host --takeover`). Reads what the old host
-// sent on `from_old`, adopts every session (nothing runs yet) and answers "ready" on `to_old`,
-// or answers "error <why>" and throws.
-#ifdef _WIN32
-std::shared_ptr<class SessionManager> receive_handover(HostConfig config, HANDLE from_old, HANDLE to_old);
-// After "ready": true once the old host said "go" or has exited (it let go of everything);
-// false when it went away without letting go (then call abandon_adopted()).
-bool await_handover_go(HANDLE from_old, HANDLE old_process);
-#else
-// macOS (ADR-30): `channel` is the socket shared with the old host (both directions, and the
-// terminals' pty masters as SCM_RIGHTS); `old_pid` is the old host.
-std::shared_ptr<class SessionManager> receive_handover(HostConfig config, int channel);
-bool await_handover_go(int channel, std::uint32_t old_pid);
-#endif
+// The new host's side of a handover (receive_handover, await_handover_go) is declared in
+// agentdesk/host/handover.hpp, which differs per system.
 
 // Owns all sessions of one host and implements IPC protocol v1 (design doc 3.7).
 //
@@ -90,11 +78,8 @@ public:
     [[nodiscard]] bool handed_over() const noexcept { return handed_over_; }
 
 private:
-#ifdef _WIN32
-    friend std::shared_ptr<SessionManager> receive_handover(HostConfig, HANDLE, HANDLE);
-#else
-    friend std::shared_ptr<SessionManager> receive_handover(HostConfig, int);
-#endif
+    // receive_handover (handover.cpp, handover_posix.cpp) builds the manager through this.
+    friend struct HandoverAccess;
     struct Adopting {};
     SessionManager(HostConfig config, Adopting);
     struct Subscriber {
@@ -190,17 +175,13 @@ private:
     std::atomic<bool> updating_{false};
     std::atomic<bool> handed_over_{false};
     std::mutex update_mutex_;  // one host.update at a time
-    struct Successor {
-#ifdef _WIN32
-        platform::win::UniqueHandle process;
-        platform::win::UniqueHandle to_new;
-#else
-        std::uint32_t pid = 0;
-        int channel = -1;  // closed by finish_handover()
-#endif
-        std::vector<ManagedPtr> sessions;  // frozen, handed over
+    // The new host and the sessions it was handed; the handles it is reached by differ per system
+    // (handover.cpp, handover_posix.cpp).
+    struct Successor;
+    struct SuccessorDeleter {
+        void operator()(Successor* p) const noexcept;
     };
-    std::optional<Successor> successor_;
+    std::unique_ptr<Successor, SuccessorDeleter> successor_;
 };
 
 }  // namespace agentdesk::host

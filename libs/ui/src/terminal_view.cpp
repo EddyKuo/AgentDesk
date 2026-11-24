@@ -15,6 +15,7 @@
 #include "agentdesk/ui/imgui_adapter.hpp"
 #include "agentdesk/ui/keyboard.hpp"
 #include "agentdesk/ui/sprites.hpp"
+#include "keyboard_os.hpp"
 
 namespace agentdesk::ui {
 
@@ -114,32 +115,18 @@ ImGuiKeyChord held_chord(const Modifiers& mods) {
         held |= ImGuiMod_Shift;
     if (mods.alt)
         held |= ImGuiMod_Alt;
-#ifdef __APPLE__
-    // macOS: keys.json chords also name the Control key, which ImGui reports as Super (it swaps
-    // Cmd and Ctrl); `mods.ctrl` here is Cmd.
-    if (ImGui::GetIO().KeySuper)
-        held |= ImGuiMod_Super;
-#endif
+    held |= keyboard_os::extra_held(ImGui::GetIO());
     return held;
 }
 
 // What the program in the terminal gets as modifiers. On macOS (FR-40) that is the Control key
 // (ImGui's Super) and Option only while it acts as Alt; Cmd never reaches the program.
 Modifiers terminal_modifiers(const ImGuiIO& io) {
-#ifdef __APPLE__
-    return Modifiers{io.KeySuper, io.KeyShift, io.KeyAlt && keyboard::option_is_alt()};
-#else
-    return Modifiers{io.KeyCtrl, io.KeyShift, io.KeyAlt};
-#endif
+    return keyboard_os::program_modifiers(io);
 }
 
-[[maybe_unused]] bool held_has_super(ImGuiKeyChord held) {
-#ifdef __APPLE__
-    return (held & ImGuiMod_Super) != 0;  // Control+C on macOS: always the program's interrupt
-#else
-    (void)held;
-    return false;
-#endif
+bool held_has_super(ImGuiKeyChord held) {
+    return keyboard_os::always_program(held);
 }
 
 bool is_modifier_key(ImGuiKey key) {
@@ -633,15 +620,9 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
                                    const terminal::ScreenSnapshot& snap) {
     const ImGuiIO& io = ImGui::GetIO();
     const Modifiers mods = terminal_modifiers(io);
-#ifdef __APPLE__
-    const bool alt_gr = false;  // Option text arrives as text (option_as_alt off)
-    const bool command = io.KeyCtrl;  // Cmd: an app chord or nothing, never input for the program
+    const bool alt_gr = keyboard_os::is_alt_gr(mods);
+    const bool command = keyboard_os::app_only_modifier(io);
     const ImGuiKeyChord held = held_chord(Modifiers{io.KeyCtrl, io.KeyShift, io.KeyAlt});
-#else
-    const bool alt_gr = mods.ctrl && mods.alt;  // AltGr arrives as Ctrl+Alt with a printable char
-    const bool command = false;
-    const ImGuiKeyChord held = held_chord(mods);
-#endif
 
     // Bound chords first: global ones go to the app, terminal ones run here. Neither reaches
     // the program.

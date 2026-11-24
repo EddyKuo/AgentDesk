@@ -2,15 +2,6 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/updates.hpp"
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <strings.h>
-#include <unistd.h>
-
-#include <CommonCrypto/CommonDigest.h>
-#endif
-
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -19,14 +10,12 @@
 #include <thread>
 #include <vector>
 
-#ifdef _WIN32
-#include <bcrypt.h>
-#endif
 #include <nlohmann/json.hpp>
 
 #include "agentdesk/protocol/frame.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "system_process.hpp"
+#include "updates_os.hpp"
 
 namespace agentdesk::ui::updates {
 
@@ -128,24 +117,13 @@ std::optional<std::string> releases() {
 }
 
 // The folder inside a release zip (tools/package names it this way).
-#ifdef _WIN32
 std::wstring packed(const std::string& version) {
-    return L"AgentDesk-" + detail::to_wide(version) + L"-win-x64";
+    return os::packed(version);
 }
 
 fs::path exe_in(const fs::path& app) {
-    return app / L"agent-ui.exe";
+    return os::ui_exe_in(app);
 }
-#else
-// macOS (ADR-30): the zip holds AgentDesk-<v>-macos-arm64/AgentDesk.app; the install is the .app.
-std::wstring packed(const std::string& version) {
-    return L"AgentDesk-" + detail::to_wide(version) + L"-macos-arm64/AgentDesk.app";
-}
-
-fs::path exe_in(const fs::path& app) {
-    return app / "Contents" / "MacOS" / "agent-ui";
-}
-#endif
 
 // Left by swap(): the next start knows it follows an update.
 fs::path marker() {
@@ -289,45 +267,11 @@ void wake_ui() {
         g().config.wake();
 }
 
-// Starts Windows PowerShell, which waits for this process to exit and then starts the app again.
-// With `expected`, the new process sees AGENTDESK_UPDATE_EXPECTED and never retries an update.
-#ifdef _WIN32
+// Starts the app again once this process has exited (os::relaunch).
 bool relaunch_expected(const std::optional<std::string>& expected) {
     const auto r = root();
-    if (!r)
-        return false;
-    std::wstring quoted;  // a single-quoted PowerShell string: ' doubles
-    for (wchar_t c : exe_in(*r).native()) {
-        quoted += c;
-        if (c == L'\'')
-            quoted += L'\'';
-    }
-    const std::wstring script = L"Wait-Process -Id " + std::to_wstring(::GetCurrentProcessId()) +
-                                L" -ErrorAction SilentlyContinue; Start-Process '" + quoted + L"'";
-    // Windows' own copy, not whatever `powershell` PATH finds.
-    const fs::path powershell = [] {
-        wchar_t sys[MAX_PATH]{};
-        const UINT n = ::GetSystemDirectoryW(sys, MAX_PATH);
-        return fs::path(std::wstring(sys, n)) / L"WindowsPowerShell" / L"v1.0" / L"powershell.exe";
-    }();
-    return detail::spawn_detached(powershell, {L"-NoProfile", L"-NonInteractive", L"-Command", script},
-                                  expected ? L"AGENTDESK_UPDATE_EXPECTED" : L"",
-                                  expected ? detail::to_wide(*expected) : L"");
+    return r && os::relaunch(*r, expected);
 }
-#else
-// macOS: /bin/sh waits for this process to exit, then `open` starts the app bundle again. The
-// script is fixed text; the pid and the bundle's path are its arguments, never parsed as code.
-bool relaunch_expected(const std::optional<std::string>& expected) {
-    const auto r = root();
-    if (!r)
-        return false;
-    const std::wstring script = L"while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open \"$2\"";
-    return detail::spawn_detached("/bin/sh",
-                                  {L"-c", script, L"agentdesk-relaunch", std::to_wstring(::getpid()), r->wstring()},
-                                  expected ? L"AGENTDESK_UPDATE_EXPECTED" : L"",
-                                  expected ? detail::to_wide(*expected) : L"");
-}
-#endif
 
 // Moves a verified download from `unpacked` to <root>.new and writes its receipt.
 bool put_stage(const fs::path& root, const fs::path& unpacked, const std::string& version,
@@ -601,55 +545,6 @@ std::optional<std::string> startup_target(std::string_view running, const std::o
     return std::nullopt;
 }
 
-#ifdef _WIN32
-std::string sha256(std::string_view bytes) {
-    BCRYPT_ALG_HANDLE alg = nullptr;
-    std::string out;
-    if (::BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0)
-        return out;
-    unsigned char digest[32]{};
-    BCRYPT_HASH_HANDLE hash = nullptr;
-    if (::BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) == 0) {
-        // BCryptHashData takes a ULONG length: feed large inputs in 1 GiB pieces.
-        std::size_t at = 0;
-        do {
-            const ULONG n = static_cast<ULONG>(std::min<std::size_t>(bytes.size() - at, 1u << 30));
-            ::BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<char*>(bytes.data() + at)), n, 0);
-            at += n;
-        } while (at < bytes.size());
-        ::BCryptFinishHash(hash, digest, sizeof digest, 0);
-        ::BCryptDestroyHash(hash);
-        static constexpr char kHex[] = "0123456789abcdef";
-        for (unsigned char b : digest) {
-            out += kHex[b >> 4];
-            out += kHex[b & 15];
-        }
-    }
-    ::BCryptCloseAlgorithmProvider(alg, 0);
-    return out;
-}
-#else
-std::string sha256(std::string_view bytes) {
-    CC_SHA256_CTX ctx;
-    CC_SHA256_Init(&ctx);
-    std::size_t at = 0;
-    while (at < bytes.size()) {
-        const auto n = static_cast<CC_LONG>(std::min<std::size_t>(bytes.size() - at, 1u << 30));
-        CC_SHA256_Update(&ctx, bytes.data() + at, n);
-        at += n;
-    }
-    unsigned char digest[CC_SHA256_DIGEST_LENGTH]{};
-    CC_SHA256_Final(digest, &ctx);
-    static constexpr char kHex[] = "0123456789abcdef";
-    std::string out;
-    for (unsigned char b : digest) {
-        out += kHex[b >> 4];
-        out += kHex[b & 15];
-    }
-    return out;
-}
-#endif
-
 fs::path beside(const fs::path& root, std::wstring_view suffix) {
     std::wstring name = root.filename().wstring();
     name += suffix;
@@ -658,35 +553,6 @@ fs::path beside(const fs::path& root, std::wstring_view suffix) {
 
 fs::path system(std::wstring_view name) {
     return detail::system32_exe(name);
-}
-
-std::string target() {
-#ifdef _WIN32
-    return "windows-x86_64";
-#else
-    return "darwin-aarch64";
-#endif
-}
-
-// An install is the folder unpacked from the portable zip, recognised by the
-// THIRD_PARTY_NOTICES.md it holds; a build folder has none.
-std::optional<fs::path> find_root(const fs::path& exe) {
-    std::error_code ec;
-    const fs::path real = fs::canonical(exe, ec);
-    if (ec)
-        return std::nullopt;
-#ifdef _WIN32
-    const fs::path dir = real.parent_path();
-    if (fs::is_regular_file(dir / L"THIRD_PARTY_NOTICES.md", ec))
-        return dir;
-#else
-    // macOS: <root>.app/Contents/MacOS/agent-ui, with the notices in Contents/Resources.
-    const fs::path bundle = real.parent_path().parent_path().parent_path();
-    if (bundle.extension() == ".app" &&
-        fs::is_regular_file(bundle / "Contents" / "Resources" / "THIRD_PARTY_NOTICES.md", ec))
-        return bundle;
-#endif
-    return std::nullopt;
 }
 
 // ---- steps
@@ -917,15 +783,9 @@ void leave_install_folder() {
     auto a = real.begin();
     auto b = r->begin();
     for (; b != r->end(); ++a, ++b)
-#ifdef _WIN32
-        if (a == real.end() || _wcsicmp(a->c_str(), b->c_str()) != 0)
+        if (a == real.end() || !os::same_component(*a, *b))
             return;
-    const auto home = detail::env_var(L"USERPROFILE");
-#else
-        if (a == real.end() || ::strcasecmp(a->c_str(), b->c_str()) != 0)
-            return;
-    const auto home = detail::env_var(L"HOME");
-#endif
+    const auto home = detail::home_folder();
     if (home)
         fs::current_path(*home, ec);
 }
@@ -934,11 +794,7 @@ bool apply_on_startup() {
     const auto expected = detail::env_var(L"AGENTDESK_UPDATE_EXPECTED");
     if (expected) {
         // Do not leak the guard into agent-host's environment and every terminal it starts.
-#ifdef _WIN32
-        ::SetEnvironmentVariableW(L"AGENTDESK_UPDATE_EXPECTED", nullptr);
-#else
-        ::unsetenv("AGENTDESK_UPDATE_EXPECTED");
-#endif
+        detail::unset_env_var(L"AGENTDESK_UPDATE_EXPECTED");
         return false;  // relaunched as this version, or not: never retried
     }
     const auto r = checks_app();
@@ -995,11 +851,7 @@ void after_update() {
         std::string now;
         std::string error;
         const bool ok = run_core_update(
-#ifdef _WIN32
-            {L"--exe", (root / L"agent-host.exe").native()},
-#else
-            {L"--exe", (root / "Contents" / "MacOS" / "agent-host").wstring()},
-#endif
+            {L"--exe", os::host_exe_in(root).wstring()},
             &now, &error);
         {
             std::lock_guard lock(g().mutex);
@@ -1034,11 +886,7 @@ bool run_core_update(const std::vector<std::wstring>& extra, std::string* now, s
             args.insert(args.end(), {L"--pipe", g().pipe});
     }
     args.insert(args.end(), extra.begin(), extra.end());
-#ifdef _WIN32
-    const fs::path ctl = g().config.exe.parent_path() / L"agentctl.exe";
-#else
-    const fs::path ctl = g().config.exe.parent_path() / "agentctl";
-#endif
+    const fs::path ctl = os::ctl_exe_beside(g().config.exe.parent_path());
     const auto r = detail::run_process(ctl, args);
     if (!r.started) {
         *error = "cannot run agentctl update";

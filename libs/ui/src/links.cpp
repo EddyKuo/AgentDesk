@@ -3,19 +3,6 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/links.hpp"
 
-#ifdef _WIN32
-#include <windows.h>
-
-#include <objbase.h>
-#include <shellapi.h>
-#else
-#include <unistd.h>
-
-#include <vector>
-
-#include "agentdesk/platform/process.hpp"
-#endif
-
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -27,6 +14,8 @@
 #include <thread>
 
 #include "agentdesk/platform/win/error.hpp"
+#include "links_os.hpp"
+#include "system_process.hpp"
 
 namespace agentdesk::ui {
 
@@ -164,23 +153,15 @@ std::string from_path(const fs::path& p) {
     }
 }
 
-std::optional<std::string> env(const char* name) {
-#ifdef _WIN32
-    char* value = nullptr;
-    std::size_t len = 0;
-    if (_dupenv_s(&value, &len, name) != 0 || value == nullptr)
+// An environment value as UTF-8; nullopt when unset, empty or not convertible.
+std::optional<std::string> env_utf8(const std::optional<std::wstring>& v) {
+    if (!v || v->empty())
         return std::nullopt;
-    std::string out(value);
-    std::free(value);
-#else
-    const char* value = std::getenv(name);
-    if (value == nullptr)
+    try {
+        return detail::to_utf8(*v);
+    } catch (const std::exception&) {
         return std::nullopt;
-    std::string out(value);
-#endif
-    if (out.empty())
-        return std::nullopt;
-    return out;
+    }
 }
 
 bool has_file_scheme(const std::string& link) {
@@ -192,8 +173,8 @@ bool has_file_scheme(const std::string& link) {
 }
 
 // The path a file: URL names on this computer, percent-decoded.
-// Every spelling counts (FILE:///C:/x, file:/C:/x, file://server/share/x); a host other than
-// localhost names a UNC path (\\server\share\x).
+// Every spelling counts (FILE:///C:/x, file:/C:/x, file://server/share/x); links_os decides
+// what the host and path name on this system.
 std::optional<std::string> file_url_path(const std::string& link) {
     if (!has_file_scheme(link))
         return std::nullopt;
@@ -229,19 +210,7 @@ std::optional<std::string> file_url_path(const std::string& link) {
     }
     if (bytes.find('\0') != std::string::npos)
         return std::nullopt;
-#ifndef _WIN32
-    // macOS: a POSIX path on this computer; another host's file is not one we can open.
-    if (!host.empty())
-        return std::nullopt;
-    return bytes;
-#endif
-    std::replace(bytes.begin(), bytes.end(), '/', '\\');
-    // /C:/Users/... names C:\Users\... (also after this computer's name, as OSC 8 writes it)
-    if (bytes.size() > 2 && bytes[2] == ':' && std::isalpha(static_cast<unsigned char>(bytes[1])) != 0)
-        return bytes.substr(1);
-    if (!host.empty())
-        return "\\\\" + host + bytes;  // file://server/share/x names \\server\share\x
-    return bytes;
+    return links_os::local_file_path(std::move(bytes), host);
 }
 
 bool is_unc(const std::string& path) {
@@ -307,7 +276,7 @@ std::optional<LinkTarget> resolve_link(const std::string& link, const std::strin
     }
     fs::path expanded;
     if (link.rfind("~/", 0) == 0) {
-        const auto home = env("USERPROFILE");
+        const auto home = env_utf8(detail::home_folder());
         if (!home)
             return std::nullopt;
         expanded = to_path(*home) / to_path(link.substr(2));
@@ -320,9 +289,9 @@ std::optional<LinkTarget> resolve_link(const std::string& link, const std::strin
         if (name == "PWD")
             base = cwd.empty() ? std::nullopt : std::optional<std::string>(cwd);
         else if (name == "HOME")
-            base = env("USERPROFILE");
+            base = env_utf8(detail::home_folder());
         else
-            base = env(name.c_str());
+            base = env_utf8(detail::env_var(detail::to_wide(name).c_str()));
         if (!base)
             return std::nullopt;
         expanded = to_path(*base) / to_path(rest);
@@ -359,75 +328,5 @@ std::optional<LinkTarget> resolve_link(const std::string& link, const std::strin
         return LinkTarget{true, bare};
     return std::nullopt;
 }
-
-#ifdef _WIN32
-void open_link(const LinkTarget& target) {
-    std::wstring wide;
-    try {
-        wide = platform::win::to_wide(target.target);
-    } catch (const std::exception&) {
-        return;
-    }
-    if (wide.empty() || wide.find(L'\0') != std::wstring::npos)
-        return;
-    std::wstring args;
-    std::wstring file = wide;
-    if (target.file) {
-        // A program or script is shown in Explorer, never run from a click on terminal text.
-        // Windows drops trailing periods and spaces (evil.exe. runs evil.exe), and a colon past
-        // the drive names a stream: neither may hide the real extension.
-        std::wstring name = wide;
-        while (!name.empty() && (name.back() == L'.' || name.back() == L' '))
-            name.pop_back();
-        if (name.find(L':', 2) != std::wstring::npos)
-            return;
-        std::wstring ext = fs::path(name).extension().wstring();
-        for (auto& ch : ext)
-            ch = static_cast<wchar_t>(std::towlower(ch));
-        static constexpr std::wstring_view kRun[] = {L".exe", L".com", L".bat", L".cmd", L".ps1", L".psm1", L".vbs",
-                                                     L".vbe", L".js",  L".jse", L".wsf", L".wsh", L".msi", L".msp",
-                                                     L".scr", L".lnk", L".pif", L".hta", L".cpl", L".reg", L".url"};
-        if (std::find(std::begin(kRun), std::end(kRun), ext) != std::end(kRun)) {
-            args = L"/select,\"" + wide + L"\"";
-            file = L"explorer.exe";
-        }
-    }
-    // ShellExecuteW can pump messages: never re-enter the UI while it handles a click.
-    std::thread([file = std::move(file), args = std::move(args)] {
-        const HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-        ShellExecuteW(nullptr, nullptr, file.c_str(), args.empty() ? nullptr : args.c_str(), nullptr, SW_SHOWNORMAL);
-        if (SUCCEEDED(init))
-            CoUninitialize();
-    }).detach();
-}
-#else
-// macOS: /usr/bin/open hands the target to its default app. A program or script is revealed in
-// the Finder (open -R), never run from a click on terminal text.
-void open_link(const LinkTarget& target) {
-    const std::string& t = target.target;
-    if (t.empty() || t.find('\0') != std::string::npos)
-        return;
-    std::vector<std::string> args;
-    if (target.file) {
-        std::error_code ec;
-        const fs::path p(t);
-        std::string ext = p.extension().string();
-        for (auto& ch : ext)
-            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-        static constexpr std::string_view kRun[] = {".app", ".command", ".sh", ".tool", ".pkg", ".dmg",
-                                                    ".workflow", ".scpt", ".jar", ".terminal", ".py", ".rb", ".pl"};
-        const bool runnable = std::find(std::begin(kRun), std::end(kRun), ext) != std::end(kRun) ||
-                              (fs::is_regular_file(p, ec) && ::access(t.c_str(), X_OK) == 0);
-        if (runnable)
-            args.push_back("-R");
-    }
-    args.push_back("--");
-    args.push_back(t);
-    try {
-        platform::spawn_detached("/usr/bin/open", args);
-    } catch (const std::exception&) {
-    }
-}
-#endif
 
 }  // namespace agentdesk::ui

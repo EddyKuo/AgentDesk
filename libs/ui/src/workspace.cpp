@@ -5,12 +5,8 @@
 
 #include <utility>
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <cstdlib>
-#include <strings.h>
-#endif
+#include "agentdesk/platform/crt.hpp"
+#include "system_process.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -310,16 +306,14 @@ std::string folder_of(const std::string& cwd) {
         return x;
     };
     const std::string s = trimmed(cwd);
-#ifdef _WIN32
-    char home[MAX_PATH]{};
-    const DWORD n = ::GetEnvironmentVariableA("USERPROFILE", home, MAX_PATH);
-    if (cwd.empty() || (n > 0 && n < MAX_PATH && _stricmp(trimmed(home).c_str(), s.c_str()) == 0))
+    const auto home_w = detail::home_folder();
+    std::string home;
+    try {
+        home = home_w ? detail::to_utf8(*home_w) : std::string();
+    } catch (const std::exception&) {
+    }
+    if (cwd.empty() || (!home.empty() && _stricmp(trimmed(home).c_str(), s.c_str()) == 0))
         return "~";
-#else
-    const char* home = std::getenv("HOME");
-    if (cwd.empty() || (home != nullptr && ::strcasecmp(trimmed(home).c_str(), s.c_str()) == 0))
-        return "~";
-#endif
     if (s.empty())
         return cwd.substr(0, 1);
     const auto p = s.find_last_of("\\/");
