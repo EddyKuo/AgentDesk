@@ -1,11 +1,9 @@
 // Connects to agent-host on macOS (starting it when allowed) or to a remote host over ssh-like
 // stdio. The interface is host_launcher.hpp; executable names given with ".exe" (shared callers)
 // name the same program without the extension here.
-#include <array>
+#include <memory>
 #include <mutex>
 #include <thread>
-
-#include <unistd.h>
 
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/platform/process.hpp"
@@ -73,12 +71,12 @@ struct CommandTransport {
     std::thread err_reader;
     std::string err_text;
     std::mutex mu;
-    int err_fd = -1;
+    std::shared_ptr<platform::Process> child;  // also held by the connection's stream
     ~CommandTransport() {
+        if (child)
+            child->kill();
         if (err_reader.joinable())
             err_reader.join();
-        if (err_fd >= 0)
-            ::close(err_fd);
     }
     std::string stderr_text() {
         std::lock_guard lock(mu);
@@ -101,13 +99,7 @@ HostConnection connect_over_command(const std::vector<std::wstring>& argv,
         out.error = name + " was not found";
         return out;
     }
-    std::array<int, 2> err_pipe{-1, -1};
-    if (::pipe(err_pipe.data()) != 0) {
-        out.error = "cannot create a pipe";
-        return out;
-    }
     auto t = std::make_shared<CommandTransport>();
-    t->err_fd = err_pipe[0];
 
     // stdin/stdout carry the protocol; the child ends with the connection (its own process group).
     platform::ProcessSpec spec;
@@ -116,29 +108,22 @@ HostConnection connect_over_command(const std::vector<std::wstring>& argv,
         spec.args.push_back(platform::to_utf8(argv[i]));
     spec.pipe_stdin = true;
     spec.pipe_stdout = true;
-    spec.stderr_fd = err_pipe[1];
-    std::unique_ptr<platform::Process> child;
+    spec.pipe_stderr = true;
     try {
-        child = platform::Process::spawn(spec);
+        t->child = platform::Process::spawn(spec);
     } catch (const std::exception& e) {
-        ::close(err_pipe[1]);
         out.error = "cannot start " + name + ": " + e.what();
         return out;
     }
-    ::close(err_pipe[1]);
     t->err_reader = std::thread([raw = t.get()] {
-        std::array<char, 1024> buf{};
-        for (;;) {
-            const ssize_t n = ::read(raw->err_fd, buf.data(), buf.size());
-            if (n <= 0)
-                break;
+        while (auto chunk = raw->child->read_some_stderr(1024)) {
             std::lock_guard lock(raw->mu);
             if (raw->err_text.size() < 4096)
-                raw->err_text.append(buf.data(), static_cast<std::size_t>(n));
+                raw->err_text += *chunk;
         }
     });
 
-    out.client = PipeClient::adopt(platform::process_stream(std::move(child)));
+    out.client = PipeClient::adopt(platform::process_stream(t->child));
     const auto hello = out.client->call("hello", hello_params(), timeout);
     if (!hello || hello->error) {
         out.client->close();

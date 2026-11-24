@@ -6,6 +6,7 @@
 #include <memory>
 #include <system_error>
 
+#include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/terminal/cwd_uri.hpp"
 #include "host_os.hpp"
@@ -120,6 +121,19 @@ void add_folder_hook(platform::PtySpawnSpec& spec) {
         "{ [Environment]::CurrentDirectory = $l.ProviderPath } } catch {}; $r }");
 }
 
+std::optional<std::filesystem::path> find_tool(const std::string& name) {
+    return platform::find_executable(name);
+}
+
+void prepare_tool(platform::ProcessSpec& spec) {
+    // git may leave work behind that must finish (gc, hooks): no kill-on-close job.
+    spec.end_with_parent = false;
+    // Files inside WSL belong to the Linux user, so Git for Windows refuses the repository as
+    // "dubious ownership". They are the person's own distribution: trust it for this one call.
+    if (is_wsl_path(spec.cwd.native()) && to_lower(spec.executable.stem().native()) == L"git")
+        spec.args.insert(spec.args.begin(), {"-c", "safe.directory=*"});
+}
+
 std::uint32_t current_pid() {
     return ::GetCurrentProcessId();
 }
@@ -140,3 +154,14 @@ std::filesystem::path home_dir() {
 }
 
 }  // namespace agentdesk::host::detail
+
+namespace agentdesk::host {
+
+bool is_wsl_path(const std::wstring& path) {
+    std::wstring p = path.substr(0, 16);
+    for (auto& c : p)
+        c = static_cast<wchar_t>(std::towlower(c == L'/' ? L'\\' : c));
+    return p.starts_with(L"\\\\wsl.localhost\\") || p.starts_with(L"\\\\wsl$\\");
+}
+
+}  // namespace agentdesk::host

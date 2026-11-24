@@ -118,7 +118,7 @@ private:
 
 class ProcessStream final : public ByteStream {
 public:
-    explicit ProcessStream(std::unique_ptr<Process> child) : child_(std::move(child)) {}
+    explicit ProcessStream(std::shared_ptr<Process> child) : child_(std::move(child)) {}
 
     std::size_t read_some(std::span<char> buf) override {
         const int fd = child_->impl().out_read.get();
@@ -142,7 +142,7 @@ public:
     }
 
 private:
-    std::unique_ptr<Process> child_;
+    std::shared_ptr<Process> child_;
     std::atomic<bool> cancelled_{false};
 };
 
@@ -285,7 +285,7 @@ std::unique_ptr<ByteStream> connect_stream(const std::string& endpoint, std::chr
     }
 }
 
-std::unique_ptr<ByteStream> process_stream(std::unique_ptr<Process> child) {
+std::unique_ptr<ByteStream> process_stream(std::shared_ptr<Process> child) {
     if (!child || !child->impl().out_read.valid() || !child->impl().in_write.valid())
         throw std::invalid_argument("process_stream needs a child with stdin and stdout pipes");
     return std::make_unique<ProcessStream>(std::move(child));

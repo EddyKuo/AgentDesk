@@ -15,6 +15,7 @@ struct Process::Impl {
     bool own_group = false;
     posix::UniqueFd in_write;  // child's stdin
     posix::UniqueFd out_read;  // child's stdout (and stderr when merged)
+    posix::UniqueFd err_read;  // child's stderr, with pipe_stderr
     std::mutex mutex;
     std::optional<int> exit_code;
 

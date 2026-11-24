@@ -12,7 +12,7 @@
 
 #include <shellscalingapi.h>
 
-#include "agentdesk/platform/win/command_line.hpp"
+#include "agentdesk/platform/process.hpp"
 #include "agentdesk/platform/win/error.hpp"
 #include "desktop_os.hpp"
 
@@ -151,17 +151,18 @@ std::filesystem::path home_dir() {
 void start_detached(const std::vector<std::wstring>& argv) {
     if (argv.empty())
         return;
-    wchar_t exe[MAX_PATH]{};
-    if (::SearchPathW(nullptr, argv[0].c_str(), L".exe", MAX_PATH, exe, nullptr) == 0)
+    const auto exe = platform::find_executable(win::to_utf8(argv[0]));
+    if (!exe)
         return;
-    std::wstring cmd = win::build_command_line(exe, std::vector<std::wstring>(argv.begin() + 1, argv.end()));
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi{};
-    if (::CreateProcessW(exe, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si,
-                         &pi)) {
-        ::CloseHandle(pi.hThread);
-        ::CloseHandle(pi.hProcess);
+    platform::ProcessSpec spec;
+    spec.executable = *exe;
+    for (std::size_t i = 1; i < argv.size(); ++i)
+        spec.args.push_back(win::to_utf8(argv[i]));
+    spec.pipe_stdout = false;
+    spec.end_with_parent = false;
+    try {
+        (void)platform::Process::spawn(spec);
+    } catch (const std::exception&) {  // not started: nothing to tell the mod
     }
 }
 

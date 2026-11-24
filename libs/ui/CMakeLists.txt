@@ -14,6 +14,7 @@ set(_ui_sources
     src/keyboard.cpp
     src/git_info.cpp
     src/path_text.cpp
+    src/system_process.cpp
     src/mods.cpp
     src/remote_screen.cpp
     src/host_client.cpp
@@ -55,7 +56,7 @@ if(WIN32)
         src/keymap_win.cpp
         src/links_win.cpp
         src/mods_win.cpp
-        src/system_process.cpp
+        src/system_process_win.cpp
         src/updates_win.cpp
         src/window_place_win.cpp)
 else()

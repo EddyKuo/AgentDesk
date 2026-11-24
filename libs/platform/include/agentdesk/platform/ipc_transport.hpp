@@ -70,8 +70,9 @@ private:
 std::unique_ptr<ByteStream> connect_stream(const std::string& endpoint, std::chrono::milliseconds timeout);
 
 // A child's stdout (read) and stdin (write) as one stream, e.g. `ssh -T host agentctl bridge`.
-// The spec must have asked for both pipes. cancel() kills the child.
-std::unique_ptr<ByteStream> process_stream(std::unique_ptr<Process> child);
+// The spec must have asked for both pipes. cancel() kills the child. Shared so that the caller can
+// still read its stderr.
+std::unique_ptr<ByteStream> process_stream(std::shared_ptr<Process> child);
 
 // Only one holder per name and user (agent-host). Released by the destructor or process exit.
 class InstanceLock {

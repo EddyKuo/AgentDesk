@@ -22,13 +22,11 @@ struct ProcessSpec {
     std::map<std::string, std::string> env_overrides;  // empty value removes the variable
     bool pipe_stdin = false;
     bool pipe_stdout = true;
-    bool merge_stderr = false;    // stderr into the stdout pipe (else to /dev/null)
-    bool end_with_parent = true;  // ~Process kills it (own process group on macOS)
-#ifndef _WIN32
-    // When set (and stderr is not merged): the child's stderr goes to this descriptor, which the
-    // caller keeps owning (ssh explains failures there).
-    int stderr_fd = -1;
-#endif
+    bool pipe_stderr = false;     // stderr in a pipe of its own (ssh, git explain failures there)
+    bool merge_stderr = false;    // stderr into the stdout pipe (neither: to the null device)
+    // ~Process ends it and what it started, and so does our own end (Windows: a kill-on-close job;
+    // macOS: its own process group, ended by ~Process only). false: it may outlive us.
+    bool end_with_parent = true;
 };
 
 // A child with optional pipes. It inherits nothing but the pipes it asked for.
@@ -47,6 +45,7 @@ public:
     void close_stdin();
     // Up to `max` bytes of stdout, blocking until some arrive; nullopt at end of stream.
     std::optional<std::string> read_some(std::size_t max);
+    std::optional<std::string> read_some_stderr(std::size_t max);  // the same for pipe_stderr
 
     // Exit code (or 128 + signal) when the child exited within `timeout`.
     std::optional<int> wait(std::chrono::milliseconds timeout);
@@ -78,7 +77,8 @@ struct DetachedResult {
 DetachedResult spawn_detached(const std::filesystem::path& exe, const std::vector<std::string>& args,
                               const std::map<std::string, std::string>& env_overrides = {});
 
-// PATH lookup without running anything. A name with a slash is checked as a path.
+// PATH lookup without running anything (Windows: SearchPathW, ".exe" added to a bare name). A name
+// with a slash is checked as a path.
 std::optional<std::filesystem::path> find_executable(std::string_view name);
 
 // True when `path` names a file this platform can start directly.

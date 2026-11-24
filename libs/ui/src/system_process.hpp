@@ -1,16 +1,19 @@
 #pragma once
 
 // Process, environment and file helpers shared by updates.cpp, telemetry.cpp and links.cpp: runs
-// the system's own tools (curl, tar) without a console and without a shell. system_process.cpp is
-// the Windows implementation, system_process_posix.cpp the macOS one (ADR-30).
+// the system's own tools (curl, tar) without a console and without a shell. What differs per
+// system is in system_process_win.cpp and system_process_posix.cpp (ADR-30).
 
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "agentdesk/platform/process.hpp"
 
 namespace agentdesk::ui::detail {
 
@@ -32,6 +35,11 @@ ProcessResult run_process(const std::filesystem::path& exe, const std::vector<st
 // environment when given. False when it could not start.
 bool spawn_detached(const std::filesystem::path& exe, const std::vector<std::wstring>& args,
                     const std::wstring& env_name = {}, const std::wstring& env_value = {});
+
+// Per system: what a tool run_process starts needs, and a start that outlives us without a window.
+void prepare_tool(platform::ProcessSpec& spec);
+bool start_in_background(const std::filesystem::path& exe, const std::vector<std::string>& args,
+                         const std::map<std::string, std::string>& env);
 
 // <SystemRoot>\System32\<name>.exe, or a bare "<name>.exe" when SystemRoot is unset or too long.
 std::filesystem::path system32_exe(std::wstring_view name);

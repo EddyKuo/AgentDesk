@@ -7,6 +7,7 @@
 
 #include "agentdesk/platform/system.hpp"
 #include "agentdesk/terminal/cwd_uri.hpp"
+#include "agentdesk/host/git_tools.hpp"
 #include "host_os.hpp"
 
 namespace agentdesk::host::detail {
@@ -73,6 +74,19 @@ void add_folder_hook(platform::PtySpawnSpec& spec) {
     }
 }
 
+// The login shell's PATH has what the person installed (git from Homebrew).
+std::optional<std::filesystem::path> find_tool(const std::string& name) {
+    return name.find('/') != std::string::npos ? platform::find_executable(name)
+                                               : platform::find_on_login_path(name);
+}
+
+void prepare_tool(platform::ProcessSpec& spec) {
+    if (spec.executable.filename() == "git")
+        spec.args.insert(spec.args.begin(), {"-c", "safe.directory=*"});
+    if (const std::string path = platform::login_path(); !path.empty())
+        spec.env_overrides["PATH"] = path;
+}
+
 std::uint32_t current_pid() {
     return static_cast<std::uint32_t>(::getpid());
 }
@@ -90,3 +104,12 @@ std::filesystem::path home_dir() {
 }
 
 }  // namespace agentdesk::host::detail
+
+namespace agentdesk::host {
+
+// No WSL on macOS.
+bool is_wsl_path(const std::wstring& /*path*/) {
+    return false;
+}
+
+}  // namespace agentdesk::host
