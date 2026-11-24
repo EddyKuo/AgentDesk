@@ -15,7 +15,8 @@ void new_menu_row(App::State& s, const char* glyph, const std::string& label, co
     const float w = ImGui::GetContentRegionAvail().x;
     const float h = px(31) - ImGui::GetStyle().ItemSpacing.y;
     ImGui::BeginDisabled(!enabled);
-    bool clicked = ImGui::InvisibleButton(("##" + label).c_str(), ImVec2(w, h));
+    // Keyed by the command, not the label: two profiles may share a name.
+    bool clicked = ImGui::InvisibleButton(("##" + label + "##" + cmd).c_str(), ImVec2(w, h));
     ImGui::EndDisabled();
     const bool hov = enabled && ImGui::IsItemHovered();
     bool run = false;

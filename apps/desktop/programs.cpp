@@ -103,9 +103,11 @@ void program_icon(ImDrawList* dl, const ui::Program& p, ImVec2 min, float size, 
                  p.tint ? color : IM_COL32_WHITE);
 }
 
+// The Unix shells are the profiles the macOS host lists from /etc/shells.
 bool is_shell(const std::string& program) {
     return program == "cmd" || program == "pwsh" || program == "powershell" || program == "bash" ||
-           program == "wsl" || program == "nu";
+           program == "wsl" || program == "nu" || program == "zsh" || program == "sh" || program == "csh" ||
+           program == "tcsh" || program == "ksh" || program == "dash" || program == "fish";
 }
 
 // Profile ids that open a shell rather than an agent (WSL profiles are "wsl-<distribution>").
