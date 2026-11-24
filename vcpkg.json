@@ -20,10 +20,6 @@
           "platform": "windows"
         },
         {
-          "name": "osx-binding",
-          "platform": "osx"
-        },
-        {
           "name": "metal-binding",
           "platform": "osx"
         },

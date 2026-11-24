@@ -174,6 +174,7 @@ Settings load_settings_unchecked() {
     s.line_height = std::clamp(j.value("line_height", 1.0f), 0.8f, 2.0f);
     s.cell_width = std::clamp(j.value("cell_width", 1.0f), 0.8f, 2.0f);
     s.sound_done = j.value("sound_done", "");
+    s.option_as_alt = safe::string_or(j, "option_as_alt", "auto");
     s.sound_blocked = j.value("sound_blocked", "");
     s.welcomed = j.value("welcomed", "");
     s.seen_version = j.value("seen_version", "");
@@ -260,6 +261,7 @@ void save_settings(const Settings& s) {
             {"line_height", s.line_height},
             {"cell_width", s.cell_width},
             {"sound_done", s.sound_done},
+            {"option_as_alt", s.option_as_alt},
             {"sound_blocked", s.sound_blocked},
             {"welcomed", s.welcomed},
             {"seen_version", s.seen_version},

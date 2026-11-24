@@ -13,6 +13,7 @@
 
 #include "agentdesk/ui/clipboard.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
+#include "agentdesk/ui/keyboard.hpp"
 #include "agentdesk/ui/sprites.hpp"
 
 namespace agentdesk::ui {
@@ -113,7 +114,32 @@ ImGuiKeyChord held_chord(const Modifiers& mods) {
         held |= ImGuiMod_Shift;
     if (mods.alt)
         held |= ImGuiMod_Alt;
+#ifdef __APPLE__
+    // macOS: keys.json chords also name the Control key, which ImGui reports as Super (it swaps
+    // Cmd and Ctrl); `mods.ctrl` here is Cmd.
+    if (ImGui::GetIO().KeySuper)
+        held |= ImGuiMod_Super;
+#endif
     return held;
+}
+
+// What the program in the terminal gets as modifiers. On macOS (FR-40) that is the Control key
+// (ImGui's Super) and Option only while it acts as Alt; Cmd never reaches the program.
+Modifiers terminal_modifiers(const ImGuiIO& io) {
+#ifdef __APPLE__
+    return Modifiers{io.KeySuper, io.KeyShift, io.KeyAlt && keyboard::option_is_alt()};
+#else
+    return Modifiers{io.KeyCtrl, io.KeyShift, io.KeyAlt};
+#endif
+}
+
+[[maybe_unused]] bool held_has_super(ImGuiKeyChord held) {
+#ifdef __APPLE__
+    return (held & ImGuiMod_Super) != 0;  // Control+C on macOS: always the program's interrupt
+#else
+    (void)held;
+    return false;
+#endif
 }
 
 bool is_modifier_key(ImGuiKey key) {
@@ -600,9 +626,16 @@ void TerminalView::run_command(const std::string& cmd, TerminalSource& source,
 void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
                                    const terminal::ScreenSnapshot& snap) {
     const ImGuiIO& io = ImGui::GetIO();
-    const Modifiers mods{io.KeyCtrl, io.KeyShift, io.KeyAlt};
+    const Modifiers mods = terminal_modifiers(io);
+#ifdef __APPLE__
+    const bool alt_gr = false;  // Option text arrives as text (option_as_alt off)
+    const bool command = io.KeyCtrl;  // Cmd: an app chord or nothing, never input for the program
+    const ImGuiKeyChord held = held_chord(Modifiers{io.KeyCtrl, io.KeyShift, io.KeyAlt});
+#else
     const bool alt_gr = mods.ctrl && mods.alt;  // AltGr arrives as Ctrl+Alt with a printable char
+    const bool command = false;
     const ImGuiKeyChord held = held_chord(mods);
+#endif
 
     // Bound chords first: global ones go to the app, terminal ones run here. Neither reaches
     // the program.
@@ -636,7 +669,9 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
     }
 
     // Ctrl+C copies when something is selected, otherwise it is an interrupt for the program.
-    if (!consumed.contains(ImGuiKey_C) && adapter::key_pressed_owned(ImGuiKey_C, str_id) &&
+    // (macOS: Cmd+C copies through keys.json; Control+C is always the interrupt.)
+    if (!command && !held_has_super(held) && !consumed.contains(ImGuiKey_C) &&
+        adapter::key_pressed_owned(ImGuiKey_C, str_id) &&
         classify_clipboard_chord(ImGuiKey_C, mods, has_selection()) == ClipboardAction::kCopy) {
         copy_selection(snap);
         clear_selection();
@@ -649,6 +684,8 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
         clear_selection();
         source.send(std::move(input));
     };
+    if (command)
+        return;  // an unbound Cmd chord: nothing for the program
     for (const ImGuiKey key : kNamedKeys) {
         if (consumed.contains(key) || !adapter::key_pressed_owned(key, str_id))
             continue;
@@ -680,7 +717,7 @@ void TerminalView::handle_keyboard(const char* str_id, TerminalSource& source,
 void TerminalView::report_global_chords(const char* str_id) {
     const ImGuiIO& io = ImGui::GetIO();
     const ImGuiKeyChord held = held_chord(Modifiers{io.KeyCtrl, io.KeyShift, io.KeyAlt});
-    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k) {
+    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k) {  // NOLINT
         const auto key = static_cast<ImGuiKey>(k);
         if (is_modifier_key(key) || !adapter::key_pressed_owned(key, str_id))
             continue;
@@ -838,7 +875,7 @@ void TerminalView::forward_mouse(TerminalSource& source, const terminal::ScreenS
                                  CellPos cell) {
     const ImGuiIO& io = ImGui::GetIO();
     std::uint8_t mods = terminal::kModNone;
-    if (io.KeyCtrl)
+    if (terminal_modifiers(io).ctrl)
         mods |= terminal::kModCtrl;
     if (io.KeyAlt)
         mods |= terminal::kModAlt;
@@ -1199,6 +1236,17 @@ bool TerminalView::draw(const char* str_id, TerminalSource& source, const FontSe
     }
     dl->PopClipRect();
 
+    // An input method's composition (macOS): drawn over the caret, underlined, until committed.
+    if (item.active) {
+        if (const std::string pre = keyboard::preedit(); !pre.empty()) {
+            const ImVec2 size = f.font->CalcTextSizeA(f.font_size, FLT_MAX, 0.0f, pre.c_str());
+            const ImVec2 b(caret.x + size.x + 2, caret.y + f.cell_h);
+            dl->AddRectFilled(caret, b, theme.default_bg);
+            dl->AddText(f.font, f.font_size, ImVec2(caret.x + 1, caret.y + (f.cell_h - size.y) * 0.5f),
+                        theme.default_fg, pre.c_str());
+            dl->AddLine(ImVec2(caret.x, b.y - 1), ImVec2(b.x, b.y - 1), theme.default_fg);
+        }
+    }
     if (item.active) {
         adapter::set_ime_caret(caret, f.cell_h);
         if (source.can_input())

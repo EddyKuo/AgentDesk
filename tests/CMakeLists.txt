@@ -14,18 +14,47 @@ if(APPLE)
         unit/cwd_uri_test.cpp
         unit/vt_engine_test.cpp
         unit/vt_handover_test.cpp
-        unit/protocol_test.cpp)
-    target_link_libraries(unit_tests PRIVATE agentdesk::protocol agentdesk::terminal agentdesk::vterm
+        unit/protocol_test.cpp
+        unit/input_mapping_test.cpp
+        unit/remote_screen_test.cpp
+        unit/workspace_test.cpp
+        unit/chrome_logic_test.cpp
+        unit/mods_test.cpp
+        unit/updates_test.cpp
+        unit/telemetry_test.cpp
+        unit/programs_test.cpp
+        unit/layout_test.cpp
+        unit/sprites_test.cpp
+        unit/safe_read_test.cpp
+        unit/window_place_test.cpp)
+    target_include_directories(unit_tests PRIVATE ${PROJECT_SOURCE_DIR}/apps/desktop)
+    target_link_libraries(unit_tests PRIVATE agentdesk::ui agentdesk::protocol agentdesk::terminal agentdesk::vterm
         nlohmann_json::nlohmann_json GTest::gtest_main GTest::gmock)
-    target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}")
+    add_library(test_mod SHARED fixtures/mods/test_mod.cpp)
+    agentdesk_target_defaults(test_mod)
+    target_link_libraries(test_mod PRIVATE agentdesk::modapi)
+    set_target_properties(test_mod PROPERTIES OUTPUT_NAME mod PREFIX "" SUFFIX ".dylib"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test_mods")
+    add_dependencies(unit_tests test_mod)
+    target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK_FIXTURE_DIR}"
+        AGENTDESK_PROGRAMS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/programs"
+        AGENTDESK_PRESET_LAYOUTS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/layouts"
+        AGENTDESK_TEST_MOD=L"$<TARGET_FILE:test_mod>")
     gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)
 
     agentdesk_executable(posix_integration_tests
         integration/posix/pty_test.cpp
         integration/posix/process_test.cpp
         integration/posix/ipc_test.cpp
-        integration/posix/system_test.cpp)
-    target_link_libraries(posix_integration_tests PRIVATE agentdesk::platform GTest::gtest_main)
+        integration/posix/system_test.cpp
+        integration/posix/osc7501_test.cpp
+        # Shared with Windows: Session through the platform layer, with vt_probe as the agent.
+        integration/windows/session_test.cpp)
+    target_link_libraries(posix_integration_tests PRIVATE agentdesk::platform agentdesk::host GTest::gtest_main)
+    add_dependencies(posix_integration_tests vt_probe)
+    target_compile_definitions(posix_integration_tests PRIVATE
+        AGENTDESK_VT_PROBE="$<TARGET_FILE:vt_probe>"
+        AGENTDESK_BUNDLED_CONPTY_DIR="")
     gtest_discover_tests(posix_integration_tests DISCOVERY_MODE PRE_TEST
         PROPERTIES LABELS "posix_integration" TIMEOUT 120)
     # agent-host built as a later release (99.0.0), for agent-host's own update (host handover).

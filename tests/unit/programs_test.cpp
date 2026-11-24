@@ -7,7 +7,12 @@
 #include <fstream>
 
 #include <gtest/gtest.h>
+#ifdef _WIN32
 #include <process.h>
+#else
+#include <unistd.h>
+#define _getpid getpid
+#endif
 
 using agentdesk::ui::powershell_line;
 using agentdesk::ui::powershell_words;

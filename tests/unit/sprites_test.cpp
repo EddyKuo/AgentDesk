@@ -47,7 +47,8 @@ TEST(Sprites, BraillePatternsUseAllEightBitsAndStayInTheCell) {
     }
     for (int w = 0; w < 80; ++w) {
         for (int h = 0; h < 160; ++h) {
-            for (const auto& [x0, y0, x1, y1] : sprites::braille(U'⣿', w, h).value()) {
+            const auto rects = sprites::braille(U'⣿', w, h).value();
+            for (const auto& [x0, y0, x1, y1] : rects) {
                 ASSERT_TRUE(0 <= x0 && x0 <= x1 && x1 <= w) << w << "x" << h;
                 ASSERT_TRUE(0 <= y0 && y0 <= y1 && y1 <= h) << w << "x" << h;
                 ASSERT_EQ(x1 - x0, y1 - y0) << w << "x" << h;

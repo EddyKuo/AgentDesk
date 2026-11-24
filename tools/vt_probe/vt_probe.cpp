@@ -9,7 +9,17 @@
 //   vt_probe counter -> prints "COUNT n" every 200 ms until killed.
 //   vt_probe flood [seconds=5] [bytes_per_sec=1048576] -> numbered lines, then "FLOOD-DONE <n>".
 // Used by S1-5 (inbox vs bundled ConPTY), the integration tests and the QA tools.
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <csignal>
+#include <cstdlib>
+
+#include <poll.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -30,6 +40,7 @@ std::string to_hex(std::string_view bytes) {
     return out;
 }
 
+#ifdef _WIN32
 void write_out(std::string_view s) {
     DWORD written = 0;
     ::WriteFile(::GetStdHandle(STD_OUTPUT_HANDLE), s.data(), static_cast<DWORD>(s.size()), &written, nullptr);
@@ -75,6 +86,51 @@ std::string read_until(std::chrono::steady_clock::time_point deadline, std::stri
     }
     return got;
 }
+#else
+// macOS (ADR-30): the same roles on a Unix pty.
+void Sleep(unsigned ms) { ::usleep(static_cast<useconds_t>(ms) * 1000); }
+
+void write_out(std::string_view s) {
+    while (!s.empty()) {
+        const ssize_t n = ::write(1, s.data(), s.size());
+        if (n <= 0)
+            return;
+        s.remove_prefix(static_cast<std::size_t>(n));
+    }
+}
+
+// Raw input: every byte as it comes, no echo, no signals from Ctrl+C; output as written.
+void enable_vt_io() {
+    termios t{};
+    if (::tcgetattr(0, &t) == 0) {
+        t.c_lflag &= ~static_cast<tcflag_t>(ICANON | ECHO | ISIG | IEXTEN);
+        t.c_iflag &= ~static_cast<tcflag_t>(ICRNL | IXON);
+        t.c_oflag &= ~static_cast<tcflag_t>(OPOST);
+        t.c_cc[VMIN] = 1;
+        t.c_cc[VTIME] = 0;
+        ::tcsetattr(0, TCSANOW, &t);
+    }
+}
+
+std::string read_until(std::chrono::steady_clock::time_point deadline, std::string_view stop = {}) {
+    std::string got;
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        pollfd p{0, POLLIN, 0};
+        if (::poll(&p, 1, static_cast<int>(std::max<long long>(left.count(), 0))) != 1)
+            break;
+        char buf[256];
+        const ssize_t n = ::read(0, buf, sizeof(buf));
+        if (n <= 0)
+            break;
+        got.append(buf, static_cast<std::size_t>(n));
+        if (!stop.empty() && got.find(stop) != std::string::npos)
+            break;
+    }
+    return got;
+}
+#endif
 
 int run_query() {
     write_out("\x1b]7501;?\x1b\\\x1b[c");
@@ -124,7 +180,7 @@ int run_flood(int seconds, long long bytes_per_sec) {
         const auto next = start + std::chrono::milliseconds(50 * (tick + 1));
         const auto now = std::chrono::steady_clock::now();
         if (next > now)
-            ::Sleep(static_cast<DWORD>(
+            ::Sleep(static_cast<unsigned>(
                 std::chrono::duration_cast<std::chrono::milliseconds>(next - now).count()));
     }
     write_out("FLOOD-DONE " + std::to_string(n) + "\r\n");
@@ -134,6 +190,7 @@ int run_flood(int seconds, long long bytes_per_sec) {
 
 }  // namespace
 
+#ifdef _WIN32
 int wmain(int argc, wchar_t** argv) {
     enable_vt_io();
     const std::wstring_view mode = argc > 1 ? argv[1] : L"query";
@@ -176,3 +233,47 @@ int wmain(int argc, wchar_t** argv) {
     write_out("usage: vt_probe query|report|echo\r\n");
     return 2;
 }
+#else
+// macOS (ADR-30): the same modes; "crash" dies of SIGSEGV, "size" reads the pty's size.
+int main(int argc, char** argv) {
+    enable_vt_io();
+    const std::string_view mode = argc > 1 ? argv[1] : "query";
+    if (mode == "query")
+        return run_query();
+    if (mode == "report")
+        return run_report();
+    if (mode == "echo")
+        return run_echo();
+    if (mode == "mouse") {
+        write_out("\x1b[?1000h\x1b[?1006h");
+        return run_echo();
+    }
+    if (mode == "size") {
+        for (;;) {
+            winsize ws{};
+            ::ioctl(1, TIOCGWINSZ, &ws);
+            write_out("\r\x1b[2KSIZE " + std::to_string(ws.ws_col) + " " + std::to_string(ws.ws_row));
+            Sleep(100);
+        }
+    }
+    if (mode == "crash") {
+        write_out("CRASHING\r\n");
+        Sleep(300);
+        std::raise(SIGSEGV);
+        return 1;
+    }
+    if (mode == "counter") {
+        for (long long n = 1;; ++n) {
+            write_out("COUNT " + std::to_string(n) + "\r\n");
+            Sleep(200);
+        }
+    }
+    if (mode == "flood") {
+        const int seconds = argc > 2 ? std::atoi(argv[2]) : 5;
+        const long long rate = argc > 3 ? std::atoll(argv[3]) : 1024 * 1024;
+        return run_flood(seconds, rate);
+    }
+    write_out("usage: vt_probe query|report|echo\r\n");
+    return 2;
+}
+#endif

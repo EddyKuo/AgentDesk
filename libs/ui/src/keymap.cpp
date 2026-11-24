@@ -64,8 +64,17 @@ std::optional<ImGuiKeyChord> Keymap::parse(std::string_view text) {
         if (dash == std::string::npos || dash + 1 >= s.size())
             break;
         const std::string part = s.substr(0, dash);
+#ifdef __APPLE__
+        // macOS (FR-40): ImGui swaps Cmd and Ctrl (ConfigMacOSXBehaviors), so Cmd is its "Ctrl"
+        // and the Control key its "Super".
+        if (part == "cmd" || part == "command" || part == "super")
+            mods |= ImGuiMod_Ctrl;
+        else if (part == "ctrl" || part == "control")
+            mods |= ImGuiMod_Super;
+#else
         if (part == "ctrl" || part == "control")
             mods |= ImGuiMod_Ctrl;
+#endif
         else if (part == "shift")
             mods |= ImGuiMod_Shift;
         else if (part == "alt")
@@ -84,12 +93,24 @@ std::optional<ImGuiKeyChord> Keymap::parse(std::string_view text) {
 
 std::string Keymap::format(ImGuiKeyChord chord) {
     std::string out;
+#ifdef __APPLE__
+    // The macOS symbols in the system's order: Control, Option, Shift, Command.
+    if (chord & ImGuiMod_Super)
+        out += "\xE2\x8C\x83";  // ⌃
+    if (chord & ImGuiMod_Alt)
+        out += "\xE2\x8C\xA5";  // ⌥
+    if (chord & ImGuiMod_Shift)
+        out += "\xE2\x87\xA7";  // ⇧
+    if (chord & ImGuiMod_Ctrl)
+        out += "\xE2\x8C\x98";  // ⌘
+#else
     if (chord & ImGuiMod_Ctrl)
         out += "Ctrl+";
     if (chord & ImGuiMod_Alt)
         out += "Alt+";
     if (chord & ImGuiMod_Shift)
         out += "Shift+";
+#endif
     const auto key = static_cast<ImGuiKey>(chord & ~ImGuiMod_Mask_);
     for (const auto& k : kKeys) {
         if (k.key == key && !k.shift && std::string_view(k.name).size() == 1) {
@@ -120,6 +141,7 @@ std::string Keymap::format(ImGuiKeyChord chord) {
 
 namespace {
 
+#ifndef __APPLE__
 // The default "global" section on Windows (spec-settings-fonts.md 3.2); ctrl-1..9 and alt-1..9
 // are added by for_each_default.
 constexpr std::pair<const char*, const char*> kGlobal[] = {
@@ -181,7 +203,85 @@ constexpr std::pair<const char*, const char*> kTerminal[] = {
      "send:\x1b"
      "f"},
 };
+#endif
 
+#ifdef __APPLE__
+// macOS defaults: herdr-app's defaults/keys.macos.json, its command names mapped to ours
+// (layout.toggle:sidebar -> sidebar.toggle, mod.open:picker -> app.picker). ctrl-1..9 select
+// spaces and cmd-1..9 tabs, added by for_each_default.
+constexpr std::pair<const char*, const char*> kGlobalMac[] = {
+    {"cmd-q", "app.quit"},
+    {"cmd-h", "app.hide"},
+    {"cmd-alt-h", "app.hide_others"},
+    {"cmd-m", "window.minimize"},
+    {"cmd-t", "tab.new"},
+    {"cmd-w", "tab.close"},
+    {"ctrl-tab", "tab.next"},
+    {"ctrl-shift-tab", "tab.prev"},
+    {"cmd-shift-]", "tab.next"},
+    {"cmd-shift-[", "tab.prev"},
+    {"cmd-alt-]", "space.next"},
+    {"cmd-alt-[", "space.prev"},
+    {"cmd-]", "agent.next"},
+    {"cmd-[", "agent.prev"},
+    {"cmd-shift-l", "layout.switch"},
+    {"cmd-n", "space.new"},
+    {"cmd-p", "app.picker"},
+    {"cmd-shift-p", "app.palette"},
+    {"cmd-,", "app.settings"},
+    {"cmd-d", "pane.split:right"},
+    {"cmd-shift-d", "pane.split:down"},
+    {"cmd-shift-w", "pane.close"},
+    {"cmd-shift-enter", "pane.zoom"},
+    {"cmd-alt-left", "pane.go:left"},
+    {"cmd-alt-right", "pane.go:right"},
+    {"cmd-alt-up", "pane.go:up"},
+    {"cmd-alt-down", "pane.go:down"},
+    {"cmd-alt-shift-left", "pane.swap:left"},
+    {"cmd-alt-shift-right", "pane.swap:right"},
+    {"cmd-alt-shift-up", "pane.swap:up"},
+    {"cmd-alt-shift-down", "pane.swap:down"},
+    {"f2", "tab.rename"},
+    {"shift-f2", "space.rename"},
+    {"cmd-/", "app.help"},
+    {"cmd-shift-/", "app.help"},
+    {"cmd-b", "sidebar.toggle"},
+    {"cmd-=", "app.zoom_in"},
+    {"cmd-shift-=", "app.zoom_in"},
+    {"cmd--", "app.zoom_out"},
+    {"cmd-0", "app.zoom_reset"},
+};
+
+constexpr std::pair<const char*, const char*> kTerminalMac[] = {
+    {"cmd-f", "terminal.search"},
+    {"cmd-a", "terminal.select_all"},
+    {"cmd-c", "terminal.copy"},
+    {"cmd-v", "terminal.paste"},
+    {"ctrl-v", "terminal.paste_image"},
+    {"alt-left",
+     "send:\x1b"
+     "b"},
+    {"alt-right",
+     "send:\x1b"
+     "f"},
+    {"alt-backspace", "send:\x17"},
+    {"cmd-left", "send:\x01"},
+    {"cmd-right", "send:\x05"},
+    {"cmd-backspace", "send:\x15"},
+};
+
+template <class F>
+void for_each_default(F&& f) {
+    for (const auto& [chord, cmd] : kGlobalMac)
+        f("global", std::string(chord), std::string(cmd));
+    for (int i = 1; i <= 9; ++i) {
+        f("global", "cmd-" + std::to_string(i), "tab.select:" + std::to_string(i));
+        f("global", "ctrl-" + std::to_string(i), "space.select:" + std::to_string(i));
+    }
+    for (const auto& [chord, cmd] : kTerminalMac)
+        f("terminal", std::string(chord), std::string(cmd));
+}
+#else
 // Calls f(section, chord text, command) for every default binding, in install order.
 template <class F>
 void for_each_default(F&& f) {
@@ -194,6 +294,7 @@ void for_each_default(F&& f) {
     for (const auto& [chord, cmd] : kTerminal)
         f("terminal", std::string(chord), std::string(cmd));
 }
+#endif
 
 }  // namespace
 
@@ -232,6 +333,11 @@ std::string migrate(std::string a) {
         a = "tab." + a.substr(8);
     if (a == "mod.open:start")
         a = "tab.new";
+    // herdr-app's names for two commands that are ours under other names.
+    if (a == "layout.toggle:sidebar")
+        a = "sidebar.toggle";
+    if (a == "mod.open:picker")
+        a = "app.picker";
     return a;
 }
 

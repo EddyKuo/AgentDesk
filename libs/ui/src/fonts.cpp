@@ -90,7 +90,9 @@ std::vector<std::string> mac_equivalents(std::wstring_view windows_name) {
         {L"msjh.ttc", {"STHeiti Medium.ttc", "Hiragino Sans GB.ttc", "Arial Unicode.ttf"}},
         {L"mingliu.ttc", {"Songti.ttc", "Arial Unicode.ttf"}},
         {L"seguisym.ttf", {"Apple Symbols.ttf"}},
-        {L"seguiemj.ttf", {"Apple Color Emoji.ttc"}},
+        // Apple Color Emoji is a 180 MB bitmap (sbix) font FreeType cannot draw at text sizes:
+        // emoji fall back to Apple Symbols' monochrome shapes where it has them.
+        {L"seguiemj.ttf", {}},
         {L"CascadiaMono.ttf", {"SFNSMono.ttf", "Menlo.ttc"}},
         {L"consola.ttf", {"Menlo.ttc"}},
         {L"consolab.ttf", {"Menlo.ttc"}},
@@ -130,8 +132,15 @@ ImFont* add_font_file(const std::string& path, float size, ImFontConfig c) {
     static std::map<std::string, std::vector<char>> files;
     auto it = files.find(path);
     if (it == files.end()) {
-        std::ifstream in(std::filesystem::path(std::u8string(path.begin(), path.end())), std::ios::binary);
-        std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        std::ifstream in(std::filesystem::path(std::u8string(path.begin(), path.end())),
+                         std::ios::binary | std::ios::ate);
+        std::vector<char> bytes;
+        if (in) {  // one read of the whole file: fonts are megabytes
+            bytes.resize(static_cast<std::size_t>(std::max<std::streamoff>(in.tellg(), 0)));
+            in.seekg(0);
+            if (!in.read(bytes.data(), static_cast<std::streamsize>(bytes.size())))
+                bytes.clear();
+        }
         if (bytes.empty())
             return nullptr;
         it = files.emplace(path, std::move(bytes)).first;

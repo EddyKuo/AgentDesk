@@ -418,7 +418,7 @@ void draw_tab_bar(App::State& s, ImVec2 pos, float width, float height) {
     // macOS: the system's window buttons sit at the left of the window (when no sidebar is left of
     // the bar, they are over it).
     if (pos.x < px(1))
-        x += px(window_system_buttons_width());
+        x += window_system_buttons_width();
     // Not in the original bar: once the sidebar is hidden (sidebar.toggle) nothing on screen could
     // bring it back, so a sidebar button leads the bar while it is hidden.
     if (const lay::Node* side = s.layout().tree.find("sidebar"); side != nullptr && side->hidden) {

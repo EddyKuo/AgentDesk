@@ -55,6 +55,7 @@
 #include "agentdesk/ui/image_cache.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
 #include "agentdesk/ui/programs.hpp"
+#include "agentdesk/ui/keyboard.hpp"
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/mods.hpp"
@@ -168,6 +169,8 @@ struct Settings {
     float line_height = 1.0f;    // terminal cell height multiplier
     float cell_width = 1.0f;     // terminal cell width multiplier
     std::string sound_done;      // MP3 replacing the bundled sounds
+    // macOS: the Option keys in terminals, "auto" | "on" | "off" | "left" | "right" (FR-40).
+    std::string option_as_alt = "auto";
     std::string sound_blocked;
     std::string welcomed;        // "", "finished" or "skipped"
     std::string seen_version;    // What's new was shown for this version (once after an update)
@@ -1110,6 +1113,7 @@ bool settings_toggle(const char* id, bool on);
 void settings_footnote(App::State& s, const char* text);
 bool settings_updates(App::State& s);
 bool settings_privacy(App::State& s);
+bool settings_keyboard(App::State& s);  // macOS only
 
 // ------------------------------------------------------------ settings_dialog.cpp
 void draw_settings(App::State& s);

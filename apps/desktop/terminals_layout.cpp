@@ -128,6 +128,8 @@ void draw_terminals_bar(App::State& s, ImVec2 pos, float width, float height) {
     // Space chip: 30 px high and round, 10 px left and 12 px right padding, 8 px gap; a 15 px icon
     // and the space name (at most 160 px).
     float x = pos.x;
+    if (pos.x < px(1))  // macOS: room for the system window buttons (points: they do not zoom)
+        x += window_system_buttons_width();
     // Not in the original bar: this layout has no sidebar, so its first button brings one back
     // (sidebar.toggle switches to the AgentDesk layout), the same button and shortcut as there.
     {

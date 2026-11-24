@@ -24,7 +24,7 @@ bool builtin_command(std::string_view name) {
         "terminal.paste", "terminal.paste_image", "terminal.peek", "terminal.pin", "terminal.right_click",
         "terminal.scroll", "terminal.search", "terminal.select_all", "theme", "window.close", "window.maximize",
         "window.minimize", "worktree.new", "worktree.open", "worktree.remove", "app.quit", "overlay.close",
-        "app.check_updates", "app.update_core", "app.update"};
+        "app.check_updates", "app.update_core", "app.update", "app.hide", "app.hide_others"};
     // clang-format on
     return kNames.contains(name);
 }
@@ -873,6 +873,8 @@ Outcome exec_app_command(App::State& s, const Command& c) {
         s.picker_buf[0] = '\0';
         s.picker_sel = -1;
         s.picker_reset = true;
+    } else if (name == "app.hide" || name == "app.hide_others") {
+        app_hide(name == "app.hide_others");
     } else if (name == "window.minimize") {
         window_minimize(s.config.hwnd);
     } else if (name == "window.maximize") {

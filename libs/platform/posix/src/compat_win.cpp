@@ -1,6 +1,8 @@
 // The macOS stand-ins for the Windows helper headers (libs/platform/posix/compat, see its README):
 // text conversion and win::PtyProcess on top of platform::Pty.
+#include <cerrno>
 #include <stdexcept>
+#include <system_error>
 
 #include "agentdesk/platform/process.hpp"
 #include "agentdesk/platform/win/command_line.hpp"
@@ -107,8 +109,13 @@ PtyProcess::~PtyProcess() = default;
 
 std::unique_ptr<PtyProcess> PtyProcess::spawn(const ConPtyApi& /*api*/, const PtySpawnSpec& spec,
                                               PtyOutputSink on_output, std::function<void()> on_exit) {
-    return std::unique_ptr<PtyProcess>(
-        new PtyProcess(platform::Pty::spawn(neutral_spec(spec), std::move(on_output), std::move(on_exit))));
+    // As on Windows, a program that cannot be started is a system_error (CreateProcess's).
+    try {
+        return std::unique_ptr<PtyProcess>(
+            new PtyProcess(platform::Pty::spawn(neutral_spec(spec), std::move(on_output), std::move(on_exit))));
+    } catch (const std::invalid_argument& e) {
+        throw std::system_error(ENOENT, std::generic_category(), e.what());
+    }
 }
 
 void PtyProcess::write(std::string_view bytes) {

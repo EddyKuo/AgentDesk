@@ -9,6 +9,7 @@
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <ImageIO/ImageIO.h>
 
 #include <algorithm>
 #include <atomic>
@@ -32,6 +33,7 @@
 #include "agentdesk/platform/win/error.hpp"
 #include "agentdesk/ui/host_client.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
+#include "agentdesk/ui/keyboard.hpp"
 #include "agentdesk/ui/telemetry.hpp"
 #include "agentdesk/ui/updates.hpp"
 #include "agentdesk/ui/window_place.hpp"
@@ -55,6 +57,7 @@ struct DevOptions {
     std::wstring pipe;
     std::vector<std::string> run;
     std::string input;
+    std::filesystem::path screenshot;  // --screenshot <png>: the last frame, written at exit
 };
 
 DevOptions parse_dev_options(int argc, char** argv) {
@@ -71,6 +74,8 @@ DevOptions parse_dev_options(int argc, char** argv) {
             o.pipe = win::to_wide(argv[++i]);
         else if (a == "--input" && i + 1 < argc)
             o.input = argv[++i];
+        else if (a == "--screenshot" && i + 1 < argc)
+            o.screenshot = argv[++i];
         else if (a == "--run" && i + 1 < argc) {
             const std::string all = argv[++i];
             for (std::size_t p = 0; p <= all.size();) {
@@ -297,6 +302,13 @@ void window_set_title(NativeWindow w, const std::string& utf8) {
 
 bool window_draws_own_buttons() { return false; }
 
+void app_hide(bool others) {
+    if (others)
+        [NSApp hideOtherApplications:nil];
+    else
+        [NSApp hide:nil];
+}
+
 float window_system_buttons_width() {
     NSWindow* win = g_shell.window;
     return win != nil && (win.styleMask & NSWindowStyleMaskFullScreen) != 0 ? 0.0f : kTrafficLightsWidth;
@@ -306,7 +318,30 @@ float window_system_buttons_width() {
 
 // ---------------------------------------------------------------- frames
 
-static void draw_frame() {
+// Writes the drawable's pixels (BGRA) as a PNG: the automated checks' screenshot, which needs no
+// screen-recording permission because it reads our own frame back from the GPU.
+static void write_png(id<MTLTexture> tex, const std::filesystem::path& file) {
+    const NSUInteger w = tex.width;
+    const NSUInteger h = tex.height;
+    std::vector<std::uint8_t> pixels(w * h * 4);
+    [tex getBytes:pixels.data() bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
+    CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx = CGBitmapContextCreate(pixels.data(), w, h, 8, w * 4, space,
+                                             static_cast<uint32_t>(kCGImageAlphaPremultipliedFirst) | static_cast<uint32_t>(kCGBitmapByteOrder32Little));
+    CGImageRef image = CGBitmapContextCreateImage(ctx);
+    NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:file.c_str()]];
+    if (CGImageDestinationRef dest =
+            CGImageDestinationCreateWithURL((__bridge CFURLRef)url, (__bridge CFStringRef)UTTypePNG.identifier, 1, nullptr)) {
+        CGImageDestinationAddImage(dest, image, nullptr);
+        CGImageDestinationFinalize(dest);
+        CFRelease(dest);
+    }
+    CGImageRelease(image);
+    CGContextRelease(ctx);
+    CGColorSpaceRelease(space);
+}
+
+static void draw_frame(bool capture = false) {
     AgentDeskView* view = g_shell.view;
     MTLRenderPassDescriptor* pass = view.currentRenderPassDescriptor;
     if (pass == nil)
@@ -323,9 +358,14 @@ static void draw_frame() {
     id<MTLRenderCommandEncoder> encoder = [commands renderCommandEncoderWithDescriptor:pass];
     ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), commands, encoder);
     [encoder endEncoding];
-    if (id<CAMetalDrawable> drawable = view.currentDrawable; drawable != nil)
+    id<CAMetalDrawable> drawable = view.currentDrawable;
+    if (drawable != nil)
         [commands presentDrawable:drawable];
     [commands commit];
+    if (capture && drawable != nil) {
+        [commands waitUntilCompleted];
+        write_png(drawable.texture, g_shell.dev.screenshot);
+    }
 }
 
 static void finish_and_exit();
@@ -339,6 +379,11 @@ static void pump() {
     auto& app = *g_shell.app;
     if (g_shell.dev.exit_after_ms > 0 &&
         Clock::now() - g_shell.launched > std::chrono::milliseconds(g_shell.dev.exit_after_ms)) {
+        if (!g_shell.dev.screenshot.empty()) {
+            @autoreleasepool {
+                draw_frame(true);
+            }
+        }
         finish_and_exit();
         return;
     }
@@ -437,6 +482,30 @@ static void finish_and_exit() {
              atStart:YES];
 }
 
+// The Option keys (FR-40): which are down is noted for "left" / "right"; while Option acts as Alt,
+// a key typed with it carries no text, so the terminal sends ESC + the key instead of the
+// character Option would type (å for Option+A).
+static NSEvent* option_as_alt(NSEvent* event) {
+    if (event.type != NSEventTypeKeyDown && event.type != NSEventTypeFlagsChanged)
+        return event;
+    const NSUInteger raw = event.modifierFlags;
+    // NX_DEVICELALTKEYMASK / NX_DEVICERALTKEYMASK: the left and right Option keys.
+    ui::keyboard::note_option_keys((raw & 0x20) != 0, (raw & 0x40) != 0);
+    if (event.type != NSEventTypeKeyDown || (raw & NSEventModifierFlagOption) == 0 ||
+        (raw & NSEventModifierFlagCommand) != 0 || !ui::keyboard::option_is_alt())
+        return event;
+    return [NSEvent keyEventWithType:event.type
+                            location:event.locationInWindow
+                       modifierFlags:event.modifierFlags
+                           timestamp:event.timestamp
+                        windowNumber:event.windowNumber
+                             context:nil
+                          characters:@""
+         charactersIgnoringModifiers:event.charactersIgnoringModifiers
+                           isARepeat:event.isARepeat
+                             keyCode:event.keyCode];
+}
+
 // ---------------------------------------------------------------- startup
 
 static void build_menu() {
@@ -526,6 +595,7 @@ int main(int argc, char** argv) {
         view.paused = YES;  // drawn by pump(), not by a display link
         view.enableSetNeedsDisplay = NO;
         view.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
+        view.framebufferOnly = g_shell.dev.screenshot.empty();  // readable only for --screenshot
         [view registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
         window.contentView = view;
         g_shell.view = view;
@@ -536,6 +606,11 @@ int main(int argc, char** argv) {
         io.IniFilename = nullptr;  // layout lives in agent-host (ui.state), settings in ui.json
         ui::adapter::disable_nav_windowing();
         ImGui_ImplOSX_Init(view);
+        // Zhuyin / Pinyin / Kana compositions are drawn by the terminal at its caret.
+        ImGui_ImplOSX_SetMarkedTextCallback([](const char* utf8) {
+            ui::keyboard::set_preedit(utf8 != nullptr ? utf8 : "");
+            schedule_pump(2);
+        });
         ImGui_ImplMetal_Init(g_shell.device);
 
         // Any input wakes the loop; a drag the chrome started moves the window.
@@ -554,7 +629,7 @@ int main(int argc, char** argv) {
                                                     }
                                                 }
                                                 schedule_pump(3);
-                                                return event;
+                                                return option_as_alt(event);
                                               }];
 
         ui::HostClientOptions hopts;

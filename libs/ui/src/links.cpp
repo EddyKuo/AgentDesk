@@ -229,6 +229,12 @@ std::optional<std::string> file_url_path(const std::string& link) {
     }
     if (bytes.find('\0') != std::string::npos)
         return std::nullopt;
+#ifndef _WIN32
+    // macOS: a POSIX path on this computer; another host's file is not one we can open.
+    if (!host.empty())
+        return std::nullopt;
+    return bytes;
+#endif
     std::replace(bytes.begin(), bytes.end(), '/', '\\');
     // /C:/Users/... names C:\Users\... (also after this computer's name, as OSC 8 writes it)
     if (bytes.size() > 2 && bytes[2] == ':' && std::isalpha(static_cast<unsigned char>(bytes[1])) != 0)

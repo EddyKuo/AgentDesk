@@ -11,6 +11,8 @@ agentdesk_library(agentdesk_ui
     src/workspace.cpp
     src/chrome_logic.cpp
     src/keymap.cpp
+    src/keyboard.cpp
+    $<$<PLATFORM_ID:Darwin>:src/macos/keyboard_macos.mm>
     src/git_info.cpp
     src/mods.cpp
     src/remote_screen.cpp
@@ -31,7 +33,7 @@ target_include_directories(agentdesk_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inclu
 # host/input.hpp is part of the public interface (TerminalSource::send).
 if(APPLE)
     target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi lunasvg::lunasvg
-        "-framework AppKit" "-framework CoreText" "-framework CoreFoundation")
+        "-framework AppKit" "-framework CoreText" "-framework CoreFoundation" "-framework Carbon")
 else()
     target_link_libraries(agentdesk_ui PRIVATE agentdesk::modapi shell32 ole32 bcrypt shcore lunasvg::lunasvg)
 endif()

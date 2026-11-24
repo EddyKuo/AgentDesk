@@ -154,6 +154,9 @@ TEST(Links, FileUrlsInEverySpellingResolveToFiles) {
         std::ofstream(exe) << "x";
     }
     std::string url_path = exe.generic_string();  // C:/Users/.../evil.exe
+#ifndef _WIN32
+    url_path.erase(0, 1);  // macOS: /var/... is spelled after the URL's own slash
+#endif
     for (const std::string& url : {"FILE:///" + url_path, "file:/" + url_path, "File://localhost/" + url_path,
                                    "file:///" + url_path}) {
         const auto t = resolve_link(url, "");
@@ -161,10 +164,15 @@ TEST(Links, FileUrlsInEverySpellingResolveToFiles) {
         EXPECT_TRUE(t->file) << url;
         EXPECT_EQ(std::filesystem::path(t->target), exe) << url;
     }
+#ifdef _WIN32
     EXPECT_EQ(resolve_link("file://server/share/evil.exe", ""),
               (LinkTarget{true, R"(\\server\share\evil.exe)"}));
     EXPECT_EQ(resolve_link("FILE://server/share/a%20b.exe", ""),
               (LinkTarget{true, R"(\\server\share\a b.exe)"}));
+#else
+    // macOS: another host's file is not one this computer can open.
+    EXPECT_FALSE(resolve_link("file://server/share/evil.exe", "").has_value());
+#endif
     EXPECT_FALSE(resolve_link("FILE:///C:/no/such/evil.exe", "").has_value());
     EXPECT_FALSE(resolve_link("file:C:/x/evil.exe", "").has_value());    // no path at all
     EXPECT_FALSE(resolve_link("file:///C:/x/%zz.exe", "").has_value());  // bad escape

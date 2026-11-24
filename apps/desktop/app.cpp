@@ -211,6 +211,7 @@ App::App(AppConfig config, std::unique_ptr<ui::HostClient> host) : s_(std::make_
     s_->config = std::move(config);
     s_->host = std::move(host);
     s_->settings = load_settings();
+    ui::keyboard::set_option_as_alt(s_->settings.option_as_alt);
     g_pal = palette_by_id(s_->settings.theme);
     s_->folded_machines.insert(s_->settings.folded_machines.begin(), s_->settings.folded_machines.end());
     s_->keymap = ui::Keymap::defaults();

@@ -47,6 +47,8 @@ inline bool window_draws_own_buttons() {
 inline float window_system_buttons_width() {
     return 0.0f;
 }
+// macOS's Cmd+H / Cmd+Alt+H (keys.macos.json); nothing on Windows.
+inline void app_hide(bool /*others*/) {}
 #else
 using NativeWindow = void*;  // the shell's NSWindow
 
@@ -58,6 +60,7 @@ void window_begin_drag(NativeWindow w);
 void window_set_title(NativeWindow w, const std::string& utf8);
 bool window_draws_own_buttons();
 float window_system_buttons_width();
+void app_hide(bool others);  // this app, or every other app
 #endif
 
 }  // namespace agentdesk::desktop

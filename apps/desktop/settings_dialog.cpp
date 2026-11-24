@@ -61,7 +61,11 @@ bool draw_settings_nav(App::State& s, float h) {
         const char* name;
         const char* glyph;
     };
-    static constexpr Section kSections[] = {{"Look", ui::icon::kPalette},    {"Machines", ui::icon::kServer},
+    static constexpr Section kSections[] = {{"Look", ui::icon::kPalette},
+#ifdef __APPLE__
+                                            {"Keyboard", ui::icon::kTerminal},  // macOS only (FR-40)
+#endif
+                                            {"Machines", ui::icon::kServer},
                                             {"Alerts", ui::icon::kBell},     {"Mods", ui::icon::kExtensions},
                                             {"Updates", ui::icon::kRefresh}, {"Privacy", ui::icon::kShield}};
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -690,6 +694,8 @@ void draw_settings(App::State& s) {
     const std::string& sec = s.settings_section;
     if (sec == "Look")
         changed = settings_look(s);
+    else if (sec == "Keyboard")
+        changed = settings_keyboard(s);
     else if (sec == "Machines")
         changed = settings_machines(s);
     else if (sec == "Alerts")

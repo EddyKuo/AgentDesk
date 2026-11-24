@@ -5,15 +5,18 @@ if(APPLE)
     find_package(imgui CONFIG REQUIRED)
     agentdesk_executable(agent-ui
         macos/main_macos.mm macos/desktop_os_macos.mm
+        ${PROJECT_SOURCE_DIR}/third_party/imgui_osx/imgui_impl_osx.mm
         app.cpp chrome.cpp code_preview.cpp commands.cpp files_changes.cpp frame.cpp git_cache.cpp
         layouts.cpp machine_add.cpp notes.cpp notices.cpp overlays.cpp panes.cpp programs.cpp
         sessions.cpp settings_dialog.cpp settings_pages.cpp settings_store.cpp side_panels.cpp
         sidebar.cpp tab_bar.cpp terminals_layout.cpp themes.cpp welcome.cpp worktrees.cpp)
-    target_include_directories(agent-ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(agent-ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/third_party/imgui_osx)
+    # Vendored backend: upstream code, its own warning level.
+    set_source_files_properties(${PROJECT_SOURCE_DIR}/third_party/imgui_osx/imgui_impl_osx.mm PROPERTIES COMPILE_OPTIONS "-Wno-error;-w")
     target_compile_options(agent-ui PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
     target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc imgui::imgui nlohmann_json::nlohmann_json
         "-framework AppKit" "-framework Metal" "-framework MetalKit" "-framework QuartzCore"
-        "-framework UniformTypeIdentifiers" "-framework GameController")
+        "-framework UniformTypeIdentifiers" "-framework GameController" "-framework Carbon")
     add_dependencies(agent-ui agent-host agentctl)
     add_custom_command(TARGET agent-ui POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/fonts" "$<TARGET_FILE_DIR:agent-ui>/fonts"

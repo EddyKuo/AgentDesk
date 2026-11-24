@@ -1,7 +1,17 @@
 // ModHost tests against a test mod DLL: loading, settings, guarded calls and the panels it returns.
 #include "agentdesk/ui/mods.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>
+#include <chrono>
+#define GetCurrentProcessId getpid
+static unsigned long long GetTickCount64() {
+    return static_cast<unsigned long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+#endif
 
 #include <filesystem>
 #include <fstream>
@@ -17,6 +27,12 @@ using agentdesk::ui::ModWidget;
 // mod.dll; each test copies it into a fresh mods folder.
 namespace {
 
+#ifdef _WIN32
+constexpr const char* kModFile = "mod.dll";
+#else
+constexpr const char* kModFile = "mod.dylib";
+#endif
+
 class ModsTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -30,7 +46,7 @@ protected:
     }
     void install(const std::string& mod, const std::string& settings = {}, const std::string& mod_json = {}) {
         fs::create_directories(dir_ / mod);
-        fs::copy_file(AGENTDESK_TEST_MOD, dir_ / mod / "mod.dll", fs::copy_options::overwrite_existing);
+        fs::copy_file(AGENTDESK_TEST_MOD, dir_ / mod / kModFile, fs::copy_options::overwrite_existing);
         if (!settings.empty())
             std::ofstream(dir_ / mod / "settings.json", std::ios::binary) << settings;
         if (!mod_json.empty())
@@ -139,7 +155,7 @@ TEST_F(ModsTest, OldLuaModsAndBadDllsReportErrors) {
     fs::create_directories(dir_ / "old");
     std::ofstream(dir_ / "old" / "main.lua", std::ios::binary) << "-- old\n";
     fs::create_directories(dir_ / "junk");
-    std::ofstream(dir_ / "junk" / "mod.dll", std::ios::binary) << "not a dll";
+    std::ofstream(dir_ / "junk" / kModFile, std::ios::binary) << "not a dll";
     ModHost h(dir_);
     h.load({"old", "junk"});
     const auto mods = h.mods();

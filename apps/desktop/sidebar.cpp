@@ -28,8 +28,11 @@ Attention most_urgent_of(App::State& s, const std::vector<std::string>& ids) {
 void draw_brand(App::State& s, ImVec2 pos, float w, bool rail) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float h = px(46);
-    const float cy = pos.y + h * 0.5f;
-    const float x = pos.x + (rail ? px(6) : px(14));
+    // macOS: the system's window buttons sit at the top-left; the mark and name start after them,
+    // and a rail (too narrow to share the row) puts its toggle below them.
+    const float system_buttons = pos.x < px(1) && pos.y < px(1) ? window_system_buttons_width() : 0.0f;
+    const float cy = pos.y + h * 0.5f + (rail && system_buttons > 0 ? px(14) : 0.0f);
+    const float x = pos.x + (rail ? px(6) : px(14) + std::max(0.0f, system_buttons - px(8)));
     if (!rail) {
         const float m = px(20);
         dl->AddRectFilled(ImVec2(x, cy - m * 0.5f), ImVec2(x + m, cy + m * 0.5f), g_pal->focus, px(5));
