@@ -32,10 +32,10 @@
 
 設計原則：
 
-1. **UI 與執行核心分離。** 終端機、子程序、VT 引擎與歷史都在 agent-host；agent-ui 與 agentctl 只是 client。關掉視窗不影響工作。
-2. **host 完整解析所有輸出。** 只有送給 UI 的畫面更新可以合併或丟棄。
-3. **Agent 狀態只信結構化回報。** 沒有來源就是 Unknown，不從畫面推斷。
-4. **一份原始碼，兩個平台在建置時分開。** 共用程式不寫平台判斷，差異放在內部介面後面（2.3）。
+1. UI 與執行核心分離：終端機、子程序、VT 引擎與歷史都在 agent-host；agent-ui 與 agentctl 只是 client。關掉視窗不影響工作。
+2. host 完整解析所有輸出：只有送給 UI 的畫面更新可以合併或丟棄。
+3. Agent 狀態只信結構化回報：沒有來源就是 Unknown，不從畫面推斷。
+4. 一份原始碼，兩個平台在建置時分開：共用程式不寫平台判斷，差異放在內部介面後面（2.3）。
 
 ## 1. 系統概觀
 
@@ -43,7 +43,7 @@
 
 | 程式 | 角色 |
 |---|---|
-| `agent-host`（Windows：`agent-host.exe`） | 每位使用者一個的背景程序。擁有 pty、子程序、VT 引擎、歷史、session 紀錄與 UI 文件；提供本機 IPC 服務 |
+| `agent-host`（Windows：`agent-host.exe`） | 每位使用者只有一個的背景程序。擁有 pty、子程序、VT 引擎、歷史、session 紀錄與 UI 文件；提供本機 IPC 服務 |
 | `agent-ui`（Windows：`agent-ui.exe`；macOS：`AgentDesk.app`） | 桌面視窗。連上 host 取得畫面並送出輸入；版面、側欄、分頁、終端機繪製、設定、mod、更新、使用統計都在這裡 |
 | `agentctl`（Windows：`agentctl.exe`） | 命令列 client；也是 Agent 的狀態 hook（`hook`）、ssh 轉接（`bridge`）與 agent-host 更新工具（`update`） |
 
@@ -168,7 +168,7 @@ vcpkg 以 manifest 模式固定 baseline。Windows triplet `x64-windows-static-m
 
 | | Windows | macOS |
 |---|---|---|
-| 背景啟動 | `DETACHED_PROCESS`＋`CREATE_BREAKAWAY_FROM_JOB`，只繼承 NUL 與 log handle；不可用 `CREATE_NEW_PROCESS_GROUP`（否則子程序收不到 Ctrl+C）。breakaway 被拒時留在原 Job，啟動者的 Job 會在關閉時殺掉程序時，UI 狀態列與 agentctl 提示 | `posix_spawn` 加 `POSIX_SPAWN_SETSID`，stdio 接 `/dev/null`，`POSIX_SPAWN_CLOEXEC_DEFAULT` |
+| 背景啟動 | `DETACHED_PROCESS`＋`CREATE_BREAKAWAY_FROM_JOB`，只繼承 NUL 與 log handle；不可用 `CREATE_NEW_PROCESS_GROUP`（否則子程序收不到 Ctrl+C）。breakaway 被拒時留在原 Job；那個 Job 會在啟動者關閉時結束所有程序的話，UI 狀態列與 agentctl 會先提示 | `posix_spawn` 加 `POSIX_SPAWN_SETSID`，stdio 接 `/dev/null`，`POSIX_SPAWN_CLOEXEC_DEFAULT` |
 | 工作目錄 | 使用者家目錄（不能是安裝資料夾，否則線上更新無法改名資料夾） | 家目錄 |
 | 單一實例 | named mutex `Local\AgentDesk-host-<SID>-s<登入工作階段>` | `flock` `<runtime>/host.lock` |
 | 端點 | `\\.\pipe\AgentDesk-<SID>-s<登入工作階段>` | Unix socket `<使用者暫存資料夾>/AgentDesk/host.sock` |
@@ -219,7 +219,7 @@ vcpkg 以 manifest 模式固定 baseline。Windows triplet `x64-windows-static-m
 
 - **背壓**：佇列裡的輸出超過 8 MiB 時 reader 暫停讀取，子程序的寫入隨之阻塞，不丟任何位元組；次數記在 `backpressure_waits`。關閉前先解除背壓，否則 join reader 會死結。
 - **歷史**：每個 session 10,000 行、16 MiB，先達到者截斷最舊的資料；`history.read` 一次最多 200 行，回報第一個還在的 line id。OSC 字串上限 64 KiB。
-- **libvterm 的處理**：UTF-8 序列被切在兩次讀取之間時，VtEngine 暫存尾端不完整的序列（只延後、不丟），程式結束時 flush。預設色的格子 RGB 一律為 0，比較快照或走協定時才會相等。模糊寬度字元一律 1 欄、ZWJ emoji 不合併；libvterm 不通知 RIS，OSC 7501「RIS 清除全部紀錄」沒有實作。
+- **libvterm 的處理**：UTF-8 序列被切在兩次讀取之間時，VtEngine 暫存尾端不完整的序列（只延後、不丟），程式結束時 flush。預設色的格子 RGB 一律存成 0，這樣比較快照或經協定傳送時，兩個預設色的格子才會相等。模糊寬度字元一律 1 欄、ZWJ emoji 不合併；libvterm 不通知 RIS，OSC 7501「RIS 清除全部紀錄」沒有實作。
 - **前景程式與資料夾**：`session.list` 的 `program`、`program_argv`、`live_cwd` 來自平台層（Windows：Job 裡最新最深的子程序與 PEB；macOS：`tcgetpgrp` 加 `libproc`）。shell 送來的 OSC 7 優先於程序的工作目錄；OSC 7 的主機名稱必須是這台電腦才採用。
 - **已結束的 session**：只有最新 8 個保留完整的 Session 物件（畫面與歷史），更舊的只留紀錄。
 - **環境變數**：每個 session 都有 `AGENTDESK_SESSION_ID`、`AGENTDESK_CTL`（agentctl 的完整路徑）、`AGENTDESK_PIPE`（host 端點）。
@@ -268,7 +268,7 @@ agent_state 為 Unknown、Idle、Working、Blocked、Done、Error，和 process_
 
 ### 3.6 shell 提示鉤子與資料夾追蹤
 
-host 啟動 shell 時加上鉤子，讓 shell 在每次顯示提示時送出 OSC 133 A（前一個程式已結束），能做到的再送 OSC 7（目前資料夾）。實作在 `host_os_win.cpp`、`host_os_posix.cpp`。
+host 啟動 shell 時加上鉤子，讓 shell 在每次顯示提示時送出 OSC 133 A（前一個程式已結束）；WSL、zsh、bash 另外送 OSC 7（目前資料夾），PowerShell 改成同步程序的工作目錄，Command Prompt 只送 OSC 133 A。實作在 `host_os_win.cpp`、`host_os_posix.cpp`。
 
 | shell | 做法 |
 |---|---|
@@ -355,7 +355,7 @@ macOS 上每個 shell 另外取得 `TERM=xterm-256color`、`COLORTERM=truecolor`
 ### 4.6 attach、訂閱與控制權
 
 - **attach**：host 在 session actor 內取得 seq=S 的快照並註冊訂閱（同一把鎖），送出快照，之後只送 seq>S 的增量，快照與訂閱之間不會漏事件。
-- **扇出**：client 需要重新同步，或 generation、尺寸改變時送完整快照；否則送變動的列。
+- **送給訂閱者**：client 需要重新同步，或 generation、尺寸改變時送完整快照；否則只送變動的列。
 - **控制權**：一個 session 同時只有一個控制者。`take_control` 一定取得；`want_control` 只在沒人控制時取得。client 斷線時釋放它的控制權與訂閱。UI attach 時帶 `want_control`，別的視窗持有時顯示唯讀橫幅，按「Take control」改帶 `take_control`。
 - **增量對不上**：generation 不同或 base_seq 不連續時，UI 丟掉增量並要求 `screen.snapshot`。
 
@@ -421,7 +421,7 @@ sequenceDiagram
     New->>New: 開始讀寫，接管端點
 ```
 
-- **凍結**：暫停 reader；解析器不在 ground 時逐位元組多讀；寫完所有待送的輸入；停止監看程序結束。沒讀的位元組留在 pty 給新 host。
+- **凍結**：暫停 reader；解析器不在 ground 時逐位元組多讀；寫完所有待送的輸入；不再監看程序是否結束。沒讀的位元組留在 pty 給新 host。
 - **狀態資料**（格式兩平台相同）：magic `ADHO`、格式 1、實例 id、`succeeds`（最多 16 筆）；每個 session 的紀錄、待送任務與時間、待送回報、引擎狀態（兩個畫面緩衝區、筆、模式、捲動區、tab、字元集、DECSC 游標、歷史與 line id、OSC 7501 紀錄與 seq）；最後是 ui.state、rev 與去重表。
 - **Windows**：以兩條私有管線溝通；把 ConPTY 的 signal、reference、conhost、輸入、輸出、子程序與 Job 共 7 個 handle `DuplicateHandle` 給新程序。新 host 核對 PID、程序在 Job 裡、Job 仍是 KILL_ON_JOB_CLOSE 且不允許 breakaway、console 程序是 OpenConsole，再用隨附 ConPTY 的 `ConptyPackPseudoConsole` 重建。系統內建 ConPTY 沒有這個函式，所以不能交接，回報錯誤。
 - **macOS**：`socketpair` 當通道（新 host 的 fd 3），以 `agent-host --takeover <舊 pid>` 啟動；狀態資料之後以 `SCM_RIGHTS` 依序送出每個 pty master。新 host 核對：fd 是 pty master、根程序還在、是同一使用者、自成 session 且擁有這個終端機。新 host 不是根程序的父程序，之後程式結束時 exit code 記為未知。
@@ -454,7 +454,7 @@ sequenceDiagram
 | `hook` | Agent CLI 的狀態 hook：從 stdin 讀事件 JSON（最多 1 MiB），`UserPromptSubmit`、`PostToolUse` → working，`PermissionRequest` → blocked（permission），`Stop`、`Interrupt` → idle；source `agentdesk-hook`、seq 為毫秒時間戳。不輸出任何東西、一律以 0 結束、不啟動 host、以 1.5 秒逾時，也不代替使用者回答權限確認 |
 | `bridge` | 連上（必要時啟動）本機 host，把 stdin／stdout 逐位元組轉接到端點；stdout 只有協定位元組。給 ssh 用 |
 | `update [--version V] [--exe PATH]` | 5.2 |
-| `skill`、`--skill` | 印出教在 AgentDesk 裡執行的 Agent 如何開、等待、讀取、回報子 Agent 的說明 |
+| `skill`、`--skill` | 印出一份說明，教在 AgentDesk 裡執行的 Agent 怎麼開子 Agent、等待它、讀它的輸出、接收它的回報 |
 
 - **全域選項**：`--json`、`--pipe NAME`、`--no-start`、`--timeout-ms N`（預設 5000）。端點依序取 `--pipe`、`AGENTDESK_PIPE`、預設值；`bridge` 不看 `AGENTDESK_PIPE`。
 - **不啟動 host 的指令**：`report-state`、`report`、`shutdown`、`hook`、`update`，以及有 `--no-start` 時。
@@ -652,7 +652,7 @@ macOS 上 ImGui 互換 Cmd 與 Ctrl：`keys.json` 的 `cmd` 是 ImGui 的 Ctrl�
 `libs/ui/src/terminal_view.cpp`。
 
 - **繪製**：用 ImDrawList 畫背景、字形、選取與游標，只畫可見的列。格寬取字型真實的 advance（終端機字型開 PixelSnapH），不用 `CalcTextSize`（它無條件進位，游標會越往右越偏）。每格各自定位；寬字元放大填滿兩格並置中，右半格用左格的背景色。框線、方塊、點字、Powerline 與 ⏺ 由 sprites 依格子的像素邊界畫成圖形（`sprites.cpp`）。格子記住它是 16 個 ANSI 色中的哪一個時，用主題的色表畫。
-- **按鍵處理順序**：(1) 綁定的和弦（terminal 區段優先），交給 AgentDesk，不送進程式；(2) Windows 上有選取時 Ctrl+C 複製；(3) 具名按鍵依修飾鍵編碼；(4) Ctrl 或 Alt 加字元；(5) 可列印文字（含輸入法確定的文字）只從 ImGui 的字元佇列取得，避免同一個字送兩次，控制字元過濾掉。AltGr（Windows 的 Ctrl+Alt 加字元）當成文字。macOS 上 Cmd 和弦不送進程式，Option 依 `option_as_alt` 決定是 Alt 還是輸入字元（auto：美式與 ABC 鍵盤配置時是 Alt，每次按鍵時查目前的輸入來源）。
+- **按鍵處理順序**：（1）綁定的和弦（terminal 區段優先），交給 AgentDesk，不送進程式；（2）Windows 上有選取時 Ctrl+C 複製；（3）具名按鍵依修飾鍵編碼；（4）Ctrl 或 Alt 加字元；（5）可列印文字（含輸入法確定的文字）只從 ImGui 的字元佇列取得，避免同一個字送兩次，控制字元過濾掉。AltGr（Windows 的 Ctrl+Alt 加字元）當成文字。macOS 上 Cmd 和弦不送進程式，Option 依 `option_as_alt` 決定是 Alt 還是輸入字元（auto：美式與 ABC 鍵盤配置時是 Alt，每次按鍵時查目前的輸入來源）。
 - **輸入法**：游標位置經 ImGui 交給系統，候選視窗出現在游標旁。macOS 組字中的文字以底線畫在游標處，確定後才送出。
 - **選取**：拖曳、雙擊選字、三擊選行，含歷史；拖出邊緣時每 50 ms 自動捲動 1～5 行；放開即複製。按住 Shift 時不把滑鼠交給程式而是選取。程式沒讀滑鼠時中鍵貼上。
 - **滑鼠**：程式開啟滑鼠回報（DECSET 1000／1002／1003）時，點擊、拖曳、移動與滾輪以 SGR 編碼送給程式。滾輪：在 alternate screen 且程式沒讀滑鼠時送方向鍵；否則捲動歷史，每格 3 行 × `scroll_speed`。右鍵預設開選單，可改成交給程式（`terminal.right_click`），Shift＋右鍵一定開選單。
@@ -664,7 +664,7 @@ macOS 上 ImGui 互換 Cmd 與 Ctrl：`keys.json` 的 `cmd` 是 ImGui 的 Ctrl�
 
 ### 7.10 主題
 
-`apps/desktop/themes.cpp`。內建八個：AgentDesk 的 Midnight、Ember、Moss（深色）、Paper（淺色），以及 preset-graphite、preset-ink、preset-moss（深色）、preset-paper（淺色）。主題檔格式 `{background, foreground, selection, cursor, ansi[16], colors{}}`，從程式資料夾與資料資料夾的 `themes/` 讀取，資料資料夾優先；隨附 atom-one-dark。介面顏色從主題推算。外觀為 system 時跟著系統的 app 外觀（最多每 2 秒檢查一次）。版面指定的主題優先於一切。舊的主題 id `<x>-<preset>` 讀成 `preset-<preset>`。
+`apps/desktop/themes.cpp`。內建八個：AgentDesk 的 Midnight、Ember、Moss（深色）、Paper（淺色），以及 preset-graphite、preset-ink、preset-moss（深色）、preset-paper（淺色）。主題檔格式 `{background, foreground, selection, cursor, ansi[16], colors{}}`，從程式資料夾與資料資料夾的 `themes/` 讀取，資料資料夾優先；隨附 atom-one-dark。介面顏色從主題推算。外觀為 system 時跟著系統的 app 外觀（最多每 2 秒檢查一次）。版面指定的主題優先於使用者選的主題與外觀設定。舊的主題 id `<x>-<preset>` 讀成 `preset-<preset>`。
 
 ### 7.11 字型與程式表
 
@@ -882,7 +882,7 @@ ADR-14、ADR-24 已被取代（見表內說明），保留供查閱。表中提�
 
 | 編號 | 問題 | 影響 |
 |---|---|---|
-| OQ-11 | (1) macOS 與 Windows 能不能互為遠端機器；(2) macOS 版的程式碼簽章與公證用哪個 Apple Developer 帳號 | (1) 擋住跨平台的遠端機器；(2) 擋住 macOS 版正式發布（目前是 ad-hoc 簽章） |
+| OQ-11 | （1）macOS 與 Windows 能不能互為遠端機器；（2）macOS 版的程式碼簽章與公證用哪個 Apple Developer 帳號 | （1）擋住跨平台的遠端機器；（2）擋住 macOS 版正式發布（目前是 ad-hoc 簽章） |
 
 OQ-01～OQ-10 已決定：OQ-01 名稱 AgentDesk、OQ-08 MIT License（ADR-10）；OQ-02 首發 Claude Code 與 Codex CLI；OQ-03 libvterm 0.3.3；OQ-04 隨附 ConPTY 1.24.260710001（ADR-08）；OQ-05 GoogleTest 1.18.0、nlohmann-json 3.12.0；OQ-06 背壓；OQ-07 vcpkg manifest；OQ-09 agent-host 單獨更新時終端機不中斷（ADR-19）；OQ-10 做 macOS 版（ADR-30）。
 
