@@ -32,7 +32,8 @@ bool known_command(std::string_view name) {
 }
 
 // Profile used for new spaces/tabs/splits: the configured one if it exists, else the first
-// shell found (PowerShell 7, Windows PowerShell, Command Prompt), else empty.
+// shell found (PowerShell 7, Windows PowerShell, Command Prompt; on macOS the login shell), else
+// empty.
 std::string pick_shell(const std::string& wanted,
                        const std::vector<std::pair<std::string, std::string>>& profiles) {
     const auto has = [&](const std::string& id) {
@@ -42,6 +43,10 @@ std::string pick_shell(const std::string& wanted,
         return wanted;
     for (const char* id : {"pwsh", "powershell", "cmd"})
         if (has(id))
+            return id;
+    // Elsewhere (macOS) the host lists the login shell first among the shells it found.
+    for (const auto& [id, name] : profiles)
+        if (is_shell_profile(id))
             return id;
     return {};
 }
@@ -61,7 +66,7 @@ host::ToolResult git_at(App::State& s, const std::string& machine, const std::st
                         std::chrono::seconds timeout = std::chrono::seconds(30)) {
     if (machine.empty()) {
         const std::filesystem::path p(win::to_wide(cwd));
-        args.insert(args.begin(), {L"git", L"-C", p.native()});
+        args.insert(args.begin(), {L"git", L"-C", p.wstring()});
         return host::run_tool(args, p, timeout);
     }
     return remote_git(s.panels->remote, machine, cwd, args);
@@ -858,12 +863,14 @@ Outcome exec_app_command(App::State& s, const Command& c) {
         s.picker_buf[0] = '\0';
         s.picker_sel = -1;
         s.picker_reset = true;
+    } else if (name == "app.hide" || name == "app.hide_others") {
+        app_hide(name == "app.hide_others");
     } else if (name == "window.minimize") {
-        ::ShowWindow(s.config.hwnd, SW_MINIMIZE);
+        window_minimize(s.config.hwnd);
     } else if (name == "window.maximize") {
-        ::ShowWindow(s.config.hwnd, ::IsZoomed(s.config.hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        window_toggle_maximize(s.config.hwnd);
     } else if (name == "window.close") {
-        ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
+        window_close(s.config.hwnd);
     } else if (name == "window.fill") {
         // The Mac layout's window fills the desktop (no margins), or floats again.
         s.mac.fill = !s.mac.fill;
@@ -907,7 +914,7 @@ Outcome exec_app_command(App::State& s, const Command& c) {
     } else if (name == "app.settings") {
         // `arg` names the page to open on ("mods", "alerts", ...).
         s.show_settings = true;
-        for (const char* sec : {"Look", "Machines", "Alerts", "Mods", "Updates", "Privacy"})
+        for (const char* sec : {"Look", "Keyboard", "Machines", "Alerts", "Mods", "Updates", "Privacy"})
             if (_stricmp(arg.c_str(), sec) == 0)
                 s.settings_tab = sec;
     } else if (name == "app.zoom_in" || name == "app.zoom_out" || name == "app.zoom_reset") {
@@ -923,7 +930,7 @@ Outcome exec_app_command(App::State& s, const Command& c) {
     } else if (name == "app.keys") {
         const auto path = data_dir() / L"keys.json";
         load_keys(s);  // writes the defaults when the file is missing
-        ::ShellExecuteW(nullptr, L"open", L"notepad.exe", path.c_str(), nullptr, SW_SHOWNORMAL);
+        os::open_text_file(path);
         s.toast("keys.json opened", "Saved changes apply right away.", "", g_pal->info);
     } else if (name == "app.exit_all") {
         s.show_exit = true;
@@ -954,7 +961,7 @@ Outcome exec_app_command(App::State& s, const Command& c) {
         if (!ui::updates::apply(&error)) {
             if (error.empty())
                 return "no update is ready yet";
-            return "Close AgentDesk's terminals (or restart Windows) and try again. Couldn't replace "
+            return "Close AgentDesk's terminals (or restart the computer) and try again. Couldn't replace "
                    "AgentDesk's files: " +
                    error + ".";
         }
@@ -1117,7 +1124,7 @@ Outcome exec_layout_mod_command(App::State& s, const Command& c) {
         const auto dir = data_dir() / L"mods";
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
-        ::ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        os::open_path(dir);
     } else if (c.name == "mod") {
         const auto c2 = c.arg.find(':');
         if (c2 == std::string::npos)

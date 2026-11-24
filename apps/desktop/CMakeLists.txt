@@ -1,5 +1,11 @@
-agentdesk_executable(agent-ui WIN32
-    main.cpp
+# agent-ui: the window contents are shared; each system has its own shell (main.cpp: Win32 and
+# DX11; macos/main_macos.mm: AppKit and Metal, ADR-30) and its own desktop_os.hpp, window_ops.hpp
+# and watcher files (win/, macos/). Bundled files are copied next to the program: fonts/ (OFL /
+# MIT), the alert sounds/, the program table and icons in programs/ and the theme files in
+# themes/. Each third_party folder's README.agentdesk.md says where its files come from and under
+# which license.
+find_package(imgui CONFIG REQUIRED)
+set(_ui_app_sources
     app.cpp
     chrome.cpp
     classic_layout.cpp
@@ -43,14 +49,38 @@ agentdesk_executable(agent-ui WIN32
     inbox_layout.cpp
     garden_layout.cpp
     layout_tips.cpp
-    ui_tokens.cpp
-    agent-ui.manifest)
-target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc d3d11 dxgi dwmapi shcore dbghelp winmm imm32 shell32 nlohmann_json::nlohmann_json)
-# The UI starts agent-host.exe from its own directory (design doc 2.2).
+    ui_tokens.cpp)
+if(WIN32)
+    agentdesk_executable(agent-ui WIN32
+        main.cpp
+        ${_ui_app_sources}
+        win/desktop_os_win.cpp
+        win/git_cache_win.cpp
+        win/side_panels_win.cpp
+        win/window_ops_win.cpp
+        agent-ui.manifest)
+    target_include_directories(agent-ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc imgui::imgui nlohmann_json::nlohmann_json
+        d3d11 dxgi dwmapi shcore dbghelp winmm imm32 shell32)
+else()
+    agentdesk_executable(agent-ui
+        macos/main_macos.mm
+        ${_ui_app_sources}
+        macos/desktop_os_macos.mm
+        macos/git_cache_macos.cpp
+        macos/side_panels_macos.cpp
+        ${PROJECT_SOURCE_DIR}/third_party/imgui_osx/imgui_impl_osx.mm)
+    target_include_directories(agent-ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/third_party/imgui_osx)
+    # Vendored backend: upstream code, its own warning level.
+    set_source_files_properties(${PROJECT_SOURCE_DIR}/third_party/imgui_osx/imgui_impl_osx.mm PROPERTIES COMPILE_OPTIONS "-Wno-error;-w")
+    target_compile_options(agent-ui PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
+    target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc imgui::imgui nlohmann_json::nlohmann_json
+        "-framework AppKit" "-framework Metal" "-framework MetalKit" "-framework QuartzCore"
+        "-framework UniformTypeIdentifiers" "-framework GameController" "-framework Carbon")
+endif()
+target_compile_definitions(agent-ui PRIVATE AGENTDESK_VERSION_STRING="${PROJECT_VERSION}")
+# The UI starts agent-host from its own directory (design doc 2.2).
 add_dependencies(agent-ui agent-host agentctl)
-# Bundled files next to agent-ui.exe: fonts\ (OFL / MIT), the alert sounds\, the program table
-# and icons in programs\ and the theme files in themes\. Each third_party folder's README.agentdesk.md says where its
-# files come from and under which license.
 add_custom_command(TARGET agent-ui POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/fonts" "$<TARGET_FILE_DIR:agent-ui>/fonts"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/sounds" "$<TARGET_FILE_DIR:agent-ui>/sounds"
@@ -60,9 +90,12 @@ add_custom_command(TARGET agent-ui POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/herdr/themes" "$<TARGET_FILE_DIR:agent-ui>/themes"
     # AgentDesk's own theme files (the layouts' suggested themes), MIT like the rest.
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/libs/ui/themes" "$<TARGET_FILE_DIR:agent-ui>/themes")
-# Last: a running agent-host holds its exe and conpty.dll open, and a failed copy stops the steps
-# after it.
-add_custom_command(TARGET agent-ui POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:agent-host>" "$<TARGET_FILE:agentctl>" "$<TARGET_FILE_DIR:agent-ui>")
-agentdesk_bundle_conpty(agent-ui)
-target_compile_definitions(agent-ui PRIVATE AGENTDESK_VERSION_STRING="${PROJECT_VERSION}")
+# agent-host and agentctl next to agent-ui, on every build (a POST_BUILD step would only run when
+# agent-ui itself relinks and leave stale copies). On Windows a running agent-host holds its exe
+# open; the copy then fails and says so.
+add_custom_target(agent-ui-siblings ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:agent-host>" "$<TARGET_FILE:agentctl>" "$<TARGET_FILE_DIR:agent-ui>"
+    DEPENDS agent-host agentctl agent-ui)
+if(WIN32)
+    agentdesk_bundle_conpty(agent-ui)
+endif()

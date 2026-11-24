@@ -4,6 +4,8 @@
 
 #include <cctype>
 
+#include "keymap_os.hpp"
+
 namespace agentdesk::ui {
 
 namespace {
@@ -64,8 +66,8 @@ std::optional<ImGuiKeyChord> Keymap::parse(std::string_view text) {
         if (dash == std::string::npos || dash + 1 >= s.size())
             break;
         const std::string part = s.substr(0, dash);
-        if (part == "ctrl" || part == "control")
-            mods |= ImGuiMod_Ctrl;
+        if (const auto m = keymap_os::modifier(part))
+            mods |= *m;
         else if (part == "shift")
             mods |= ImGuiMod_Shift;
         else if (part == "alt")
@@ -84,12 +86,7 @@ std::optional<ImGuiKeyChord> Keymap::parse(std::string_view text) {
 
 std::string Keymap::format(ImGuiKeyChord chord) {
     std::string out;
-    if (chord & ImGuiMod_Ctrl)
-        out += "Ctrl+";
-    if (chord & ImGuiMod_Alt)
-        out += "Alt+";
-    if (chord & ImGuiMod_Shift)
-        out += "Shift+";
+    out += keymap_os::modifier_text(chord);
     const auto key = static_cast<ImGuiKey>(chord & ~ImGuiMod_Mask_);
     for (const auto& k : kKeys) {
         if (k.key == key && !k.shift && std::string_view(k.name).size() == 1) {
@@ -120,114 +117,11 @@ std::string Keymap::format(ImGuiKeyChord chord) {
 
 namespace {
 
-// The default "global" section on Windows (spec-settings-fonts.md 3.2); ctrl-1..9 and alt-1..9
-// are added by for_each_default.
-constexpr std::pair<const char*, const char*> kGlobal[] = {
-    {"ctrl-shift-t", "tab.new"},
-    {"ctrl-shift-n", "space.new"},
-    {"ctrl-shift-k", "app.picker"},
-    {"ctrl-alt-shift-escape", "app.reset"},
-    {"alt-[", "tab.prev"},
-    {"alt-]", "tab.next"},
-    {"ctrl-shift-w", "tab.close"},
-    {"ctrl-shift-x", "pane.close"},
-    {"ctrl-shift-o", "pane.split:right"},
-    {"ctrl-shift-e", "pane.split:down"},
-    {"ctrl-shift-z", "pane.zoom"},
-    {"ctrl-shift-p", "app.palette"},
-    {"ctrl-shift-/", "app.help"},  // = ctrl-? and ctrl-shift-? (same key)
-    {"ctrl-shift-b", "sidebar.toggle"},
-    {"ctrl-shift-l", "layout.switch"},
-    {"ctrl-,", "app.settings"},
-    {"ctrl-tab", "tab.next"},
-    {"ctrl-shift-tab", "tab.prev"},
-    {"ctrl-pagedown", "tab.next"},
-    {"ctrl-pageup", "tab.prev"},
-    {"ctrl-shift-pagedown", "space.next"},
-    {"ctrl-shift-pageup", "space.prev"},
-    {"alt-down", "agent.next"},
-    {"alt-up", "agent.prev"},
-    {"alt-h", "pane.go:left"},
-    {"alt-j", "pane.go:down"},
-    {"alt-k", "pane.go:up"},
-    {"alt-l", "pane.go:right"},
-    {"alt-left", "pane.go:left"},
-    {"alt-right", "pane.go:right"},
-    {"alt-shift-h", "pane.swap:left"},
-    {"alt-shift-j", "pane.swap:down"},
-    {"alt-shift-k", "pane.swap:up"},
-    {"alt-shift-l", "pane.swap:right"},
-    {"ctrl-=", "app.zoom_in"},
-    {"ctrl-shift-=", "app.zoom_in"},
-    {"ctrl--", "app.zoom_out"},
-    {"ctrl-0", "app.zoom_reset"},
-    {"f2", "tab.rename"},
-    {"shift-f2", "space.rename"},
-    {"ctrl-shift-.", "focus.toggle"},
-    {"ctrl-shift-m", "stage.toggle"},
-    {"ctrl-shift-i", "inbox.toggle"},
-    {"ctrl-shift-2", "pair.toggle"},  // free in every section (a terminal no longer sees Ctrl+@ there)
-    {"ctrl-shift-r", "review.toggle"},
-    {"ctrl-shift-h", "timeline.toggle"},
-};
-
-constexpr std::pair<const char*, const char*> kTerminal[] = {
-    {"ctrl-shift-c", "terminal.copy"},
-    {"ctrl-insert", "terminal.copy"},
-    {"ctrl-shift-v", "terminal.paste"},
-    {"shift-insert", "terminal.paste"},
-    {"ctrl-shift-f", "terminal.search"},
-    // terminal.paste_image: the clipboard text, else Ctrl+V so the program reads the clipboard.
-    {"ctrl-v", "terminal.paste_image"},
-    {"ctrl-backspace", "send:\x17"},
-    {"ctrl-left",
-     "send:\x1b"
-     "b"},
-    {"ctrl-right",
-     "send:\x1b"
-     "f"},
-};
-
-// Defaults that apply only while one layout shows ("layout:<name>" sections). None of them is bound
-// in "global" or "terminal": the Review layout's F8 / Shift+F8 move between changed files (elsewhere
-// F8 still reaches the terminal); Terminals' Alt keys (resize mode, split, close, gaps); Classic's F10 menu
-// bar; Stage's Alt+Left / Alt+Right put the previous / next agent on stage (it shows one pane, so
-// moving between panes has nothing to do there); Pair's Alt+P (into the shared prompt bar) and
-// Alt+Shift+S (swap sides).
-struct LayoutDefault {
-    const char* section;
-    const char* chord;
-    const char* command;
-};
-// clang-format off
-constexpr LayoutDefault kLayoutDefaults[] = {
-    {"layout:review", "f8", "review.next_file"},
-    {"layout:review", "shift-f8", "review.prev_file"},
-    {"layout:terminals", "alt-r", "terminals.resize_mode"},
-    {"layout:terminals", "alt-shift-enter", "pane.split:auto"},
-    {"layout:terminals", "alt-shift-q", "pane.close"},
-    {"layout:terminals", "alt-shift-g", "terminals.gaps"},
-    {"layout:classic", "f10", "classic.menu"},
-    {"layout:stage", "alt-left", "stage.prev"},
-    {"layout:stage", "alt-right", "stage.next"},
-    {"layout:pair", "alt-p", "pair.prompt"},
-    {"layout:pair", "alt-shift-s", "pair.swap"},
-};
-// clang-format on
-
 // Calls f(section, chord text, command) for every default binding, in install order.
 template <class F>
 void for_each_default(F&& f) {
-    for (const auto& [chord, cmd] : kGlobal)
-        f("global", std::string(chord), std::string(cmd));
-    for (int i = 1; i <= 9; ++i) {
-        f("global", "ctrl-" + std::to_string(i), "tab.select:" + std::to_string(i));
-        f("global", "alt-" + std::to_string(i), "space.select:" + std::to_string(i));
-    }
-    for (const auto& [chord, cmd] : kTerminal)
-        f("terminal", std::string(chord), std::string(cmd));
-    for (const auto& d : kLayoutDefaults)
-        f(d.section, std::string(d.chord), std::string(d.command));
+    for (auto& b : keymap_os::default_bindings())
+        f(b.section, std::move(b.chord), std::move(b.command));
 }
 
 }  // namespace
@@ -267,6 +161,11 @@ std::string migrate(std::string a) {
         a = "tab." + a.substr(8);
     if (a == "mod.open:start")
         a = "tab.new";
+    // herdr-app's names for two commands that are ours under other names.
+    if (a == "layout.toggle:sidebar")
+        a = "sidebar.toggle";
+    if (a == "mod.open:picker")
+        a = "app.picker";
     return a;
 }
 

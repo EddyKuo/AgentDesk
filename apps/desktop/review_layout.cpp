@@ -101,7 +101,7 @@ void draw_head_contents(App::State& s, ImVec2 pos, float w, float h) {
     dl->AddLine(ImVec2(pos.x, pos.y + h - 1), ImVec2(pos.x + w, pos.y + h - 1), g_pal->border);
     const float cy = pos.y + h * 0.5f;
     float right = pos.x + w - px(10);
-    if (s.config.hwnd != nullptr && !mac_window_buttons(s)) {
+    if (windows_window_buttons(s)) {
         draw_window_buttons(s, right + px(10) - px(6), pos.y, h);
         right -= px(26) * 3 + px(4) + px(12);
     }

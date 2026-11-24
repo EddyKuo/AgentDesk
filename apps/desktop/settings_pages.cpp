@@ -531,20 +531,9 @@ std::string clock_at(std::uint64_t secs) {
     return buf;
 }
 
-// Unix seconds as the date and time in the user's own Windows format.
+// Unix seconds as the date and time in the person's own format.
 std::string local_date_time(std::uint64_t secs) {
-    ULARGE_INTEGER u{};
-    u.QuadPart = (secs + 11644473600ull) * 10000000ull;  // 100 ns ticks since 1601
-    FILETIME ft{u.LowPart, u.HighPart};
-    FILETIME local{};
-    SYSTEMTIME st{};
-    ::FileTimeToLocalFileTime(&ft, &local);
-    ::FileTimeToSystemTime(&local, &st);
-    wchar_t d[64]{};
-    wchar_t t[64]{};
-    ::GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, DATE_SHORTDATE, &st, nullptr, d, 64, nullptr);
-    ::GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, 0, &st, nullptr, t, 64);
-    return win::to_utf8(std::wstring(d) + L", " + t);
+    return os::local_date_time(secs);
 }
 
 enum class UpdateControl { kNone, kCheck, kRestart, kRetry, kUpdateCore };
@@ -804,6 +793,47 @@ bool settings_privacy(App::State& s) {
     settings_row_done(s);
     if (s.show_data)
         privacy_reports(s, st);
+    return changed;
+}
+// ------------------------------------------------------------------ Keyboard page (macOS)
+// The Option keys in terminals: Alt for terminal shortcuts (an ESC prefix), or characters
+// (accents, symbols). Choices and wording as in herdr-app's macOS settings.
+bool settings_keyboard(App::State& s) {
+    static constexpr std::pair<const char*, const char*> kChoices[] = {
+        {"auto", "Automatic (Alt on US keyboards)"},
+        {"on", "Alt"},
+        {"off", "Types characters"},
+        {"left", "Left Option is Alt"},
+        {"right", "Right Option is Alt"},
+    };
+    bool changed = false;
+    settings_section(s, "Option key");
+    ImGui::PushFont(s.fonts.ui, fpx(13));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(g_pal->dim));
+    ImGui::TextWrapped("Use Option for terminal shortcuts or to type accents and special characters.");
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, px(12)));
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float w = ImGui::GetContentRegionAvail().x;
+    const float h = px(10) + line_h(14) + px(10);
+    for (const auto& [value, label] : kChoices) {
+        const bool on = s.settings.option_as_alt == value;
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        ImGui::PushID(value);
+        if (ImGui::InvisibleButton("##opt", ImVec2(w, h)) && !on) {
+            s.settings.option_as_alt = value;
+            ui::keyboard::set_option_as_alt(value);
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+            dl->AddRectFilled(a, ImVec2(a.x + w, a.y + h), g_pal->hover, px(7));
+        ImGui::PopID();
+        const float ty = a.y + (h - line_h(14)) * 0.5f;
+        dl->AddText(s.fonts.ui, fpx(14), ImVec2(a.x + px(12), ty), on ? g_pal->focus : g_pal->faint,
+                    on ? "\xE2\x97\x89" : "\xE2\x97\x8B");  // ◉ / ○
+        dl->AddText(s.fonts.ui, fpx(14), ImVec2(a.x + px(12) + px(24), ty), g_pal->text, label);
+    }
     return changed;
 }
 }  // namespace detail

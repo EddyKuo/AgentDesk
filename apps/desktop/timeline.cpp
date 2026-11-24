@@ -14,14 +14,7 @@ namespace tl = ui::timeline;
 constexpr auto kRefresh = std::chrono::seconds(15);
 
 long long utc_offset_ms() {
-    TIME_ZONE_INFORMATION tz{};
-    const DWORD r = ::GetTimeZoneInformation(&tz);
-    long long bias = tz.Bias;
-    if (r == TIME_ZONE_ID_DAYLIGHT)
-        bias += tz.DaylightBias;
-    else if (r == TIME_ZONE_ID_STANDARD)
-        bias += tz.StandardBias;
-    return -bias * 60LL * 1000LL;
+    return os::local_time().utc_offset * 60LL * 1000LL;
 }
 
 std::vector<std::string> machine_names(App::State& s) {

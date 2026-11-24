@@ -151,6 +151,6 @@ TEST(LayoutTips, MergedTerminalsAndFunLayoutsAreExplained) {
     });
     bool resize_key = false;
     for (const auto& st : shown)
-        resize_key = resize_key || (st.text.starts_with("Resize mode") && st.chord == "Alt+R");
+        resize_key = resize_key || (st.text.starts_with("Resize mode") && !st.chord.empty());
     EXPECT_TRUE(resize_key);
 }

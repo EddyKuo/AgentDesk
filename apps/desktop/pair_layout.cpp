@@ -360,7 +360,7 @@ void draw_bar(App::State& s, ImVec2 pos, float w, float h) {
     const float cy = pos.y + h * 0.5f;
     float x = clear_of_traffic_lights(s, pos.x + tok::gap_l(), pos.y, end.y, tok::gap_l());
     float right = end.x - tok::gap_s();
-    if (s.config.hwnd != nullptr && !mac_window_buttons(s)) {
+    if (windows_window_buttons(s)) {
         draw_window_buttons(s, right + tok::gap_s(), pos.y, h);
         right -= px(26) * 3 + px(4) + px(12);
     }

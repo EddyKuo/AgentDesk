@@ -34,10 +34,10 @@
 #include <thread>
 #include <tuple>
 #include <vector>
-#include <dwmapi.h>
 #include <imgui.h>
-#include <mmsystem.h>
-#include <shellapi.h>
+
+#include "agentdesk/platform/crt.hpp"
+#include "desktop_os.hpp"
 
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
@@ -51,6 +51,7 @@
 #include "agentdesk/ui/imgui_adapter.hpp"
 #include "agentdesk/ui/programs.hpp"
 #include "agentdesk/ui/schedule.hpp"
+#include "agentdesk/ui/keyboard.hpp"
 #include "agentdesk/ui/keymap.hpp"
 #include "agentdesk/ui/layout.hpp"
 #include "agentdesk/ui/mac_layout.hpp"
@@ -193,6 +194,8 @@ struct Settings {
     float line_height = 1.0f;    // terminal cell height multiplier
     float cell_width = 1.0f;     // terminal cell width multiplier
     std::string sound_done;      // MP3 replacing the bundled sounds
+    // macOS: the Option keys in terminals, "auto" | "on" | "off" | "left" | "right" (FR-40).
+    std::string option_as_alt = "auto";
     std::string sound_blocked;
     std::string welcomed;        // "", "finished" or "skipped"
     std::string seen_version;    // What's new was shown for this version (once after an update)
@@ -472,10 +475,7 @@ struct GitInfo {
 
 class GitCache {
 public:
-    GitCache()
-        : wake_(::CreateEventW(nullptr, FALSE, FALSE, nullptr)),
-          worker_([this](std::stop_token st) { run(st); }),
-          watcher_([this](std::stop_token st) { watch_loop(st); }) {}
+    GitCache();
     ~GitCache();
     GitCache(const GitCache&) = delete;
     GitCache& operator=(const GitCache&) = delete;
@@ -509,8 +509,9 @@ private:
     static std::string machine_of(const std::string& key);
     static std::string dir_of(const std::string& key);
 
-    // Local repos' git folders, each with a change notification. A change looks again at every folder of that repo; folders no longer asked about for
-    // 10 minutes stop being watched. At most 62 at once (WaitForMultipleObjects).
+    // Local repos' git folders are watched for changes (a change notification on Windows, the
+    // files' times on macOS). A change looks again at every folder of that repo; folders no longer
+    // asked about for 10 minutes stop being watched.
     void watch_loop(std::stop_token st);
 
     static std::string trim(std::string s);
@@ -525,7 +526,14 @@ private:
     std::deque<std::string> queue_;
     std::map<std::string, Entry> entries_;
     std::atomic<bool> active_{true};
-    HANDLE wake_ = nullptr;
+    // What wakes the watcher, per system (win/git_cache_win.cpp, macos/git_cache_macos.cpp).
+    struct Watch;
+    struct WatchDeleter {
+        void operator()(Watch* p) const noexcept;
+    };
+    static Watch* new_watch();
+    void wake_watcher();
+    std::unique_ptr<Watch, WatchDeleter> watch_;  // before the threads that use it
     std::jthread worker_;
     std::jthread watcher_;
 };
@@ -1176,7 +1184,7 @@ struct App::State {
         return false;
     }
     [[nodiscard]] std::string machine_label(const std::string& machine) const {
-        return machine.empty() ? std::string("This PC") : machine;
+        return machine.empty() ? std::string("This computer") : machine;
     }
     // The machine's spaces are still on their way: it is connecting (not connected, no error
     // yet), or this computer's document has not arrived. Disconnected or failed is not loading.
@@ -1273,6 +1281,8 @@ void window_drag_area(App::State& s, ImVec2 a, ImVec2 b);
 // Round window buttons (Settings > Look > Window buttons = "mac"). Input before the layout draws,
 // so the bars' drag areas leave them alone; paint after it, on top of the bars.
 bool mac_window_buttons(const App::State& s);
+// Whether the Windows-style buttons show instead; neither kind does where the system draws its own.
+bool windows_window_buttons(const App::State& s);
 void traffic_lights_input(App::State& s, ImVec2 origin);
 void traffic_lights_paint(App::State& s);
 // The first x a bar spanning [top, bottom] may use without covering the round buttons, `margin`
@@ -1449,6 +1459,7 @@ bool settings_toggle(const char* id, bool on);
 void settings_footnote(App::State& s, const char* text);
 bool settings_updates(App::State& s);
 bool settings_privacy(App::State& s);
+bool settings_keyboard(App::State& s);  // macOS only
 
 // ------------------------------------------------------------ settings_dialog.cpp
 void draw_settings(App::State& s);

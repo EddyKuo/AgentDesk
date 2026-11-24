@@ -103,9 +103,11 @@ void program_icon(ImDrawList* dl, const ui::Program& p, ImVec2 min, float size, 
                  p.tint ? color : IM_COL32_WHITE);
 }
 
+// The Unix shells are the profiles the macOS host lists from /etc/shells.
 bool is_shell(const std::string& program) {
     return program == "cmd" || program == "pwsh" || program == "powershell" || program == "bash" ||
-           program == "wsl" || program == "nu";
+           program == "wsl" || program == "nu" || program == "zsh" || program == "sh" || program == "csh" ||
+           program == "tcsh" || program == "ksh" || program == "dash" || program == "fish";
 }
 
 // Profile ids that open a shell rather than an agent (WSL profiles are "wsl-<distribution>").
@@ -132,9 +134,8 @@ bool path_within(const std::string& p, const std::string& dir) {
 
 std::string display_path(const std::string& cwd) {
     static const std::string home = [] {
-        wchar_t buf[MAX_PATH]{};
-        const DWORD n = ::GetEnvironmentVariableW(L"USERPROFILE", buf, MAX_PATH);
-        return n > 0 ? win::to_utf8(std::wstring(buf, n)) : std::string();
+        const auto u8 = os::home_dir().u8string();
+        return std::string(u8.begin(), u8.end());
     }();
     if (path_within(cwd, home))
         return "~" + cwd.substr(home.size());

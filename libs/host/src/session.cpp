@@ -2,8 +2,6 @@
 // backpressure, snapshot publishing and the handover state format.
 #include "agentdesk/host/session.hpp"
 
-#include <windows.h>
-
 #include <algorithm>
 #include <stdexcept>
 
@@ -22,13 +20,6 @@ template <class... Ts>
 struct Overloaded : Ts... {
     using Ts::operator()...;
 };
-
-DWORD millis_until(Clock::time_point t) {
-    const auto now = Clock::now();
-    if (t <= now)
-        return 0;
-    return static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(t - now).count() + 1);
-}
 
 std::int64_t wall_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -56,15 +47,6 @@ platform::win::PtyOutputSink Session::output_sink() {
     return [this](std::span<const char> b) { post_output(std::string(b.data(), b.size())); };
 }
 
-Session::Session(SessionConfig config, SessionListener listener)
-    : config_(std::move(config)),
-      listener_(std::move(listener)),
-      queue_event_(::CreateEventW(nullptr, FALSE, FALSE, nullptr)) {
-    if (!queue_event_) {
-        win::throw_last_error("CreateEventW(session queue)");
-    }
-}
-
 std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener listener) {
     std::unique_ptr<Session> self(new Session(std::move(config), std::move(listener)));
     self->engine_ = std::make_unique<terminal::VtEngine>(self->config_.engine, self->engine_events());
@@ -72,7 +54,7 @@ std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener li
 
     self->writer_ = std::thread([raw = self.get()] { raw->writer_loop(); });
     try {
-        auto process = win::PtyProcess::spawn(self->config_.api, self->config_.spec, self->output_sink());
+        auto process = self->spawn_process();
         std::lock_guard lock(self->write_mutex_);  // the writer reads process_ under this lock
         self->process_ = std::move(process);
     } catch (...) {
@@ -103,7 +85,7 @@ std::unique_ptr<Session> Session::start(SessionConfig config, SessionListener li
 Session::~Session() {
     stopping_ = true;
     release_backpressure();
-    ::SetEvent(queue_event_.get());
+    wake_actor();
     if (actor_.joinable())
         actor_.join();
     if (process_)
@@ -122,7 +104,7 @@ void Session::post(Command cmd) {
         std::lock_guard lock(queue_mutex_);
         queue_.push_back(std::move(cmd));
     }
-    ::SetEvent(queue_event_.get());
+    wake_actor();
 }
 
 void Session::post_output(std::string bytes) {
@@ -142,7 +124,7 @@ void Session::post_output(std::string bytes) {
         queued_output_bytes_ += bytes.size();
         queue_.push_back(OutputChunk{std::move(bytes)});
     }
-    ::SetEvent(queue_event_.get());
+    wake_actor();
 }
 
 void Session::release_backpressure() {
@@ -199,7 +181,7 @@ void Session::force_stop() {
     }
     if (process_)
         process_->terminate(1);
-    ::SetEvent(queue_event_.get());
+    wake_actor();
 }
 
 void Session::report_state(std::string source, std::uint64_t seq, AgentState state, terminal::StatusKind kind,
@@ -225,12 +207,7 @@ platform::win::Foreground Session::foreground() const {
     // A folder the shell reported itself (OSC 7) beats the Windows process's current directory:
     // WSL and MSYS shells cd without changing it.
     if (!i.cwd_uri.empty()) {
-        static const std::string local = [] {
-            char buf[MAX_COMPUTERNAME_LENGTH + 1]{};
-            DWORD n = MAX_COMPUTERNAME_LENGTH + 1;
-            return ::GetComputerNameA(buf, &n) ? std::string(buf, n) : std::string();
-        }();
-        if (auto p = terminal::windows_path_from_cwd_uri(i.cwd_uri, local); !p.empty())
+        if (auto p = local_path_from_cwd_uri(i.cwd_uri); !p.empty())
             fg.cwd = std::move(p);
     }
     return fg;
@@ -312,27 +289,7 @@ void Session::actor_loop() {
     bool root_exited = process_ == nullptr;
     for (;;) {
         // Wait for commands, root process exit, the next publish slot or the interrupt deadline.
-        DWORD timeout = INFINITE;
-        if (engine_->seq() != published_seq_) {
-            timeout = millis_until(last_publish_ + config_.snapshot_interval);
-        }
-        if (interrupt_deadline_) {
-            timeout = std::min(timeout, millis_until(*interrupt_deadline_));
-        }
-        // Frozen for a handover: the program's exit is the new host's to see (design doc 7.4 OQ-09).
-        const bool watch = !root_exited && !frozen_;
-        HANDLE handles[2] = {queue_event_.get(), watch ? process_->process_handle() : nullptr};
-        const DWORD count = watch ? 2 : 1;
-        const DWORD r = ::WaitForMultipleObjects(count, handles, FALSE, timeout);
-
-        drain_queue();
-
-        if (!root_exited && !frozen_ &&
-            ((watch && r == WAIT_OBJECT_0 + 1) ||
-             ::WaitForSingleObject(process_->process_handle(), 0) == WAIT_OBJECT_0)) {
-            root_exited = true;
-            on_root_exit();
-        }
+        wait_for_work(root_exited);
 
         if (interrupt_deadline_ && Clock::now() >= *interrupt_deadline_) {
             interrupt_deadline_.reset();
@@ -359,7 +316,7 @@ void Session::actor_loop() {
 }
 
 void Session::on_root_exit() {
-    DWORD remaining = 0;
+    std::uint32_t remaining = 0;
     try {
         remaining = process_->job_active_processes();
     } catch (const std::exception&) {
@@ -376,7 +333,7 @@ void Session::on_root_exit() {
     {
         std::lock_guard lock(state_mutex_);
         info_.process_state = ProcessState::kExited;
-        info_.exit_code = code.value_or(0);
+        info_.exit_code = recorded_exit_code(code);
         info_.remaining_processes = remaining > 0 ? remaining - 1 : 0;  // excluding the root
         info_.still_running_after_interrupt = false;
         note_state_locked();
@@ -794,7 +751,7 @@ std::unique_ptr<Session> Session::adopt(SessionConfig config, SessionListener li
         if (handles->pid != i.pid)
             throw std::runtime_error("handed over process is not this session's");
         // Last step that can throw: once adopted, the process must be released, never closed.
-        self->process_ = win::PtyProcess::adopt(self->config_.api, *handles, self->output_sink());
+        self->process_ = self->adopt_process(*handles);
     } else if (i.process_state != ProcessState::kExited && i.process_state != ProcessState::kFailed) {
         throw std::runtime_error("a running session came without its terminal");
     }

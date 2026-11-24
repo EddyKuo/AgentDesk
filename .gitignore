@@ -48,3 +48,6 @@ soak.err
 
 # Claude Code session data (agent worktrees, local settings)
 /.claude/
+
+# macOS Finder metadata
+.DS_Store

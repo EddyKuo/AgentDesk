@@ -130,19 +130,19 @@ float draw_strip_exit(App::State& s, ImDrawList* dl, float right, float top, flo
 
 // Windows' minimize, maximize and close, small enough for the strip (Window buttons = Windows).
 float draw_strip_window_buttons(App::State& s, float right, float top, float h) {
-    if (s.config.hwnd == nullptr || mac_window_buttons(s))
+    if (!windows_window_buttons(s))
         return right;
     const float b = px(20);
     float x = right - b * 3 - px(4);
     const float y = top + (h - b) * 0.5f;
     const float left = x;
-    const bool zoomed = ::IsZoomed(s.config.hwnd) != FALSE;
+    const bool zoomed = window_is_maximized(s.config.hwnd);
     if (icon_button(s, "##fwin-min", ui::icon::kMinimize, ImVec2(x, y), b, fpx(13), nullptr, g_pal->dim))
-        ::ShowWindow(s.config.hwnd, SW_MINIMIZE);
+        window_minimize(s.config.hwnd);
     x += b + px(2);
     if (icon_button(s, "##fwin-max", zoomed ? ui::icon::kRestore : ui::icon::kMaximize, ImVec2(x, y), b,
                     fpx(13), nullptr, g_pal->dim))
-        ::ShowWindow(s.config.hwnd, zoomed ? SW_RESTORE : SW_MAXIMIZE);
+        window_toggle_maximize(s.config.hwnd);
     x += b + px(2);
     // Close: the theme's close colour under the pointer, as in the tab bar.
     ImGui::SetCursorScreenPos(ImVec2(x, y));
@@ -154,7 +154,7 @@ float draw_strip_window_buttons(App::State& s, float right, float top, float h) 
     draw_icon(s, dl, ui::icon::kWinClose, fpx(13), ImVec2(x + b * 0.5f, y + b * 0.5f),
               hov ? window_button_glyph(0, g_pal->sidebar) : g_pal->dim);
     if (close)
-        ::PostMessageW(s.config.hwnd, WM_CLOSE, 0, 0);
+        window_close(s.config.hwnd);
     return left - px(8);
 }
 

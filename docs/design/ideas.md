@@ -2,11 +2,11 @@
 
 日期：2026-11-20（第二輪構想 2026-11-21）｜狀態：A1～A4、B1～B3、T2～T5 已實作（見設計文件 ADR-32～ADR-35），T1 仍延後；第二輪構想（版面收斂、美化、C1～C4）也已全部實作（設計文件 v2.27、ADR-37～ADR-41），見文末
 
-> 2026-11-20 更新：使用者選定 A1～A4、B1～B3、T2～T5，都已實作並寫進設計文件 v2.24（2.9～2.12、ADR-32 Mission Control 與 Focus、ADR-33 Review 與 Timeline、ADR-34 風格版面、ADR-35 主題）與 PRD v3.4.0（FR-40～FR-50）。實際做法以 `ideas/IMPL-A12.md`、`IMPL-A34.md`、`IMPL-B.md`、`IMPL-T.md` 為準，和下方構想或規格不同的地方記在那裡。T1（高對比與色盲友善）使用者決定延後。下方內容保留當初的構想原文。
+> 2026-11-20 更新：使用者選定 A1～A4、B1～B3、T2～T5，都已實作並寫進設計文件 v2.24（2.9～2.12、ADR-32 Mission Control 與 Focus、ADR-33 Review 與 Timeline、ADR-34 風格版面、ADR-35 主題）與 PRD v3.4.0（FR-59～FR-50）。實際做法以 `ideas/IMPL-A12.md`、`IMPL-A34.md`、`IMPL-B.md`、`IMPL-T.md` 為準，和下方構想或規格不同的地方記在那裡。T1（高對比與色盲友善）使用者決定延後。下方內容保留當初的構想原文。
 
 這份文件收集版面與主題的發想，給挑選、排工作時參考。要做哪一項由使用者決定，再寫進設計文件（`docs/design/AgentDesk_Design.md`）與 PRD，照一般流程開發。
 
-構想當時已有的版面：AgentDesk（workspace）、Terminals、AgentDesk Mac（ADR-31）。主題：AgentDesk 自己的四套，加上 herdr 的 graphite、ink、moss、paper、atom-one-dark，以及使用者放進 `themes\` 的主題檔。第二輪之後內建版面共 9 個（7 個列出、2 個好玩的），見設計文件 2.4。
+構想當時已有的版面：AgentDesk（workspace）、Terminals、AgentDesk Mac（ADR-43）。主題：AgentDesk 自己的四套，加上 herdr 的 graphite、ink、moss、paper、atom-one-dark，以及使用者放進 `themes\` 的主題檔。第二輪之後內建版面共 9 個（7 個列出、2 個好玩的），見設計文件 2.4。
 
 ## 設計規格
 
@@ -75,7 +75,7 @@
 
 ## 二、換外觀的風格版面
 
-照 AgentDesk 98（已移除，ADR-28）與 AgentDesk Mac（ADR-31）的做法。原則相同：可以有那個風格，但不能照抄別人的素材，圖形、圖示、配色、字型都要自己做或使用授權允許的開源素材。
+照 AgentDesk 98（已移除，ADR-28）與 AgentDesk Mac（ADR-43）的做法。原則相同：可以有那個風格，但不能照抄別人的素材，圖形、圖示、配色、字型都要自己做或使用授權允許的開源素材。
 
 ### B1. Terminal Classic（復古終端機）
 

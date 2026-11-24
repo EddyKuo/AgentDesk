@@ -3,53 +3,17 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "app_internal.hpp"
 
-// GetDpiForMonitor; app_internal.hpp brings in windows.h first.
-#include <shellscalingapi.h>
 
 namespace agentdesk::desktop {
 namespace detail {
 
 std::filesystem::path data_dir() {
-    wchar_t buf[MAX_PATH]{};
-    DWORD n = ::GetEnvironmentVariableW(L"AGENTDESK_DATA_DIR", buf, MAX_PATH);
-    std::filesystem::path dir;
-    if (n > 0 && n < MAX_PATH) {
-        dir = std::wstring(buf, n);
-    } else {
-        n = ::GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
-        dir = (n > 0 ? std::filesystem::path(std::wstring(buf, n)) : std::filesystem::temp_directory_path()) /
-              L"AgentDesk";
-    }
-    std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
-    return dir;
+    return os::data_dir();
 }
 
 std::filesystem::path exe_dir() {
-    wchar_t exe[MAX_PATH]{};
-    ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    return std::filesystem::path(exe).parent_path();
+    return os::program_files_dir();
 }
-
-namespace {
-// The first run's zoom: Windows' text size (Accessibility TextScaleFactor, 100..225 %), x1.15 when
-// the primary screen is 2400 DIPs or wider, rounded to tenths. DIPs, not pixels: Windows' display
-// scale already draws everything bigger, so a 4K screen at 200 % (1920 DIPs) gets no extra.
-float first_run_zoom() {
-    DWORD factor = 100, size = sizeof(factor);
-    ::RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Accessibility", L"TextScaleFactor", RRF_RT_REG_DWORD,
-                   nullptr, &factor, &size);
-    float z = std::clamp(static_cast<float>(factor) / 100.0f, 1.0f, 2.0f);
-    UINT dpi = 96, dpi_y = 96;
-    const HMONITOR primary = ::MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
-    if (FAILED(::GetDpiForMonitor(primary, MDT_EFFECTIVE_DPI, &dpi, &dpi_y)) || dpi == 0)
-        dpi = 96;
-    if (::GetSystemMetrics(SM_CXSCREEN) * 96.0 / dpi >= 2400.0)
-        z *= 1.15f;
-    return std::clamp(std::round(z * 10.0f) / 10.0f, 0.5f, 3.0f);
-}
-
-}  // namespace
 
 // The shown layout's {dark, light} themes, else the defaults.
 std::pair<std::string, std::string> layout_theme_pair(const Settings& st) {
@@ -136,7 +100,7 @@ Settings load_settings_unchecked() {
     Settings s;
     std::ifstream in(data_dir() / L"ui.json", std::ios::binary);
     if (!in) {
-        s.zoom = first_run_zoom();
+        s.zoom = os::first_run_zoom();
         return s;
     }
     std::stringstream ss;
@@ -173,6 +137,7 @@ Settings load_settings_unchecked() {
     s.line_height = std::clamp(j.value("line_height", 1.0f), 0.8f, 2.0f);
     s.cell_width = std::clamp(j.value("cell_width", 1.0f), 0.8f, 2.0f);
     s.sound_done = j.value("sound_done", "");
+    s.option_as_alt = safe::string_or(j, "option_as_alt", "auto");
     s.sound_blocked = j.value("sound_blocked", "");
     s.welcomed = j.value("welcomed", "");
     s.seen_version = j.value("seen_version", "");
@@ -305,6 +270,7 @@ void save_settings(const Settings& s) {
             {"line_height", s.line_height},
             {"cell_width", s.cell_width},
             {"sound_done", s.sound_done},
+            {"option_as_alt", s.option_as_alt},
             {"sound_blocked", s.sound_blocked},
             {"welcomed", s.welcomed},
             {"seen_version", s.seen_version},
@@ -382,7 +348,7 @@ void save_settings(const Settings& s) {
             std::filesystem::remove(tmp, ec);
             continue;
         }
-        if (!::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        if (!os::replace_file(tmp, path)) {
             std::filesystem::remove(tmp, ec);
             g_settings_problem = "Not saved to ui.json";
         }

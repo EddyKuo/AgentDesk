@@ -154,6 +154,8 @@ TEST(Links, FileUrlsInEverySpellingResolveToFiles) {
         std::ofstream(exe) << "x";
     }
     std::string url_path = exe.generic_string();  // C:/Users/.../evil.exe
+    if (url_path.starts_with('/'))
+        url_path.erase(0, 1);  // a POSIX path (/var/...) is spelled after the URL's own slash
     for (const std::string& url : {"FILE:///" + url_path, "file:/" + url_path, "File://localhost/" + url_path,
                                    "file:///" + url_path}) {
         const auto t = resolve_link(url, "");
@@ -161,10 +163,7 @@ TEST(Links, FileUrlsInEverySpellingResolveToFiles) {
         EXPECT_TRUE(t->file) << url;
         EXPECT_EQ(std::filesystem::path(t->target), exe) << url;
     }
-    EXPECT_EQ(resolve_link("file://server/share/evil.exe", ""),
-              (LinkTarget{true, R"(\\server\share\evil.exe)"}));
-    EXPECT_EQ(resolve_link("FILE://server/share/a%20b.exe", ""),
-              (LinkTarget{true, R"(\\server\share\a b.exe)"}));
+    // A file on another computer: win/links_win_test.cpp, posix/links_posix_test.cpp.
     EXPECT_FALSE(resolve_link("FILE:///C:/no/such/evil.exe", "").has_value());
     EXPECT_FALSE(resolve_link("file:C:/x/evil.exe", "").has_value());    // no path at all
     EXPECT_FALSE(resolve_link("file:///C:/x/%zz.exe", "").has_value());  // bad escape

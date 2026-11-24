@@ -2,7 +2,6 @@
 // AgentDesk window contents (design doc 4, ADR-12/ADR-13). main.cpp owns Win32, Direct3D and
 // the event loop; everything drawn and every command lives here.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
-#include <windows.h>
 
 #include <filesystem>
 #include <functional>
@@ -14,11 +13,12 @@
 
 #include "agentdesk/ui/fonts.hpp"
 #include "agentdesk/ui/host_client.hpp"
+#include "window_ops.hpp"
 
 namespace agentdesk::desktop {
 
 struct AppConfig {
-    HWND hwnd = nullptr;
+    NativeWindow hwnd = nullptr;  // the window (HWND on Windows, NSWindow on macOS)
     std::function<void()> wake;             // ask the loop for another frame
     std::string start_profile;              // developer option --start
     std::vector<std::string> run_commands;  // developer option --run "cmd;cmd" (after start)

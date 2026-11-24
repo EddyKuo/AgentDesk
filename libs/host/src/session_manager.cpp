@@ -13,6 +13,7 @@
 #include "agentdesk/host/git_tools.hpp"
 #include "agentdesk/ipc/host_launcher.hpp"
 #include "agentdesk/platform/win/error.hpp"
+#include "host_os.hpp"
 
 namespace agentdesk::host {
 
@@ -75,107 +76,12 @@ std::string valid_utf8(const std::string& in) {
 // unserializable: describe Windows errors with FormatMessageW instead.
 std::string error_text(const std::exception& e) {
     std::string what = e.what();
-    if (const auto* se = dynamic_cast<const std::system_error*>(&e);
-        se != nullptr && se->code().category() == std::system_category()) {
-        const std::string ansi = se->code().message();
-        std::string prefix = what;
-        if (what.size() >= ansi.size() + 2 && what.ends_with(ansi))
-            prefix = what.substr(0, what.size() - ansi.size() - 2);
-        wchar_t* text = nullptr;
-        const DWORD n = ::FormatMessageW(
-            FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-            nullptr, static_cast<DWORD>(se->code().value()), 0, reinterpret_cast<LPWSTR>(&text), 0, nullptr);
-        const std::unique_ptr<wchar_t, decltype(&::LocalFree)> owned(text, &::LocalFree);
-        std::string message;
-        if (n > 0 && text != nullptr) {
-            std::wstring_view w(text, n);
-            while (!w.empty() &&
-                   (w.back() == L'\r' || w.back() == L'\n' || w.back() == L' ' || w.back() == L'.'))
-                w.remove_suffix(1);
-            try {
-                message = win::to_utf8(w);
-            } catch (const std::exception&) {
-            }
-        }
-        if (message.empty())
-            message = "Windows error " + std::to_string(se->code().value());
-        what = prefix.empty() ? message : prefix + ": " + message;
-    }
+    what = detail::os_error_text(e, std::move(what));
     return valid_utf8(what);
 }
 
 Response bad(const Request& r, std::string msg) {
     return protocol::fail(r.id, ErrorCode::kBadRequest, std::move(msg));
-}
-
-// WSL: a Linux cd never reaches wsl.exe's Windows current folder. bash runs PROMPT_COMMAND
-// before each prompt; set it (passed into Linux through WSLENV) to send OSC 7 with the distro
-// as the host, which the session maps to \\wsl.localhost\<distro>\... or C:\... for /mnt/c.
-// Only for an interactive shell: a profile that runs a command (-e, --exec, --) is left alone.
-// A ~/.bashrc that assigns PROMPT_COMMAND, or zsh/fish, replaces it; then the folder is unknown.
-void add_wsl_folder_hook(platform::win::PtySpawnSpec& spec) {
-    for (const auto& a : spec.args)
-        if (a == L"-e" || a == L"--exec" || a == L"--")
-            return;
-    // OSC 133 A too: the prompt is back, so the program that ran before it (an agent) has ended.
-    spec.env_overrides[L"PROMPT_COMMAND"] =
-        L"printf '\\033]133;A\\007\\033]7;file://%s%s\\007' \"$WSL_DISTRO_NAME\" \"$PWD\"";
-    std::wstring wslenv;
-    if (const auto it = spec.env_overrides.find(L"WSLENV"); it != spec.env_overrides.end()) {
-        wslenv = it->second;
-    } else {
-        wchar_t buf[4096]{};
-        const DWORD n = ::GetEnvironmentVariableW(L"WSLENV", buf, 4096);
-        if (n > 0 && n < 4096)
-            wslenv.assign(buf, n);
-    }
-    if (wslenv.find(L"PROMPT_COMMAND") == std::wstring::npos)
-        wslenv += (wslenv.empty() ? L"" : L":") + std::wstring(L"PROMPT_COMMAND/u");
-    spec.env_overrides[L"WSLENV"] = wslenv;
-}
-
-std::wstring to_lower(std::wstring s) {
-    for (auto& c : s)
-        c = static_cast<wchar_t>(std::towlower(c));
-    return s;
-}
-
-// PowerShell's cd (Set-Location) does not change the process's Windows current folder, which is
-// what the host reads to follow the shell. So the prompt is wrapped: after the person's own
-// prompt runs, the location is copied into [Environment]::CurrentDirectory. Only for an interactive
-// PowerShell the profile starts without its own -Command/-File; cmd needs nothing.
-void add_folder_hook(platform::win::PtySpawnSpec& spec) {
-    const std::wstring exe = to_lower(spec.executable.filename().native());
-    if (exe == L"wsl.exe") {
-        add_wsl_folder_hook(spec);
-        return;
-    }
-    if (exe == L"cmd.exe") {
-        // cmd's PROMPT can send escapes ($E): OSC 133 A before the person's own prompt (or the
-        // default $P$G), so the host knows a program that ran before it (an agent) has ended.
-        wchar_t buf[1024]{};
-        const DWORD n = ::GetEnvironmentVariableW(L"PROMPT", buf, 1024);
-        const std::wstring own = n > 0 && n < 1024 ? std::wstring(buf, n) : std::wstring(L"$P$G");
-        if (own.find(L"]133;A") == std::wstring::npos)
-            spec.env_overrides[L"PROMPT"] = L"$E]133;A$E\\" + own;
-        return;
-    }
-    if (exe != L"pwsh.exe" && exe != L"powershell.exe")
-        return;
-    for (const auto& a : spec.args) {
-        const std::wstring l = to_lower(a);
-        if (l == L"-command" || l == L"-c" || l == L"-file" || l == L"-f" || l == L"-encodedcommand" ||
-            l == L"-ec" || l == L"-noninteractive")
-            return;
-    }
-    spec.args.push_back(L"-NoExit");
-    spec.args.push_back(L"-Command");
-    spec.args.push_back(
-        L"$global:__agentdesk_prompt = $function:prompt; "
-        L"function global:prompt { [Console]::Write([char]27 + ']133;A' + [char]7); "
-        L"$r = & $global:__agentdesk_prompt; "
-        L"try { $l = Get-Location; if ($l.Provider.Name -eq 'FileSystem') "
-        L"{ [Environment]::CurrentDirectory = $l.ProviderPath } } catch {}; $r }");
 }
 
 std::optional<terminal::Key> key_from_name(std::string_view n) {
@@ -299,7 +205,7 @@ void log_skipped_entry(const std::filesystem::path& data_dir, std::string_view f
                        const std::exception& e) {
     try {
         std::ofstream(data_dir / L"host.log", std::ios::app)
-            << iso8601_now() << " pid=" << ::GetCurrentProcessId() << " skipped " << file << " entry "
+            << iso8601_now() << " pid=" << detail::current_pid() << " skipped " << file << " entry "
             << index << " ("
             << (dynamic_cast<const Json::exception*>(&e) != nullptr ? "malformed" : "unreadable") << ")\n";
     } catch (const std::exception&) {
@@ -689,7 +595,7 @@ Response SessionManager::do_git_run(const Request& req) {
     // worktree remove may take minutes.
     const bool long_running = args.front() == L"worktree";
     args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-c", L"core.fsmonitor=false", L"-c",
-                               L"diff.autoRefreshIndex=false", L"-C", cwd->native()});
+                               L"diff.autoRefreshIndex=false", L"-C", cwd->wstring()});
     std::error_code ec;
     if (!std::filesystem::is_directory(*cwd, ec))
         return protocol::fail(req.id, ErrorCode::kNotFound, "not a folder");
@@ -720,9 +626,7 @@ Response SessionManager::do_worktree_add(const Request& req) {
     if (!std::filesystem::is_directory(repo_path, ec))
         return protocol::fail(req.id, ErrorCode::kBadRequest, "repo folder does not exist: " + repo);
     if (path.empty()) {
-        wchar_t home[MAX_PATH]{};
-        const DWORD n = ::GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
-        const auto base = std::filesystem::path(std::wstring(home, n)) / L".agentdesk" / L"worktrees";
+        const auto base = detail::home_dir() / ".agentdesk" / "worktrees";
         const auto p = default_worktree_path(base, repo_path, branch).u8string();
         path.assign(p.begin(), p.end());
     }
@@ -731,12 +635,12 @@ Response SessionManager::do_worktree_add(const Request& req) {
     // A branch that exists is checked out; a new one starts from HEAD. Existence is asked of git, never read
     // from its (translated) messages.
     const auto known = run_tool(
-        {L"git", L"-C", repo_path.native(), L"show-ref", L"--verify", L"--quiet", L"refs/heads/" + wbranch},
+        {L"git", L"-C", repo_path.wstring(), L"show-ref", L"--verify", L"--quiet", L"refs/heads/" + wbranch},
         repo_path, kGitTimeout);
     if (!known.started)
         return protocol::fail(req.id, ErrorCode::kSpawnFailed, "git was not found on PATH");
     const bool exists = !known.timed_out && known.exit_code == 0;
-    std::vector<std::wstring> add = {L"git", L"-C", repo_path.native(), L"worktree", L"add"};
+    std::vector<std::wstring> add = {L"git", L"-C", repo_path.wstring(), L"worktree", L"add"};
     if (exists)
         add.insert(add.end(), {wpath, wbranch});
     else
@@ -1000,7 +904,7 @@ Response SessionManager::do_hello(const Request& req) {
         req.id, {{"version", protocol::kProtocolVersion},
                  {"host_instance_id", config_.host_instance_id},
                  {"host_version", config_.host_version},
-                 {"host_pid", ::GetCurrentProcessId()},
+                 {"host_pid", detail::current_pid()},
                  // Self-update (design doc 7.4 OQ-09): the hosts whose sessions this one took
                  // over (a client keeps those sessions), and where it runs from (agentctl update).
                  {"succeeds", config_.succeeds},
@@ -1042,7 +946,7 @@ SessionConfig new_session_config(const HostConfig& host, const Profile& profile,
     sc.spec.args = profile.args;
     for (const auto& a : p.value("args", Json::array()))
         sc.spec.args.push_back(win::to_wide(a.get<std::string>()));
-    add_folder_hook(sc.spec);
+    detail::add_folder_hook(sc.spec);
     sc.spec.cwd = win::to_wide(cwd);  // never silently replaced (design doc 4.2)
     const int cols = std::clamp(p.value("cols", 120), 2, 1000);
     const int rows = std::clamp(p.value("rows", 40), 1, 500);
@@ -1050,7 +954,7 @@ SessionConfig new_session_config(const HostConfig& host, const Profile& profile,
     sc.engine.cols = cols;
     sc.engine.rows = rows;
     sc.spec.env_overrides[L"AGENTDESK_SESSION_ID"] = win::to_wide(session_id);
-    sc.spec.env_overrides[L"AGENTDESK_CTL"] = host.ctl_path.native();
+    sc.spec.env_overrides[L"AGENTDESK_CTL"] = host.ctl_path.wstring();
     sc.spec.env_overrides[L"AGENTDESK_PIPE"] = host.pipe_name;
     return sc;
 }

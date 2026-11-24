@@ -66,7 +66,10 @@ TEST(Telemetry, ReportShape) {
                                               "agents_open", "agents_working", "spaces", "tabs", "terminals",
                                               "layouts", "mods", "commands", "custom", "welcome", "events"}));
     EXPECT_EQ(r["v"], 1);
-    EXPECT_EQ(r["app"]["os"], "windows");
+    // The build's own system: windows/x86_64 or macos/aarch64.
+    const std::string os = r["app"]["os"];
+    const std::string arch = r["app"]["arch"];
+    EXPECT_TRUE((os == "windows" && arch == "x86_64") || (os == "macos" && arch == "aarch64")) << os << " " << arch;
     EXPECT_EQ(r["app"]["channel"], "stable");
     EXPECT_TRUE(r["core"]["version"].is_null());
     EXPECT_EQ(r["usage"]["startups"], 99);

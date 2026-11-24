@@ -162,13 +162,8 @@ const AccessReads& access() {
     const auto now = Clock::now();
     if (r.read == Clock::time_point{} || now - r.read >= std::chrono::seconds(2)) {
         r.read = now;
-        BOOL animate = TRUE;
-        r.reduced =
-            ::SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animate, 0) != FALSE && animate == FALSE;
-        HIGHCONTRASTW hc{};
-        hc.cbSize = sizeof(hc);
-        r.contrast = ::SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0) != FALSE &&
-                     (hc.dwFlags & HCF_HIGHCONTRASTON) != 0;
+        r.reduced = os::reduced_motion();
+        r.contrast = os::high_contrast();
     }
     return r;
 }

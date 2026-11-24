@@ -399,7 +399,7 @@ void draw_mac_menubar(App::State& s, ImVec2 pos, float w, float h) {
 
     // Right side, right to left.
     float right = b.x - px(10);
-    if (s.config.hwnd != nullptr && !mac_window_buttons(s)) {
+    if (windows_window_buttons(s)) {
         draw_window_buttons(s, b.x - px(4), pos.y, h - 1);
         right -= px(26) * 3 + px(4) + px(10);
     }

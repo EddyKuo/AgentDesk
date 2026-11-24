@@ -3,8 +3,6 @@
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 #include "agentdesk/ui/telemetry.hpp"
 
-#include <windows.h>
-
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -14,10 +12,9 @@
 #include <deque>
 #include <fstream>
 #include <mutex>
+#include <random>
 #include <thread>
 #include <utility>
-
-#include <bcrypt.h>
 
 #include "system_process.hpp"
 
@@ -55,13 +52,17 @@ bool write_atomic(const fs::path& path, const std::string& text) {
         if (!out)
             return false;
     }
-    return ::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);  // replaces the old file
+    return !ec;
 }
 
 // 64 random bits from the OS's RNG, for the install id and send jitter.
 std::uint64_t random_u64() {
     std::uint64_t v = 0;
-    ::BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&v), sizeof v, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    // The OS's generator on both systems (rand_s on Windows, arc4random on macOS).
+    std::random_device rd;
+    v = (static_cast<std::uint64_t>(rd()) << 32) | rd();
     return v;
 }
 
@@ -394,7 +395,7 @@ private:
         std::error_code ec;
         for (const auto& e : fs::directory_iterator(dir() / L"queue", ec)) {
             const fs::path path = e.path();
-            const std::string day = detail::to_utf8(path.stem().native());
+            const std::string day = detail::to_utf8(path.stem().wstring());
             if (day < oldest) {
                 std::error_code rm;
                 fs::remove(path, rm);
@@ -805,8 +806,8 @@ Json Day::report(const std::string& install, const Config& config) const {
         {"app",
          {
              {"version", version(config.app_version)},
-             {"os", "windows"},
-             {"arch", "x86_64"},
+             {"os", detail::os_name()},
+             {"arch", detail::cpu_arch()},
              {"channel", "stable"},
          }},
         {"core", {{"version", core ? Json(version(*core)) : Json()}}},

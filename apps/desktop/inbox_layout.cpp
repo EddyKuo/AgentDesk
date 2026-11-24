@@ -929,7 +929,7 @@ void draw_inbox_bar(App::State& s, ImVec2 pos, float w, float h) {
     const float cy = pos.y + h * 0.5f;
     const float x = clear_of_traffic_lights(s, pos.x + px(14), pos.y, end.y, px(14));
     float right = end.x - px(10);
-    if (!mac_window_buttons(s)) {
+    if (windows_window_buttons(s)) {
         draw_window_buttons(s, right, pos.y, h);
         right -= px(26) * 3 + px(4) + px(8);
     }

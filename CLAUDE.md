@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案現況
 
-AgentDesk 是 Windows 11 x64 的原生 AI Agent 工作台：在可分割的終端機面板裡跑多個 coding agent CLI（首發 Claude Code 與 Codex CLI），關掉視窗後工作繼續跑，重開時接回原畫面。介面與行為依 herdr 桌面版（https://github.com/herdrdev/herdr-app）的原始碼複刻（ADR-15），用 C++ 重寫，不追求協定相容。
+AgentDesk 是 Windows 11 x64 與 macOS（Apple Silicon）的原生 AI Agent 工作台：在可分割的終端機面板裡跑多個 coding agent CLI（首發 Claude Code 與 Codex CLI），關掉視窗後工作繼續跑，重開時接回原畫面。介面與行為依 herdr 桌面版（https://github.com/herdrdev/herdr-app）的原始碼複刻（ADR-15），用 C++ 重寫，不追求協定相容。
 
-MVP（M0～M4，Sprint 1～5）已完成：結論在 `docs/poc/M0-report.md`、`docs/poc/M4-report.md`，最終驗收矩陣在 `contracts/inbox/TestReport_sprint5.md`。Sprint 6～9 依使用者要求補齊 herdr 的主要功能，外觀自訂（設計文件 5.5、ADR-13、ADR-14）：space／分頁／分割、注意力與通知、命令面板與 keys.json、子 Agent 協作、遠端機器（ssh＋`agentctl bridge`）、版面與 mod（C++ DLL，ADR-17）。Sprint 10 依使用者要求依 herdr-app 原始碼完整複刻介面與行為（設計文件 5.6、ADR-15）：有疑問就查 herdr 原始碼，逐項規格在 `docs/research/herdr-app/`。剩下的是人工驗收項目（設計文件 5.4、5.5）。之後的工作依 `sprint/current/plan.md` 的任務順序進行，每完成一項就在 `sprint/current/status.md` 追加一列（只追加不改寫）。需求不清楚時列進設計文件 7.4，不要自己補。
+MVP（M0～M4，Sprint 1～5）已完成：結論在 `docs/poc/M0-report.md`、`docs/poc/M4-report.md`，最終驗收矩陣在 `contracts/inbox/TestReport_sprint5.md`。Sprint 6～9 依使用者要求補齊 herdr 的主要功能，外觀自訂（ADR-13、ADR-14）：space／分頁／分割、注意力與通知、命令面板與 keys.json、子 Agent 協作、遠端機器（ssh＋`agentctl bridge`）、版面與 mod（C++ DLL，ADR-17）。Sprint 10 依使用者要求依 herdr-app 原始碼完整複刻介面與行為（設計文件第 7 章、ADR-15）：有疑問就查 herdr 原始碼，逐項規格在 `docs/research/herdr-app/`。剩下的是人工驗收項目（設計文件 12.2）。之後的工作依 `sprint/current/plan.md` 的任務順序進行，每完成一項就在 `sprint/current/status.md` 追加一列（只追加不改寫）。需求不清楚時列進設計文件 12.3，不要自己補。
 
 ## 常用指令
 
@@ -38,20 +38,27 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 - `qa\*.exe`：QA-05、QA-07、QA-10（`qa05_ui_detach.exe`、`qa07_silence.exe`、`qa10_ui_host_crash.exe`）、`screenshot_ui.exe`（隔離的 host 加 PrintWindow 截圖與 report，用來檢查渲染）、`smoke_zip.exe`；發布用 `agentdesk_package.exe`（先建 Release）
 - `fetch_conpty.exe`（隨附 ConPTY）、`make_fixtures.exe`（重產 `tests\fixtures\bytes`）
 
+macOS（ADR-30，設計文件第 9 章）：
+- 建置 `scripts/build.sh clang-macos-arm64-debug all`（vcpkg 在 `~/vcpkg`，triplet `arm64-osx-agentdesk`）；打包 `scripts/package_macos.sh`（`.app` 與 zip）；截圖 `agent-ui --screenshot <png> --exit-after-ms N`。
+- 兩個平台共用一份原始碼，差異在建置時分開：共用的 `.cpp` 不寫 `#ifdef _WIN32`。
+- 各平台不同的部分放在內部介面（`*_os.hpp`，例如 `libs/host/src/host_os.hpp`、`apps/desktop/desktop_os.hpp`）後面，實作分成 `*_win.cpp`／`win/` 與 `*_posix.cpp`／`macos/`，由各資料夾的 CMakeLists 依平台挑選。
+- 宣告不同的標頭檔放在 `include_win/`、`include_posix/`（`agentdesk/ipc/pipe.hpp`、`agentdesk/host/handover.hpp`、`agentdesk/platform/crt.hpp`），靠 include 路徑挑選。
+- macOS 的平台層在 `libs/platform/posix/`（含過渡用的 `compat/`）。
+
 不要用自動化腳本反覆啟動又強制結束實際的 Claude Code：它會把這當成全螢幕渲染器故障，自行關掉該模式。渲染檢查用 PowerShell 或 vt_probe。
 
 ## 文件地圖
 
 | 檔案 | 內容 |
 |---|---|
-| `docs/design/AgentDesk_Design.md` | 唯一權威的 PRD＋系統設計（目前 v2.27）。改設計就改這份，並在檔頭版本紀錄加一列 |
-| `contracts/approved/PRD.md` | PRD 契約 v4.0.0（鎖定設計文件 v2.27）。需求變更要依憲法 6.3 升版 |
-| `docs/design/ideas.md`、`docs/design/ideas/` | 版面與主題的構想清單、各項設計規格與實作紀錄（`IMPL-*.md`）。第一輪 A1～A4、B1～B3、T2～T5 已實作（設計文件 2.9～2.12、ADR-32～ADR-35）；第二輪的共用設計規則、版面收斂、Stage、Inbox、Pair、Garden 已實作（2.9、2.11、2.13～2.16、ADR-37～ADR-41，紀錄在 `IMPL-round2-*.md`）；T1 尚未 |
+| `docs/design/AgentDesk_Design.md` | 唯一權威的詳細設計（目前 v3.1）：架構、協定、host、UI、平台差異、驗收矩陣、ADR（第 11 章）、待決事項（12.3）。改設計就改這份，並在檔頭版本紀錄加一列；舊版與完整的版本紀錄在 `docs/archive/`（合併前的兩份是 v2.27 與 v3.0） |
+| `contracts/approved/PRD.md` | PRD 契約 v5.0.0（鎖定設計文件 v3.1）：需求、驗收、已知落差（第 7 節）。需求變更要依憲法 6.3 升版 |
+| `docs/design/ideas.md`、`docs/design/ideas/` | 版面與主題的構想清單、各項設計規格與實作紀錄（`IMPL-*.md`）。第一輪 A1～A4、B1～B3、T2～T5 已實作（設計文件 7.17～7.20、ADR-32～ADR-35）；第二輪的共用設計規則、版面收斂、Stage、Inbox、Pair、Garden 已實作（7.17、7.19、7.21～7.24、ADR-37～ADR-41，紀錄在 `IMPL-round2-*.md`）；T1 尚未 |
 | `docs/design/use-cases.md`、`docs/design/design-concept.md` | Use case（UC-01～UC-21）與設計概念（給新加入的開發者） |
 | `contracts/inbox/TestReport_sprint*.md` | 每個 Sprint 的測試報告（QA，依 ADR_001 判定） |
 | `docs/poc/M0-report.md`、`docs/poc/evidence/` | M0 結論與實測 JSON |
 | `sprint/current/`、`sprint/archive/` | Sprint 計畫與狀態 |
-| `.decisions/` | 治理與流程 ADR（`ADR_NNN`）。產品與技術決策是設計文件 7.1 的 `ADR-NN`，兩者不要混用 |
+| `.decisions/` | 治理與流程 ADR（`ADR_NNN`）。產品與技術決策是設計文件第 11 章的 `ADR-NN`，兩者不要混用 |
 | `docs/research/herdr-reference.md` | herdr 研究筆記（core 與主產品） |
 | `docs/research/herdr-app-review.md`、`docs/research/herdr-app/` | herdr-app 原始碼審閱與移植規格（版面、側欄、分頁、面板、選單、Files／Changes、設定、字型） |
 | `third_party/*/README.agentdesk.md` | 每個收錄依賴的來源、版本、雜湊與授權 |
@@ -63,11 +70,12 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 | 路徑 | 內容 |
 |---|---|
 | `libs/platform/windows` | `PtyProcess`（ConPTY＋Job＋reader 執行緒）、argv quoting、ConPTY 載入、RAII handle |
+| `libs/platform/posix` | macOS 的 pty（`posix_openpt`＋`fork`，根程序結束以 kqueue 監看）、過渡用的 `compat/`（沿用 `platform::win` 的名稱） |
 | `libs/terminal` | `VtEngine`（libvterm 封裝、快照、歷史、按鍵編碼）、OSC 7501 解析與紀錄 |
 | `libs/protocol` | IPC 分幀（4-byte LE＋UTF-8 JSON）、訊息封包、錯誤碼、畫面編碼 |
 | `libs/host` | `Session` actor（程序＋引擎＋狀態），M1 的 host 由它組成；`state_timeline` 是 Timeline 用的狀態歷史（只記時間與狀態，`session.timeline`） |
 | `libs/ui` | `TerminalView`（字元格、輸入、IME、選取、搜尋、捲動）、`Workspace`（space／分頁／分割樹、注意力）、`Keymap`、`ModHost`（載入 C++ DLL mod，ImGui 無關）、`git_info`、`HostClient`、唯一碰 `imgui_internal.h` 的 `imgui_adapter.cpp`；版面與主題的純邏輯：`layout_styles`（mod → style 對照表、好玩的版面、被拿掉版面的替代）、`design_tokens`（共用的間距、圓角、字級、陰影、動畫數值）、`terminals_options`、`stage`、`inbox`、`pair`、`garden`、`mission`（Stage 與 Garden 共用的畫面末行與訊息清理）、`focus_mode`、`review`、`timeline`、`classic_layout`、`layout_tips`、`color_math`、`theme_file`、`schedule`、`ambient`。版面檔在 `libs/ui/layouts/`，AgentDesk 隨附的主題檔在 `libs/ui/themes/`（建置時複製到 `themes\`） |
-| `apps/desktop` | `agent-ui.exe`：`main.cpp` 是 Win32／DX11 外殼（自繪標題列：`WM_NCCALCSIZE`／`WM_NCHITTEST`）與崩潰記錄，`app.cpp` 是 `App` 的建構與對外介面；介面依功能分檔（`sidebar.cpp`、`tab_bar.cpp`、`panes.cpp`、`files_changes.cpp`、`commands.cpp`、`settings_dialog.cpp`、`welcome.cpp`、`frame.cpp` 等，清單見設計文件 3.10），AgentDesk Mac 版面在 `mac_layout.cpp`（規則在 `libs/ui` 的 `mac_layout.cpp`，版面檔 `libs/ui/layouts/mac.json`）。其他版面與功能：`stage_layout.cpp`、`inbox_layout.cpp`、`pair_layout.cpp`、`garden_layout.cpp`、`focus_mode.cpp`、`review_layout.cpp`、`timeline.cpp`、`state_card.cpp`（狀態卡、空白狀態、版面頂端列共用的按鈕），風格版面由 `style_layouts.cpp` 分派給 `terminals_options.cpp`、`stage_layout.cpp`、`pair_layout.cpp`、`classic_layout.cpp`、`garden_layout.cpp`；共用設計規則的螢幕端（`tok::`：間距、字級、陰影、動畫與減少動畫、空白狀態插圖）在 `ui_tokens.hpp`／`ui_tokens.cpp`，新畫面一律用它，不自己寫像素數字；主題相關是 `appearance.cpp`、`ambient.cpp`、`theme_suggest.cpp`、`theme_commands.cpp`、`theme_editor.cpp`（設計文件 2.9～2.16）。共用宣告在 `app_internal.hpp`（`detail` 命名空間） |
+| `apps/desktop` | `agent-ui`：`main.cpp` 是 Win32／DX11 外殼（macOS 是 `macos/main_macos.mm`）（自繪標題列：`WM_NCCALCSIZE`／`WM_NCHITTEST`）與崩潰記錄，`app.cpp` 是 `App` 的建構與對外介面；介面依功能分檔（`sidebar.cpp`、`tab_bar.cpp`、`panes.cpp`、`files_changes.cpp`、`commands.cpp`、`settings_dialog.cpp`、`welcome.cpp`、`frame.cpp` 等，清單見設計文件 2.1），AgentDesk Mac 版面在 `mac_layout.cpp`（規則在 `libs/ui` 的 `mac_layout.cpp`，版面檔 `libs/ui/layouts/mac.json`）。其他版面與功能：`stage_layout.cpp`、`inbox_layout.cpp`、`pair_layout.cpp`、`garden_layout.cpp`、`focus_mode.cpp`、`review_layout.cpp`、`timeline.cpp`、`state_card.cpp`（狀態卡、空白狀態、版面頂端列共用的按鈕），風格版面由 `style_layouts.cpp` 分派給 `terminals_options.cpp`、`stage_layout.cpp`、`pair_layout.cpp`、`classic_layout.cpp`、`garden_layout.cpp`；共用設計規則的螢幕端（`tok::`：間距、字級、陰影、動畫與減少動畫、空白狀態插圖）在 `ui_tokens.hpp`／`ui_tokens.cpp`，新畫面一律用它，不自己寫像素數字；主題相關是 `appearance.cpp`、`ambient.cpp`、`theme_suggest.cpp`、`theme_commands.cpp`、`theme_editor.cpp`（設計文件 7.17～7.24）。共用宣告在 `app_internal.hpp`（`detail` 命名空間） |
 | `third_party/fonts`、`third_party/herdr` | 隨附字型（Geist、JetBrains Mono、Symbols Nerd Font）與 herdr 的授權、提示音；建置時複製到執行檔旁的 `fonts\`、`sounds\` |
 | `libs/modapi`、`mods/` | mod 介面（純 C 的 `mod_api.h` 與 header-only 的 `mod_sdk.hpp`，ADR-17）與三個範例 mod（各自編成 `mods\<名稱>\mod.dll`，隨 zip 附上 SDK） |
 | `tools/` | 開發與量測工具（不出貨） |
@@ -76,7 +84,7 @@ ctest --test-dir build\msvc-x64-debug -L unit          :: 依 label：unit、win
 
 ## 架構重點（需要讀好幾個檔案才拼得出來的部分）
 
-三個執行檔：`agent-ui.exe`、`agent-host.exe`（背景程序）、`agentctl.exe`（CLI）。UI 和 CLI 都只是 host 的 client，透過 Named Pipe 溝通（先 `hello` 協商 v=1）。
+三個執行檔：`agent-ui.exe`、`agent-host.exe`（背景程序）、`agentctl.exe`（CLI）。UI 和 CLI 都只是 host 的 client，透過本機通道溝通（Windows 是 Named Pipe，macOS 是 Unix socket；先 `hello` 協商 v=1）。
 
 **host 擁有一切執行狀態。** ConPTY、子程序、Job、VtEngine、歷史全部在 host。UI 只拿快照和增量來畫，不持有 HPCON 或程序 handle。改功能前先判斷它屬於 host 還是 UI。`ui::TerminalSource` 是兩者之間的接縫。
 

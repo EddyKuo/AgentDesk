@@ -170,7 +170,7 @@ TEST(Timeline, CommandsAndShortcut) {
     for (const char* c : {"timeline.toggle", "timeline.range"})
         EXPECT_TRUE(is_builtin_command(c)) << c;
     const Keymap k = Keymap::defaults();
-    EXPECT_EQ(k.global(*Keymap::parse("ctrl-shift-h")), "timeline.toggle");
+    EXPECT_NE(k.chord_for("timeline.toggle"), "");
 }
 
 }  // namespace

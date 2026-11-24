@@ -2,7 +2,7 @@
 // of taking agent-ui.exe down; also parses the panels mods return.
 #include "agentdesk/ui/mods.hpp"
 
-#include <windows.h>
+#include "mods_os.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -38,81 +38,7 @@ std::string dump(const Json& j) {
     return j.dump(-1, ' ', false, Json::error_handler_t::replace);
 }
 
-// ---- calls into a mod, guarded against crashes (structured exceptions). These functions hold
-// no C++ objects, so __try is allowed; a fault returns its exception code instead of ending
-// agent-ui.exe.
-using Code = unsigned long;
-
-Code seh_init(agentdesk_mod_init_fn fn, const agentdesk_host* h, agentdesk_mod* m, int* rc) {
-    __try {
-        *rc = fn(h, m);
-        return 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return GetExceptionCode();
-    }
-}
-Code seh_event(const agentdesk_mod* m, const char* e, const char* p) {
-    __try {
-        m->on_event(m->self, e, p);
-        return 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return GetExceptionCode();
-    }
-}
-Code seh_panels(const agentdesk_mod* m, const char* where, const char** out) {
-    __try {
-        *out = m->panels(m->self, where);
-        return 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return GetExceptionCode();
-    }
-}
-Code seh_click(const agentdesk_mod* m, const char* panel, const char* widget) {
-    __try {
-        m->click(m->self, panel, widget);
-        return 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return GetExceptionCode();
-    }
-}
-Code seh_decorate(const agentdesk_mod* m, const char* kind, const char* subject, const char** out) {
-    __try {
-        *out = m->decorate(m->self, kind, subject);
-        return 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return GetExceptionCode();
-    }
-}
-Code seh_command(const agentdesk_mod* m, const char* id) {
-    __try {
-        m->command(m->self, id);
-        return 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return GetExceptionCode();
-    }
-}
-Code seh_destroy(const agentdesk_mod* m) {
-    __try {
-        m->destroy(m->self);
-        return 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return GetExceptionCode();
-    }
-}
-// Copies a mod-owned string; a bad pointer counts as a crash.
-Code seh_copy(const char* s, std::size_t max, char* buf, std::size_t* len) {
-    __try {
-        std::size_t n = 0;
-        while (n < max && s[n] != '\0') {
-            buf[n] = s[n];
-            ++n;
-        }
-        *len = n;
-        return 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return GetExceptionCode();
-    }
-}
+using namespace mods_os;  // Code and the guarded seh_* calls
 
 std::string crash_text(Code code) {
     char buf[64];
@@ -192,7 +118,7 @@ struct ModHost::Mod {
     ModHost* host = nullptr;
     ModInfo info;
     std::filesystem::path folder;
-    HMODULE dll = nullptr;
+    void* dll = nullptr;  // mods_os::load_library
     agentdesk_host api{};
     agentdesk_mod mod{};
     bool ready = false;    // init succeeded and not crashed since
@@ -206,7 +132,7 @@ struct ModHost::Mod {
             return;  // a mod that crashed may have left state behind: keep its code mapped
         if (ready && mod.destroy != nullptr && seh_destroy(&mod) != 0)
             return;
-        ::FreeLibrary(dll);
+        mods_os::unload_library(dll);
     }
 
     void fail(Code code) {
@@ -289,20 +215,18 @@ const char* api_setting(void* ctx, const char* key) {
     return m.scratch.c_str();
 }
 
-// Loads <folder>\mod.dll and runs its agentdesk_mod_init. Any failure is kept in m.info.error;
-// success sets m.ready.
+// Loads the mod's library (mod.dll, mod.dylib) and runs its agentdesk_mod_init. Any failure is
+// kept in m.info.error; success sets m.ready.
 void start_mod(ModHost::Mod& m) {
-    // The mod's own folder first for its dependencies, then System32; never the current folder
-    // or PATH.
-    m.dll = ::LoadLibraryExW((m.folder / L"mod.dll").c_str(), nullptr,
-                             LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+    std::string error;
+    m.dll = mods_os::load_library(m.folder, &error);
     if (m.dll == nullptr) {
-        m.info.error = "cannot load mod.dll (error " + std::to_string(::GetLastError()) + ")";
+        m.info.error = error;
         return;
     }
-    const auto init = reinterpret_cast<agentdesk_mod_init_fn>(::GetProcAddress(m.dll, "agentdesk_mod_init"));
+    const auto init = reinterpret_cast<agentdesk_mod_init_fn>(mods_os::find_symbol(m.dll, "agentdesk_mod_init"));
     if (init == nullptr) {
-        m.info.error = "mod.dll does not export agentdesk_mod_init";
+        m.info.error = std::string(mods_os::library_file()) + " does not export agentdesk_mod_init";
         return;
     }
     m.api = {AGENTDESK_MOD_API_VERSION, &m,           api_run,    api_send, api_notify, api_exec,
@@ -345,7 +269,7 @@ void ModHost::load(const std::set<std::string>& enabled) {
             folders.push_back(e.path());
     std::sort(folders.begin(), folders.end());
     for (const auto& f : folders) {
-        const bool has_dll = std::filesystem::is_regular_file(f / L"mod.dll", ec);
+        const bool has_dll = std::filesystem::is_regular_file(f / mods_os::library_file(), ec);
         const bool old_lua = std::filesystem::is_regular_file(f / L"main.lua", ec);
         if (!has_dll && !old_lua)
             continue;

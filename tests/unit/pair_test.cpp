@@ -235,24 +235,31 @@ TEST(Pair, CommandsAreKnownAndTargetsParse) {
 TEST(Pair, KeysOnlyWhilePairShows) {
     using agentdesk::ui::Keymap;
     Keymap k = Keymap::defaults();
-    const ImGuiKeyChord alt_p = *Keymap::parse("alt-p");
+    const auto defaults = Keymap::default_file();
+    const auto key_of = [&](const char* section, const char* command) {
+        for (const auto& [chord, cmd] : defaults.at(section).items())
+            if (cmd == command)
+                return Keymap::parse(chord);
+        return std::optional<ImGuiKeyChord>();
+    };
+    const auto prompt = key_of("layout:pair", "pair.prompt");
+    const auto swap = key_of("layout:pair", "pair.swap");
+    const auto toggle = key_of("global", "pair.toggle");
+    ASSERT_TRUE(prompt && swap && toggle);
     k.set_layout("workspace");
-    EXPECT_FALSE(k.global(alt_p).has_value());  // elsewhere Alt+P reaches the terminal
+    EXPECT_FALSE(k.global(*prompt).has_value());  // elsewhere the key reaches the terminal
     k.set_layout("pair");
-    EXPECT_EQ(k.global(alt_p), "pair.prompt");
-    EXPECT_EQ(k.global(*Keymap::parse("alt-shift-s")), "pair.swap");
-    EXPECT_EQ(Keymap::default_file()["layout:pair"]["alt-p"], "pair.prompt");
-    // Ctrl+Shift+2 toggles Pair from any layout, and nothing else has that chord by default.
-    const ImGuiKeyChord ctrl_shift_2 = *Keymap::parse("ctrl-shift-2");
+    EXPECT_EQ(k.global(*prompt), "pair.prompt");
+    EXPECT_EQ(k.global(*swap), "pair.swap");
+    // The toggle key works from any layout, and nothing else has that chord by default.
     for (const auto& l : agentdesk::ui::layout::builtin_names()) {
         k.set_layout(l);
-        EXPECT_EQ(k.global(ctrl_shift_2), "pair.toggle") << l;
+        EXPECT_EQ(k.global(*toggle), "pair.toggle") << l;
     }
     int uses = 0;
-    const auto defaults = Keymap::default_file();
     for (const auto& [section, keys] : defaults.items())
         for (const auto& [chord, cmd] : keys.items())
-            uses += Keymap::parse(chord) == ctrl_shift_2 ? 1 : 0;
+            uses += Keymap::parse(chord) == toggle ? 1 : 0;
     EXPECT_EQ(uses, 1);
 }
 

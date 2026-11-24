@@ -175,7 +175,14 @@ int init(const agentdesk_host* host, agentdesk_mod* out, const char* description
 }  // namespace detail
 }  // namespace agentdesk::mod
 
+// The init function is exported from the mod library (mod.dll on Windows, mod.dylib on macOS).
+#if defined(_WIN32)
+#define AGENTDESK_MOD_EXPORT __declspec(dllexport)
+#else
+#define AGENTDESK_MOD_EXPORT __attribute__((visibility("default")))
+#endif
+
 #define AGENTDESK_MOD(Class, Description)                                                              \
-    extern "C" __declspec(dllexport) int agentdesk_mod_init(const agentdesk_host* host, agentdesk_mod* mod) { \
+    extern "C" AGENTDESK_MOD_EXPORT int agentdesk_mod_init(const agentdesk_host* host, agentdesk_mod* mod) { \
         return ::agentdesk::mod::detail::init<Class>(host, mod, Description);                          \
     }

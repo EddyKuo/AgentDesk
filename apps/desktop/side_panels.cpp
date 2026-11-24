@@ -204,7 +204,7 @@ std::pair<std::vector<SidePanels::FileEntry>, bool> SidePanels::list_folder(cons
     std::filesystem::directory_iterator it(win::to_wide(join(root, rel)),
                                            std::filesystem::directory_options::skip_permission_denied, ec);
     for (; !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
-        const std::string name = safe::utf8_lossy(it->path().filename().native());
+        const std::string name = safe::utf8_lossy(it->path().filename().wstring());
         if (name == ".git")
             continue;
         if (out.size() >= kPerFolder) {
@@ -224,7 +224,7 @@ host::ToolResult SidePanels::git_run(const std::string& mc, const std::string& c
         return remote_git(remote, mc, cwd, args);
     const std::filesystem::path p(win::to_wide(cwd));
     args.insert(args.begin(), {L"git", L"--no-optional-locks", L"-c", L"core.fsmonitor=false", L"-c",
-                               L"diff.autoRefreshIndex=false", L"-C", p.native()});
+                               L"diff.autoRefreshIndex=false", L"-C", p.wstring()});
     return host::run_tool(args, p, std::chrono::seconds(60));
 }
 
@@ -633,55 +633,6 @@ void SidePanels::task_failed(Panel panel, const char* what) {
     }
 }
 
-void SidePanels::run(std::stop_token st) {
-    std::string watching;
-    HANDLE change = INVALID_HANDLE_VALUE;
-    while (!st.stop_requested()) {
-        Task task;
-        std::string want;
-        {
-            std::unique_lock lock(mutex);
-            cv_.wait_for(lock, st, std::chrono::milliseconds(150), [&] { return !tasks_.empty(); });
-            if (st.stop_requested())
-                break;
-            want = watch_dir_;
-            if (!tasks_.empty()) {
-                task = std::move(tasks_.front());
-                tasks_.pop_front();
-            }
-        }
-        if (want != watching) {
-            if (change != INVALID_HANDLE_VALUE)
-                ::FindCloseChangeNotification(change);
-            change = INVALID_HANDLE_VALUE;
-            try {
-                if (!want.empty())
-                    change = ::FindFirstChangeNotificationW(
-                        win::to_wide(want).c_str(), TRUE,
-                        FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
-                            FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE);
-            } catch (const std::exception&) {  // not watched; the 10 s refresh still runs
-            }
-            watching = want;
-        }
-        if (change != INVALID_HANDLE_VALUE && ::WaitForSingleObject(change, 0) == WAIT_OBJECT_0) {
-            files_changed_ = true;
-            changes_changed_ = true;
-            ::FindNextChangeNotification(change);
-        }
-        if (task.fn) {
-            try {
-                task.fn();
-            } catch (const std::exception& e) {
-                task_failed(task.panel, e.what());
-            } catch (...) {
-                task_failed(task.panel, "unexpected error");
-            }
-        }
-    }
-    if (change != INVALID_HANDLE_VALUE)
-        ::FindCloseChangeNotification(change);
-}
 
 }  // namespace detail
 

@@ -121,10 +121,8 @@ TEST(Review, F8IsBoundOnlyInTheReviewLayout) {
     EXPECT_EQ(file["layout:review"]["f8"], "review.next_file");
 }
 
-TEST(Review, CtrlShiftRTogglesReviewEverywhere) {
-    const Keymap k = Keymap::defaults();
-    EXPECT_EQ(k.global(*Keymap::parse("ctrl-shift-r")), "review.toggle");
-    EXPECT_EQ(k.chord_for("review.toggle"), "Ctrl+Shift+R");
+TEST(Review, ToggleIsBound) {
+    EXPECT_NE(Keymap::defaults().chord_for("review.toggle"), "");  // the key: win/ and posix/ keymap tests
 }
 
 TEST(Review, CommandsAreKnown) {
