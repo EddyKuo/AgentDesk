@@ -429,12 +429,18 @@ void TerminalView::paint_screen_rows(ImDrawList* dl, const Frame& f, const termi
                                   static_cast<int>((dl->GetClipRectMax().y - f.origin.y) / f.cell_h) + 1);
     for (int row = first_row; row < last_row; ++row) {
         const float y = f.y_at(row + f.offset);
-        // Backgrounds as merged runs of equal colour.
+        // Backgrounds as merged runs of equal colour. The right half of a wide character carries no
+        // colours of its own (it is a continuation cell): it takes its character's, else a coloured
+        // prompt shows a dark gap after every CJK character.
+        const auto bg_at = [&](int c) {
+            const terminal::Cell& cell = snap.at(row, c);
+            return colors_of(cell.width == 0 && c > 0 ? snap.at(row, c - 1) : cell, theme).bg;
+        };
         int col = 0;
         while (col < snap.cols) {
-            const ImU32 bg = colors_of(snap.at(row, col), theme).bg;
+            const ImU32 bg = bg_at(col);
             int end = col + 1;
-            while (end < snap.cols && colors_of(snap.at(row, end), theme).bg == bg)
+            while (end < snap.cols && bg_at(end) == bg)
                 ++end;
             if (bg != theme.default_bg)
                 dl->AddRectFilled(ImVec2(f.x_at(col), y), ImVec2(f.x_at(end), y + f.cell_h), bg);
