@@ -29,7 +29,7 @@ change_summary: |
 
 # Product Requirements Document：AgentDesk
 
-> 本契約鎖定設計文件 **v3.0**（`docs/design/AgentDesk_Design.md`），對應產品版本 0.2.0。設計文件之後的變更若影響第 2～5 節，必須依憲法 6.3 將本契約升版，下游才能採用。每項需求在設計文件的對應章節列在第 8 節。
+> 本契約鎖定設計文件 **v3.0**（`docs/design/AgentDesk_Design.md`），對應產品版本 0.2.0。設計文件之後的變更若影響第 2～5 節，必須依憲法 6.3 將本契約升版，下游才能採用。各需求對應的設計文件章節見第 8 節。
 
 ## 1. 產品概述
 
@@ -43,7 +43,7 @@ AgentDesk 是原生的 AI Agent 工作台：在可分割的終端機面板裡跑
 
 ### 1.2 目標使用者
 
-以一般使用者權限、同時操作兩個以上 coding agent CLI 的開發者，使用以下任一平台：
+同時操作兩個以上 coding agent CLI 的開發者，以一般使用者權限使用以下任一平台：
 
 - Windows 11 x64。
 - Apple Silicon 的 macOS 13 Ventura 以上（ADR-30）。
@@ -72,7 +72,7 @@ AgentDesk 是原生的 AI Agent 工作台：在可分割的終端機面板裡跑
 
 ## 2. 功能需求
 
-格式：每項需求有優先級、描述、驗收（Given／When／Then）與驗證。P1 是核心功能，P2 是重要功能，P3 是選用功能。
+格式：每項需求有優先級、描述、驗收（Given／When／Then）與驗證。P1 沒有就不能發布；P2 首發應該要有，必要時可以延到下一版；P3 可有可無。
 
 ### 2.1 終端機工作階段（核心）
 
@@ -142,7 +142,7 @@ AgentDesk 是原生的 AI Agent 工作台：在可分割的終端機面板裡跑
 
 #### US-07 CLI 自動化
 **優先級**：P1
-**描述**：`agentctl` 提供 `run`、`list`、`read`、`send`、`stop`、`wait`、`report-state`、`report`、`label`、`shutdown`、`hook`、`bridge`、`update`，`--json` 時 stdout 只有結果，診斷寫到 stderr，退出碼固定：0 成功、2 參數錯誤、3 host 無法連線、4 session 不存在或名稱歧義、5 操作遭拒、6 啟動失敗、7 逾時。
+**描述**：`agentctl` 提供 `run`、`list`、`read`、`send`、`stop`、`wait`、`report-state`、`report`、`label`、`shutdown`、`hook`、`bridge`、`update`。加上 `--json` 時 stdout 只有結果，診斷寫到 stderr。退出碼固定：0 成功、2 參數錯誤、3 host 無法連線、4 session 不存在或名稱歧義、5 操作遭拒、6 啟動失敗、7 逾時。
 **驗收**：
 - Given 腳本以 `--json` 呼叫 `agentctl list`，When 指令完成，Then stdout 只有 JSON，退出碼符合上述定義。（QA-13）
 - Given 腳本呼叫 `agentctl send` 而沒有 `--enter`，When 指令完成，Then 只送出文字，不送 Enter。（QA-13）
@@ -217,7 +217,7 @@ AgentDesk 是原生的 AI Agent 工作台：在可分割的終端機面板裡跑
 
 #### FR-31 Agent 狀態的生命週期
 **優先級**：P1
-**描述**：Agent 結束就清掉狀態，space 關閉才全部關掉。shell 顯示新提示（OSC 133 A）表示前一個程式已經結束，host 丟掉該 session 的全部 OSC 7501 紀錄。host 啟動 shell 時加上提示鉤子：Windows 是 PowerShell、Command Prompt、WSL（bash）；macOS 是 zsh 與 bash，同時送出 OSC 7 回報資料夾。Agents 清單只列出各 space 面板裡、正在執行而且現在有狀態的終端機。已結束或 Lost 的終端機，面板會被移除，分頁空了就關閉分頁，space 空了就關閉 space。
+**描述**：Agent 結束時只清掉它的狀態，終端機（shell）留著；space 關閉時，裡面的終端機才會被結束。shell 顯示新提示（OSC 133 A）表示前一個程式已經結束，host 丟掉該 session 的全部 OSC 7501 紀錄。host 啟動 shell 時加上提示鉤子：Windows 是 PowerShell、Command Prompt、WSL（bash）；macOS 是 zsh 與 bash，同時送出 OSC 7 回報資料夾。Agents 清單只列出各 space 面板裡、正在執行而且現在有狀態的終端機。已結束或 Lost 的終端機，面板會被移除，分頁空了就關閉分頁，space 空了就關閉 space。
 **驗收**：
 - Given Claude Code 在 shell 裡回報 Working，When 它結束、shell 顯示提示，Then 該 session 的 OSC 7501 紀錄全部被丟掉，agent_state 變成 Unknown，原值存進 `last_agent_state`，Agents 清單與狀態點一起清掉。
 - Given 一個終端機已結束或 Lost，When 使用者重開 UI，Then 它的面板被移除，已結束的 session 不會被開成 space。
@@ -306,7 +306,7 @@ AgentDesk 是原生的 AI Agent 工作台：在可分割的終端機面板裡跑
 **優先級**：P2
 **描述**：
 - **版面**：內建 workspace（預設）與 terminals 兩個版面，另可放自訂的 JSON 版面；使用者的拖曳與開關另存，不改版面檔。可複製與重設內建版面。
-- **mod**：C++ 動態函式庫（Windows `mods/<名稱>/mod.dll`、macOS `mods/<名稱>/mod.dylib`），透過純 C 介面加命令、面板、分頁與 Agent 的裝飾、通知（ADR-17）。只載入已啟用的 mod；啟用前先說明權限；mod 當掉就停用，AgentDesk 照常執行。隨附三個範例 mod，預設不啟用。
+- **mod**：C++ 動態函式庫（Windows `mods/<名稱>/mod.dll`、macOS `mods/<名稱>/mod.dylib`），透過純 C 介面加入命令、面板、通知，以及分頁與 Agent 旁的裝飾文字（ADR-17）。只載入已啟用的 mod；啟用前先說明權限；mod 當掉就停用，AgentDesk 照常執行。隨附三個範例 mod，預設不啟用。
 
 **驗收**：
 - Given 目前是 workspace 版面，When 使用者切到 terminals，Then 側欄與狀態列消失，space 改在上方列選；上方列最左邊的按鈕可切回有側欄的版面。
@@ -349,7 +349,7 @@ AgentDesk 是原生的 AI Agent 工作台：在可分割的終端機面板裡跑
 
 #### FR-36 agent-host 單獨更新時接手終端機
 **優先級**：P2
-**描述**：`agentctl update`、設定 › Updates 的 agent-host 列，或 app 更新後第一次啟動時，舊 host 啟動新的 agent-host，凍結每個 session（解析器回到 ground 才停），把終端機交給新 host，連同完整的終端機狀態（畫面、歷史、OSC 7501 紀錄與 seq、待送任務）；新 host 核對後回報 ready，舊 host 才放手（ADR-19）。Windows 複製 ConPTY、子程序與 Job 的 handle，只支援隨附 ConPTY；macOS 經 Unix socket 以 `SCM_RIGHTS` 傳 pty master（ADR-30）。
+**描述**：觸發時機：`agentctl update`、設定 › Updates 的 agent-host 列，或 app 更新後第一次啟動。舊 host 啟動新的 agent-host，凍結每個 session（解析器回到 ground 才停），再把終端機連同完整狀態（畫面、歷史、OSC 7501 紀錄與 seq、待送任務）交給新 host。新 host 核對後回報 ready，舊 host 才放手（ADR-19）。Windows 複製 ConPTY、子程序與 Job 的 handle，只支援隨附 ConPTY；macOS 經 Unix socket 以 `SCM_RIGHTS` 傳 pty master（ADR-30）。
 **驗收**：
 - Given host 正在跑幾個終端機，When 使用者執行 `agentctl update`，Then 新 host 接手所有 session，程式不中斷；連線會斷，client 重新連上後取得新快照，不把 session 標成 Lost。
 - Given 新 host 在 30 秒內沒回報 ready 或出錯，When 交接失敗，Then 舊 host 結束新程序並恢復所有 session。
