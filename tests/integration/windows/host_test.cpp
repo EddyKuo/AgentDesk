@@ -1174,6 +1174,11 @@ TEST_F(HostFixture, TimelineRecordsStateChangesInOrder) {
     const auto text = ctl({L"timeline", w(id), L"--since", L"1h"});
     EXPECT_EQ(text.exit_code, 0u);
     EXPECT_NE(text.out.find("Blocked / Running"), std::string::npos) << text.out;
+    // The value belongs to --since: without a session it is not taken for one, and it is checked.
+    const auto all = ctl({L"timeline", L"--since", L"1h"});
+    EXPECT_EQ(all.exit_code, 0u) << all.out;
+    EXPECT_NE(all.out.find("Blocked / Running"), std::string::npos) << all.out;
+    EXPECT_EQ(ctl({L"timeline", w(id), L"--since", L"soon"}).exit_code, 2u);
     c->close();
 }
 
