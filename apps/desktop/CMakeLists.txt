@@ -58,7 +58,9 @@ if(WIN32)
         win/git_cache_win.cpp
         win/side_panels_win.cpp
         win/window_ops_win.cpp
+        agent-ui.rc
         agent-ui.manifest)
+    set_source_files_properties(agent-ui.rc PROPERTIES OBJECT_DEPENDS "${PROJECT_SOURCE_DIR}/assets/icon/agentdesk.ico")
     target_include_directories(agent-ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(agent-ui PRIVATE agentdesk::ui agentdesk::ipc imgui::imgui nlohmann_json::nlohmann_json
         d3d11 dxgi dwmapi shcore dbghelp winmm imm32 shell32)

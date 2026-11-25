@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- AgentDesk app icon: a meerkat standing sentry, seen from the side. Original drawing, MIT like the rest. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f5d73"/><stop offset="1" stop-color="#17303f"/>
+    </linearGradient>
+    <linearGradient id="fur" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e6cfa8"/><stop offset=".45" stop-color="#d3a873"/><stop offset="1" stop-color="#b98249"/>
+    </linearGradient>
+    <clipPath id="clip"><rect width="1024" height="1024" rx="228"/></clipPath>
+  </defs>
+  <g clip-path="url(#clip)">
+    <rect width="1024" height="1024" fill="url(#tile)"/>
+    <!-- rock -->
+    <path d="M-20 912 C150 864 380 852 560 858 C760 864 900 890 1044 936 V1044 H-20 Z" fill="#0f2230"/>
+    <!-- tail, resting on the rock -->
+    <path d="M436 800 C350 838 250 852 118 852 C92 852 88 886 114 888 C250 896 372 890 460 872 Z" fill="#a9713c"/>
+    <path d="M212 849 C180 851 150 852 118 852 C92 852 88 886 114 888 C148 890 180 891 212 891 Z" fill="#4a2f1d"/>
+    <!-- far arm and far foot -->
+    <path d="M590 452 C652 500 700 566 716 640 C720 672 682 684 668 656 C650 602 612 560 572 528 Z" fill="#a9713c"/>
+    <path d="M600 838 C660 828 736 836 748 862 C752 880 736 884 720 884 H600 Z" fill="#a9713c"/>
+    <!-- body and head -->
+    <path d="M478 96 C560 72 622 104 654 152 C688 178 742 196 762 230 C772 252 760 274 736 276 C692 294 652 300 620 300 C616 344 626 384 644 430 C672 506 676 590 660 664 C676 740 668 818 640 884 H432 C372 850 350 760 358 664 C364 576 396 500 396 420 C396 384 388 352 384 320 C372 220 396 120 478 96 Z" fill="url(#fur)"/>
+    <!-- pale throat, chest and belly -->
+    <path d="M736 276 C692 294 652 300 620 300 C616 344 626 384 644 430 C672 506 676 590 660 664 C656 676 644 682 632 676 C612 600 592 520 566 440 C552 392 560 330 588 284 C630 296 680 290 736 276 Z" fill="#f4e4c6"/>
+    <!-- thigh and foot -->
+    <path d="M640 884 C662 830 666 770 640 722 C604 668 520 676 484 736 C452 792 462 856 500 884 Z" fill="#c08a51"/>
+    <path d="M520 884 C530 846 600 836 660 844 C694 850 706 868 702 884 Z" fill="#dcb27c"/>
+    <!-- stripes on the lower back -->
+    <g fill="none" stroke="#7b4f2b" stroke-width="17" stroke-linecap="round">
+      <path d="M384 566 C410 572 434 572 456 564"/><path d="M372 620 C402 630 432 630 458 620"/>
+      <path d="M366 676 C396 688 426 688 450 678"/><path d="M370 732 C394 744 416 746 436 740"/>
+    </g>
+    <!-- near arm, paw hanging -->
+    <path d="M492 420 C536 412 574 440 592 490 C616 540 652 580 668 640 C676 684 630 700 612 662 C592 612 544 576 508 534 C478 496 466 436 492 420 Z" fill="#dcb27c"/>
+    <path d="M624 678 l-4 26 M644 682 l2 26 M660 672 l10 22" stroke="#3a2417" stroke-width="13" stroke-linecap="round"/>
+    <!-- ear -->
+    <ellipse cx="452" cy="216" rx="33" ry="47" transform="rotate(-10 452 216)" fill="#3a2417"/>
+    <!-- mask and eye -->
+    <path d="M560 188 C566 150 606 136 640 152 C666 168 680 196 668 218 C640 226 600 238 576 226 C562 218 558 204 560 188 Z" fill="#3f281a"/>
+    <circle cx="616" cy="186" r="27" fill="#f2a93c"/><circle cx="620" cy="186" r="18" fill="#130b07"/><circle cx="627" cy="178" r="7" fill="#fff"/>
+    <!-- nose and mouth -->
+    <path d="M728 206 C750 208 768 228 766 248 C762 264 744 264 734 250 C724 238 720 218 728 206 Z" fill="#2c1a12"/>
+    <path d="M724 272 C700 274 676 268 658 256" fill="none" stroke="#6b4529" stroke-width="10" stroke-linecap="round"/>
+    <!-- prompt on the rock -->
+    <path d="M436 930 l34 24 l-34 24 M496 980 h52" fill="none" stroke="#f2a93c" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
