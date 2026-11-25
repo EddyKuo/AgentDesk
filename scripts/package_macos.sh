@@ -48,6 +48,7 @@ for d in fonts sounds programs themes mods; do
   cp -R "$bin/$d" "$app/Contents/Resources/"
 done
 cp LICENSE "$app/Contents/Resources/"
+cp assets/icon/agentdesk.icns "$app/Contents/Resources/"
 mkdir -p "$app/Contents/Resources/docs"
 cp docs/user-guide.md docs/integrations/agent-hooks.md docs/compatibility.md docs/mods.md \
    "$app/Contents/Resources/docs/"
@@ -109,6 +110,7 @@ cat > "$app/Contents/Info.plist" <<EOF
   <key>CFBundleDisplayName</key><string>AgentDesk</string>
   <key>CFBundleIdentifier</key><string>org.agentdesk.AgentDesk</string>
   <key>CFBundleExecutable</key><string>agent-ui</string>
+  <key>CFBundleIconFile</key><string>agentdesk</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
   <key>CFBundleVersion</key><string>$version</string>

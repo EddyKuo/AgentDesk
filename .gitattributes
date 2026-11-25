@@ -9,5 +9,6 @@ tests/fixtures/** -text
 
 *.png  binary
 *.ico  binary
+*.icns binary
 *.ttf  binary
 *.otf  binary

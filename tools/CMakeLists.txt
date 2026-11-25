@@ -1,6 +1,11 @@
 # Developer and test tools (not shipped). vt_probe, the fake agent, runs on both systems.
 agentdesk_executable(vt_probe vt_probe/vt_probe.cpp
     $<IF:$<BOOL:${WIN32}>,vt_probe/vt_probe_win.cpp,vt_probe/vt_probe_posix.cpp>)
+# The app icon's .ico and .icns from assets/icon/*.svg.
+find_package(lunasvg CONFIG REQUIRED)
+agentdesk_executable(make_icons make_icons/make_icons.cpp)
+target_compile_definitions(make_icons PRIVATE AGENTDESK_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_link_libraries(make_icons PRIVATE lunasvg::lunasvg)
 if(NOT WIN32)
     return()  # the other tools drive ConPTY and the Win32 UI (macOS: ADR-30)
 endif()

@@ -511,6 +511,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_wake = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, wnd_proc,       0,      0, instance, nullptr, nullptr,
                    nullptr,    nullptr,    L"AgentDeskUi", nullptr};
+    // The taskbar, Alt+Tab and title icon (agent-ui.rc), each drawn for the size it is shown in. Not
+    // LR_SHARED: that returns the first one loaded, whatever its size. They live as long as the window.
+    const auto icon = [instance](int cx, int cy) {
+        return static_cast<HICON>(::LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, ::GetSystemMetrics(cx),
+                                               ::GetSystemMetrics(cy), LR_DEFAULTCOLOR));
+    };
+    wc.hIcon = icon(SM_CXICON, SM_CYICON);
+    wc.hIconSm = icon(SM_CXSMICON, SM_CYSMICON);
     ::RegisterClassExW(&wc);
     const bool automated = dev.exit_after_ms > 0;
     const ui::window_place::Place place = start_place(automated);

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- The same meerkat for 16 to 48 px: only the head in profile, with the ear, mask, eye and nose. -->
+  <defs><clipPath id="clip"><rect width="1024" height="1024" rx="200"/></clipPath></defs>
+  <g clip-path="url(#clip)">
+    <rect width="1024" height="1024" fill="#1e4357"/>
+    <g transform="translate(-34 0)">
+    <path d="M336 108 C520 50 668 124 744 236 C824 298 940 336 980 414 C1004 470 976 520 916 526 C820 566 728 582 654 582 C640 700 676 860 712 1044 H120 C150 880 150 760 124 628 C84 400 144 164 336 108 Z" fill="#e0b57c"/>
+    <path d="M916 526 C820 566 728 582 654 582 C640 700 676 860 712 1044 H520 C500 860 500 660 580 536 C680 560 800 560 916 526 Z" fill="#f8e8cb"/>
+    <ellipse cx="270" cy="390" rx="84" ry="120" transform="rotate(-10 270 390)" fill="#3f2416"/>
+    <path d="M520 330 C530 226 630 186 716 232 C780 272 816 340 788 400 C720 430 620 452 560 420 C530 400 516 368 520 330 Z" fill="#3f2416"/>
+    <circle cx="650" cy="326" r="76" fill="#ffc861"/>
+    <g id="pupils"><circle cx="664" cy="326" r="40" fill="#130b07"/></g>
+    <path d="M884 354 C940 362 988 410 982 458 C974 500 926 502 898 470 C872 438 864 386 884 354 Z" fill="#1d100a"/>
+    </g>
+  </g>
+</svg>
