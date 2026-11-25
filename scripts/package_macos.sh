@@ -6,7 +6,7 @@
 #
 # Without --sign the app is signed ad hoc ("-"): it runs on this Mac, and elsewhere only after the
 # person allows it (Gatekeeper). A Developer ID signature and notarization need an Apple Developer
-# account (design doc 7.4 OQ-11).
+# account (design doc 12.3 OQ-11).
 set -eu
 cd "$(dirname "$0")/.."
 root=$(pwd)

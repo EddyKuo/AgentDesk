@@ -8,7 +8,7 @@ namespace detail {
 namespace {
 // The release notes What's new shows (it opens once after an update).
 constexpr const char* kWhatsNew[] = {
-    "A new look: sidebar with spaces and agents, tab bar with the window buttons, Files and Changes "
+    "A new look: sidebar with spaces and agents, tab bar, Files and Changes "
     "panels, picker, command palette, settings and welcome.",
     "Bigger interface text by default (15 px), adjustable in Settings > Look; Geist and JetBrains Mono are "
     "bundled.",

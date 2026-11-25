@@ -229,7 +229,15 @@ void draw_layout(App::State& s, ImVec2 origin, ImVec2 full, bool connected) {
     const std::optional<lay::Node> mac =
         l.style == "mac" ? mac_layout_tree(s, l.tree) : style_layout_tree(s, l.tree);
     const lay::Node& tree = mac ? *mac : l.tree;
-    s.placed = lay::place(tree, lay::Rect{origin.x, origin.y, full.x, full.y}, g_scale, {}, true);
+    // Focus has no top bar to hold the system's window buttons (macOS; none in full screen), so its
+    // terminal starts under them. Their height is in points and does not zoom.
+    const float top = s.settings.focus_on ? window_system_buttons_height() : 0.0f;
+    if (top > 0.0f) {
+        const ImVec2 b(origin.x + full.x, origin.y + top);
+        ImGui::GetWindowDrawList()->AddRectFilled(origin, b, g_pal->term_bg);
+        window_drag_area(s, origin, b);
+    }
+    s.placed = lay::place(tree, lay::Rect{origin.x, origin.y + top, full.x, full.y - top}, g_scale, {}, true);
     if (l.style == "mac")
         draw_mac_backdrop(s, tree);
     else

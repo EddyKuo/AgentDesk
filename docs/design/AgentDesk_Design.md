@@ -1,6 +1,6 @@
 # AgentDesk 詳細設計文件
 
-版本 v3.2｜日期：2026-11-24｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.0.0
+版本 v3.3｜日期：2026-11-25｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.0.0
 技術基線：C++20、Dear ImGui（FreeType 繪字）、libvterm 0.3.3。Windows 11 x64：Win32、DirectX 11、隨附 ConPTY。macOS 13 以上（Apple Silicon）：AppKit、Metal、POSIX pty
 
 > 這份文件依 0.2.0 的程式重寫，描述系統「現在怎麼運作」。需求與驗收在 PRD；這裡寫設計、資料格式、數字與理由。程式與文件不一致時，先查程式，再修文件或列進 12.4。
@@ -11,6 +11,7 @@
 
 | 版本 | 日期 | 變更 |
 |---|---|---|
+| 3.3 | 2026-11-25 | 合併後在 Mac 上建置並跑完全部測試（12.2）。Focus 模式在 macOS 讓開系統紅綠燈（7.17） |
 | 3.2 | 2026-11-24 | 平台抽象層第 1～8 步完成：Windows 也實作中立介面，過渡用的 `compat/` 拿掉，交接邏輯合為一份（2.1、2.3、5.2、ADR-45）。路徑改由 `ui::path_text` 依路徑本身判斷系統。對外行為不變 |
 | 3.1 | 2026-11-24 | 合併 Windows 端的 v2.27（版面與主題第一、二輪）與 macOS 端的 v3.0。v2.27 的 2.8～2.16 原文搬到 7.16～7.24，內建版面與 style 對照表在 7.25，決策紀錄加入 ADR-32～ADR-41。兩邊編號相撞：macOS 端的 ADR-30、ADR-31 不變，Windows 端的「Mac 風格的視窗按鈕」改為 ADR-42、「AgentDesk Mac 版面」改為 ADR-43。新增 ADR-44（新版面在兩個平台的做法）。合併前的兩份保存在 `docs/archive/AgentDesk_Design_v2.27.md`、`AgentDesk_Design_v3.0.md` |
 | 3.0 | 2026-11-24 | 使用者要求依照現有程式重寫。改為純設計文件：需求與驗收移到 PRD 4.0.0；依程式碼重寫架構、協定、host、UI 與平台差異各章；決策紀錄（第 11 章）照舊保留。舊版 v2.21 與完整的版本紀錄保存在 `docs/archive/AgentDesk_Design_v2.21.md`，v1.0 在 `docs/archive/AgentDesk_Design_v1.0.md` |
@@ -771,7 +772,7 @@ Stage 的構想是 `docs/design/ideas.md` 第二輪的 C2，實作與差異在 `
 **Focus 模式**：任何版面都能切換的模式，畫面只剩一個終端機。
 
 - `focus.toggle`（Ctrl+Shift+.）、`focus.on`、`focus.off`。開啟時以不列出的內建樹 `focus.json` 取代目前版面，保留目前版面的主題、字級與 keys.json 區段；顯示目前分頁的焦點面板（沒有就是放大中的，再沒有就第一個），`Tab::zoomed` 與分割樹不動，關掉就回到原本的分割。狀態存在 `ui.json` 的 `focus_on`，重開後仍在 Focus。
-- 底部 22 px 的列：左邊程式與「名稱 · space」，中間其他 Agent 的狀態點（需要你、完成為實心，工作中是空心圈，閒置是小灰點，Unknown 不畫；子 Agent 不另外畫點，父 Agent 的點顯示整棵樹最緊急的狀態），放不下時「+N」；點一個點跳到那個 Agent 並留在 Focus。右邊是「Exit focus」與快捷鍵。滑鼠在終端機上緣停 300 ms，面板標題列浮在終端機上方出現（不推擠終端機，尺寸不變）。
+- 底部 22 px 的列：左邊程式與「名稱 · space」，中間其他 Agent 的狀態點（需要你、完成為實心，工作中是空心圈，閒置是小灰點，Unknown 不畫；子 Agent 不另外畫點，父 Agent 的點顯示整棵樹最緊急的狀態），放不下時「+N」；點一個點跳到那個 Agent 並留在 Focus。右邊是「Exit focus」與快捷鍵。滑鼠在終端機上緣停 300 ms，面板標題列浮在終端機上方出現（不推擠終端機，尺寸不變）。macOS 的系統紅綠燈在視窗左上角，所以 Focus 的內容從它們下方 28 px 開始，空出的那條可以拖曳視窗；全螢幕時沒有紅綠燈，內容用滿整個視窗。
 - 提醒（`focus_alerts`，視窗在前景時才適用）：`edge_sound`（預設）視窗內緣亮一下並播放提示音、不跳通知；`edge` 只亮邊緣；`normal` 照平常。預設 `edge_sound` 是使用者的決定，讓 4.1「需要你時一定播放提示音」仍然成立。視窗在背景時照平常提醒。設定 › Alerts 有「In focus mode」一列。
 - Focus 開著時風格版面（例如 Classic）的外框、背景與鍵盤攔截都不作用，也不能開調整大小模式；`stage.toggle`、`inbox.toggle`、`review.toggle`、`pair.toggle`、`garden.toggle` 都走共用的 `toggle_layout`，會先離開 Focus 再切版面。
 
@@ -1131,7 +1132,7 @@ ADR-14、ADR-24 已被取代（見表內說明），保留供查閱。表中提�
 |---|---|
 | Windows | 繁中注音與候選視窗、100%／150%／200% DPI、Codex hook 實機、另一個 Windows 帳號連線被拒、實際 ssh 連到另一台電腦 |
 | macOS | 注音輸入（組字顯示、選字窗位置、組字中的按鍵不送進程式）、Option 鍵的五種設定、實際的 Claude Code／Codex 狀態顯示、Retina 與外接螢幕之間移動、紅綠燈位置與拖曳上方列、通知音效、mod 啟用、實際 ssh 連線 |
-| macOS | 合併後的程式在 Mac 上建置並跑全部測試（7.16～7.25 的版面與主題沒有在 macOS 上編譯過）；各版面頂端列與紅綠燈的位置、新版面的快捷鍵、減少動畫與增加對比 |
+| macOS | 實際視窗裡各版面頂端列與紅綠燈的位置（含 Focus）、新版面的快捷鍵、減少動畫與增加對比 |
 
 ### 12.3 待決事項
 

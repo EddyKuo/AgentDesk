@@ -127,6 +127,17 @@
         "noTestsAction": "error",
         "timeout": 300
       }
+    },
+    {
+      "name": "clang-macos-arm64-release",
+      "configurePreset": "clang-macos-arm64-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "timeout": 300
+      }
     }
   ]
 }
