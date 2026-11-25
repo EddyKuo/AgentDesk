@@ -64,9 +64,9 @@ struct Args {
 };
 
 const std::vector<std::string> kValueOptions = {
-    "--profile", "--name",   "--cwd",     "--lines", "--file", "--text",       "--source",
-    "--state",   "--kind",   "--message", "--seq",   "--pipe", "--timeout-ms", "--key",
-    "--task",    "--parent", "--until",   "--to",    "--from", "--version",    "--exe"};
+    "--profile", "--name",    "--cwd",  "--lines",   "--file",       "--text", "--source", "--state",
+    "--kind",    "--message", "--seq",  "--pipe",    "--timeout-ms", "--key",  "--task",   "--parent",
+    "--until",   "--to",      "--from", "--version", "--exe",        "--since"};
 
 Args parse_args(int argc, wchar_t** argv) {
     Args a;

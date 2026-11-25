@@ -74,6 +74,22 @@ TEST(InputMapping, SelectionTextHandlesWideAndCombining) {
     EXPECT_EQ(selection_text(snap, {0, 5}, {1, 2}), "x\r\nred");
 }
 
+// A drag may end on either half of a wide character: it is in the selection whole, in the text and
+// in the cells that are painted.
+TEST(InputMapping, SelectionTakesWideCharactersWhole) {
+    const std::vector<LineCells> lines = {cells_from_text("a中文b", false)};
+    // columns: a=0, two wide characters=1..2 and 3..4, b=5
+    EXPECT_EQ(whole_characters(lines[0], 2, 3), (std::pair{1, 4}));
+    EXPECT_EQ(whole_characters(lines[0], 1, 2), (std::pair{1, 2}));  // already whole
+    EXPECT_EQ(whole_characters(lines[0], 1, 1), (std::pair{1, 2}));
+    EXPECT_EQ(whole_characters(lines[0], 2, 2), (std::pair{1, 2}));
+    EXPECT_EQ(whole_characters(lines[0], 0, 5), (std::pair{0, 5}));
+    EXPECT_EQ(whole_characters(lines[0], 0, 99), (std::pair{0, 99}));  // past the end of the line
+    EXPECT_EQ(selection_text(lines, {0, 2}, {0, 3}), "中文");
+    EXPECT_EQ(selection_text(lines, {0, 4}, {0, 5}), "文b");
+    EXPECT_EQ(selection_text(lines, {0, 4}, {0, 2}), "中文");  // dragged to the left
+}
+
 // Copying a selection: soft-wrapped rows join, trailing blank lines go.
 TEST(InputMapping, SelectionTextJoinsSoftWrapsAndTrims) {
     VtEngineOptions o;

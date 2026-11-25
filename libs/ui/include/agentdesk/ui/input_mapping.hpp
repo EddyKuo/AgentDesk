@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <imgui.h>
@@ -66,11 +67,15 @@ struct LineCells {
 };
 LineCells cells_from_text(const std::string& utf8, bool wrapped);
 
+// The cells c0..c1 of a line, widened so that a wide character at either end is in it whole: both of
+// its cells, whichever one was named. Columns outside the line stay as they are.
+std::pair<int, int> whole_characters(const LineCells& line, int c0, int c1);
+
 // Text of a linear selection between two cells (inclusive, any order) over consecutive lines
 // (CellPos::row indexes `lines`), copied the way Ghostty's formatter does with unwrap and trim:
 // soft-wrapped lines join without a break, trailing blanks of each line and trailing blank lines
-// are trimmed, lines end with "\r\n". Continuation cells of wide characters
-// are skipped. Never contains control characters.
+// are trimmed, lines end with "\r\n". A wide character is copied when either of its
+// cells is selected. Never contains control characters.
 std::string selection_text(const std::vector<LineCells>& lines, CellPos a, CellPos b);
 // The same over one snapshot's rows.
 std::string selection_text(const terminal::ScreenSnapshot& snap, CellPos a, CellPos b);

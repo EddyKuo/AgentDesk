@@ -46,7 +46,8 @@ set(_unit_sources
     unit/window_buttons_test.cpp
     unit/layout_tips_test.cpp
     unit/design_tokens_test.cpp
-    unit/path_text_test.cpp)
+    unit/path_text_test.cpp
+    unit/terminal_view_test.cpp)
 if(WIN32)
     list(APPEND _unit_sources
         unit/command_line_test.cpp
