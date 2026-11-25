@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <set>
+#include <tuple>
 
 #include "agentdesk/ui/clipboard.hpp"
 #include "agentdesk/ui/imgui_adapter.hpp"
@@ -1091,8 +1092,11 @@ void TerminalView::paint_selection(ImDrawList* dl, const Frame& f, const Lines& 
         const int idx = f.top + r;
         if (idx < ia || idx > ib)
             continue;
-        const int c0 = std::max(0, idx == ia ? ca : 0);
-        const int c1 = std::min(snap.cols - 1, idx == ib ? cb : snap.cols - 1);
+        int c0 = std::max(0, idx == ia ? ca : 0);
+        int c1 = std::min(snap.cols - 1, idx == ib ? cb : snap.cols - 1);
+        // The drag's ends are cells; a wide character under one is selected (and copied) whole.
+        if (idx == ia || idx == ib)
+            std::tie(c0, c1) = whole_characters(lines.cells(idx), c0, c1);
         if (c1 < c0)
             continue;
         const float y = f.y_at(r);

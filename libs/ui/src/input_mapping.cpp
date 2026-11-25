@@ -171,6 +171,16 @@ LineCells cells_from_text(const std::string& s, bool wrapped) {
     return out;
 }
 
+std::pair<int, int> whole_characters(const LineCells& line, int c0, int c1) {
+    const int cols = static_cast<int>(line.cells.size());
+    const auto width = [&](int c) { return line.cells[static_cast<std::size_t>(c)].width; };
+    if (c0 > 0 && c0 < cols && width(c0) == 0)
+        --c0;
+    if (c1 >= 0 && c1 + 1 < cols && width(c1) == 2)
+        ++c1;
+    return {c0, c1};
+}
+
 std::string selection_text(const std::vector<LineCells>& lines, CellPos a, CellPos b) {
     if (lines.empty())
         return {};
@@ -182,8 +192,8 @@ std::string selection_text(const std::vector<LineCells>& lines, CellPos a, CellP
     for (int row = std::max(a.row, 0); row <= std::min(b.row, last); ++row) {
         const auto& line = lines[static_cast<std::size_t>(row)];
         const int cols = static_cast<int>(line.cells.size());
-        const int c0 = row == a.row ? a.col : 0;
-        const int c1 = row == b.row ? b.col : cols - 1;
+        const auto [c0, c1] =
+            whole_characters(line, row == a.row ? a.col : 0, row == b.row ? b.col : cols - 1);
         std::string text;
         for (int col = std::max(c0, 0); col <= std::min(c1, cols - 1); ++col) {
             const auto& cell = line.cells[static_cast<std::size_t>(col)];
