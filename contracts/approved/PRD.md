@@ -1,21 +1,24 @@
 ---
 contract_type: PRD
-version: 5.0.0
+version: 5.0.1
 status: approved
 author_agent: PM
 sprint: 11
 created_at: 2026-11-16T00:00:00+08:00
-approved_at: 2026-11-24T00:00:00+08:00
+approved_at: 2026-11-25T00:00:00+08:00
 skills_used:
   - shared/domain-coding-agents@1.0.0
 upstream_deps:
   - raw_requirement@2026-11-16
   - docs/design/AgentDesk_Design.md@3.1
-  - sprint/current/status.md@2026-11-24
+  - sprint/current/status.md@2026-11-25
 downstream_consumers:
   - RD
   - QA
 change_summary: |
+  5.0.1（Patch）：更新 macOS 的驗證狀態（使用者 2026-11-25 要求），需求、驗收條文與數字不變，仍鎖定設計文件 v3.1。
+  第 7 節與 2.11 開頭改為已在 macOS 建置並通過自動測試、人工驗收未完成，並列出 FR-43 的兩項落差。
+  上一版保存在 `contracts/deprecated/PRD_v5.0.0.md`。
   5.0.0（Major）：合併兩份同為 4.0.0 的契約（Windows 端鎖定設計文件 v2.27、macOS 端鎖定 v3.0；使用者 2026-11-24 要求合併）。
   以 macOS 端的重寫版為底，Windows 端的版面與主題需求原文放進 2.11，需求內容與數字不變。
   編號相撞的需求改號，屬於重大變更，所以升主版號：Windows 端的 FR-39「Mac 風格的視窗按鈕」改為 FR-58，
@@ -398,7 +401,7 @@ AgentDesk 是原生的 AI Agent 工作台：在可分割的終端機面板裡跑
 
 ### 2.11 版面與主題
 
-本節是 Windows 端 4.0.0 的 FR-39（改為 FR-58）、第 10 節與第 11 節原文，只改編號。文中「第 8～11 節」指那份契約的章節。文中的按鍵是 Windows 的，macOS 的見設計文件 7.7。macOS 端尚未建置與驗收這一節（設計文件 12.2）。
+本節是 Windows 端 4.0.0 的 FR-39（改為 FR-58）、第 10 節與第 11 節原文，只改編號。文中「第 8～11 節」指那份契約的章節。文中的按鍵是 Windows 的，macOS 的見設計文件 7.7。macOS 端已建置並通過自動測試，人工驗收未完成（第 7 節、設計文件 12.2）。
 
 #### FR-58 Mac 風格的視窗按鈕（ADR-42）
 **優先級**: P2
@@ -681,7 +684,27 @@ AgentDesk 是原生的 AI Agent 工作台：在可分割的終端機面板裡跑
 
 程式目前與本契約不一致、尚未修正的地方。修正後從這裡刪除；若決定改需求，則依憲法 6.3 升版。
 
-FR-41～FR-57 在 macOS 上還沒有建置與驗收過。4.0.0 寫成時列出的五項（macOS 畫面上的 Windows 字樣、使用統計的平台欄位、`toasts` 設定沒有作用、第一次關閉的說明指向不存在的按鈕、What's new 的 WSL 條目）已在 2026-11-24 修正。
+### 7.1 FR-41～FR-57 在 macOS 上的狀態
+
+不含已移除的 FR-45、FR-46。FR-58 只適用 Windows，FR-59 已移除，都不在此列。
+
+| 項目 | 狀態（2026-11-25） |
+|---|---|
+| 建置 | Debug、Release 成功，沒有編譯警告 |
+| 自動測試 | Debug、Release 各 438／438。這些需求引用的單元測試都有在 macOS 執行 |
+| 畫面 | 九個版面與主要對話框以截圖檢查，正常。截圖不含系統的紅綠燈按鈕 |
+| Timeline（FR-43） | 在隔離的 host 上，`agentctl report-state` 回報的狀態依序記錄，`agentctl timeline` 與 `--json` 都讀得到。引用的 `HostFixture.Timeline*` 與 `HostUpdate.*` 只在 Windows 執行，macOS 沒有對應的自動測試 |
+| 人工驗收 | 未完成：紅綠燈與各版面頂端列的位置（含 Focus）、新版面的快捷鍵、減少動畫與增加對比、Claude Code 與 Codex 的實際狀態與互動（設計文件 12.2） |
+
+人工驗收完成前，FR-41～FR-57 在 macOS 上不算通過驗收。
+
+### 7.2 程式與需求不一致
+
+| 項目 | 現況 | 影響 |
+|---|---|---|
+| `agentctl timeline --since`（兩個平台共用的程式） | `--since 1h` 的 `1h` 被當成 session 名稱。沒指定 session 時回報 `NOT_FOUND`；有指定時不會出錯，但時間範圍沒有作用。`--since=1h` 也沒有作用 | FR-43：`agentctl timeline --since 1h` 的驗收不成立 |
+
+4.0.0 寫成時列出的五項（macOS 畫面上的 Windows 字樣、使用統計的平台欄位、`toasts` 設定沒有作用、第一次關閉的說明指向不存在的按鈕、What's new 的 WSL 條目）已在 2026-11-24 修正。
 
 ## 8. 需求追溯
 
