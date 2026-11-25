@@ -1,6 +1,6 @@
 # AgentDesk 詳細設計文件
 
-版本 v3.3｜日期：2026-11-25｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.0.0
+版本 v3.3｜日期：2026-11-25｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.0.1
 技術基線：C++20、Dear ImGui（FreeType 繪字）、libvterm 0.3.3。Windows 11 x64：Win32、DirectX 11、隨附 ConPTY。macOS 13 以上（Apple Silicon）：AppKit、Metal、POSIX pty
 
 > 這份文件依 0.2.0 的程式重寫，描述系統「現在怎麼運作」。需求與驗收在 PRD；這裡寫設計、資料格式、數字與理由。程式與文件不一致時，先查程式，再修文件或列進 12.4。
