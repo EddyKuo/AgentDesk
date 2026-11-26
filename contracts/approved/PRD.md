@@ -1,21 +1,24 @@
 ---
 contract_type: PRD
-version: 5.0.1
+version: 5.1.0
 status: approved
 author_agent: PM
 sprint: 11
 created_at: 2026-11-16T00:00:00+08:00
-approved_at: 2026-11-25T00:00:00+08:00
+approved_at: 2026-11-26T00:00:00+08:00
 skills_used:
   - shared/domain-coding-agents@1.0.0
 upstream_deps:
   - raw_requirement@2026-11-16
   - docs/design/AgentDesk_Design.md@3.1
-  - sprint/current/status.md@2026-11-25
+  - sprint/current/status.md@2026-11-26
 downstream_consumers:
   - RD
   - QA
 change_summary: |
+  5.1.0（Minor）：使用者 2026-11-26 要求程式開啟時自動檢查有哪些 CLI 與 shell 可用，不要列出用不到的。
+  FR-32 改為 host 每次啟動都偵測：新裝的程式自動加入，程式不在了就不列出；macOS 只列登入 shell 與常用的 shell。
+  下游 RD、QA 需重新確認 FR-32。上一版保存在 `contracts/deprecated/PRD_v5.0.1.md`。
   5.0.1（Patch）：更新 macOS 的驗證狀態（使用者 2026-11-25 要求），需求、驗收條文與數字不變，仍鎖定設計文件 v3.1。
   第 7 節與 2.11 開頭改為已在 macOS 建置並通過自動測試、人工驗收未完成，並列出 FR-43 的兩項落差。
   上一版保存在 `contracts/deprecated/PRD_v5.0.0.md`。
@@ -192,13 +195,16 @@ AgentDesk 是原生的 AI Agent 工作台：在可分割的終端機面板裡跑
 
 #### FR-32 新增 space 或分頁時選擇 shell
 **優先級**：P1
-**描述**：新 space、新分頁與分割一律先開 shell，位置是目前面板 shell 所在的資料夾。側欄 Spaces 的「+」列出這台電腦偵測到的 shell，選哪個就用哪個開新 space；分頁列「+」選單列出預設以外的 shell。偵測到的 shell：Windows 是 PowerShell 7、Windows PowerShell、Command Prompt 與各 WSL 發行版；macOS 是登入 shell 與 `/etc/shells` 列出的 shell。預設 shell 可在設定 › Look 指定；沒指定時，Windows 依序找 PowerShell 7、Windows PowerShell、Command Prompt，macOS 用登入 shell（ADR-20）。
+**描述**：新 space、新分頁與分割一律先開 shell，位置是目前面板 shell 所在的資料夾。側欄 Spaces 的「+」列出這台電腦偵測到的 shell，選哪個就用哪個開新 space；分頁列「+」選單列出預設以外的 shell。偵測到的 shell：Windows 是 PowerShell 7、Windows PowerShell、Command Prompt 與各 WSL 發行版；macOS 是登入 shell，以及 `/etc/shells` 裡常用的 shell（zsh、bash、fish、nu、pwsh、elvish、xonsh）。host 每次啟動都重新偵測：之後才裝的 shell 或 Agent CLI 自動加入，使用者刪掉的設定不會加回來；程式不在了就不列出，裝回來會再出現。預設 shell 可在設定 › Look 指定；沒指定時，Windows 依序找 PowerShell 7、Windows PowerShell、Command Prompt，macOS 用登入 shell（ADR-20）。
 **驗收**：
 - Given 這台電腦有多個 shell，When 使用者按側欄 Spaces 的「+」並選其中一個，Then 用它開一個新 space。
 - Given 同上，When 使用者打開分頁列的「+」選單，Then 預設以外的 shell 都列出來，選了就開成新分頁，同一個 shell 不會出現兩次。
 - Given 同上，When 使用者按新 space 或新分頁的快捷鍵，Then 直接用預設 shell 開啟。
+- Given AgentDesk 第一次啟動之後才安裝 Codex CLI，When host 下次啟動，Then 新分頁的清單出現 Codex CLI；使用者從 `profiles.json` 刪掉它之後，再啟動也不會加回來。
+- Given 清單裡某個程式被移除，When host 下次啟動，Then 清單不再列出它，`profiles.json` 裡的設定保留。
+- Given macOS 的登入 shell 是 zsh，When 打開新分頁的清單，Then 不列出 sh、dash、csh、tcsh、ksh。
 
-**驗證**：使用者驗收（2026-11-19）；macOS 實機（2026-11-24）。
+**驗證**：使用者驗收（2026-11-19）；macOS 實機（2026-11-24）；`Profiles.*`、`HostFixture.DamagedEntriesAreSkippedNotFatal`；macOS 實機以 2026-11-24 的 `profiles.json` 啟動（2026-11-26）。
 
 #### FR-38 視窗開啟的位置與大小
 **優先級**：P2

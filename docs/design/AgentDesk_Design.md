@@ -1,6 +1,6 @@
 # AgentDesk 詳細設計文件
 
-版本 v3.4｜日期：2026-11-26｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.0.1
+版本 v3.5｜日期：2026-11-26｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.1.0
 技術基線：C++20、Dear ImGui（FreeType 繪字）、libvterm 0.3.3。Windows 11 x64：Win32、DirectX 11、隨附 ConPTY。macOS 13 以上（Apple Silicon）：AppKit、Metal、POSIX pty
 
 > 這份文件依 0.2.0 的程式重寫，描述系統「現在怎麼運作」。需求與驗收在 PRD；這裡寫設計、資料格式、數字與理由。程式與文件不一致時，先查程式，再修文件或列進 12.4。
@@ -11,6 +11,7 @@
 
 | 版本 | 日期 | 變更 |
 |---|---|---|
+| 3.5 | 2026-11-26 | host 每次啟動都偵測 profile：新裝的程式自動加入，使用者刪掉的不加回來，程式不在了就不列出（3.2）。macOS 的 shell 只列常用的（登入 shell、zsh、bash、fish、nu、pwsh、elvish、xonsh），sh、dash、csh、tcsh、ksh 只在是登入 shell 時列出（3.2、9） |
 | 3.4 | 2026-11-26 | 終端機字級改以 em 計算，和 herdr 及一般終端機相同（7.8 設定表）。之前照 ImGui 的方式當成字高（上緣到下緣），JetBrains Mono 的 14 只畫成約 10.6 pt。兩個平台都受影響 |
 | 3.3 | 2026-11-25 | 合併後在 Mac 上建置並跑完全部測試（12.2）。Focus 模式在 macOS 讓開系統紅綠燈（7.17） |
 | 3.2 | 2026-11-24 | 平台抽象層第 1～8 步完成：Windows 也實作中立介面，過渡用的 `compat/` 拿掉，交接邏輯合為一份（2.1、2.3、5.2、ADR-45）。路徑改由 `ui::path_text` 依路徑本身判斷系統。對外行為不變 |
@@ -188,7 +189,7 @@ ctest 的 `PlatformBoundaries`（`cmake/CheckPlatformBoundaries.cmake`）檢查�
 
 | 檔案 | 持有者 | 內容 |
 |---|---|---|
-| `profiles.json` | host | `{schema_version:1, wsl_detected, profiles:[{id,name,executable,args}]}` |
+| `profiles.json` | host | `{schema_version:1, wsl_detected, detected:[id], profiles:[{id,name,executable,args}]}` |
 | `sessions.json` | host | `{schema_version:1, sessions:[{id,name,cwd,profile_id,created_at,process_state,exit_code,parent,labels}]}`，最多 200 筆 |
 | `ui-state.json` | host | `{schema_version:1, rev, doc}`：UI 文件（space、分頁、分割樹、隱藏的面板），所有視窗共用 |
 | `host.log` | host | 診斷紀錄 |
@@ -205,10 +206,14 @@ ctest 的 `PlatformBoundaries`（`cmake/CheckPlatformBoundaries.cmake`）檢查�
 
 **寫入**：先寫 `<檔>.tmp`，再原子替換；舊檔留作 `.bak`（Windows `ReplaceFileW`；macOS 先複製 `.bak` 再 `rename`）。**讀取**：主檔損毀或 schema_version 不符時讀 `.bak`；兩份都壞時把主檔改名為 `.corrupt-<UTC 時間>`，以預設值啟動。單筆紀錄損毀時跳過，在 host.log 只記檔名與位置。
 
-**profile 偵測**（`profiles.json` 不存在時）：
+**profile 偵測**（host 每次啟動時）：
 
-- Windows：以 `SearchPath` 找 `claude-native`（claude.exe）、`codex-native`（codex.exe）、`pwsh`（PowerShell 7，`-NoLogo`）、`powershell`（Windows PowerShell，`-NoLogo`）、`cmd`；再從 `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss` 為每個 WSL 發行版建 `wsl-<名稱>`（略過 `docker-desktop*`）。沒有 `wsl_detected` 旗標的舊檔只補一次 WSL。
-- macOS：在登入 shell 的 PATH 上找 `claude`、`codex`；再列出登入 shell 與 `/etc/shells` 的每個 shell（依檔名去重），以 `-l` 啟動。
+- 偵測到、但不在 `detected` 裡的 profile 加到清單最後，id 記進 `detected`。使用者從 `profiles.json` 刪掉的 profile 還在 `detected` 裡，所以不會再加回來。
+- 沒有 `detected` 的舊檔只轉換一次：清單裡的 id 都算已偵測（`wsl_detected` 為 true 時，現在偵測到的 WSL 發行版也算）；舊版自動加入、現在不再提供的 shell（id 等於執行檔名、參數只有 `-l`）從清單移除，使用者改過的不動。
+- `profile.list` 只回傳執行檔還在的 profile，其他的留在 `profiles.json`，程式裝回來就會再出現。
+
+- Windows：以 `SearchPath` 找 `claude-native`（claude.exe）、`codex-native`（codex.exe）、`pwsh`（PowerShell 7，`-NoLogo`）、`powershell`（Windows PowerShell，`-NoLogo`）、`cmd`；再從 `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss` 為每個 WSL 發行版建 `wsl-<名稱>`（略過 `docker-desktop*`）。
+- macOS：在登入 shell 的 PATH 上找 `claude`、`codex`；再列出登入 shell，以及 `/etc/shells` 裡常用的 shell（zsh、bash、fish、nu、pwsh、elvish、xonsh，依檔名去重），以 `-l` 啟動。
 - 驗證：id 不能空白；拒絕 `.cmd`、`.bat`；executable 必須可執行。
 
 ### 3.3 Session 與歷史
@@ -997,7 +1002,7 @@ herdr-app 的 `main.json`、`terminals.json` 原檔放在 `third_party/herdr/lay
 | 前景程式與資料夾 | Job 成員＋PEB | `tcgetpgrp`＋`libproc` |
 | 停止 | `TerminateJobObject` | 對根程序群組與終端機的所有程序送訊號 |
 | 提示鉤子 | PowerShell、Command Prompt、WSL | zsh、bash；另補 `TERM`、`LANG`、登入 shell 的 `PATH` |
-| shell 偵測 | PowerShell 7、Windows PowerShell、Command Prompt、WSL 發行版 | 登入 shell 與 `/etc/shells` |
+| shell 偵測 | PowerShell 7、Windows PowerShell、Command Prompt、WSL 發行版 | 登入 shell 與 `/etc/shells` 裡常用的 shell |
 | 本機通道 | Named Pipe（DACL、拒絕遠端） | Unix socket（0700／0600、`getpeereid`） |
 | 單一實例 | named mutex | `flock` |
 | host 交接 | `DuplicateHandle`＋`ConptyPackPseudoConsole`；只支援隨附 ConPTY | `socketpair`＋`SCM_RIGHTS`；接手後 exit code 未知 |

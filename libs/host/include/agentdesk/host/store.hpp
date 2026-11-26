@@ -5,8 +5,10 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -34,8 +36,25 @@ Profile profile_from_json(const nlohmann::json& j);
 
 // Profiles found on PATH (claude, codex, pwsh, powershell, cmd) and WSL distributions, used when profiles.json is missing.
 std::vector<Profile> detect_default_profiles();
-// One profile per installed WSL distribution ("wsl-<name>", wsl.exe -d <name>).
-std::vector<Profile> detect_wsl_profiles();
+
+// What profiles.json keeps about detection: `detected` holds every id AgentDesk added on its own,
+// so a profile the person removed is not added back. A file written before that list existed has
+// none; `wsl_detected` then says whether its WSL profiles were added (and may have been removed).
+struct ProfileFile {
+    std::vector<Profile> profiles;
+    std::optional<std::set<std::string>> detected;
+    bool wsl_detected = false;
+};
+// Brings the file up to date with what is installed now (`found`, detect_default_profiles()):
+// programs found for the first time are added at the end. Once, for a file without `detected`:
+// what it lists counts as detected, and the shells an older AgentDesk added that today's detection
+// no longer offers (sh, dash, csh, tcsh, ksh on macOS, still as they were added: /…/<id> -l) are
+// removed. Returns whether the file changed.
+bool sync_detected_profiles(ProfileFile& file, const std::vector<Profile>& found);
+// The profiles to offer: those whose program is still there (`exists`, by default a launchable
+// file). The others stay in profiles.json and come back when the program does.
+std::vector<Profile> available_profiles(const std::vector<Profile>& profiles,
+                                        const std::function<bool(const Profile&)>& exists = {});
 
 // Validates a profile before spawning (design doc 1.4): executable exists, not a batch file.
 std::optional<std::string> validate_profile(const Profile& p);

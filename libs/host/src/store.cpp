@@ -45,11 +45,47 @@ std::vector<Profile> detect_default_profiles() {
     return out;
 }
 
-std::vector<Profile> detect_wsl_profiles() {
+bool sync_detected_profiles(ProfileFile& file, const std::vector<Profile>& found) {
+    const auto listed = [&](const std::string& id) {
+        return std::any_of(file.profiles.begin(), file.profiles.end(), [&](const Profile& p) { return p.id == id; });
+    };
+    const auto offered = [&](const std::string& id) {
+        return std::any_of(found.begin(), found.end(), [&](const Profile& p) { return p.id == id; });
+    };
+    bool changed = false;
+    if (!file.detected) {
+        std::set<std::string> seen;
+        for (const auto& p : file.profiles)
+            seen.insert(p.id);
+        if (file.wsl_detected)  // added before, so one that is missing now was removed on purpose
+            for (const auto& p : found)
+                if (p.id.starts_with("wsl-"))
+                    seen.insert(p.id);
+        const auto retired = [&](const Profile& p) {
+            return !offered(p.id) && p.executable.filename() == platform::to_wide(p.id) &&
+                   p.args == std::vector<std::string>{"-l"};
+        };
+        std::erase_if(file.profiles, retired);
+        file.detected = std::move(seen);
+        changed = true;
+    }
+    for (const auto& p : found) {
+        if (file.detected->contains(p.id))
+            continue;
+        file.detected->insert(p.id);
+        if (!listed(p.id))
+            file.profiles.push_back(p);
+        changed = true;
+    }
+    return changed;
+}
+
+std::vector<Profile> available_profiles(const std::vector<Profile>& profiles,
+                                        const std::function<bool(const Profile&)>& exists) {
     std::vector<Profile> out;
-    for (const auto& s : platform::detect_shells())
-        if (s.id.starts_with("wsl-"))
-            out.push_back({s.id, s.name, s.executable, s.args});
+    for (const auto& p : profiles)
+        if (exists ? exists(p) : platform::is_launchable_file(p.executable))
+            out.push_back(p);
     return out;
 }
 

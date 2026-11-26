@@ -242,7 +242,8 @@ std::optional<std::filesystem::path> find_on_login_path(std::string_view name) {
 
 std::vector<ShellCandidate> detect_shells() {
     std::vector<std::string> paths;
-    if (const std::string login = login_shell(); !login.empty())
+    const std::string login = login_shell();
+    if (!login.empty())
         paths.push_back(login);
     std::ifstream shells("/etc/shells");
     std::string line;
@@ -256,6 +257,11 @@ std::vector<ShellCandidate> detect_shells() {
         const std::filesystem::path exe(p);
         const std::string id = exe.filename().string();
         if (id.empty() || seen.contains(id) || !is_launchable_file(exe))
+            continue;
+        // /etc/shells also lists sh, dash, csh, tcsh and ksh, which few people open on purpose:
+        // offered only when one of them is the login shell.
+        static const std::set<std::string> kOffered = {"zsh", "bash", "fish", "nu", "pwsh", "elvish", "xonsh"};
+        if (p != login && !kOffered.contains(id))
             continue;
         seen.insert(id);
         // Login shells read the person's profile, as Terminal.app does.
