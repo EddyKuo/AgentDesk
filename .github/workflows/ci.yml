@@ -18,7 +18,7 @@ concurrency:
 jobs:
   build-test:
     name: ${{ matrix.preset }}
-    runs-on: windows-2022
+    runs-on: windows-2025  # closest to Windows 11 24H2 (its inbox ConPTY and handle behaviour)
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -87,6 +87,15 @@ jobs:
       - uses: actions/checkout@v4
 
       # The macOS presets take vcpkg from ~/vcpkg; manifest mode needs the baseline in its history.
+      # The code uses std::jthread and std::stop_token, which Apple's libc++ has from Xcode 26 on;
+      # the image's default Xcode can be older.
+      - name: Use the newest Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+          clang++ --version | head -1
+
       - name: Set up vcpkg and Ninja
         run: |
           brew list ninja >/dev/null 2>&1 || brew install ninja
