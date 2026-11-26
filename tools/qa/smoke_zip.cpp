@@ -43,7 +43,8 @@ int wmain(int argc, wchar_t** argv) {
         if (dk::run(dk::system_dir() / L"tar.exe", {L"-x", L"-f", zip.native(), L"-C", work.native()})
                 .exit_code != 0)
             throw std::runtime_error("cannot extract " + dk::u8(zip));
-        const fs::path app = work / L"AgentDesk-0.1.0-win-x64";
+        // The zip holds one folder named like the zip itself (AgentDesk-<version>-win-x64).
+        const fs::path app = work / zip.stem();
         const fs::path data = work / L"data";
         fs::create_directories(data);
         const auto cmd = dk::u8(dk::system_dir() / L"cmd.exe");
