@@ -7,6 +7,7 @@
 #include <libproc.h>
 #include <sys/proc_info.h>
 #include <sys/sysctl.h>
+#include <unistd.h>
 
 #include "proc_info.hpp"
 
@@ -101,6 +102,34 @@ std::vector<pid_t> terminal_members(dev_t tty) {
     std::erase_if(pids, [](pid_t p) { return p <= 0 || is_zombie(p); });
     std::sort(pids.begin(), pids.end());
     return pids;
+}
+
+std::vector<pid_t> session_members(pid_t sid) {
+    if (sid <= 0)
+        return {};
+    const int bytes = ::proc_listpids(PROC_ALL_PIDS, 0, nullptr, 0);
+    if (bytes <= 0)
+        return {};
+    std::vector<pid_t> pids(static_cast<std::size_t>(bytes) / sizeof(pid_t) + 64);
+    const int got = ::proc_listpids(PROC_ALL_PIDS, 0, pids.data(), static_cast<int>(pids.size() * sizeof(pid_t)));
+    if (got <= 0)
+        return {};
+    pids.resize(static_cast<std::size_t>(got) / sizeof(pid_t));
+    std::erase_if(pids, [sid](pid_t p) { return p <= 0 || ::getsid(p) != sid || is_zombie(p); });
+    std::sort(pids.begin(), pids.end());
+    return pids;
+}
+
+bool is_running(pid_t pid) {
+    return pid > 0 && !is_zombie(pid);
+}
+
+std::optional<std::uint64_t> start_time(pid_t pid) {
+    proc_bsdinfo info{};
+    if (pid <= 0 ||
+        ::proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) != static_cast<int>(sizeof(info)))
+        return std::nullopt;
+    return info.pbi_start_tvsec * 1'000'000ULL + info.pbi_start_tvusec;
 }
 
 ForegroundInfo describe_process(pid_t pid) {

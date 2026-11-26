@@ -63,6 +63,9 @@ struct Pty::Impl {
     std::thread waiter;
     UniqueFd kq;           // the waiter's kqueue: the root's exit, or a cancel
     bool adopted = false;  // taken over from another host: the root is not our child
+    // When the root started. Its pid is also the terminal's group and session id, but only while
+    // no other process has taken the pid over; see root_pid_reused().
+    std::optional<std::uint64_t> root_start;
 
     mutable std::mutex mutex;
     mutable std::condition_variable cv;
@@ -216,20 +219,42 @@ struct Pty::Impl {
         reader = std::thread([this] { reader_loop(); });
     }
 
-    // The root's process group (its pid: it called setsid()) and every other process of the
-    // terminal: a shell puts each job in a group of its own.
-    void signal_all(int sig) const {
-        ::killpg(pid, sig);  // ESRCH: the group is already empty
-        for (const pid_t p : posix::terminal_members(tty))
-            ::kill(p, sig);
+    // True once the root's pid names another process: the root ended, was reaped, and the pid went
+    // to a new program, which may lead a session or group of its own (another terminal's shell).
+    // From then on the pid says nothing about this terminal and nothing is signalled through it.
+    bool root_pid_reused() const {
+        const auto now = posix::start_time(pid);
+        return now && root_start && *now != *root_start;
     }
 
-    // The processes still running in the terminal, its root's group included.
+    // Every process of the terminal: the root's process group (its pid: it called setsid()), the
+    // jobs a shell put in groups of their own, and, by session, those jobs after the root exited.
+    // Listed before any signal goes out: once the root ends, the terminal no longer lists them.
+    // Returns the processes it signalled.
+    std::vector<pid_t> signal_all(int sig) const {
+        const std::vector<pid_t> members = remaining();
+        if (!root_pid_reused())
+            ::killpg(pid, sig);  // ESRCH: the group is already empty
+        for (const pid_t p : members)
+            ::kill(p, sig);
+        return members;
+    }
+
+    // The processes still running in the terminal, its root's group included. Scans every process
+    // on the system (for the session), so callers that poll check the returned pids instead.
     std::vector<pid_t> remaining() const {
-        std::vector<pid_t> all = posix::process_group_members(pid);
-        for (const pid_t p : posix::terminal_members(tty))
-            if (std::find(all.begin(), all.end(), p) == all.end())
-                all.push_back(p);
+        const bool own_pid = !root_pid_reused();
+        std::vector<pid_t> all;
+        if (own_pid)
+            all = posix::process_group_members(pid);
+        const auto add = [&](const std::vector<pid_t>& more) {
+            for (const pid_t p : more)
+                if (std::find(all.begin(), all.end(), p) == all.end())
+                    all.push_back(p);
+        };
+        add(posix::terminal_members(tty));
+        if (own_pid)
+            add(posix::session_members(pid));
         return all;
     }
 };
@@ -340,6 +365,7 @@ std::unique_ptr<Pty> Pty::spawn(const PtySpawnSpec& spec, PtyOutputSink on_outpu
     auto impl = std::make_unique<Impl>();
     impl->master = std::move(master);
     impl->pid = pid;
+    impl->root_start = posix::start_time(pid);
     impl->on_output = std::move(on_output);
     impl->on_exit = std::move(on_exit);
     impl->start_threads(false);
@@ -430,7 +456,7 @@ void Pty::close() {
     Impl& s = *impl_;
     s.closing = true;  // a write waiting for room stops
     // Hang up the terminal's programs and let the reader take the last output while they end.
-    s.signal_all(SIGHUP);
+    std::vector<pid_t> signalled = s.signal_all(SIGHUP);
     {
         std::unique_lock lock(s.mutex);
         s.cv.wait_for(lock, kDrainWait, [&] { return s.reader_done; });
@@ -441,12 +467,17 @@ void Pty::close() {
     s.wake();
     if (s.reader.joinable())
         s.reader.join();
-    s.signal_all(SIGKILL);
+    for (const pid_t p : s.signal_all(SIGKILL))
+        if (std::find(signalled.begin(), signalled.end(), p) == signalled.end())
+            signalled.push_back(p);
     if (s.waiter.joinable())
         s.waiter.join();
     // SIGKILL is delivered asynchronously; return only when nothing of the terminal still runs.
+    // Only the pids signalled above are polled: a full scan every 5 ms would cost thousands of
+    // system calls each time on a busy machine.
     const auto deadline = std::chrono::steady_clock::now() + kKillWait;
-    while (!s.remaining().empty() && std::chrono::steady_clock::now() < deadline)
+    const auto any_left = [&] { return std::ranges::any_of(signalled, posix::is_running); };
+    while (any_left() && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     {
         std::lock_guard lock(s.write_mutex);
@@ -563,6 +594,7 @@ std::unique_ptr<Pty> Pty::adopt(const PtyHandles& handles, PtyOutputSink on_outp
     impl->master = std::move(master);
     impl->pid = root;
     impl->adopted = true;
+    impl->root_start = info.pbi_start_tvsec * 1'000'000ULL + info.pbi_start_tvusec;
     impl->on_output = std::move(on_output);
     impl->on_exit = std::move(on_exit);
     impl->start_threads(true);

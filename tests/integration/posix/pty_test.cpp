@@ -277,3 +277,23 @@ TEST(PosixPty, CloseEndsJobsInOtherProcessGroups) {
     pty->close();
     EXPECT_TRUE(wait_gone(job, 3s));
 }
+
+// The shell (the session leader) exits first: the kernel then detaches the terminal from the
+// session, and a job in another group no longer shows up as one of the terminal's processes.
+// Closing still ends it, as it does when the shell is still there.
+TEST(PosixPty, CloseEndsJobsLeftByAShellThatExited) {
+    Output out;
+    auto pty = ap::Pty::spawn(sh("set -m; sleep 300 & echo \"job=$!\"; exit 0"), out.sink(), {});
+    ASSERT_TRUE(out.wait_for("\n", 5s));
+    const std::string text = out.text();
+    const auto at = text.find("job=");
+    ASSERT_NE(at, std::string::npos) << text;
+    const pid_t job = static_cast<pid_t>(std::stol(text.substr(at + 4)));
+    pty->wait_exit(5s);
+    ASSERT_TRUE(process_exists(job)) << "the job ended with the shell; nothing to test";
+    EXPECT_EQ(pty->live_processes(), 1u) << "the job still belongs to the terminal";
+    pty->close();
+    EXPECT_TRUE(wait_gone(job, 3s));
+    if (process_exists(job))
+        ::kill(job, SIGKILL);  // do not leave it behind for 300 s
+}
