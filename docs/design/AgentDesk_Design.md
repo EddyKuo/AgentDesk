@@ -1,6 +1,6 @@
 # AgentDesk 詳細設計文件
 
-版本 v3.5｜日期：2026-11-26｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.1.0
+版本 v3.6｜日期：2026-11-26｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.1.0
 技術基線：C++20、Dear ImGui（FreeType 繪字）、libvterm 0.3.3。Windows 11 x64：Win32、DirectX 11、隨附 ConPTY。macOS 13 以上（Apple Silicon）：AppKit、Metal、POSIX pty
 
 > 這份文件依 0.2.0 的程式重寫，描述系統「現在怎麼運作」。需求與驗收在 PRD；這裡寫設計、資料格式、數字與理由。程式與文件不一致時，先查程式，再修文件或列進 12.4。
@@ -11,6 +11,7 @@
 
 | 版本 | 日期 | 變更 |
 |---|---|---|
+| 3.6 | 2026-11-26 | macOS 關閉終端機時，也以 session id 找出 shell 已結束後留下、在其他 process group 的 job（第 8 章）。之前只靠終端機列舉，shell 一結束，kernel 就把終端機和 session 分開，這些 job 會一直執行下去 |
 | 3.5 | 2026-11-26 | host 每次啟動都偵測 profile：新裝的程式自動加入，使用者刪掉的不加回來，程式不在了就不列出（3.2）。macOS 的 shell 只列常用的（登入 shell、zsh、bash、fish、nu、pwsh、elvish、xonsh），sh、dash、csh、tcsh、ksh 只在是登入 shell 時列出（3.2、9） |
 | 3.4 | 2026-11-26 | 終端機字級改以 em 計算，和 herdr 及一般終端機相同（7.8 設定表）。之前照 ImGui 的方式當成字高（上緣到下緣），JetBrains Mono 的 14 只畫成約 10.6 pt。兩個平台都受影響 |
 | 3.3 | 2026-11-25 | 合併後在 Mac 上建置並跑完全部測試（12.2）。Focus 模式在 macOS 讓開系統紅綠燈（7.17） |
@@ -985,7 +986,7 @@ herdr-app 的 `main.json`、`terminals.json` 原檔放在 `third_party/herdr/lay
 | 程式輸出 | 不能觸發命令、不能寫剪貼簿（不支援 OSC 52）；未知的控制序列受長度上限約束並忽略；OSC 7501 的 msg 與 title 含控制字元時整筆丟棄，顯示前中和 bidi 與不可見字元 |
 | 連結 | 使用者按住修飾鍵點擊才開啟；只開白名單內的 scheme 與存在的檔案；程式與指令檔只標出不執行（7.9） |
 | 啟動程式 | executable 與參數分開保存與傳遞，不經 shell；Windows 使用經測試的 argv quoting，拒絕直接啟動 `.cmd`、`.bat`；mod 的 exec 也不經 shell |
-| 子程序的範圍 | Windows：每個 session 一個 KILL_ON_JOB_CLOSE 的 Job，不允許 breakaway；子程序以 CREATE_SUSPENDED 建立、指派 Job 後才恢復。macOS：每個 session 自成 session（`setsid`），停止時結束這個終端機的所有程序。這是生命週期管理，不是沙盒 |
+| 子程序的範圍 | Windows：每個 session 一個 KILL_ON_JOB_CLOSE 的 Job，不允許 breakaway；子程序以 CREATE_SUSPENDED 建立、指派 Job 後才恢復。macOS：每個 session 自成 session（`setsid`），停止時結束這個終端機的所有程序：根程序的 process group、終端機上的其他 job，以及 session id 相同的程序（shell 結束後，kernel 會把終端機和 session 分開，留下的 job 只能從 session id 找到）。這是生命週期管理，不是沙盒 |
 | 遠端檔案與 git | `fs.*`、`git.run` 只接受絕對路徑，git 只允許白名單內的子命令並拒絕會執行外部程式的選項（4.4） |
 | mod | 沒有沙盒，以使用者權限執行；只載入已啟用的 mod，啟用前說明權限；範例預設不啟用 |
 | 診斷紀錄 | host.log 與 ui-crash.txt 只記 ID、事件類型、錯誤碼、耗時與資源數，不記輸入文字或完整環境變數；損毀的設定紀錄只記檔名與位置 |
