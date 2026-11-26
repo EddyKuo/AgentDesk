@@ -52,7 +52,7 @@ macOS（ADR-30，設計文件第 9 章）：
 
 | 檔案 | 內容 |
 |---|---|
-| `docs/design/AgentDesk_Design.md` | 唯一權威的詳細設計（目前 v3.3）：架構、協定、host、UI、平台差異、驗收矩陣、ADR（第 11 章）、待決事項（12.3）。改設計就改這份，並在檔頭版本紀錄加一列；舊版與完整的版本紀錄在 `docs/archive/`（合併前的兩份是 v2.27 與 v3.0） |
+| `docs/design/AgentDesk_Design.md` | 唯一權威的詳細設計（目前 v3.4）：架構、協定、host、UI、平台差異、驗收矩陣、ADR（第 11 章）、待決事項（12.3）。改設計就改這份，並在檔頭版本紀錄加一列；舊版與完整的版本紀錄在 `docs/archive/`（合併前的兩份是 v2.27 與 v3.0） |
 | `contracts/approved/PRD.md` | PRD 契約 v5.0.1（鎖定設計文件 v3.1）：需求、驗收、已知落差（第 7 節）。需求變更要依憲法 6.3 升版 |
 | `docs/design/ideas.md`、`docs/design/ideas/` | 版面與主題的構想清單、各項設計規格與實作紀錄（`IMPL-*.md`）。第一輪 A1～A4、B1～B3、T2～T5 已實作（設計文件 7.17～7.20、ADR-32～ADR-35）；第二輪的共用設計規則、版面收斂、Stage、Inbox、Pair、Garden 已實作（7.17、7.19、7.21～7.24、ADR-37～ADR-41，紀錄在 `IMPL-round2-*.md`）；T1 尚未 |
 | `docs/design/use-cases.md`、`docs/design/design-concept.md` | Use case（UC-01～UC-21）與設計概念（給新加入的開發者） |

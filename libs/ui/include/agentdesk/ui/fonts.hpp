@@ -4,6 +4,7 @@
 // installed font families, and the icon glyphs used by the interface.
 // Portions adapted from herdr-app (Apache-2.0) and modified; see THIRD_PARTY_NOTICES.md.
 
+#include <cstddef>
 #include <map>
 #include <string>
 #include <vector>
@@ -20,6 +21,9 @@ struct FontSet {
     ImFont* ui_bold = nullptr;    // headings, names (semibold weight)
     ImFont* icons = nullptr;      // Symbols Nerd Font alone (icon glyphs)
     float mono_size = 14.0f;
+    // The terminal font's ascent minus descent per em. ImGui sizes a font by that height, while a
+    // terminal font size (and herdr's) is the em; multiply by this to get the ImGui size.
+    float mono_line_per_em = 1.0f;
     float ui_size = 13.0f;
     std::string mono_source;  // files used, for diagnostics
     std::string ui_source;
@@ -31,6 +35,13 @@ struct FontSet {
 // Microsoft JhengHei for CJK and Segoe UI Symbol/Emoji for the rest. Falls back to system fonts
 // (Segoe UI, Cascadia Mono) when the bundled files are missing.
 FontSet load_fonts(float mono_size_px, float ui_size_px);
+
+// A font's ascent minus descent per em, as FreeType reads them for its sizing (hhea, else OS/2
+// typo, else OS/2 win metrics), from TrueType/OpenType bytes or a collection (`face` picks one).
+// 0 when the bytes are not a font this can read.
+float line_height_per_em(const unsigned char* data, std::size_t size, unsigned face = 0);
+// The same for a loaded font's main face; 1 when unknown (the ImGui size is used as it is).
+float line_height_per_em(const ImFont* font);
 
 // A terminal font from a file (empty: the bundled JetBrains Mono), merged like load_fonts does.
 // Fonts can be added while running (ImGui 1.92 dynamic atlas).

@@ -145,6 +145,7 @@ void apply_terminal_font(App::State& s) {
         f != nullptr ? ui::load_font_file(f->file_for(s.settings.terminal_weight), s.settings.font_size, true)
                      : nullptr;
     s.fonts.mono = mono != nullptr ? mono : ui::load_terminal_font(L"", s.settings.font_size);
+    s.fonts.mono_line_per_em = ui::line_height_per_em(s.fonts.mono);
     ImFont* bold = f != nullptr ? ui::load_font_file(f->file_for(700), s.settings.font_size, true) : nullptr;
     s.fonts.mono_bold = bold != nullptr ? bold : s.fonts.mono;
 }

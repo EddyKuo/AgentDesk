@@ -1,6 +1,6 @@
 # AgentDesk 詳細設計文件
 
-版本 v3.3｜日期：2026-11-25｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.0.1
+版本 v3.4｜日期：2026-11-26｜產品版本 0.2.0｜需求契約：`contracts/approved/PRD.md` 5.0.1
 技術基線：C++20、Dear ImGui（FreeType 繪字）、libvterm 0.3.3。Windows 11 x64：Win32、DirectX 11、隨附 ConPTY。macOS 13 以上（Apple Silicon）：AppKit、Metal、POSIX pty
 
 > 這份文件依 0.2.0 的程式重寫，描述系統「現在怎麼運作」。需求與驗收在 PRD；這裡寫設計、資料格式、數字與理由。程式與文件不一致時，先查程式，再修文件或列進 12.4。
@@ -11,6 +11,7 @@
 
 | 版本 | 日期 | 變更 |
 |---|---|---|
+| 3.4 | 2026-11-26 | 終端機字級改以 em 計算，和 herdr 及一般終端機相同（7.8 設定表）。之前照 ImGui 的方式當成字高（上緣到下緣），JetBrains Mono 的 14 只畫成約 10.6 pt。兩個平台都受影響 |
 | 3.3 | 2026-11-25 | 合併後在 Mac 上建置並跑完全部測試（12.2）。Focus 模式在 macOS 讓開系統紅綠燈（7.17） |
 | 3.2 | 2026-11-24 | 平台抽象層第 1～8 步完成：Windows 也實作中立介面，過渡用的 `compat/` 拿掉，交接邏輯合為一份（2.1、2.3、5.2、ADR-45）。路徑改由 `ui::path_text` 依路徑本身判斷系統。對外行為不變 |
 | 3.1 | 2026-11-24 | 合併 Windows 端的 v2.27（版面與主題第一、二輪）與 macOS 端的 v3.0。v2.27 的 2.8～2.16 原文搬到 7.16～7.24，內建版面與 style 對照表在 7.25，決策紀錄加入 ADR-32～ADR-41。兩邊編號相撞：macOS 端的 ADR-30、ADR-31 不變，Windows 端的「Mac 風格的視窗按鈕」改為 ADR-42、「AgentDesk Mac 版面」改為 ADR-43。新增 ADR-44（新版面在兩個平台的做法）。合併前的兩份保存在 `docs/archive/AgentDesk_Design_v2.27.md`、`AgentDesk_Design_v3.0.md` |
@@ -624,7 +625,7 @@ macOS 上 ImGui 互換 Cmd 與 Ctrl：`keys.json` 的 `cmd` 是 ImGui 的 Ctrl�
 | `theme_dark`、`theme_light`、`layout_themes` | midnight、paper、{} | 每個版面各自的深淺主題 |
 | `zoom` | 1.0 | 0.5～3；第一次啟動依系統決定 |
 | `ui_text` | 15 | 介面文字 11～24 px |
-| `font_size`、`terminal_font`、`terminal_weight` | 14、JetBrains Mono、500 | 終端機字級 8～32、字型、字重 100～900 |
+| `font_size`、`terminal_font`、`terminal_weight` | 14、JetBrains Mono、500 | 終端機字級 8～32（em，和 herdr 相同；ImGui 以字高計算字級，所以實際傳入的是字級乘上字型的「上緣到下緣÷em」，JetBrains Mono 是 1.32）、字型、字重 100～900 |
 | `line_height`、`cell_width`、`scroll_speed` | 1.0、1.0、1.0 | 0.8～2、0.8～2、0.1～5 |
 | `ui_font` | Geist | 介面字型 |
 | `shell_profile` | 空 | 預設 shell；空的時候見 FR-32 |
