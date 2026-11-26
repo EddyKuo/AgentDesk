@@ -1,0 +1,199 @@
+# Publishes a GitHub Release when a version tag (v0.2.0) is pushed: builds and tests the Release
+# preset on Windows and macOS, packages both zips, smoke-tests the Windows one, and attaches them
+# with their SHA-256. Versions below 1.0 are marked pre-release. docs/release.md has the steps.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)build and publish, for example v0.2.0
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      # The packages take their version from CMakeLists.txt; the tag must say the same.
+      - id: v
+        run: |
+          project=$(sed -n 's/^ *VERSION \([0-9][0-9.]*\)$/\1/p' CMakeLists.txt | head -1)
+          tag=${TAG#v}
+          echo "CMakeLists.txt: $project, tag: $tag"
+          [ "$project" = "$tag" ] || { echo "::error::tag $TAG does not match project version $project"; exit 1; }
+          echo "version=$project" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows package
+    needs: version
+    runs-on: windows-2025
+    timeout-minutes: 120
+    env:
+      PRESET: msvc-x64-release
+      VCPKG_ROOT: C:\vcpkg-ci
+      VCPKG_DEFAULT_BINARY_CACHE: C:\vcpkg-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Set up vcpkg
+        shell: cmd
+        run: |
+          git clone --quiet https://github.com/microsoft/vcpkg.git %VCPKG_ROOT% || exit /b 1
+          call %VCPKG_ROOT%\bootstrap-vcpkg.bat -disableMetrics || exit /b 1
+          if not exist %VCPKG_DEFAULT_BINARY_CACHE% mkdir %VCPKG_DEFAULT_BINARY_CACHE%
+
+      # Same key as CI, so a tag build reuses main's cache.
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg-cache
+          key: vcpkg-msvc-x64-release-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-msvc-x64-release-
+
+      # The bundled ConPTY is fetched after the first build, then the build copies it next to
+      # the executables.
+      - name: Build
+        shell: cmd
+        run: |
+          call scripts\build.cmd %PRESET% configure || exit /b 1
+          call scripts\build.cmd %PRESET% build || exit /b 1
+          build\%PRESET%\tools\fetch_conpty.exe || exit /b 1
+          call scripts\build.cmd %PRESET% configure || exit /b 1
+          call scripts\build.cmd %PRESET% build
+
+      - name: Test
+        shell: cmd
+        run: ctest --preset %PRESET% --repeat until-pass:2
+
+      - name: Package and smoke-test
+        shell: cmd
+        run: |
+          build\%PRESET%\tools\agentdesk_package.exe --version ${{ needs.version.outputs.version }} || exit /b 1
+          build\%PRESET%\tools\qa\smoke_zip.exe --zip dist\AgentDesk-${{ needs.version.outputs.version }}-win-x64.zip --probe build\%PRESET%\tools\vt_probe.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-windows
+          path: |
+            dist/AgentDesk-${{ needs.version.outputs.version }}-win-x64.zip
+            dist/AgentDesk-${{ needs.version.outputs.version }}-win-x64-symbols.zip
+          if-no-files-found: error
+
+  macos:
+    name: macOS package
+    needs: version
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      PRESET: clang-macos-arm64-release
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../vcpkg-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      # std::jthread needs Xcode 26's libc++; the image's default Xcode can be older.
+      - name: Use the newest Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: Set up vcpkg and Ninja
+        run: |
+          brew list ninja >/dev/null 2>&1 || brew install ninja
+          git clone --quiet https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+          "$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/../vcpkg-cache
+          key: vcpkg-clang-macos-arm64-release-${{ hashFiles('vcpkg.json', 'cmake/triplets/*') }}
+          restore-keys: vcpkg-clang-macos-arm64-release-
+
+      - name: Build
+        run: |
+          scripts/build.sh "$PRESET" configure
+          scripts/build.sh "$PRESET" build
+
+      - name: Test
+        run: ctest --preset "$PRESET" --repeat until-pass:2
+
+      # Signed ad hoc: no Developer ID or notarization yet (design doc 12.3, OQ-11).
+      - name: Package
+        run: |
+          scripts/package_macos.sh --skip-build
+          test -f "dist/AgentDesk-${{ needs.version.outputs.version }}-macos-arm64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-macos
+          path: dist/AgentDesk-${{ needs.version.outputs.version }}-macos-arm64.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [version, windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # The symbols zip is only for reading crash reports; it is not published.
+      - name: Write release notes
+        run: |
+          cd dist
+          win="AgentDesk-$VERSION-win-x64.zip"
+          mac="AgentDesk-$VERSION-macos-arm64.zip"
+          {
+            echo "## Downloads"
+            echo
+            echo "| File | Platform | SHA-256 |"
+            echo "|---|---|---|"
+            echo "| \`$win\` | Windows 11 x64 | \`$(sha256sum "$win" | cut -d' ' -f1)\` |"
+            echo "| \`$mac\` | macOS, Apple Silicon | \`$(sha256sum "$mac" | cut -d' ' -f1)\` |"
+            echo
+            echo "## Before you run it"
+            echo
+            echo "- **Windows**: the programs are not code-signed, so SmartScreen may show \"Windows protected your PC\". Choose *More info*, then *Run anyway*."
+            echo "- **macOS**: the app is signed ad hoc and not notarized. After unzipping, run \`xattr -dr com.apple.quarantine AgentDesk.app\` once, or right-click the app and choose *Open*."
+          } > ../notes.md
+          cat ../notes.md
+
+      - name: Create the release
+        run: |
+          major=${VERSION%%.*}
+          pre=""
+          [ "$major" = "0" ] && pre="--prerelease"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag $pre \
+            --title "AgentDesk $VERSION" --notes-file notes.md --generate-notes \
+            "dist/AgentDesk-$VERSION-win-x64.zip" "dist/AgentDesk-$VERSION-macos-arm64.zip"

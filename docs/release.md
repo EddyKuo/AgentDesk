@@ -40,9 +40,13 @@ Smoke-test it like the Windows zip: unzip into a clean folder and run `AgentDesk
 
 ## 3. Publish on GitHub
 
-1. Tag the commit: `git tag v0.2.0` and `git push origin v0.2.0`.
-2. Create a GitHub Release for the tag and attach `AgentDesk-<version>-win-x64.zip`.
-3. Put the zip's SHA-256 in the release notes (`certutil -hashfile dist\AgentDesk-0.2.0-win-x64.zip SHA256`), so people can check what they downloaded.
+Steps 1 and 2 are for checking a release locally; publishing is done by `.github/workflows/release.yml`:
+
+1. Make sure `project(... VERSION x.y.z)` in `CMakeLists.txt` is the version to release; the workflow stops if the tag says otherwise.
+2. Tag the commit on `main` and push the tag: `git tag v0.2.0` and `git push origin v0.2.0`.
+3. The workflow builds and tests the Release preset on Windows and macOS, packages both zips, smoke-tests the Windows zip, and creates the GitHub Release with `AgentDesk-<version>-win-x64.zip`, `AgentDesk-<version>-macos-arm64.zip`, their SHA-256 and the generated change list. Versions below 1.0 are marked pre-release. The Windows symbols zip stays in the run's artifacts (`package-windows`).
+
+If a run fails before publishing, fix it and run the workflow again by hand (Actions, Release, "Run workflow", with the existing tag). If the release already exists, delete it first (`gh release delete v0.2.0`), or the last step fails.
 
 ## Code signing and SmartScreen
 
