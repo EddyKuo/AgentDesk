@@ -524,7 +524,9 @@ TEST_F(HostFixture, SlowClientDoesNotStallHost) {
     ASSERT_TRUE(wait_until([&] { return read(id).find("FLOOD-DONE") != std::string::npos; }, 30s));
     const auto elapsed = std::chrono::steady_clock::now() - start;
     EXPECT_LT(elapsed, 10s) << "host consumption slowed down";
-    EXPECT_GT(deltas.load(), 10) << "healthy client starved";
+    // A starved client gets one update or none; a slow Debug build on a shared runner gets about
+    // ten in the 3 s of output, a fast machine many more.
+    EXPECT_GT(deltas.load(), 3) << "healthy client starved";
     PROCESS_MEMORY_COUNTERS_EX pmc{};
     pmc.cb = sizeof(pmc);
     ASSERT_TRUE(
@@ -815,8 +817,9 @@ TEST_F(HostFixture, ForegroundProgramFollowsChild) {
 
 // live_cwd follows cd in cmd (real current folder) and PowerShell (the prompt hook).
 TEST_F(HostFixture, LiveCwdFollowsCd) {
-    const auto target = data_dir_ / L"sub dir";
-    fs::create_directories(target);
+    // The long form: TEMP can be an 8.3 path (C:\Users\RUNNER~1 on CI), PowerShell reports long names.
+    fs::create_directories(data_dir_ / L"sub dir");
+    const auto target = fs::canonical(data_dir_ / L"sub dir");
     const std::string want = win::to_utf8(target.native());
     for (const char* profile : {"cmd", "powershell"}) {
         const auto id = create(profile, profile);
