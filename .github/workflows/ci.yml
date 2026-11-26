@@ -1,10 +1,12 @@
-# Builds AgentDesk and runs every test on Windows, for pushes to main and for pull requests.
+# Builds AgentDesk and runs every test on Windows and macOS, for pushes to main, pull requests and
+# manual runs.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -61,6 +63,51 @@ jobs:
       # A few integration tests measure timing; a busy shared runner gets one retry.
       - name: Test
         shell: cmd
+        run: ctest --preset ${{ matrix.preset }} --repeat until-pass:2
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-${{ matrix.preset }}
+          path: build/${{ matrix.preset }}/ctest-junit.xml
+          if-no-files-found: ignore
+
+  build-test-macos:
+    name: ${{ matrix.preset }}
+    runs-on: macos-15  # Apple Silicon, as the app (ADR-30)
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [clang-macos-arm64-debug, clang-macos-arm64-release]
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../vcpkg-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      # The macOS presets take vcpkg from ~/vcpkg; manifest mode needs the baseline in its history.
+      - name: Set up vcpkg and Ninja
+        run: |
+          brew list ninja >/dev/null 2>&1 || brew install ninja
+          git clone --quiet https://github.com/microsoft/vcpkg.git "$HOME/vcpkg"
+          "$HOME/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/../vcpkg-cache
+          key: vcpkg-${{ matrix.preset }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/*') }}
+          restore-keys: vcpkg-${{ matrix.preset }}-
+
+      - name: Configure and build
+        run: |
+          scripts/build.sh ${{ matrix.preset }} configure
+          scripts/build.sh ${{ matrix.preset }} build
+
+      # A few integration tests measure timing; a busy shared runner gets one retry.
+      - name: Test
         run: ctest --preset ${{ matrix.preset }} --repeat until-pass:2
 
       - name: Upload test results
