@@ -586,10 +586,15 @@ TEST_F(HostFixture, DamagedEntriesAreSkippedNotFatal) {
     ASSERT_TRUE(c);
     const auto list = c->call("profile.list", Json::object());
     ASSERT_TRUE(list && list->result);
+    // "echo" is kept; anything else is what the host detects on this computer (added on start).
     std::set<std::string> ids;
     for (const auto& p : list->result->at("profiles"))
         ids.insert(p.value("id", ""));
-    EXPECT_EQ(ids, std::set<std::string>{"echo"});
+    EXPECT_TRUE(ids.contains("echo"));
+    for (const auto& id : ids)
+        EXPECT_TRUE(id == "echo" || id == "claude-native" || id == "codex-native" || id == "pwsh" ||
+                    id == "powershell" || id == "cmd" || id.starts_with("wsl-"))
+            << id;
     const auto got = c->call("session.get", {{"session", "ok-2"}});
     ASSERT_TRUE(got && got->result) << "the good session record was not kept";
     EXPECT_EQ(got->result->value("name", ""), "kept");

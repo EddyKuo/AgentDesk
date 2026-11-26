@@ -48,7 +48,8 @@ set(_unit_sources
     unit/design_tokens_test.cpp
     unit/path_text_test.cpp
     unit/terminal_view_test.cpp
-    unit/font_metrics_test.cpp)
+    unit/font_metrics_test.cpp
+    unit/profiles_test.cpp)
 if(WIN32)
     list(APPEND _unit_sources
         unit/command_line_test.cpp

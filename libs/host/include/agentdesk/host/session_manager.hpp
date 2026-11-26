@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -158,6 +159,7 @@ private:
     mutable std::mutex mutex_;
     std::map<std::string, ManagedPtr> sessions_;
     std::vector<Profile> profiles_;
+    std::set<std::string> detected_profiles_;  // profiles.json "detected"
     struct Dedupe {
         std::chrono::steady_clock::time_point at;
         protocol::Response response;

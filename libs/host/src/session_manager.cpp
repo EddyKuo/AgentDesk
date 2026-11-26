@@ -318,30 +318,37 @@ SessionManager::~SessionManager() {
 
 void SessionManager::load_profiles() {
     const auto file = config_.data_dir / L"profiles.json";
+    // Detected on every start, so programs installed since show up; see sync_detected_profiles.
+    ProfileFile pf;
     if (const auto doc = read_json_with_backup(file)) {
-        profiles_ = read_entries<Profile>(doc->value("profiles", Json::array()), config_.data_dir,
-                                          "profiles.json", profile_from_json);
-        // Files written before WSL profiles existed get them once; a profile the person removes
-        // afterwards stays removed ("wsl_detected").
-        if (const auto wd = doc->find("wsl_detected");
-            wd != doc->end() && wd->is_boolean() && wd->get<bool>())
-            return;
-        for (auto& p : detect_wsl_profiles())
-            if (std::none_of(profiles_.begin(), profiles_.end(),
-                             [&](const Profile& q) { return q.id == p.id; }))
-                profiles_.push_back(std::move(p));
-        save_profiles(file);
-        return;
+        pf.profiles = read_entries<Profile>(doc->value("profiles", Json::array()), config_.data_dir,
+                                            "profiles.json", profile_from_json);
+        if (const auto wd = doc->find("wsl_detected"); wd != doc->end() && wd->is_boolean())
+            pf.wsl_detected = wd->get<bool>();
+        if (const auto d = doc->find("detected"); d != doc->end() && d->is_array()) {
+            pf.detected.emplace();
+            for (const auto& id : *d)
+                if (id.is_string())
+                    pf.detected->insert(id.get<std::string>());
+        }
+    } else {
+        pf.detected.emplace();  // a new file: everything found is added
     }
-    profiles_ = detect_default_profiles();
-    save_profiles(file);
+    const bool changed = sync_detected_profiles(pf, detect_default_profiles());
+    profiles_ = std::move(pf.profiles);
+    detected_profiles_ = std::move(*pf.detected);
+    if (changed)
+        save_profiles(file);
 }
 
 void SessionManager::save_profiles(const std::filesystem::path& file) {
     Json list = Json::array();
     for (const auto& p : profiles_)
         list.push_back(to_json(p));
-    write_json_atomic(file, {{"schema_version", kSchemaVersion}, {"wsl_detected", true}, {"profiles", list}});
+    write_json_atomic(file, {{"schema_version", kSchemaVersion},
+                             {"wsl_detected", true},  // for an older AgentDesk reading this file
+                             {"detected", detected_profiles_},
+                             {"profiles", list}});
 }
 
 void SessionManager::persist_locked() {
@@ -916,8 +923,9 @@ Response SessionManager::do_hello(const Request& req) {
 
 Response SessionManager::do_profile_list(const Request& req) {
     std::lock_guard lock(mutex_);
+    // Only programs that are still installed; the others stay in profiles.json.
     Json list = Json::array();
-    for (const auto& p : profiles_)
+    for (const auto& p : available_profiles(profiles_))
         list.push_back(to_json(p));
     return protocol::ok(req.id, {{"profiles", list}});
 }
