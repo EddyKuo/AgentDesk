@@ -588,7 +588,10 @@ void App::frame() {
     for (const auto& cmd : std::exchange(s.chord_commands, {}))
         run_command(s, cmd);
     g_scale = s.dpi * ui_scale(s.settings);
-    s.fonts.mono_size = s.layout().font_size.value_or(s.settings.font_size) / ui_text_factor(s.settings);
+    // The setting is the em, as in other terminals; ImGui sizes by ascent minus descent. Divided
+    // by the interface text factor because ui_scale() scales every font by it.
+    s.fonts.mono_size = s.layout().font_size.value_or(s.settings.font_size) * s.fonts.mono_line_per_em /
+                        ui_text_factor(s.settings);
     reload_changed_files(s);
     if (!g_settings_problem.empty()) {
         s.toast(g_settings_problem, "", "", g_pal->needs_you, 8);

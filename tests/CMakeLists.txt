@@ -47,7 +47,8 @@ set(_unit_sources
     unit/layout_tips_test.cpp
     unit/design_tokens_test.cpp
     unit/path_text_test.cpp
-    unit/terminal_view_test.cpp)
+    unit/terminal_view_test.cpp
+    unit/font_metrics_test.cpp)
 if(WIN32)
     list(APPEND _unit_sources
         unit/command_line_test.cpp
@@ -87,6 +88,7 @@ target_compile_definitions(unit_tests PRIVATE AGENTDESK_FIXTURE_DIR="${AGENTDESK
     AGENTDESK_PRESET_LAYOUTS_DIR="${PROJECT_SOURCE_DIR}/third_party/herdr/layouts"
     AGENTDESK_OWN_LAYOUTS_DIR="${PROJECT_SOURCE_DIR}/libs/ui/layouts"
     AGENTDESK_OWN_THEMES_DIR="${PROJECT_SOURCE_DIR}/libs/ui/themes"
+    AGENTDESK_BUNDLED_FONTS_DIR="${PROJECT_SOURCE_DIR}/third_party/fonts"
     AGENTDESK_TEST_MOD=L"$<TARGET_FILE:test_mod>")
 gtest_discover_tests(unit_tests DISCOVERY_MODE PRE_TEST PROPERTIES LABELS "unit" TIMEOUT 60)
 # Shared files name no system (cmake/CheckPlatformBoundaries.cmake).

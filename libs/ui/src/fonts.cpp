@@ -4,6 +4,8 @@
 #include "agentdesk/ui/fonts.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -86,7 +88,71 @@ ImFont* add(const std::string& path, float size, bool pixel_snap, const std::str
     return f;
 }
 
+// Big-endian reads from a font file; 0 past the end.
+std::uint32_t be(const unsigned char* d, std::size_t size, std::size_t at, int bytes) {
+    if (at + static_cast<std::size_t>(bytes) > size)
+        return 0;
+    std::uint32_t v = 0;
+    for (int i = 0; i < bytes; ++i)
+        v = (v << 8) | d[at + static_cast<std::size_t>(i)];
+    return v;
+}
+
+std::int16_t be16s(const unsigned char* d, std::size_t size, std::size_t at) {
+    return static_cast<std::int16_t>(static_cast<std::uint16_t>(be(d, size, at, 2)));
+}
+
 }  // namespace
+
+float line_height_per_em(const unsigned char* d, std::size_t size, unsigned face) {
+    if (d == nullptr || size < 12)
+        return 0.0f;
+    std::size_t dir = 0;                     // the table directory of the face
+    if (be(d, size, 0, 4) == 0x74746366u) {  // 'ttcf': a collection, offsets to each face
+        if (face >= be(d, size, 8, 4))
+            return 0.0f;
+        dir = be(d, size, 12 + 4 * static_cast<std::size_t>(face), 4);
+    }
+    const std::uint32_t tables = be(d, size, dir + 4, 2);
+    std::size_t head = 0;
+    std::size_t hhea = 0;
+    std::size_t os2 = 0;
+    for (std::uint32_t i = 0; i < tables; ++i) {
+        const std::size_t rec = dir + 12 + 16 * static_cast<std::size_t>(i);
+        const std::uint32_t tag = be(d, size, rec, 4);
+        const std::size_t at = be(d, size, rec + 8, 4);
+        if (tag == 0x68656164u)  // 'head'
+            head = at;
+        else if (tag == 0x68686561u)  // 'hhea'
+            hhea = at;
+        else if (tag == 0x4F532F32u)  // 'OS/2'
+            os2 = at;
+    }
+    const std::uint32_t upem = head != 0 ? be(d, size, head + 18, 2) : 0;
+    if (upem == 0)
+        return 0.0f;
+    int ascent = hhea != 0 ? be16s(d, size, hhea + 4) : 0;
+    int descent = hhea != 0 ? be16s(d, size, hhea + 6) : 0;
+    if (ascent == 0 && descent == 0 && os2 != 0) {  // FreeType's order when hhea says nothing
+        ascent = be16s(d, size, os2 + 68);          // sTypoAscender
+        descent = be16s(d, size, os2 + 70);
+        if (ascent == 0 && descent == 0) {
+            ascent = static_cast<int>(be(d, size, os2 + 74, 2));    // usWinAscent
+            descent = -static_cast<int>(be(d, size, os2 + 76, 2));  // usWinDescent, below the baseline
+        }
+    }
+    const int height = ascent - descent;
+    return height > 0 ? static_cast<float>(height) / static_cast<float>(upem) : 0.0f;
+}
+
+float line_height_per_em(const ImFont* font) {
+    if (font == nullptr || font->Sources.empty() || font->Sources[0] == nullptr)
+        return 1.0f;
+    const ImFontConfig& src = *font->Sources[0];
+    const float r = line_height_per_em(static_cast<const unsigned char*>(src.FontData),
+                                       static_cast<std::size_t>(std::max(src.FontDataSize, 0)), src.FontNo);
+    return r > 0.0f ? r : 1.0f;
+}
 
 ImFont* load_font_file(const std::wstring& file, float size_px, bool pixel_snap) {
     if (file.empty())
@@ -110,8 +176,9 @@ std::wstring FontFamily::file_for(int weight) const {
 }
 
 ImFont* load_terminal_font(const std::wstring& file, float size_px) {
-    std::string path = file.empty() ? find_font({L"JetBrainsMono-Medium.ttf"}, {L"CascadiaMono.ttf", L"consola.ttf"})
-                                    : utf8(std::filesystem::path(file));
+    std::string path = file.empty()
+                           ? find_font({L"JetBrainsMono-Medium.ttf"}, {L"CascadiaMono.ttf", L"consola.ttf"})
+                           : utf8(std::filesystem::path(file));
     const std::string nerd = find_font({L"SymbolsNerdFont-Regular.ttf"}, {});
     const std::string cjk = find_font({}, {L"msjh.ttc", L"mingliu.ttc"});
     ImFont* f = add(path, size_px, true, cjk, nerd);
@@ -148,6 +215,7 @@ FontSet load_fonts(float mono_size_px, float ui_size_px) {
         set.ui_bold = set.ui_medium;
     if (set.mono == nullptr)
         set.mono = set.ui;
+    set.mono_line_per_em = line_height_per_em(set.mono);
     if (set.mono_bold == nullptr)
         set.mono_bold = set.mono;
     if (set.icons == nullptr)
