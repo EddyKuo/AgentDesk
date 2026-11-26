@@ -2,6 +2,17 @@
 
 [English](README.md) | 繁體中文
 
+[![CI](https://github.com/EddyKuo/AgentDesk/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EddyKuo/AgentDesk/actions/workflows/ci.yml)
+[![Release](https://github.com/EddyKuo/AgentDesk/actions/workflows/release.yml/badge.svg)](https://github.com/EddyKuo/AgentDesk/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/EddyKuo/AgentDesk?include_prereleases&sort=semver)](https://github.com/EddyKuo/AgentDesk/releases)
+[![Downloads](https://img.shields.io/github/downloads/EddyKuo/AgentDesk/total)](https://github.com/EddyKuo/AgentDesk/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platform: macOS](https://img.shields.io/badge/platform-macOS%20%28Apple%20Silicon%29-lightgrey?logo=apple)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows%2011%20x64-0078D6?logo=windows)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus)](https://en.cppreference.com/w/cpp/20)
+[![Dear ImGui](https://img.shields.io/badge/UI-Dear%20ImGui-5c6bc0)](https://github.com/ocornut/imgui)
+[![Tests](https://img.shields.io/badge/tests-GoogleTest-brightgreen)](https://github.com/EddyKuo/AgentDesk/actions/workflows/ci.yml)
+
 AgentDesk 是 Windows 11 與 macOS 上的原生 AI coding agent 工作台。你可以在可分割的終端機面板裡同時跑多個 Agent CLI（首發支援 Claude Code 與 Codex CLI，其他命令列程式也能跑），關掉視窗後工作照常執行，重開時接回原本的畫面與版面。哪個 Agent 在等你、哪個已經做完，側欄都看得到。
 
 介面與行為依 [herdr-app](https://github.com/herdrdev/herdr-app) 的原始碼複刻，用 C++ 重寫，不追求與 herdr 的協定相容。

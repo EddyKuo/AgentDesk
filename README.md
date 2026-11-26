@@ -2,6 +2,17 @@
 
 English | [繁體中文](README.zh-TW.md)
 
+[![CI](https://github.com/EddyKuo/AgentDesk/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EddyKuo/AgentDesk/actions/workflows/ci.yml)
+[![Release](https://github.com/EddyKuo/AgentDesk/actions/workflows/release.yml/badge.svg)](https://github.com/EddyKuo/AgentDesk/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/EddyKuo/AgentDesk?include_prereleases&sort=semver)](https://github.com/EddyKuo/AgentDesk/releases)
+[![Downloads](https://img.shields.io/github/downloads/EddyKuo/AgentDesk/total)](https://github.com/EddyKuo/AgentDesk/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platform: macOS](https://img.shields.io/badge/platform-macOS%20%28Apple%20Silicon%29-lightgrey?logo=apple)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows%2011%20x64-0078D6?logo=windows)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus)](https://en.cppreference.com/w/cpp/20)
+[![Dear ImGui](https://img.shields.io/badge/UI-Dear%20ImGui-5c6bc0)](https://github.com/ocornut/imgui)
+[![Tests](https://img.shields.io/badge/tests-GoogleTest-brightgreen)](https://github.com/EddyKuo/AgentDesk/actions/workflows/ci.yml)
+
 AgentDesk is a native workbench for AI coding agents on Windows 11 and macOS. Run several agent CLIs side by side in split terminal panes (Claude Code and Codex CLI first; any command-line program works). Close the window and the work keeps running; open it again and you are back where you were, with the same layout. The sidebar shows which agent is waiting for you and which one is done.
 
 The interface and behaviour are ported from the source of [herdr-app](https://github.com/herdrdev/herdr-app) and rewritten in C++. AgentDesk does not aim for protocol compatibility with herdr.
