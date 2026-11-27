@@ -1,0 +1,2 @@
+// The program's icon; assets/icon/agentctl.ico is made by tools/make_icons.
+1 ICON "../../assets/icon/agentctl.ico"
